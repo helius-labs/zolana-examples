@@ -13,7 +13,6 @@ use zolana_interface::{
     instruction::{TransactSplWithdrawal, TransactWithdrawal},
     pda, SPL_TOKEN_PROGRAM_ID,
 };
-use zolana_test_utils::test_validator_asserts::wait_for_indexed_transaction;
 use zolana_transaction::{Utxo, SOL_MINT};
 
 fn main() -> Result<()> {
@@ -70,7 +69,6 @@ fn main() -> Result<()> {
         },
     )?;
     let signed = tx.sign(&keypair, &wallet.registry)?;
-    let wait_tag = keypair.signing_pubkey().confidential_view_tag()?;
 
     // Withdraw private balance to recipient's public balance
     let withdrawal = TransactWithdrawal::Spl(TransactSplWithdrawal {
@@ -88,9 +86,8 @@ fn main() -> Result<()> {
     };
     let payer_keypair = client.payer.insecure_clone();
     let signature = submit.execute(&client.rpc, &client.prover, &payer_keypair, client.tree)?;
-    // Let indexer catch up for sync of private balances
-    wait_for_indexed_transaction(&client.indexer, wait_tag, signature);
 
+    // Sync the private balance.
     sync_wallet(&mut wallet, &client.indexer)?;
 
     println!("ok withdrawal signature={signature} recipient_token_account={ata}");

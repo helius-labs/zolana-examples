@@ -7,7 +7,6 @@ use solana_signer::Signer;
 use zolana_client::{
     get_private_token_balances, sync_wallet, Submit, Transaction as ClientTransaction,
 };
-use zolana_test_utils::test_validator_asserts::wait_for_indexed_transaction;
 use zolana_transaction::{Utxo, SOL_MINT};
 
 fn main() -> Result<()> {
@@ -50,7 +49,6 @@ fn main() -> Result<()> {
     let mut tx = ClientTransaction::from_wallet(&sender_wallet, &inputs, payer)?;
     tx.send(&recipient_keypair.shielded_address()?, asset_address, 4_000)?;
     let signed = tx.sign(&sender_keypair, &sender_wallet.registry)?;
-    let wait_tag = recipient_keypair.signing_pubkey().confidential_view_tag()?;
 
     let submit = Submit {
         signed,
@@ -59,9 +57,8 @@ fn main() -> Result<()> {
     };
     let payer_keypair = client.payer.insecure_clone();
     let signature = submit.execute(&client.rpc, &client.prover, &payer_keypair, client.tree)?;
-    // Let indexer catch up for sync of private balances
-    wait_for_indexed_transaction(&client.indexer, wait_tag, signature);
 
+    // Sync the recipient's private balance.
     sync_wallet(&mut recipient_wallet, &client.indexer)?;
     let balance = get_private_token_balances(&recipient_wallet)?;
 

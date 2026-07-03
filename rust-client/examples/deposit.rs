@@ -3,7 +3,7 @@ use rust_client_example::{register_asset, setup_localnet, setup_private_wallet};
 use solana_address::Address;
 use solana_signer::Signer;
 use zolana_client::{create_deposit, get_private_token_balances, sync_wallet, CreateDeposit, Rpc};
-use zolana_test_utils::{spl::mint_to, test_validator_asserts::wait_for_indexed_transaction};
+use zolana_test_utils::spl::mint_to;
 use zolana_transaction::SOL_MINT;
 
 fn main() -> Result<()> {
@@ -26,7 +26,6 @@ fn main() -> Result<()> {
     let sol_sig = client
         .rpc
         .create_and_send_transaction(&[sol_ix], payer_address, &[&payer])?;
-    wait_for_indexed_transaction(&client.indexer, sol.view_tag(), sol_sig);
 
     // Deposit an SPL token to private balance
     mint_to(&client.rpc, &payer, &asset.mint, &asset.user_token, 10_000)?;
@@ -41,9 +40,8 @@ fn main() -> Result<()> {
     let spl_sig = client
         .rpc
         .create_and_send_transaction(&[spl_ix], payer_address, &[&payer])?;
-    wait_for_indexed_transaction(&client.indexer, spl.view_tag(), spl_sig);
 
-    // Sync once and read the private balance, which now holds both assets.
+    // Sync the private balance, which now holds both assets.
     sync_wallet(&mut wallet, &client.indexer)?;
     let balance = get_private_token_balances(&wallet)?;
 
