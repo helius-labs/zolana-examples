@@ -43,6 +43,9 @@ fn main() -> Result<()> {
     )?;
     let interface_pda = pda::spl_asset_vault(&asset.mint);
 
+    // Sync the wallet to see the current balance before spending it
+    sync_wallet(&mut wallet, &client.indexer)?;
+
     // Select the SPL asset to withdraw and SOL for the transaction fee
     let mut inputs: Vec<Utxo> = Vec::new();
     for want in [asset_address, SOL_MINT] {

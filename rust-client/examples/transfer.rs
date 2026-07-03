@@ -30,6 +30,9 @@ fn main() -> Result<()> {
     )?;
     deposit_sol(&mut client, &sender_keypair, &mut sender_wallet, 5_000_000)?;
 
+    // Sync the wallet to see the current balance before spending it
+    sync_wallet(&mut sender_wallet, &client.indexer)?;
+
     // Select the SPL asset to send and SOL for the transaction fee
     let mut inputs: Vec<Utxo> = Vec::new();
     for want in [asset_address, SOL_MINT] {
