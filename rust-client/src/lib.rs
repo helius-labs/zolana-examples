@@ -41,7 +41,6 @@ const FIRST_SPL_ASSET_ID: u64 = 2;
 #[derive(Clone, Copy)]
 pub struct SplAsset {
     pub mint: Pubkey,
-    pub vault: Pubkey,
     pub user_token: Pubkey,
 }
 
@@ -273,7 +272,7 @@ pub fn setup_private_wallet(
 }
 
 /// Register an SPL mint for private balances and transactions. This is idempotent.
-pub fn ensure_spl_asset(client: &mut Client, localnet: &mut Localnet) -> Result<SplAsset> {
+pub fn register_asset(client: &mut Client, localnet: &mut Localnet) -> Result<SplAsset> {
     if let Some(asset) = localnet.spls.first() {
         return Ok(*asset);
     }
@@ -312,18 +311,13 @@ pub fn ensure_spl_asset(client: &mut Client, localnet: &mut Localnet) -> Result<
         &[&payer, &authority],
     )?;
 
-    let vault = pda::spl_asset_vault(&mint);
     let user_token = create_token_account(&client.rpc, &payer, &mint, &payer.pubkey())?;
     localnet
         .assets
         .insert(asset_id, Address::new_from_array(mint.to_bytes()))
         .map_err(|e| anyhow!("register SPL asset: {e}"))?;
 
-    let asset = SplAsset {
-        mint,
-        vault,
-        user_token,
-    };
+    let asset = SplAsset { mint, user_token };
     localnet.spls.push(asset);
     Ok(asset)
 }

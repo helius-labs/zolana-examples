@@ -1,6 +1,6 @@
 use anyhow::Result;
 use rust_client_example::{
-    deposit_sol, deposit_spl, ensure_spl_asset, setup_localnet, setup_private_wallet,
+    deposit_sol, deposit_spl, register_asset, setup_localnet, setup_private_wallet,
 };
 use solana_address::Address;
 use solana_keypair::Keypair;
@@ -18,7 +18,7 @@ use zolana_transaction::{Utxo, SOL_MINT};
 
 fn main() -> Result<()> {
     let (mut client, mut localnet) = setup_localnet()?;
-    let asset = ensure_spl_asset(&mut client, &mut localnet)?;
+    let asset = register_asset(&mut client, &mut localnet)?;
     let asset_address = Address::new_from_array(asset.mint.to_bytes());
     let (keypair, _funding, mut wallet) = setup_private_wallet(&mut client, &localnet)?;
 
@@ -41,7 +41,7 @@ fn main() -> Result<()> {
         &recipient.pubkey(),
         &asset.mint,
     )?;
-    let vault = pda::spl_asset_vault(&asset.mint);
+    let interface_pda = pda::spl_asset_vault(&asset.mint);
 
     // Select the SPL asset to withdraw and SOL for the transaction fee
     let mut inputs: Vec<Utxo> = Vec::new();
@@ -63,7 +63,7 @@ fn main() -> Result<()> {
         4_000,
         WithdrawalTarget::Spl {
             user_spl_token: Address::new_from_array(ata.to_bytes()),
-            spl_token_interface: Address::new_from_array(vault.to_bytes()),
+            spl_token_interface: Address::new_from_array(interface_pda.to_bytes()),
         },
     )?;
     let signed = tx.sign(&keypair, &wallet.registry)?;
@@ -72,7 +72,7 @@ fn main() -> Result<()> {
     // Withdraw private balance to recipient's public balance
     let withdrawal = TransactWithdrawal::Spl(TransactSplWithdrawal {
         cpi_authority: Some(pda::shielded_pool_cpi_authority()),
-        vault,
+        spl_token_interface: interface_pda,
         recipient: recipient.pubkey(),
         user_token_account: ata,
         token_program: solana_pubkey::Pubkey::new_from_array(SPL_TOKEN_PROGRAM_ID),

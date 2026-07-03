@@ -1,39 +1,52 @@
 use anyhow::Result;
-use rust_client_example::{ensure_spl_asset, setup_localnet, setup_private_wallet};
+use rust_client_example::{register_asset, setup_localnet, setup_private_wallet};
 use solana_address::Address;
 use solana_signer::Signer;
 use zolana_client::{create_deposit, get_private_token_balances, sync_wallet, CreateDeposit, Rpc};
 use zolana_test_utils::{spl::mint_to, test_validator_asserts::wait_for_indexed_transaction};
+use zolana_transaction::SOL_MINT;
 
 fn main() -> Result<()> {
-    // Register SPL and Token 2022 mints for private balances and transactions
     let (mut client, mut localnet) = setup_localnet()?;
-    let asset = ensure_spl_asset(&mut client, &mut localnet)?;
+    let asset = register_asset(&mut client, &mut localnet)?;
     let (keypair, _funding, mut wallet) = setup_private_wallet(&mut client, &localnet)?;
 
-    // Fund token account for deposit to private balance
     let payer = client.payer.insecure_clone();
-    mint_to(&client.rpc, &payer, &asset.mint, &asset.user_token, 10_000)?;
+    let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
 
-    // Move the tokens into the private balance
-    let prepared = create_deposit(CreateDeposit {
+    // Deposit SOL to private balance
+    let sol = create_deposit(CreateDeposit {
+        recipient: &keypair.shielded_address()?,
+        asset: SOL_MINT,
+        amount: 5_000_000,
+        spl_token_account: None,
+        memo: None,
+    })?;
+    let sol_ix = sol.instruction(client.tree, payer.pubkey());
+    let sol_sig = client
+        .rpc
+        .create_and_send_transaction(&[sol_ix], payer_address, &[&payer])?;
+    wait_for_indexed_transaction(&client.indexer, sol.view_tag(), sol_sig);
+
+    // Deposit an SPL token to private balance
+    mint_to(&client.rpc, &payer, &asset.mint, &asset.user_token, 10_000)?;
+    let spl = create_deposit(CreateDeposit {
         recipient: &keypair.shielded_address()?,
         asset: Address::new_from_array(asset.mint.to_bytes()),
         amount: 10_000,
         spl_token_account: Some(asset.user_token),
         memo: None,
     })?;
-    let ix = prepared.instruction(client.tree, payer.pubkey());
-    let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
-    let signature = client
+    let spl_ix = spl.instruction(client.tree, payer.pubkey());
+    let spl_sig = client
         .rpc
-        .create_and_send_transaction(&[ix], payer_address, &[&payer])?;
+        .create_and_send_transaction(&[spl_ix], payer_address, &[&payer])?;
+    wait_for_indexed_transaction(&client.indexer, spl.view_tag(), spl_sig);
 
-    // Let indexer catch up for sync of private balances
-    wait_for_indexed_transaction(&client.indexer, prepared.view_tag(), signature);
+    // Sync once and read the private balance, which now holds both assets.
     sync_wallet(&mut wallet, &client.indexer)?;
     let balance = get_private_token_balances(&wallet)?;
 
-    println!("ok deposit signature={signature} private_balance={balance:?}");
+    println!("ok deposit sol_signature={sol_sig} spl_signature={spl_sig} private_balance={balance:?}");
     Ok(())
 }

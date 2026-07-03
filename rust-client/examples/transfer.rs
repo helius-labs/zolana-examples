@@ -1,6 +1,6 @@
 use anyhow::Result;
 use rust_client_example::{
-    deposit_sol, deposit_spl, ensure_spl_asset, setup_localnet, setup_private_wallet,
+    deposit_sol, deposit_spl, register_asset, setup_localnet, setup_private_wallet,
 };
 use solana_address::Address;
 use solana_signer::Signer;
@@ -12,7 +12,7 @@ use zolana_transaction::{Utxo, SOL_MINT};
 
 fn main() -> Result<()> {
     let (mut client, mut localnet) = setup_localnet()?;
-    let asset = ensure_spl_asset(&mut client, &mut localnet)?;
+    let asset = register_asset(&mut client, &mut localnet)?;
     let asset_address = Address::new_from_array(asset.mint.to_bytes());
     let (sender_keypair, _sender_funding, mut sender_wallet) =
         setup_private_wallet(&mut client, &localnet)?;
