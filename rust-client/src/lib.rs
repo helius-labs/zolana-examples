@@ -25,7 +25,6 @@ use zolana_keypair::ShieldedKeypair;
 use zolana_test_utils::{
     smart_account::{self, execute_sync_ix, StandardSigners},
     spl::{create_mint, create_token_account, mint_to},
-    test_validator_asserts::wait_for_indexed_transaction,
 };
 use zolana_transaction::{AssetRegistry, Wallet, SOL_MINT};
 use zolana_user_registry_interface::user_registry_program_id;
@@ -149,8 +148,10 @@ pub fn setup_localnet() -> Result<(Client, Localnet)> {
         std::env::var("ZOLANA_INDEXER_URL").unwrap_or_else(|_| DEFAULT_INDEXER_URL.into());
     let prover_url =
         std::env::var("ZOLANA_PROVER_URL").unwrap_or_else(|_| DEFAULT_PROVER_URL.into());
-    let mut rpc = SolanaRpc::new(rpc_url);
     let indexer = ZolanaIndexer::new(indexer_url);
+    // Attach the indexer so one rpc both fetches spend proofs and sends, which
+    // the one-call Submit action (transfer, withdraw) needs.
+    let mut rpc = SolanaRpc::new(rpc_url).with_indexer(indexer.clone());
     let program_id = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
     rpc.assert_executable(&program_id)?;
 
@@ -341,8 +342,8 @@ fn deposit(
         memo: None,
     })?;
     let payer = client.payer.insecure_clone();
-    let signature = prepared.send(&client.rpc, &payer, client.tree, &payer)?;
-    wait_for_indexed_transaction(&client.indexer, prepared.view_tag(), signature);
+    let _signature = prepared.send(&client.rpc, &payer, client.tree, &payer)?;
+    // Sync the private balance.
     sync_wallet(wallet, &client.indexer)?;
     Ok(())
 }
