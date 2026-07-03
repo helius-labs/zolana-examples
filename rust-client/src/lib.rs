@@ -256,10 +256,9 @@ pub fn setup_localnet() -> Result<(Client, Localnet)> {
     ))
 }
 
-/// Create a party with a private identity, a funded Solana key, and an empty
-/// wallet. The party is registered so others can send to it privately by its
-/// Solana address.
-pub fn new_party(
+/// Create a private wallet: a keypair, a funded Solana key, and an empty wallet.
+/// Register it so others can send to its Solana address privately.
+pub fn setup_private_wallet(
     client: &mut Client,
     localnet: &Localnet,
 ) -> Result<(ShieldedKeypair, Keypair, Wallet)> {
@@ -267,7 +266,7 @@ pub fn new_party(
     let funding = Keypair::new();
     client.rpc.airdrop(&funding.pubkey(), 1_000_000_000)?;
     let wallet = Wallet::new(keypair.clone(), localnet.assets.clone())?;
-    // Publish the party's keys so transfers to its Solana address stay private
+    // Publish the wallet's keys so transfers to its Solana address stay private
     // instead of becoming a public withdrawal.
     zolana_client::ensure_registered(&client.rpc, &funding, &keypair)?;
     Ok((keypair, funding, wallet))

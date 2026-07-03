@@ -40,3 +40,7 @@ path = "examples/withdraw.rs"
 [[example]]
 name = "sync_balance"
 path = "examples/sync_balance.rs"
+
+[[example]]
+name = "create_private_wallet"
+path = "examples/create_private_wallet.rs"

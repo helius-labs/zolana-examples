@@ -9,6 +9,7 @@ The examples live in [`rust-client/`](rust-client/) — see its
 
 ## Examples
 
+- **create_private_wallet** — create and register a wallet for a private balance.
 - **deposit** — move public tokens into a private balance.
 - **transfer** — send privately between two private balances.
 - **withdraw** — move a private balance back to a public account.

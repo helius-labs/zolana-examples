@@ -1,5 +1,7 @@
 use anyhow::Result;
-use rust_client_example::{deposit_sol, deposit_spl, ensure_spl_asset, new_party, setup_localnet};
+use rust_client_example::{
+    deposit_sol, deposit_spl, ensure_spl_asset, setup_localnet, setup_private_wallet,
+};
 use solana_address::Address;
 use solana_signer::Signer;
 use zolana_client::{
@@ -12,10 +14,11 @@ fn main() -> Result<()> {
     let (mut client, mut localnet) = setup_localnet()?;
     let asset = ensure_spl_asset(&mut client, &mut localnet)?;
     let asset_address = Address::new_from_array(asset.mint.to_bytes());
-    let (sender_keypair, _sender_funding, mut sender_wallet) = new_party(&mut client, &localnet)?;
+    let (sender_keypair, _sender_funding, mut sender_wallet) =
+        setup_private_wallet(&mut client, &localnet)?;
     // Transfers privately to a recipient with a private wallet, otherwise falls back to a private-to-public withdrawal
     let (recipient_keypair, _recipient_funding, mut recipient_wallet) =
-        new_party(&mut client, &localnet)?;
+        setup_private_wallet(&mut client, &localnet)?;
 
     // Deposit an SPL asset to send and SOL for the transaction fee
     deposit_spl(

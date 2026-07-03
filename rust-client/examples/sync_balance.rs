@@ -1,18 +1,17 @@
 use anyhow::Result;
-use rust_client_example::{deposit_sol, new_party, setup_localnet};
+use rust_client_example::{deposit_sol, setup_localnet, setup_private_wallet};
 use zolana_client::Rpc;
 
 fn main() -> Result<()> {
     let (mut client, localnet) = setup_localnet()?;
-    let (sender_keypair, _sender_funding, mut sender_wallet) = new_party(&mut client, &localnet)?;
+    let (keypair, _funding, mut wallet) = setup_private_wallet(&mut client, &localnet)?;
 
-    // Deposit SOL to private balance
-    deposit_sol(&mut client, &sender_keypair, &mut sender_wallet, 5_000_000)?;
-    deposit_sol(&mut client, &sender_keypair, &mut sender_wallet, 2_000_000)?;
+    // Setup: Deposit SOL to private balance
+    deposit_sol(&mut client, &keypair, &mut wallet, 5_000_000)?;
+    deposit_sol(&mut client, &keypair, &mut wallet, 2_000_000)?;
 
-    // Query indexer for private balances of a wallet; sync_wallet wraps this lookup
-    // and decrypts the results into a spendable balance
-    let tags = vec![sender_keypair.recipient_bootstrap_view_tag()];
+    // Query indexer for private balances of a wallet and decrypts the results
+    let tags = vec![keypair.recipient_bootstrap_view_tag()];
     let response = client
         .indexer
         .get_encrypted_utxos_by_tags(tags, None, None)?;

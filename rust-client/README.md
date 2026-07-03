@@ -10,6 +10,8 @@ holds.
 
 ## Examples
 
+- **`create_private_wallet`** (proofless): create the keypair, fund a Solana fee
+  key, build the wallet, and register it so others can send to it privately.
 - **`deposit`** (proofless): deposit a public SPL balance into the pool with
   `create_deposit`, sent at the instruction level.
 - **`transfer`** (private send): move an SPL value privately between two private
