@@ -1,0 +1,42 @@
+[package]
+name = "rust-client-example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone repo: the zolana SDK crates are pulled in by relative path from the
+# sibling zolana checkout (the feature worktree that carries the new client
+# APIs); the solana-* crates are pinned to the versions the SDK builds against.
+[dependencies]
+anyhow = "1.0"
+solana-address = { version = "2.6", features = ["atomic", "borsh", "bytemuck", "copy", "decode", "wincode"] }
+solana-instruction = "3.4"
+solana-keypair = "3.1.2"
+solana-message = "3.1"
+solana-pubkey = { version = "4.2", features = ["curve25519"] }
+solana-signature = "3.4"
+solana-signer = "3.0"
+solana-transaction = "3.1"
+zolana-client = { path = "../../zolana-devx/sdk-libs/client", features = ["indexer-api", "solana-rpc"] }
+zolana-interface = { path = "../../zolana-devx/program-libs/interface" }
+zolana-keypair = { path = "../../zolana-devx/sdk-libs/keypair" }
+zolana-program-test = { path = "../../zolana-devx/sdk-libs/program-test" }
+zolana-test-utils = { path = "../../zolana-devx/program-tests/test-utils" }
+zolana-transaction = { path = "../../zolana-devx/sdk-libs/transaction" }
+zolana-user-registry-interface = { path = "../../zolana-devx/program-libs/user-registry-interface", features = ["solana"] }
+
+[[example]]
+name = "deposit"
+path = "examples/deposit.rs"
+
+[[example]]
+name = "transfer"
+path = "examples/transfer.rs"
+
+[[example]]
+name = "withdraw"
+path = "examples/withdraw.rs"
+
+[[example]]
+name = "sync_balance"
+path = "examples/sync_balance.rs"
