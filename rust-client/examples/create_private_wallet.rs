@@ -1,42 +1,33 @@
-use anyhow::Result;
-use rust_client_example::{fund_key, setup};
-use solana_address::Address;
-use solana_keypair::Keypair;
+use anyhow::{anyhow, Result};
+use rust_client_example::create_private_wallet;
+use solana_keypair::read_keypair_file;
+use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use zolana_client::{ensure_registered, Rpc};
-use zolana_keypair::ShieldedKeypair;
-use zolana_transaction::{AssetRegistry, Wallet};
-use zolana_user_registry_interface::user_registry_program_id;
+use zolana_client::{ProverClient, SolanaRpc, ZolanaIndexer};
+use zolana_interface::SHIELDED_POOL_PROGRAM_ID;
+use zolana_transaction::AssetRegistry;
 
 fn main() -> Result<()> {
-    let (mut client, _localnet) = setup()?;
+    // Connect to the devnet deployment.
+    let indexer = ZolanaIndexer::new("http://202.8.10.77:8784/");
+    let rpc_url = format!(
+        "https://devnet.helius-rpc.com/?api-key={}",
+        std::env::var("API_KEY").expect("set API_KEY"),
+    );
+    let mut rpc = SolanaRpc::new(rpc_url).with_indexer(indexer.clone());
+    let _prover = ProverClient::new("http://202.8.10.77:3011".to_string());
+    let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR")
+        .unwrap_or_else(|_| format!("{}/.config/solana/id.json", std::env::var("HOME").unwrap_or_default()));
+    let payer = read_keypair_file(&payer_path).map_err(|e| anyhow!("load payer {payer_path}: {e}"))?;
+    rpc.assert_executable(&Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID))?;
 
-    // The keypair owns and decrypts the private balance.
-    let keypair = ShieldedKeypair::new()?;
-
-    // Fund the Solana key that pays fees; registration below spends from it.
-    let funding = Keypair::new();
-    fund_key(&mut client, &funding.pubkey(), 20_000_000)?;
-
-    // The wallet holds the party's private balance.
-    let _wallet = Wallet::new(keypair.clone(), AssetRegistry::default())?;
-
-    // Register private wallet address for private transfers; senders transfer privately
-    // to the regular Solana public key that serves as inbox for the private wallet. If a
-    // recipient has no private wallet, meaning a public key is not registered, transfers
-    // resolve to a private-to-public withdrawal. Skip where the user-registry program is
-    // not deployed.
-    let registry_id = Address::new_from_array(user_registry_program_id().to_bytes());
-    let registry_deployed = client
-        .rpc
-        .get_account(registry_id)?
-        .map(|a| a.executable)
-        .unwrap_or(false);
-    if registry_deployed {
-        ensure_registered(&client.rpc, &funding, &keypair)?;
-    } else {
-        eprintln!("note: user-registry program not deployed; skipping registration");
-    }
+    // Create the keypair that owns the private balance, fund a Solana fee key, and
+    // register the wallet address so senders can transfer to it privately. Senders
+    // transfer privately to the regular Solana public key that serves as inbox for
+    // the private wallet; if a public key is not registered, transfers resolve to a
+    // private-to-public withdrawal.
+    let (_keypair, funding, _wallet) =
+        create_private_wallet(&mut rpc, &payer, AssetRegistry::default())?;
 
     println!("ok private wallet solana_address={}", funding.pubkey());
     Ok(())

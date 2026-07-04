@@ -1,52 +1,55 @@
-use anyhow::Result;
-use rust_client_example::{
-    deposit_sol, deposit_spl, fund_key, register_asset, setup, setup_private_wallet,
-};
+use anyhow::{anyhow, Result};
+use rust_client_example::{create_private_wallet, deposit_sol, deposit_spl, fund_key, register_asset};
 use solana_address::Address;
-use solana_keypair::Keypair;
+use solana_keypair::{read_keypair_file, Keypair};
+use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use zolana_client::{
-    create_associated_token_account, sync_wallet, Submit, Transaction as ClientTransaction,
-    WithdrawalTarget,
+    create_associated_token_account, sync_wallet, ProverClient, SolanaRpc, Submit,
+    Transaction as ClientTransaction, WithdrawalTarget, ZolanaIndexer,
 };
 use zolana_interface::{
     instruction::{TransactSplWithdrawal, TransactWithdrawal},
-    pda, SPL_TOKEN_PROGRAM_ID,
+    pda, SHIELDED_POOL_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID,
 };
 use zolana_transaction::{Utxo, SOL_MINT};
 
 fn main() -> Result<()> {
-    let (mut client, mut localnet) = setup()?;
-    // Withdraw an SPL value. For a SOL withdrawal, skip register_asset, use
-    // `SOL_MINT` as the asset, and target `WithdrawalTarget::Sol` /
-    // `TransactWithdrawal::Sol` (a plain recipient, no ATA or vault).
-    let asset = register_asset(&mut client, &mut localnet)?;
+    // Connect to the devnet deployment.
+    let indexer = ZolanaIndexer::new("http://202.8.10.77:8784/");
+    let rpc_url = format!(
+        "https://devnet.helius-rpc.com/?api-key={}",
+        std::env::var("API_KEY").expect("set API_KEY"),
+    );
+    let mut rpc = SolanaRpc::new(rpc_url).with_indexer(indexer.clone());
+    let prover = ProverClient::new("http://202.8.10.77:3011".to_string());
+    let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR")
+        .unwrap_or_else(|_| format!("{}/.config/solana/id.json", std::env::var("HOME").unwrap_or_default()));
+    let payer = read_keypair_file(&payer_path).map_err(|e| anyhow!("load payer {payer_path}: {e}"))?;
+    let tree: Pubkey = std::env::var("ZOLANA_TREE").expect("set ZOLANA_TREE").parse()?;
+    rpc.assert_executable(&Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID))?;
+
+    // Withdraw an SPL value. For a SOL withdrawal, skip register_asset, build the
+    // wallet from `AssetRegistry::default()`, use `SOL_MINT` as the asset, and
+    // target `WithdrawalTarget::Sol` / `TransactWithdrawal::Sol` (a plain
+    // recipient, no ATA or vault).
+    let (asset, registry) = register_asset(&mut rpc, &payer)?;
     let asset_address = Address::new_from_array(asset.mint.to_bytes());
-    let (keypair, _funding, mut wallet) = setup_private_wallet(&mut client, &localnet)?;
+    let (keypair, _funding, mut wallet) = create_private_wallet(&mut rpc, &payer, registry)?;
 
     // Deposit an SPL asset to withdraw and SOL for the transaction fee
-    deposit_spl(
-        &mut client,
-        &keypair,
-        &mut wallet,
-        &asset,
-        10_000,
-    )?;
-    deposit_sol(&mut client, &keypair, &mut wallet, 5_000_000)?;
+    deposit_spl(&rpc, &payer, tree, &indexer, &keypair, &mut wallet, &asset, 10_000)?;
+    deposit_sol(&rpc, &payer, tree, &indexer, &keypair, &mut wallet, 5_000_000)?;
 
     // A withdrawal exits to a public account. Recipient's token account is created idempotently
     let recipient = Keypair::new();
-    fund_key(&mut client, &recipient.pubkey(), 1_000_000)?;
-    let (_ata_sig, ata) = create_associated_token_account(
-        &client.rpc,
-        &client.payer,
-        &recipient.pubkey(),
-        &asset.mint,
-    )?;
+    fund_key(&mut rpc, &payer, &recipient.pubkey(), 1_000_000)?;
+    let (_ata_sig, ata) =
+        create_associated_token_account(&rpc, &payer, &recipient.pubkey(), &asset.mint)?;
     let interface_pda = pda::spl_asset_vault(&asset.mint);
 
     // Sync the wallet to see the current balance before spending it
-    sync_wallet(&mut wallet, &client.indexer)?;
+    sync_wallet(&mut wallet, &indexer)?;
 
     // Select the SPL asset to withdraw and SOL for the transaction fee
     let mut inputs: Vec<Utxo> = Vec::new();
@@ -61,8 +64,8 @@ fn main() -> Result<()> {
     }
 
     // Build and sign the withdrawal
-    let payer = Address::new_from_array(client.payer.pubkey().to_bytes());
-    let mut tx = ClientTransaction::from_wallet(&wallet, &inputs, payer)?;
+    let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
+    let mut tx = ClientTransaction::from_wallet(&wallet, &inputs, payer_address)?;
     tx.withdraw(
         asset_address,
         4_000,
@@ -79,7 +82,7 @@ fn main() -> Result<()> {
         spl_token_interface: interface_pda,
         recipient: recipient.pubkey(),
         user_token_account: ata,
-        token_program: solana_pubkey::Pubkey::new_from_array(SPL_TOKEN_PROGRAM_ID),
+        token_program: Pubkey::new_from_array(SPL_TOKEN_PROGRAM_ID),
     });
 
     let submit = Submit {
@@ -87,11 +90,10 @@ fn main() -> Result<()> {
         withdrawal: Some(withdrawal),
         cu_limit: None,
     };
-    let payer_keypair = client.payer.insecure_clone();
-    let signature = submit.execute(&client.rpc, &client.prover, &payer_keypair, client.tree)?;
+    let signature = submit.execute(&rpc, &prover, &payer, tree)?;
 
     // Sync the private balance.
-    sync_wallet(&mut wallet, &client.indexer)?;
+    sync_wallet(&mut wallet, &indexer)?;
 
     println!("ok withdrawal signature={signature} recipient_token_account={ata}");
     Ok(())

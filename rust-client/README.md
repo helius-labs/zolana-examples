@@ -2,10 +2,11 @@
 
 End-to-end client examples for private balances and transactions, driven through
 the `zolana-client` SDK against a devnet deployment (RPC, Photon indexer, and
-prover). Each example is a self-contained binary covering one operation. `setup`
-in `src/lib.rs` connects to the deployment and seeds the deposit the transfer,
-withdraw, and sync examples need; each example holds the SDK call it demonstrates
-so you see the code production holds.
+prover). Each example is a self-contained binary covering one operation: it opens
+by building its own connection (RPC, indexer, prover, payer, tree) so you see how
+to reach the deployment, then holds the SDK call it demonstrates. The helpers in
+`src/lib.rs` cover only the seeding a real app never hand-writes (register a
+throwaway mint, fund a fee key, create a private wallet, deposit).
 
 Each example moves an SPL value; a comment in each shows the SOL variant.
 
@@ -34,30 +35,29 @@ spend them.
 
 ## Configure
 
-`setup` reads the deployment from the environment:
+The devnet URLs are literals in each example: RPC
+`https://devnet.helius-rpc.com/?api-key={API_KEY}`, indexer
+`http://202.8.10.77:8784/`, prover `http://202.8.10.77:3011/`. Three values come
+from the environment:
 
 | Variable | Meaning | Default |
 |----------|---------|---------|
-| `ZOLANA_RPC_URL` | Solana RPC endpoint | Helius devnet from `API_KEY` |
-| `API_KEY` | Helius key, used only when `ZOLANA_RPC_URL` is unset | — |
-| `ZOLANA_INDEXER_URL` | Photon indexer | `http://202.8.10.77:8784` |
-| `ZOLANA_PROVER_URL` | prover endpoint (transfer, withdraw) | — |
-| `ZOLANA_PAYER_KEYPAIR` | fee payer keypair file | `~/.config/solana/id.json` |
+| `API_KEY` | Helius key, injected into the RPC URL | required |
 | `ZOLANA_TREE` | the deployment's state tree address | required |
+| `ZOLANA_PAYER_KEYPAIR` | fee payer keypair file | `~/.config/solana/id.json` |
 
 The payer must already hold SOL; there is no airdrop. There is no tree discovery,
 so `ZOLANA_TREE` is required (current devnet:
 `treeYbr45LjxovKvtD46uEphM64kwoFFPYhVNw1A8x8`).
 
-Transfers and withdrawals generate a proof. Point `ZOLANA_PROVER_URL` at a running
-prover; on first use it downloads its proving keys from a GitHub release, which
-needs `gh` authenticated for the hosting org (`gh auth status`). Deposits and sync
-are proofless and need neither.
+Transfers and withdrawals generate a proof; on first use the prover downloads its
+proving keys from a GitHub release, which needs `gh` authenticated for the hosting
+org (`gh auth status`). Deposits and sync are proofless and need neither.
 
 ## Run
 
 ```bash
-ZOLANA_TREE=<tree> ZOLANA_PAYER_KEYPAIR=<funded key> \
+API_KEY=<helius key> ZOLANA_TREE=<tree> ZOLANA_PAYER_KEYPAIR=<funded key> \
   cargo run -p rust-client-example --example deposit
 ```
 
