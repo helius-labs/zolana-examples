@@ -1,6 +1,6 @@
 use anyhow::Result;
 use rust_client_example::{
-    deposit_sol, deposit_spl, register_asset, setup_localnet, setup_private_wallet,
+    deposit_sol, deposit_spl, fund_key, register_asset, setup, setup_private_wallet,
 };
 use solana_address::Address;
 use solana_keypair::Keypair;
@@ -16,7 +16,10 @@ use zolana_interface::{
 use zolana_transaction::{Utxo, SOL_MINT};
 
 fn main() -> Result<()> {
-    let (mut client, mut localnet) = setup_localnet()?;
+    let (mut client, mut localnet) = setup()?;
+    // Withdraw an SPL value. For a SOL withdrawal, skip register_asset, use
+    // `SOL_MINT` as the asset, and target `WithdrawalTarget::Sol` /
+    // `TransactWithdrawal::Sol` (a plain recipient, no ATA or vault).
     let asset = register_asset(&mut client, &mut localnet)?;
     let asset_address = Address::new_from_array(asset.mint.to_bytes());
     let (keypair, _funding, mut wallet) = setup_private_wallet(&mut client, &localnet)?;
@@ -33,7 +36,7 @@ fn main() -> Result<()> {
 
     // A withdrawal exits to a public account. Recipient's token account is created idempotently
     let recipient = Keypair::new();
-    client.rpc.airdrop(&recipient.pubkey(), 1_000_000)?;
+    fund_key(&mut client, &recipient.pubkey(), 1_000_000)?;
     let (_ata_sig, ata) = create_associated_token_account(
         &client.rpc,
         &client.payer,

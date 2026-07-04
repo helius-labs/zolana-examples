@@ -1,9 +1,9 @@
 use anyhow::Result;
-use rust_client_example::{deposit_sol, setup_localnet, setup_private_wallet};
+use rust_client_example::{deposit_sol, setup, setup_private_wallet};
 use zolana_client::Rpc;
 
 fn main() -> Result<()> {
-    let (mut client, localnet) = setup_localnet()?;
+    let (mut client, localnet) = setup()?;
     let (keypair, _funding, mut wallet) = setup_private_wallet(&mut client, &localnet)?;
 
     // Setup: Deposit SOL to private balance

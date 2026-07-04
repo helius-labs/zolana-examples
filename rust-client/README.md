@@ -1,23 +1,24 @@
 # Rust Client SDK Examples
 
-End-to-end client examples for the shielded pool, driven through the
-`zolana-client` SDK against a local validator, Photon indexer, and prover. Each
-example is a self-contained binary covering one operation. The shared harness in
-`src/lib.rs` handles only the localnet and protocol-admin setup a real app never
-writes, plus the deposit seeding the transfer, withdraw, and sync examples need;
-each example holds the SDK call it demonstrates so you see the code production
-holds.
+End-to-end client examples for private balances and transactions, driven through
+the `zolana-client` SDK against a devnet deployment (RPC, Photon indexer, and
+prover). Each example is a self-contained binary covering one operation. `setup`
+in `src/lib.rs` connects to the deployment and seeds the deposit the transfer,
+withdraw, and sync examples need; each example holds the SDK call it demonstrates
+so you see the code production holds.
+
+Each example moves an SPL value; a comment in each shows the SOL variant.
 
 ## Examples
 
 - **`create_private_wallet`** (proofless): create the keypair, fund a Solana fee
   key, build the wallet, and register it so others can send to it privately.
-- **`deposit`** (proofless): deposit a public SPL balance into the pool with
+- **`deposit`** (proofless): deposit a public balance into a private balance with
   `create_deposit`, sent at the instruction level.
-- **`transfer`** (private send): move an SPL value privately between two private
+- **`transfer`** (private send): move a value privately between two private
   balances, spending one note and one SOL fee note. Proven.
-- **`withdraw`**: withdraw an SPL value back to a public account's ATA, building
-  the SPL withdrawal target by hand. Proven.
+- **`withdraw`**: withdraw a value back to a public account (an ATA for SPL, a
+  wallet for SOL), building the withdrawal target by hand. Proven.
 - **`sync_balance`**: query the indexer for a wallet's encrypted UTXOs by view
   tag, the raw layer under `sync_wallet`.
 
@@ -31,47 +32,43 @@ The wallet owns its `AssetRegistry`, so the SDK reads asset ids off the wallet
 separate registry argument). Register SPL assets before creating the parties that
 spend them.
 
-## Prerequisites
+## Configure
 
-Build the on-chain programs, prover, CLI, and indexer once:
+`setup` reads the deployment from the environment:
 
-```bash
-just build-programs build-prover-server build-cli
-just ensure-photon
-just ensure-smart-account
-```
+| Variable | Meaning | Default |
+|----------|---------|---------|
+| `ZOLANA_RPC_URL` | Solana RPC endpoint | Helius devnet from `API_KEY` |
+| `API_KEY` | Helius key, used only when `ZOLANA_RPC_URL` is unset | — |
+| `ZOLANA_INDEXER_URL` | Photon indexer | `http://202.8.10.77:8784` |
+| `ZOLANA_PROVER_URL` | prover endpoint (transfer, withdraw) | — |
+| `ZOLANA_PAYER_KEYPAIR` | fee payer keypair file | `~/.config/solana/id.json` |
+| `ZOLANA_TREE` | the deployment's state tree address | required |
 
-`ensure-photon` builds the Photon indexer from a sibling `../photon` checkout
-(`just build-photon` -> `target/bin/photon`); point `ZOLANA_PHOTON_BIN` at a
-prebuilt binary to skip the build.
+The payer must already hold SOL; there is no airdrop. There is no tree discovery,
+so `ZOLANA_TREE` is required (current devnet:
+`treeYbr45LjxovKvtD46uEphM64kwoFFPYhVNw1A8x8`).
 
-Transfers and withdrawals generate a proof; the prover downloads its proving
-keys from a GitHub release on first use, which needs `gh` authenticated for the
-hosting org (`gh auth status`). Deposits and sync are proofless and need
-neither, so they run with no `gh` and no keys.
+Transfers and withdrawals generate a proof. Point `ZOLANA_PROVER_URL` at a running
+prover; on first use it downloads its proving keys from a GitHub release, which
+needs `gh` authenticated for the hosting org (`gh auth status`). Deposits and sync
+are proofless and need neither.
 
 ## Run
 
-Each example boots its own validator, Photon, and prover, so run one at a time:
-
 ```bash
-just run-rust-client-example deposit
-```
-
-or directly:
-
-```bash
-cargo run -p rust-client-example --example transfer
+ZOLANA_TREE=<tree> ZOLANA_PAYER_KEYPAIR=<funded key> \
+  cargo run -p rust-client-example --example deposit
 ```
 
 Start with `deposit` or `sync_balance`: they are proofless, so they validate the
-setup without the prover or `gh`. Each example prints a single `ok ...` line with
-the transaction signature and the resulting balance.
+connection without the prover or `gh`. Each example prints a single `ok ...` line
+with the transaction signature and the resulting balance.
 
-The validator binds the RPC port (8899) and Photon port (8784). The
-`just run-rust-client-example` recipe frees stale validators on those ports
-before each run; a bare `cargo run` does not, so kill leftover processes first if
-a port is busy.
+Registering an SPL asset needs a program that allows permissionless SPL interface
+creation. `create_private_wallet` registers the wallet address only where the
+user-registry program is deployed; where it is not, registration is skipped with
+a note and deposits and reads still work.
 
 ## Documentation
 

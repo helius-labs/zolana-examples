@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rust_client_example::{register_asset, setup_localnet, setup_private_wallet};
+use rust_client_example::{register_asset, setup, setup_private_wallet};
 use solana_address::Address;
 use solana_signer::Signer;
 use zolana_client::{create_deposit, get_private_token_balances, sync_wallet, CreateDeposit, Rpc};
@@ -7,7 +7,7 @@ use zolana_test_utils::spl::mint_to;
 use zolana_transaction::SOL_MINT;
 
 fn main() -> Result<()> {
-    let (mut client, mut localnet) = setup_localnet()?;
+    let (mut client, mut localnet) = setup()?;
     let asset = register_asset(&mut client, &mut localnet)?;
     let (keypair, _funding, mut wallet) = setup_private_wallet(&mut client, &localnet)?;
 
