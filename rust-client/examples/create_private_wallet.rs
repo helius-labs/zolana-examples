@@ -9,12 +9,12 @@ use zolana_transaction::AssetRegistry;
 
 fn main() -> Result<()> {
     // Connect to the devnet deployment.
-    let indexer = ZolanaIndexer::new("http://202.8.10.77:8784/");
+    let _indexer = ZolanaIndexer::new("http://202.8.10.77:8784/");
     let rpc_url = format!(
         "https://devnet.helius-rpc.com/?api-key={}",
         std::env::var("API_KEY").expect("set API_KEY"),
     );
-    let mut rpc = SolanaRpc::new(rpc_url).with_indexer(indexer.clone());
+    let mut rpc = SolanaRpc::new(rpc_url);
     let _prover = ProverClient::new("http://202.8.10.77:3011".to_string());
     let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR")
         .unwrap_or_else(|_| format!("{}/.config/solana/id.json", std::env::var("HOME").unwrap_or_default()));
