@@ -24,10 +24,11 @@ Each example moves an SPL value; a comment in each shows the SOL variant.
   tag, the raw layer under `sync_wallet`.
 
 Transfer and withdraw call `create_transfer_sync` / `create_withdrawal_sync` to
-select inputs, build, and sign the transaction, then run the prove-and-submit
-sequence inline: fetch the merkle and non-inclusion proofs, assemble the witness,
-prove, and send the `Transact` instruction. Both examples keep that sequence in a
-local `submit_private_transaction` so the full flow is visible in one file.
+select inputs, build, and sign the transaction, then hand the signed transaction
+to `Submit`. `Submit` fetches the input proofs, proves, sends the `Transact`
+instruction, and waits for the indexer to pick it up, so the following
+`sync_wallet` does not race Photon. It takes the indexer and RPC separately
+because a private submit needs both.
 
 The wallet owns its `AssetRegistry`, so the SDK reads asset ids off the wallet
 (`sync_wallet`, `get_private_token_balances`, and the transaction builder take no
