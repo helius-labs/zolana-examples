@@ -1,22 +1,17 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::create_private_wallet;
 use solana_keypair::read_keypair_file;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use zolana_client::SolanaRpc;
+use zolana_client::{ensure_registered, ZolanaClient};
 use zolana_interface::SHIELDED_POOL_PROGRAM_ID;
-use zolana_transaction::AssetRegistry;
+use zolana_keypair::{ShieldedKeypair, ViewingKey};
+use zolana_transaction::{AssetRegistry, Wallet};
 
 fn main() -> Result<()> {
     // Load .env if present.
     dotenvy::dotenv().ok();
 
-    // Connect to devnet.
-    let rpc_url = format!(
-        "https://devnet.helius-rpc.com/?api-key={}",
-        std::env::var("API_KEY").expect("set API_KEY"),
-    );
-    let mut rpc = SolanaRpc::new(rpc_url);
+    // Load the fee payer, then connect to devnet with one client.
     let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR").unwrap_or_else(|_| {
         format!(
             "{}/.config/solana/id.json",
@@ -25,11 +20,16 @@ fn main() -> Result<()> {
     });
     let payer =
         read_keypair_file(&payer_path).map_err(|e| anyhow!("load payer {payer_path}: {e}"))?;
+    let api_key = std::env::var("API_KEY").expect("set API_KEY");
+    let mut client = ZolanaClient::devnet(payer, &api_key);
+    let (rpc, _indexer, _prover, payer) = client.parts();
     rpc.assert_executable(&Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID))?;
+    let seed = *payer.secret_bytes();
+    let keypair = ShieldedKeypair::from_ed25519(&seed, ViewingKey::new())?;
+    let _wallet = Wallet::new(keypair.clone(), AssetRegistry::default())?;
 
-    // Create a private wallet. This adds the wallet address to a lookup table for
-    // private transfers.
-    let (_keypair, _wallet) = create_private_wallet(&mut rpc, &payer, AssetRegistry::default())?;
+    // Register the wallet address in a lookup table so others can send to it privately.
+    ensure_registered(rpc, payer, &keypair)?;
 
     println!("ok private wallet solana_address={}", payer.pubkey());
     Ok(())
