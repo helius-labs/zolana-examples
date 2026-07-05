@@ -18,7 +18,7 @@ use zolana_interface::{
     instruction::{CreateAssetCounter, CreateSplInterface},
     pda,
 };
-use zolana_keypair::ShieldedKeypair;
+use zolana_keypair::{ShieldedKeypair, ViewingKey};
 use zolana_test_utils::spl::{create_mint, create_token_account, mint_to};
 use zolana_transaction::{AssetRegistry, Wallet, SOL_MINT};
 use zolana_user_registry_interface::user_registry_program_id;
@@ -111,8 +111,10 @@ pub fn create_private_wallet(
     payer: &Keypair,
     registry: AssetRegistry,
 ) -> Result<(ShieldedKeypair, Keypair, Wallet)> {
-    let keypair = ShieldedKeypair::new()?;
+    // One ed25519 key signs both the Solana account and the private balance.
     let funding = Keypair::new();
+    let seed = *funding.secret_bytes();
+    let keypair = ShieldedKeypair::from_ed25519(&seed, ViewingKey::new())?;
     // The payer covers the fee key; registration is the only thing it pays for.
     fund_key(rpc, payer, &funding.pubkey(), 20_000_000)?;
     let wallet = Wallet::new(keypair.clone(), registry)?;
@@ -172,7 +174,9 @@ pub fn deposit_sol(
     wallet: &mut Wallet,
     amount: u64,
 ) -> Result<()> {
-    deposit(rpc, payer, tree, indexer, keypair, wallet, SOL_MINT, amount, None)
+    deposit(
+        rpc, payer, tree, indexer, keypair, wallet, SOL_MINT, amount, None,
+    )
 }
 
 /// Fund the token account, then move `amount` of an SPL asset into the private

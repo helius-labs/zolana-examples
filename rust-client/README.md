@@ -3,8 +3,10 @@
 End-to-end client examples for private balances and transactions, driven through
 the `zolana-client` SDK against a devnet deployment (RPC, Photon indexer, and
 prover). Each example is a self-contained binary covering one operation: it opens
-by building its own connection (RPC, indexer, prover, payer, tree) so you see how
-to reach the deployment, then holds the SDK call it demonstrates. The helpers in
+by building its own connection so you see how to reach the deployment, then holds
+the SDK call it demonstrates. Each example builds only the connections it uses, so
+the proofless ones (`create_private_wallet`, `deposit`, `sync_balance`) skip the
+prover, and `create_private_wallet` skips the indexer too. The helpers in
 `src/lib.rs` cover only the seeding a real app never hand-writes (register a
 throwaway mint, fund a fee key, create a private wallet, deposit).
 
@@ -37,7 +39,7 @@ spend them.
 
 ## Configure
 
-The devnet URLs are literals in each example: RPC
+The devnet URLs are literals in each example that uses them: RPC
 `https://devnet.helius-rpc.com/?api-key={API_KEY}`, indexer
 `http://202.8.10.77:8784/`, prover `http://202.8.10.77:3011/`. Three values come
 from the environment:

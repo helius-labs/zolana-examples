@@ -19,10 +19,17 @@ fn main() -> Result<()> {
     );
     let mut rpc = SolanaRpc::new(rpc_url);
     let prover = ProverClient::new("http://202.8.10.77:3011".to_string());
-    let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR")
-        .unwrap_or_else(|_| format!("{}/.config/solana/id.json", std::env::var("HOME").unwrap_or_default()));
-    let payer = read_keypair_file(&payer_path).map_err(|e| anyhow!("load payer {payer_path}: {e}"))?;
-    let tree: Pubkey = std::env::var("ZOLANA_TREE").expect("set ZOLANA_TREE").parse()?;
+    let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR").unwrap_or_else(|_| {
+        format!(
+            "{}/.config/solana/id.json",
+            std::env::var("HOME").unwrap_or_default()
+        )
+    });
+    let payer =
+        read_keypair_file(&payer_path).map_err(|e| anyhow!("load payer {payer_path}: {e}"))?;
+    let tree: Pubkey = std::env::var("ZOLANA_TREE")
+        .expect("set ZOLANA_TREE")
+        .parse()?;
     rpc.assert_executable(&Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID))?;
 
     // Send an SPL value. For a SOL transfer, skip register_asset, build the wallets
@@ -30,9 +37,8 @@ fn main() -> Result<()> {
     // then covers both the value and the fee).
     let (asset, registry) = register_asset(&mut rpc, &payer)?;
     let asset_address = Address::new_from_array(asset.mint.to_bytes());
-    let (sender_keypair, _sender_funding, mut sender_wallet) =
+    let (sender_keypair, sender_funding, mut sender_wallet) =
         create_private_wallet(&mut rpc, &payer, registry.clone())?;
-    // Transfers privately to a recipient with a private wallet, otherwise falls back to a private-to-public withdrawal
     let (_recipient_keypair, recipient_funding, mut recipient_wallet) =
         create_private_wallet(&mut rpc, &payer, registry)?;
 
@@ -64,13 +70,16 @@ fn main() -> Result<()> {
     // notes, builds the transaction, and signs it. A transfer to a recipient whose
     // address is registered stays private; an unregistered one falls back to a
     // private-to-public withdrawal.
-    let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
+    // The sender's own key pays the fee. On the ed25519 rail the program reads the
+    // input owner from the fee payer account, so the payer must be the key that owns
+    // the private balance being spent.
+    let sender_address = Address::new_from_array(sender_funding.pubkey().to_bytes());
     let transfer = create_transfer_sync(CreateTransfer {
         rpc: &rpc,
         wallet: &sender_wallet,
         authority: &sender_keypair,
         owner_pubkey: Pubkey::default(),
-        payer: payer_address,
+        payer: sender_address,
         recipient_owner: recipient_funding.pubkey(),
         asset: asset_address,
         amount: 4_000,
@@ -84,7 +93,7 @@ fn main() -> Result<()> {
         indexer: &indexer,
         rpc: &rpc,
         prover: &prover,
-        payer: &payer,
+        payer: &sender_funding,
         tree,
         cu_limit: None,
     }

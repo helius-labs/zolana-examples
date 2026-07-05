@@ -1,5 +1,7 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{create_private_wallet, deposit_sol, deposit_spl, fund_key, register_asset};
+use rust_client_example::{
+    create_private_wallet, deposit_sol, deposit_spl, fund_key, register_asset,
+};
 use solana_address::Address;
 use solana_keypair::{read_keypair_file, Keypair};
 use solana_pubkey::Pubkey;
@@ -19,10 +21,17 @@ fn main() -> Result<()> {
     );
     let mut rpc = SolanaRpc::new(rpc_url);
     let prover = ProverClient::new("http://202.8.10.77:3011".to_string());
-    let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR")
-        .unwrap_or_else(|_| format!("{}/.config/solana/id.json", std::env::var("HOME").unwrap_or_default()));
-    let payer = read_keypair_file(&payer_path).map_err(|e| anyhow!("load payer {payer_path}: {e}"))?;
-    let tree: Pubkey = std::env::var("ZOLANA_TREE").expect("set ZOLANA_TREE").parse()?;
+    let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR").unwrap_or_else(|_| {
+        format!(
+            "{}/.config/solana/id.json",
+            std::env::var("HOME").unwrap_or_default()
+        )
+    });
+    let payer =
+        read_keypair_file(&payer_path).map_err(|e| anyhow!("load payer {payer_path}: {e}"))?;
+    let tree: Pubkey = std::env::var("ZOLANA_TREE")
+        .expect("set ZOLANA_TREE")
+        .parse()?;
     rpc.assert_executable(&Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID))?;
 
     // Withdraw an SPL value. For a SOL withdrawal, skip register_asset, build the
@@ -30,11 +39,28 @@ fn main() -> Result<()> {
     // the recipient's plain Solana pubkey (no token account needed).
     let (asset, registry) = register_asset(&mut rpc, &payer)?;
     let asset_address = Address::new_from_array(asset.mint.to_bytes());
-    let (keypair, _funding, mut wallet) = create_private_wallet(&mut rpc, &payer, registry)?;
+    let (keypair, funding, mut wallet) = create_private_wallet(&mut rpc, &payer, registry)?;
 
     // Deposit an SPL asset to withdraw and SOL for the transaction fee
-    deposit_spl(&rpc, &payer, tree, &indexer, &keypair, &mut wallet, &asset, 10_000)?;
-    deposit_sol(&rpc, &payer, tree, &indexer, &keypair, &mut wallet, 5_000_000)?;
+    deposit_spl(
+        &rpc,
+        &payer,
+        tree,
+        &indexer,
+        &keypair,
+        &mut wallet,
+        &asset,
+        10_000,
+    )?;
+    deposit_sol(
+        &rpc,
+        &payer,
+        tree,
+        &indexer,
+        &keypair,
+        &mut wallet,
+        5_000_000,
+    )?;
 
     // A withdrawal exits to a public account. Create the recipient's token account
     // so the withdrawal can land the tokens; the SDK derives this same account from
@@ -50,12 +76,15 @@ fn main() -> Result<()> {
     // Build and sign the withdrawal. `create_withdrawal_sync` picks the input notes,
     // derives the recipient's token account from the mint, builds the transaction,
     // and signs it.
-    let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
+    // The wallet's own key pays the fee. On the ed25519 rail the program reads the
+    // input owner from the fee payer account, so the payer must be the key that owns
+    // the private balance being spent.
+    let owner_address = Address::new_from_array(funding.pubkey().to_bytes());
     let withdrawal = create_withdrawal_sync(CreateWithdrawal {
         wallet: &wallet,
         authority: &keypair,
         owner_pubkey: Pubkey::default(),
-        payer: payer_address,
+        payer: owner_address,
         recipient: recipient.pubkey(),
         asset: asset_address,
         amount: 4_000,
@@ -69,11 +98,15 @@ fn main() -> Result<()> {
         indexer: &indexer,
         rpc: &rpc,
         prover: &prover,
-        payer: &payer,
+        payer: &funding,
         tree,
         cu_limit: None,
     }
-    .execute(withdrawal.signed, Some(withdrawal.withdrawal), withdrawal.wait_tag)?;
+    .execute(
+        withdrawal.signed,
+        Some(withdrawal.withdrawal),
+        withdrawal.wait_tag,
+    )?;
 
     // Sync the private balance.
     sync_wallet(&mut wallet, &indexer)?;
