@@ -26,13 +26,6 @@ With `.env` in place:
 cargo run -p rust-client-example --example deposit
 ```
 
-Values set inline on the command still work and take precedence over `.env`:
-
-```bash
-API_KEY=<helius key> ZOLANA_TREE=<tree> ZOLANA_PAYER_KEYPAIR=<funded key> \
-  cargo run -p rust-client-example --example deposit
-```
-
 ## Documentation
 
 - [Documentation](https://helius.dev/docs/privacy)
