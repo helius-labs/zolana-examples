@@ -1,5 +1,6 @@
 target/
 node_modules/
 .DS_Store
+rust-client/.env
 rust-client/BUGS.md
 rust-client/test-ledger/

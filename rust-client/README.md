@@ -1,80 +1,40 @@
-# Rust Client SDK Examples
+# Zolana - Rust Client
 
-End-to-end client examples for private balances and transactions, driven through
-the `zolana-client` SDK against a devnet deployment (RPC, Photon indexer, and
-prover). Each example is a self-contained binary covering one operation: it opens
-by building its own connection so you see how to reach the deployment, then holds
-the SDK call it demonstrates. Each example builds only the connections it uses, so
-the proofless ones (`create_private_wallet`, `deposit`, `sync_balance`) skip the
-prover, and `create_private_wallet` skips the indexer too. The helpers in
-`src/lib.rs` cover only the seeding a real app never hand-writes (register a
-throwaway mint, fund a fee key, create a private wallet, deposit).
-
-Each example moves an SPL value; a comment in each shows the SOL variant.
-
-## Examples
-
-- **`create_private_wallet`** (proofless): create the keypair, fund a Solana fee
-  key, build the wallet, and register it so others can send to it privately.
-- **`deposit`** (proofless): deposit a public balance into a private balance with
-  `create_deposit`, sent at the instruction level.
-- **`transfer`** (private send): move a value privately between two private
-  balances, spending one note and one SOL fee note. Proven.
-- **`withdraw`**: withdraw a value back to a public account (an ATA for SPL, a
-  wallet for SOL). Proven.
-- **`sync_balance`**: query the indexer for a wallet's encrypted UTXOs by view
-  tag, the raw layer under `sync_wallet`.
-
-Transfer and withdraw call `create_transfer_sync` / `create_withdrawal_sync` to
-select inputs, build, and sign the transaction, then hand the signed transaction
-to `Submit`. `Submit` fetches the input proofs, proves, sends the `Transact`
-instruction, and waits for the indexer to pick it up, so the following
-`sync_wallet` does not race Photon. It takes the indexer and RPC separately
-because a private submit needs both.
-
-The wallet owns its `AssetRegistry`, so the SDK reads asset ids off the wallet
-(`sync_wallet`, `get_private_token_balances`, and the transaction builder take no
-separate registry argument). Register SPL assets before creating the parties that
-spend them.
+| Example | Description |
+|---------|-------------|
+| [`create_private_wallet`](examples/create_private_wallet.rs) | Create and register a wallet for a private balance. |
+| [`deposit`](examples/deposit.rs) | Move public tokens into a private balance. |
+| [`transfer`](examples/transfer.rs) | Send a value privately between two private balances. |
+| [`withdraw`](examples/withdraw.rs) | Withdraw a private balance back to a public account. |
+| [`sync_balance`](examples/sync_balance.rs) | Read a wallet's private balance from the indexer. |
 
 ## Configure
 
-The devnet URLs are literals in each example that uses them: RPC
-`https://devnet.helius-rpc.com/?api-key={API_KEY}`, indexer
-`http://202.8.10.77:8784/`, prover `http://202.8.10.77:3011/`. Three values come
-from the environment:
+Copy `.env.example` to `.env` and set `API_KEY`. The tree default is prefilled and
+the payer defaults to `~/.config/solana/id.json`, so a Helius key is all you need
+to add:
 
-| Variable | Meaning | Default |
-|----------|---------|---------|
-| `API_KEY` | Helius key, injected into the RPC URL | required |
-| `ZOLANA_TREE` | the deployment's state tree address | required |
-| `ZOLANA_PAYER_KEYPAIR` | fee payer keypair file | `~/.config/solana/id.json` |
-
-The payer must already hold SOL; there is no airdrop. There is no tree discovery,
-so `ZOLANA_TREE` is required (current devnet:
-`treeYbr45LjxovKvtD46uEphM64kwoFFPYhVNw1A8x8`).
-
-Transfers and withdrawals generate a proof; on first use the prover downloads its
-proving keys from a GitHub release, which needs `gh` authenticated for the hosting
-org (`gh auth status`). Deposits and sync are proofless and need neither.
+```bash
+cp .env.example .env
+```
 
 ## Run
+
+With `.env` in place:
+
+```bash
+cargo run -p rust-client-example --example deposit
+```
+
+Values set inline on the command still work and take precedence over `.env`:
 
 ```bash
 API_KEY=<helius key> ZOLANA_TREE=<tree> ZOLANA_PAYER_KEYPAIR=<funded key> \
   cargo run -p rust-client-example --example deposit
 ```
 
-Start with `deposit` or `sync_balance`: they are proofless, so they validate the
-connection without the prover or `gh`. Each example prints a single `ok ...` line
-with the transaction signature and the resulting balance.
-
-Registering an SPL asset needs a program that allows permissionless SPL interface
-creation. `create_private_wallet` registers the wallet address only where the
-user-registry program is deployed; where it is not, registration is skipped with
-a note and deposits and reads still work.
-
 ## Documentation
 
-- Protocol spec: [`docs/spec.md`](../../zolana-devx/docs/spec.md)
-- Client SDK: [`sdk-libs/client`](../../zolana-devx/sdk-libs/client)
+- [Documentation](https://helius.dev/docs/privacy)
+- [Source Code](https://github.com/helius-labs/zolana)
+- [AI Skill](https://example.com/zolana-ai-skill)

@@ -8,8 +8,10 @@ use zolana_interface::SHIELDED_POOL_PROGRAM_ID;
 use zolana_transaction::AssetRegistry;
 
 fn main() -> Result<()> {
-    // Connect to the devnet deployment. Creating a wallet is proofless and reads no
-    // encrypted state, so this example needs only the RPC, not the indexer or prover.
+    // Load .env if present.
+    dotenvy::dotenv().ok();
+
+    // Connect to devnet.
     let rpc_url = format!(
         "https://devnet.helius-rpc.com/?api-key={}",
         std::env::var("API_KEY").expect("set API_KEY"),
@@ -25,14 +27,10 @@ fn main() -> Result<()> {
         read_keypair_file(&payer_path).map_err(|e| anyhow!("load payer {payer_path}: {e}"))?;
     rpc.assert_executable(&Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID))?;
 
-    // Create the keypair that owns the private balance, fund a Solana fee key, and
-    // register the wallet address so senders can transfer to it privately. Senders
-    // transfer privately to the regular Solana public key that serves as inbox for
-    // the private wallet; if a public key is not registered, transfers resolve to a
-    // private-to-public withdrawal.
-    let (_keypair, funding, _wallet) =
-        create_private_wallet(&mut rpc, &payer, AssetRegistry::default())?;
+    // Create a private wallet. This adds the wallet address to a lookup table for
+    // private transfers.
+    let (_keypair, _wallet) = create_private_wallet(&mut rpc, &payer, AssetRegistry::default())?;
 
-    println!("ok private wallet solana_address={}", funding.pubkey());
+    println!("ok private wallet solana_address={}", payer.pubkey());
     Ok(())
 }

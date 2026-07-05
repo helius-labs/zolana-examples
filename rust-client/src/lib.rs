@@ -1,8 +1,5 @@
-//! Seeding helpers shared by the client examples. Each example inlines its own
-//! connection (RPC, indexer, prover, payer, tree); these helpers cover only what
-//! a real app would not hand-write: registering a throwaway SPL mint, funding a
-//! fee key, creating a private wallet, and the deposit seeding the transfer,
-//! withdraw, and sync examples need.
+//! Setup helpers for examples: create a test SPL mint with interface PDA, fund a
+//! fee key, create a private wallet, and deposit a balance.
 
 use anyhow::{anyhow, Result};
 use solana_address::Address;
@@ -21,7 +18,6 @@ use zolana_interface::{
 use zolana_keypair::{ShieldedKeypair, ViewingKey};
 use zolana_test_utils::spl::{create_mint, create_token_account, mint_to};
 use zolana_transaction::{AssetRegistry, Wallet, SOL_MINT};
-use zolana_user_registry_interface::user_registry_program_id;
 
 /// SOL occupies asset id 1; the first registered SPL mint gets id 2.
 const FIRST_SPL_ASSET_ID: u64 = 2;
@@ -68,10 +64,7 @@ pub fn fund_key(
     send(rpc, &[ix], &payer.pubkey(), &[payer])
 }
 
-/// Register a throwaway SPL mint for private balances and transactions. The payer
-/// signs the registration directly (the deployment allows permissionless SPL
-/// interface creation). Returns the asset and an [`AssetRegistry`] that maps its
-/// id to the mint, ready to build a wallet from.
+/// Create test mint with interface PDA for private balances and transactions.
 pub fn register_asset(rpc: &mut SolanaRpc, payer: &Keypair) -> Result<(SplAsset, AssetRegistry)> {
     let mint = create_mint(rpc, payer)?;
 
@@ -102,42 +95,24 @@ pub fn register_asset(rpc: &mut SolanaRpc, payer: &Keypair) -> Result<(SplAsset,
     Ok((SplAsset { mint, user_token }, registry))
 }
 
-/// Create a private wallet from `registry`: a keypair, a funded Solana fee key,
-/// and the wallet. Register it so others can send to its Solana address privately
-/// (skipped where the user-registry program is not deployed). Pass
+/// Create a private wallet owned by `owner` and register its address for private
+/// transfers. `owner` pays for its own registration. Pass
 /// `AssetRegistry::default()` for a SOL-only wallet.
 pub fn create_private_wallet(
     rpc: &mut SolanaRpc,
-    payer: &Keypair,
+    owner: &Keypair,
     registry: AssetRegistry,
-) -> Result<(ShieldedKeypair, Keypair, Wallet)> {
+) -> Result<(ShieldedKeypair, Wallet)> {
     // One ed25519 key signs both the Solana account and the private balance.
-    let funding = Keypair::new();
-    let seed = *funding.secret_bytes();
+    let seed = *owner.secret_bytes();
     let keypair = ShieldedKeypair::from_ed25519(&seed, ViewingKey::new())?;
-    // The payer covers the fee key; registration is the only thing it pays for.
-    fund_key(rpc, payer, &funding.pubkey(), 20_000_000)?;
     let wallet = Wallet::new(keypair.clone(), registry)?;
-    // Publish the wallet's keys so transfers to its Solana address stay private
-    // instead of becoming a public withdrawal. Skip it where the user-registry
-    // program is not deployed; deposits and reads work without it.
-    let registry_id = Address::new_from_array(user_registry_program_id().to_bytes());
-    let registry_deployed = rpc
-        .get_account(registry_id)?
-        .map(|a| a.executable)
-        .unwrap_or(false);
-    if registry_deployed {
-        zolana_client::ensure_registered(rpc, &funding, &keypair)?;
-    } else {
-        eprintln!("note: user-registry program not deployed; skipping registration");
-    }
-    Ok((keypair, funding, wallet))
+    zolana_client::ensure_registered(rpc, owner, &keypair)?;
+    Ok((keypair, wallet))
 }
 
 /// Move `amount` of `asset` into the private balance of `keypair` and refresh
 /// `wallet`. Pass `Some` token account for an SPL deposit, or `None` for SOL.
-// The examples inline their connection, so the helpers take it as loose
-// primitives rather than a handle struct.
 #[allow(clippy::too_many_arguments)]
 fn deposit(
     rpc: &SolanaRpc,
@@ -163,8 +138,7 @@ fn deposit(
     Ok(())
 }
 
-/// Move `amount` of SOL into the private balance of `keypair`. This is shared
-/// setup for the transfer, withdraw, and sync examples.
+/// Move `amount` of SOL into the private balance of `keypair`.
 pub fn deposit_sol(
     rpc: &SolanaRpc,
     payer: &Keypair,
@@ -180,7 +154,7 @@ pub fn deposit_sol(
 }
 
 /// Fund the token account, then move `amount` of an SPL asset into the private
-/// balance of `keypair`. This is shared setup for the transfer and withdraw examples.
+/// balance of `keypair`.
 #[allow(clippy::too_many_arguments)]
 pub fn deposit_spl(
     rpc: &SolanaRpc,

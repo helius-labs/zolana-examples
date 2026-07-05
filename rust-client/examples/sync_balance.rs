@@ -7,8 +7,10 @@ use zolana_interface::SHIELDED_POOL_PROGRAM_ID;
 use zolana_transaction::AssetRegistry;
 
 fn main() -> Result<()> {
-    // Connect to the devnet deployment. Reading balances is proofless, so this example
-    // needs the RPC and the indexer, but not the prover.
+    // Load .env if present.
+    dotenvy::dotenv().ok();
+
+    // Connect to devnet.
     let indexer = ZolanaIndexer::new("http://202.8.10.77:8784/");
     let rpc_url = format!(
         "https://devnet.helius-rpc.com/?api-key={}",
@@ -28,8 +30,7 @@ fn main() -> Result<()> {
         .parse()?;
     rpc.assert_executable(&Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID))?;
 
-    let (keypair, _funding, mut wallet) =
-        create_private_wallet(&mut rpc, &payer, AssetRegistry::default())?;
+    let (keypair, mut wallet) = create_private_wallet(&mut rpc, &payer, AssetRegistry::default())?;
 
     // Setup: Deposit SOL to private balance
     deposit_sol(
@@ -40,15 +41,6 @@ fn main() -> Result<()> {
         &keypair,
         &mut wallet,
         5_000_000,
-    )?;
-    deposit_sol(
-        &rpc,
-        &payer,
-        tree,
-        &indexer,
-        &keypair,
-        &mut wallet,
-        2_000_000,
     )?;
 
     // Query indexer for private balances of a wallet and decrypts the results

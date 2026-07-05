@@ -13,8 +13,10 @@ use zolana_test_utils::spl::mint_to;
 use zolana_transaction::SOL_MINT;
 
 fn main() -> Result<()> {
-    // Connect to the devnet deployment. A deposit is proofless, so this example needs
-    // the RPC to send and the indexer to read the balance back, but not the prover.
+    // Load .env if present.
+    dotenvy::dotenv().ok();
+
+    // Connect to devnet.
     let indexer = ZolanaIndexer::new("http://202.8.10.77:8784/");
     let rpc_url = format!(
         "https://devnet.helius-rpc.com/?api-key={}",
@@ -34,10 +36,12 @@ fn main() -> Result<()> {
         .parse()?;
     rpc.assert_executable(&Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID))?;
 
+    // Create test mint with interface PDA for private balances and transactions
+    // and create a private wallet
     let (asset, registry) = register_asset(&mut rpc, &payer)?;
-    let (keypair, _funding, mut wallet) = create_private_wallet(&mut rpc, &payer, registry)?;
-
+    let (keypair, mut wallet) = create_private_wallet(&mut rpc, &payer, registry)?;
     let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
+    mint_to(&rpc, &payer, &asset.mint, &asset.user_token, 10_000)?;
 
     // Deposit SOL to private balance
     let sol = create_deposit(CreateDeposit {
@@ -51,7 +55,6 @@ fn main() -> Result<()> {
     let sol_sig = rpc.create_and_send_transaction(&[sol_ix], payer_address, &[&payer])?;
 
     // Deposit an SPL token to private balance
-    mint_to(&rpc, &payer, &asset.mint, &asset.user_token, 10_000)?;
     let spl = create_deposit(CreateDeposit {
         recipient: &keypair.shielded_address()?,
         asset: Address::new_from_array(asset.mint.to_bytes()),
@@ -62,7 +65,7 @@ fn main() -> Result<()> {
     let spl_ix = spl.instruction(tree, payer.pubkey());
     let spl_sig = rpc.create_and_send_transaction(&[spl_ix], payer_address, &[&payer])?;
 
-    // Sync the private balance, which now holds both assets.
+    // Sync the private balance.
     sync_wallet(&mut wallet, &indexer)?;
     let balance = get_private_token_balances(&wallet)?;
 

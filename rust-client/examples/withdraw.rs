@@ -1,7 +1,5 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{
-    create_private_wallet, deposit_sol, deposit_spl, fund_key, register_asset,
-};
+use rust_client_example::{create_private_wallet, deposit_sol, deposit_spl, register_asset};
 use solana_address::Address;
 use solana_keypair::{read_keypair_file, Keypair};
 use solana_pubkey::Pubkey;
@@ -13,7 +11,10 @@ use zolana_client::{
 use zolana_interface::SHIELDED_POOL_PROGRAM_ID;
 
 fn main() -> Result<()> {
-    // Connect to the devnet deployment.
+    // Load .env if present.
+    dotenvy::dotenv().ok();
+
+    // Connect to devnet.
     let indexer = ZolanaIndexer::new("http://202.8.10.77:8784/");
     let rpc_url = format!(
         "https://devnet.helius-rpc.com/?api-key={}",
@@ -34,12 +35,11 @@ fn main() -> Result<()> {
         .parse()?;
     rpc.assert_executable(&Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID))?;
 
-    // Withdraw an SPL value. For a SOL withdrawal, skip register_asset, build the
-    // wallet from `AssetRegistry::default()`, use `SOL_MINT` as the asset, and pass
-    // the recipient's plain Solana pubkey (no token account needed).
+    // Create a test mint with an interface PDA for private balances and transactions,
+    // then create a private wallet.
     let (asset, registry) = register_asset(&mut rpc, &payer)?;
     let asset_address = Address::new_from_array(asset.mint.to_bytes());
-    let (keypair, funding, mut wallet) = create_private_wallet(&mut rpc, &payer, registry)?;
+    let (keypair, mut wallet) = create_private_wallet(&mut rpc, &payer, registry)?;
 
     // Deposit an SPL asset to withdraw and SOL for the transaction fee
     deposit_spl(
@@ -62,24 +62,16 @@ fn main() -> Result<()> {
         5_000_000,
     )?;
 
-    // A withdrawal exits to a public account. Create the recipient's token account
-    // so the withdrawal can land the tokens; the SDK derives this same account from
-    // the recipient pubkey and mint.
+    // Recipient for withdrawal can be owner or third party.
     let recipient = Keypair::new();
-    fund_key(&mut rpc, &payer, &recipient.pubkey(), 1_000_000)?;
     let (_ata_sig, ata) =
         create_associated_token_account(&rpc, &payer, &recipient.pubkey(), &asset.mint)?;
 
     // Sync the wallet to see the current balance before spending it
     sync_wallet(&mut wallet, &indexer)?;
 
-    // Build and sign the withdrawal. `create_withdrawal_sync` picks the input notes,
-    // derives the recipient's token account from the mint, builds the transaction,
-    // and signs it.
-    // The wallet's own key pays the fee. On the ed25519 rail the program reads the
-    // input owner from the fee payer account, so the payer must be the key that owns
-    // the private balance being spent.
-    let owner_address = Address::new_from_array(funding.pubkey().to_bytes());
+    // Build and sign the private-to-public withdrawal.
+    let owner_address = Address::new_from_array(payer.pubkey().to_bytes());
     let withdrawal = create_withdrawal_sync(CreateWithdrawal {
         wallet: &wallet,
         authority: &keypair,
@@ -90,15 +82,13 @@ fn main() -> Result<()> {
         amount: 4_000,
     })?;
 
-    // Prove and submit the signed withdrawal. `Submit` runs the whole flow: fetch
-    // the input proofs, prove, send the `Transact` instruction, and wait for the
-    // indexer to pick it up so the sync below does not race Photon. It takes the
-    // indexer and RPC separately because a private submit needs both.
+    // Prove and submit the withdrawal. The proof shows the sender owns the balance
+    // being spent and has not already spent it.
     let signature = Submit {
         indexer: &indexer,
         rpc: &rpc,
         prover: &prover,
-        payer: &funding,
+        payer: &payer,
         tree,
         cu_limit: None,
     }
