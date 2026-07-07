@@ -1,26 +1,24 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{create_private_wallet, deposit_sol, deposit_spl, register_asset};
+use rust_client_example::{deposit_spl, register_asset};
 use solana_address::Address;
 use solana_keypair::{read_keypair_file, Keypair};
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use zolana_client::{
-    create_associated_token_account, create_withdrawal_sync, sync_wallet, CreateWithdrawal, Submit,
-    ZolanaClient,
+    create_associated_token_account, create_private_wallet, create_withdrawal_sync, sync_wallet,
+    CreateWithdrawal, Submit, ZolanaClient,
 };
 use zolana_interface::SHIELDED_POOL_PROGRAM_ID;
+use zolana_keypair::{ShieldedKeypair, ViewingKey};
 
 fn main() -> Result<()> {
     // Load .env if present.
     dotenvy::dotenv().ok();
 
     // Load the fee payer, then connect to devnet with one client.
-    let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR").unwrap_or_else(|_| {
-        format!(
-            "{}/.config/solana/id.json",
-            std::env::var("HOME").unwrap_or_default()
-        )
-    });
+    let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR")
+        .unwrap_or_else(|_| "~/.config/solana/id.json".to_string());
+    let payer_path = shellexpand::tilde(&payer_path).into_owned();
     let payer =
         read_keypair_file(&payer_path).map_err(|e| anyhow!("load payer {payer_path}: {e}"))?;
     let api_key = std::env::var("API_KEY").expect("set API_KEY");
@@ -32,12 +30,15 @@ fn main() -> Result<()> {
     rpc.assert_executable(&Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID))?;
 
     // Create a test mint with an interface PDA for private balances and transactions,
-    // then create a private wallet.
+    // then create a private wallet. One ed25519 key signs both the Solana
+    // account and the private balance.
     let (asset, registry) = register_asset(rpc, payer)?;
     let asset_address = Address::new_from_array(asset.mint.to_bytes());
-    let (keypair, mut wallet) = create_private_wallet(rpc, payer, registry)?;
+    let seed = *payer.secret_bytes();
+    let keypair = ShieldedKeypair::from_ed25519(&seed, ViewingKey::new())?;
+    let mut wallet = create_private_wallet(rpc, payer, keypair.clone(), registry)?;
 
-    // Deposit an SPL asset to withdraw and SOL for the transaction fee
+    // Deposit the SPL asset to withdraw privately below.
     deposit_spl(
         rpc,
         payer,
@@ -48,15 +49,11 @@ fn main() -> Result<()> {
         &asset,
         10_000,
     )?;
-    deposit_sol(rpc, payer, tree, indexer, &keypair, &mut wallet, 5_000_000)?;
 
     // Recipient for withdrawal can be owner or third party.
     let recipient = Keypair::new();
     let (_ata_sig, ata) =
         create_associated_token_account(rpc, payer, &recipient.pubkey(), &asset.mint)?;
-
-    // Sync the wallet to see the current balance before spending it
-    sync_wallet(&mut wallet, indexer)?;
 
     // Build and sign the private-to-public withdrawal.
     let owner_address = Address::new_from_array(payer.pubkey().to_bytes());
@@ -88,6 +85,9 @@ fn main() -> Result<()> {
 
     // Sync the private balance.
     sync_wallet(&mut wallet, indexer)?;
+
+    // Withdrawing SOL works the same way with `asset: SOL_MINT`; it goes to the
+    // recipient's address directly, no token account needed.
 
     println!("ok withdrawal signature={signature} recipient_token_account={ata}");
     Ok(())
