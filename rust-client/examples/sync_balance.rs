@@ -1,6 +1,8 @@
 use anyhow::Result;
 use rust_client_example::{deposit_sol, env_config};
-use zolana_client::{create_private_wallet, Rpc, ZolanaClient};
+use zolana_client::{
+    create_private_wallet, get_private_token_balances, sync_wallet, Rpc, ZolanaClient,
+};
 use zolana_keypair::{ShieldedKeypair, ViewingKey};
 use zolana_transaction::AssetRegistry;
 
@@ -21,12 +23,21 @@ fn main() -> Result<()> {
     // Setup: deposit SOL to the private balance.
     deposit_sol(&client, &keypair, &mut wallet, 5_000_000)?;
 
-    // Query indexer for private balances of a wallet and decrypts the results
+    // Sync the wallet, then read the private balance per asset.
+    sync_wallet(&mut wallet, client.indexer())?;
+    let balance = get_private_token_balances(&wallet)?;
+
+    // The raw layer beneath sync: query the indexer for the wallet's
+    // encrypted outputs by view tag. Sync runs this query over the wallet's
+    // full tag set and decrypts the matches.
     let tags = vec![keypair.recipient_bootstrap_view_tag()];
     let response = client
         .indexer()
         .get_encrypted_utxos_by_tags(tags, None, None)?;
 
-    println!("ok query encrypted_matches={}", response.matches.len());
+    println!(
+        "ok private_balance={balance:?} encrypted_matches={}",
+        response.matches.len()
+    );
     Ok(())
 }

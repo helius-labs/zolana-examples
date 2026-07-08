@@ -10,7 +10,8 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use zolana_client::{
-    create_deposit, create_private_wallet, register_spl_interface, CreateDeposit, Rpc, ZolanaClient,
+    create_associated_token_account, create_deposit, create_private_wallet, register_spl_interface,
+    CreateDeposit, Rpc, ZolanaClient,
 };
 use zolana_keypair::{ShieldedKeypair, ViewingKey};
 use zolana_test_utils::spl::{create_mint, create_token_account, mint_to};
@@ -75,6 +76,36 @@ pub fn create_test_recipient(
     let keypair = ShieldedKeypair::from_ed25519(recipient.secret_bytes(), ViewingKey::new())?;
     let wallet = create_private_wallet(client.rpc(), &recipient, keypair.clone(), registry)?;
     Ok((recipient, keypair, wallet))
+}
+
+/// Create a test asset and a private wallet from `seed`, then deposit
+/// `amount` of the asset into the wallet.
+pub fn setup_funded_wallet(
+    client: &ZolanaClient,
+    seed: &[u8; 32],
+    amount: u64,
+) -> Result<(SplAsset, AssetRegistry, ShieldedKeypair, Wallet)> {
+    let (asset, registry) = register_asset(client)?;
+    let keypair = ShieldedKeypair::from_ed25519(seed, ViewingKey::new())?;
+    let mut wallet = create_private_wallet(
+        client.rpc(),
+        client.payer(),
+        keypair.clone(),
+        registry.clone(),
+    )?;
+    deposit_spl(client, &keypair, &mut wallet, &asset, amount)?;
+    Ok((asset, registry, keypair, wallet))
+}
+
+/// Create a fresh test recipient and its token account for `mint`.
+pub fn create_test_recipient_token_account(
+    client: &ZolanaClient,
+    mint: &Pubkey,
+) -> Result<(Keypair, Pubkey)> {
+    let recipient = Keypair::new();
+    let (_signature, token_account) =
+        create_associated_token_account(client.rpc(), client.payer(), &recipient.pubkey(), mint)?;
+    Ok((recipient, token_account))
 }
 
 /// Setup shorthand for the SDK calls shown in the deposit example:
