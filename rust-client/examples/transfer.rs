@@ -4,8 +4,7 @@ use solana_address::Address;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use zolana_client::{
-    create_transfer_sync, get_private_token_balances, sync_wallet, CreateTransfer, Submit,
-    ZolanaClient,
+    create_transfer_sync, get_private_token_balances, sync_wallet, CreateTransfer, ZolanaClient,
 };
 use zolana_keypair::{ShieldedKeypair, ViewingKey};
 
@@ -14,19 +13,19 @@ fn main() -> Result<()> {
     let (payer, api_key) = env_config()?;
     // One ed25519 key signs both the Solana account and the private balance.
     let sender_keypair = ShieldedKeypair::from_ed25519(&payer, ViewingKey::new())?;
-    let client = ZolanaClient::devnet(payer, &api_key);
+    let rpc = ZolanaClient::devnet(&api_key);
 
     // Test setup: a test asset, the sender's funded private wallet, and the
     // recipient's private wallet.
-    let sender = setup_funded_wallet(&client, &sender_keypair, 10_000)?;
-    let mut recipient = create_test_recipient(&client, sender.registry)?;
+    let sender = setup_funded_wallet(&rpc, &payer, rpc.tree(), &sender_keypair, 10_000)?;
+    let mut recipient = create_test_recipient(&rpc, &payer, sender.registry)?;
 
     // Build and sign the private transfer. If the recipient does not have a
     // private wallet, the SDK resolves to a private-to-public withdrawal.
-    let sender_address = Address::new_from_array(client.payer().pubkey().to_bytes());
+    let sender_address = Address::new_from_array(payer.pubkey().to_bytes());
     let mint = Address::new_from_array(sender.asset.mint.to_bytes());
     let transfer = create_transfer_sync(CreateTransfer {
-        rpc: client.rpc(),
+        rpc: &rpc,
         wallet: &sender.wallet,
         authority: &sender_keypair,
         owner_pubkey: Pubkey::default(),
@@ -44,22 +43,14 @@ fn main() -> Result<()> {
 
     // Prove and submit the private transfer. The proof shows the sender owns the
     // balance being spent and has not already spent it.
-    let signature = Submit {
-        indexer: client.indexer(),
-        rpc: client.rpc(),
-        prover: client.prover(),
-        payer: client.payer(),
-        tree: client.tree(),
-        cu_limit: None,
-    }
-    .execute(
+    let signature = rpc.submit(&payer).execute(
         transfer.signed,
         transfer.recipient.withdrawal().cloned(),
         transfer.wait_tag,
     )?;
 
     // Sync the recipient's private balance. The memo arrives with it, decrypted.
-    sync_wallet(&mut recipient.wallet, client.indexer())?;
+    sync_wallet(&mut recipient.wallet, &rpc)?;
     let balance = get_private_token_balances(&recipient.wallet)?;
     let memo = recipient
         .wallet
