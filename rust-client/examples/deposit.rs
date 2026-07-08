@@ -38,7 +38,10 @@ fn main() -> Result<()> {
     let mut wallet = create_private_wallet(rpc, payer, keypair.clone(), registry)?;
     mint_to(rpc, payer, &asset.mint, &asset.user_token, 10_000)?;
 
-    // Deposit SOL to the private balance and wait until the wallet sees it.
+    // Deposit SOL to the private balance. The wait is the recipient-side
+    // read-your-write step, not part of depositing: this example deposits to
+    // its own wallet and reads the balance right after, so it blocks until
+    // the wallet sees the UTXO.
     let sol = create_deposit(CreateDeposit {
         recipient: &keypair.shielded_address()?,
         asset: SOL_MINT,
@@ -46,7 +49,8 @@ fn main() -> Result<()> {
         spl_token_account: None,
         memo: None,
     })?;
-    let sol_sig = sol.send_and_sync(rpc, payer, tree, payer, &mut wallet, indexer)?;
+    let sol_sig = sol.send(rpc, payer, tree, payer)?;
+    sol.wait_until_synced(&mut wallet, indexer, sol_sig)?;
 
     // Deposit an SPL token to the private balance.
     let spl = create_deposit(CreateDeposit {
@@ -56,7 +60,8 @@ fn main() -> Result<()> {
         spl_token_account: Some(asset.user_token),
         memo: None,
     })?;
-    let spl_sig = spl.send_and_sync(rpc, payer, tree, payer, &mut wallet, indexer)?;
+    let spl_sig = spl.send(rpc, payer, tree, payer)?;
+    spl.wait_until_synced(&mut wallet, indexer, spl_sig)?;
 
     let balance = get_private_token_balances(&wallet)?;
 

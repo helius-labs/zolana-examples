@@ -50,8 +50,9 @@ pub fn register_asset(rpc: &SolanaRpc, payer: &Keypair) -> Result<(SplAsset, Ass
     Ok((SplAsset { mint, user_token }, registry))
 }
 
-/// Setup shorthand for the two SDK calls shown in the deposit example:
-/// `create_deposit` + `send_and_sync`.
+/// Setup shorthand for the SDK calls shown in the deposit example:
+/// `create_deposit` + `send` + `wait_until_synced` (self-deposit, so the
+/// wallet is the recipient's).
 #[allow(clippy::too_many_arguments)]
 fn deposit(
     rpc: &SolanaRpc,
@@ -71,7 +72,8 @@ fn deposit(
         spl_token_account,
         memo: None,
     })?;
-    prepared.send_and_sync(rpc, payer, tree, payer, wallet, indexer)?;
+    let signature = prepared.send(rpc, payer, tree, payer)?;
+    prepared.wait_until_synced(wallet, indexer, signature)?;
     Ok(())
 }
 

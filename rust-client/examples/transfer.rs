@@ -67,7 +67,7 @@ fn main() -> Result<()> {
         authority: &sender_keypair,
         owner_pubkey: Pubkey::default(),
         payer: sender_address,
-        recipient_owner: recipient.pubkey(),
+        recipient: recipient.pubkey(),
         asset: asset_address,
         amount: 4_000,
     })?;
