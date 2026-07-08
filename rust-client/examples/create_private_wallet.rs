@@ -7,7 +7,6 @@ use zolana_transaction::AssetRegistry;
 fn main() -> Result<()> {
     // Load the fee payer and API key from .env, then connect to devnet.
     let (payer, api_key) = env_config()?;
-    // One ed25519 key signs both the Solana account and the private balance.
     let seed = *payer.secret_bytes();
     let client = ZolanaClient::devnet(payer, &api_key);
     let keypair = ShieldedKeypair::from_ed25519(&seed, ViewingKey::new())?;
