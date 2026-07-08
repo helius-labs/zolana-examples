@@ -11,7 +11,8 @@ fn main() -> Result<()> {
     let client = ZolanaClient::devnet(payer, &api_key);
     let keypair = ShieldedKeypair::from_ed25519(&seed, ViewingKey::new())?;
 
-    // Create the wallet and register its address so others can send to it privately.
+    // Create the wallet and register it for private transactions. The registry maps the Solana address
+    // to the shielded keys, so senders need only this wallet's Solana address.
     let _wallet = create_private_wallet(
         client.rpc(),
         client.payer(),
