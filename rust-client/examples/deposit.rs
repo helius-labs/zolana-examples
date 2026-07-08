@@ -49,7 +49,7 @@ fn main() -> Result<()> {
         asset: Address::new_from_array(asset.mint.to_bytes()), // for SOL: SOL_MINT
         amount: 10_000,
         spl_token_account: Some(asset.user_token), // for SOL: None
-        memo: None,
+        memo: Some(b"deposit note".to_vec()),      // public: readable by anyone onchain
     })?;
     let spl_sig = spl.send(client.rpc(), client.payer(), client.tree(), client.payer())?;
     spl.wait_until_synced(&mut wallet, client.indexer(), spl_sig)?;

@@ -34,7 +34,7 @@ fn main() -> Result<()> {
         recipient: recipient.pubkey(),
         asset: asset_address, // for SOL: SOL_MINT
         amount: 4_000,
-        memo: None, // encrypted note for the recipient
+        memo: Some(b"thanks".to_vec()), // encrypted; only the recipient can read it
     })?;
     if transfer.recipient.is_public_withdrawal() {
         return Err(anyhow!(
@@ -58,10 +58,17 @@ fn main() -> Result<()> {
         transfer.wait_tag,
     )?;
 
-    // Sync the recipient's private balance.
+    // Sync the recipient's private balance. The memo arrives with it, decrypted.
     sync_wallet(&mut recipient_wallet, client.indexer())?;
     let balance = get_private_token_balances(&recipient_wallet)?;
+    let memo = recipient_wallet
+        .utxos
+        .iter()
+        .find_map(|entry| entry.utxo.data.memo())
+        .map(String::from_utf8_lossy);
 
-    println!("ok private transfer signature={signature} recipient_private_balance={balance:?}");
+    println!(
+        "ok private transfer signature={signature} recipient_private_balance={balance:?} memo={memo:?}"
+    );
     Ok(())
 }
