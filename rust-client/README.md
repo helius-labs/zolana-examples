@@ -10,9 +10,8 @@
 
 ## Configure
 
-Copy `.env.example` to `.env` and set `API_KEY`. The tree default is prefilled and
-the payer defaults to `~/.config/solana/id.json`, so a Helius key is all you need
-to add:
+Copy `.env.example` to `.env` and set `API_KEY`. The payer defaults to
+`~/.config/solana/id.json`, so a Helius key is all you need to add:
 
 ```bash
 cp .env.example .env
