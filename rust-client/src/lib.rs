@@ -64,54 +64,75 @@ pub fn register_asset(client: &ZolanaClient) -> Result<(SplAsset, AssetRegistry)
     Ok((SplAsset { mint, user_token }, registry))
 }
 
+/// A funded test recipient with its private wallet.
+pub struct TestRecipient {
+    pub keypair: Keypair,
+    pub shielded_keypair: ShieldedKeypair,
+    pub wallet: Wallet,
+}
+
 /// Fund a fresh test recipient and create its private wallet. The recipient
 /// owns and pays for its own registration. One ed25519 key signs both the
 /// Solana account and the private balance.
 pub fn create_test_recipient(
     client: &ZolanaClient,
     registry: AssetRegistry,
-) -> Result<(Keypair, ShieldedKeypair, Wallet)> {
+) -> Result<TestRecipient> {
     let recipient = Keypair::new();
     fund_key(client, &recipient.pubkey(), 20_000_000)?;
-    let keypair = ShieldedKeypair::from_ed25519(recipient.secret_bytes(), ViewingKey::new())?;
-    let wallet = create_private_wallet(client.rpc(), &recipient, keypair.clone(), registry)?;
-    Ok((recipient, keypair, wallet))
+    let shielded_keypair = ShieldedKeypair::from_ed25519(&recipient, ViewingKey::new())?;
+    let wallet =
+        create_private_wallet(client.rpc(), &recipient, shielded_keypair.clone(), registry)?;
+    Ok(TestRecipient {
+        keypair: recipient,
+        shielded_keypair,
+        wallet,
+    })
 }
 
-/// Create a test asset and a private wallet from `seed`, then deposit
+/// A private wallet funded with a test asset.
+pub struct FundedWallet {
+    pub asset: SplAsset,
+    pub registry: AssetRegistry,
+    pub wallet: Wallet,
+}
+
+/// Create a test asset and a private wallet for `keypair`, then deposit
 /// `amount` of the asset into the wallet.
 pub fn setup_funded_wallet(
     client: &ZolanaClient,
-    seed: &[u8; 32],
+    keypair: &ShieldedKeypair,
     amount: u64,
-) -> Result<(SplAsset, AssetRegistry, ShieldedKeypair, Wallet)> {
+) -> Result<FundedWallet> {
     let (asset, registry) = register_asset(client)?;
-    let keypair = ShieldedKeypair::from_ed25519(seed, ViewingKey::new())?;
     let mut wallet = create_private_wallet(
         client.rpc(),
         client.payer(),
         keypair.clone(),
         registry.clone(),
     )?;
-    deposit_spl(client, &keypair, &mut wallet, &asset, amount)?;
-    Ok((asset, registry, keypair, wallet))
+    deposit_spl(client, keypair, &mut wallet, &asset, amount)?;
+    Ok(FundedWallet {
+        asset,
+        registry,
+        wallet,
+    })
 }
 
-/// Create a private wallet from `seed` and deposit `amount` of SOL into it.
+/// Create a private wallet for `keypair` and deposit `amount` of SOL into it.
 pub fn setup_funded_sol_wallet(
     client: &ZolanaClient,
-    seed: &[u8; 32],
+    keypair: &ShieldedKeypair,
     amount: u64,
-) -> Result<(ShieldedKeypair, Wallet)> {
-    let keypair = ShieldedKeypair::from_ed25519(seed, ViewingKey::new())?;
+) -> Result<Wallet> {
     let mut wallet = create_private_wallet(
         client.rpc(),
         client.payer(),
         keypair.clone(),
         AssetRegistry::default(),
     )?;
-    deposit_sol(client, &keypair, &mut wallet, amount)?;
-    Ok((keypair, wallet))
+    deposit_sol(client, keypair, &mut wallet, amount)?;
+    Ok(wallet)
 }
 
 /// Create a fresh test recipient and its token account for `mint`.

@@ -7,9 +7,8 @@ use zolana_transaction::AssetRegistry;
 fn main() -> Result<()> {
     // Load the fee payer and API key from .env, then connect to devnet.
     let (payer, api_key) = env_config()?;
-    let seed = *payer.secret_bytes();
+    let keypair = ShieldedKeypair::from_ed25519(&payer, ViewingKey::new())?;
     let client = ZolanaClient::devnet(payer, &api_key);
-    let keypair = ShieldedKeypair::from_ed25519(&seed, ViewingKey::new())?;
 
     // Create the wallet and register it for private transactions. The registry maps the Solana address
     // to the shielded keys, so senders need only this wallet's Solana address.

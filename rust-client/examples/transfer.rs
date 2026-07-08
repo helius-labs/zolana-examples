@@ -7,32 +7,32 @@ use zolana_client::{
     create_transfer_sync, get_private_token_balances, sync_wallet, CreateTransfer, Submit,
     ZolanaClient,
 };
+use zolana_keypair::{ShieldedKeypair, ViewingKey};
 
 fn main() -> Result<()> {
     // Load the fee payer and API key from .env, then connect to devnet.
     let (payer, api_key) = env_config()?;
-    let sender_seed = *payer.secret_bytes();
+    // One ed25519 key signs both the Solana account and the private balance.
+    let sender_keypair = ShieldedKeypair::from_ed25519(&payer, ViewingKey::new())?;
     let client = ZolanaClient::devnet(payer, &api_key);
 
     // Test setup: a test asset, the sender's funded private wallet, and the
     // recipient's private wallet.
-    let (asset, registry, sender_keypair, sender_wallet) =
-        setup_funded_wallet(&client, &sender_seed, 10_000)?;
-    let (recipient, _recipient_keypair, mut recipient_wallet) =
-        create_test_recipient(&client, registry)?;
+    let sender = setup_funded_wallet(&client, &sender_keypair, 10_000)?;
+    let mut recipient = create_test_recipient(&client, sender.registry)?;
 
     // Build and sign the private transfer. If the recipient does not have a
     // private wallet, the SDK resolves to a private-to-public withdrawal.
     let sender_address = Address::new_from_array(client.payer().pubkey().to_bytes());
-    let asset_address = Address::new_from_array(asset.mint.to_bytes());
+    let mint = Address::new_from_array(sender.asset.mint.to_bytes());
     let transfer = create_transfer_sync(CreateTransfer {
         rpc: client.rpc(),
-        wallet: &sender_wallet,
+        wallet: &sender.wallet,
         authority: &sender_keypair,
         owner_pubkey: Pubkey::default(),
         payer: sender_address,
-        recipient: recipient.pubkey(),
-        asset: asset_address, // for SOL: SOL_MINT
+        recipient: recipient.keypair.pubkey(),
+        asset: mint, // for SOL: SOL_MINT
         amount: 4_000,
         memo: Some(b"thanks".to_vec()), // encrypted; only the recipient can read it
     })?;
@@ -59,9 +59,10 @@ fn main() -> Result<()> {
     )?;
 
     // Sync the recipient's private balance. The memo arrives with it, decrypted.
-    sync_wallet(&mut recipient_wallet, client.indexer())?;
-    let balance = get_private_token_balances(&recipient_wallet)?;
-    let memo = recipient_wallet
+    sync_wallet(&mut recipient.wallet, client.indexer())?;
+    let balance = get_private_token_balances(&recipient.wallet)?;
+    let memo = recipient
+        .wallet
         .utxos
         .iter()
         .find_map(|entry| entry.utxo.data.memo())

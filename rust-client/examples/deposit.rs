@@ -12,13 +12,12 @@ fn main() -> Result<()> {
     // Load the fee payer and API key from .env, then connect to devnet.
     let (payer, api_key) = env_config()?;
     // One ed25519 key signs both the Solana account and the private balance.
-    let seed = *payer.secret_bytes();
+    let keypair = ShieldedKeypair::from_ed25519(&payer, ViewingKey::new())?;
     let client = ZolanaClient::devnet(payer, &api_key);
 
     // Create test mint with interface PDA for private balances and transactions,
     // then create a private wallet.
     let (asset, registry) = register_asset(&client)?;
-    let keypair = ShieldedKeypair::from_ed25519(&seed, ViewingKey::new())?;
     let mut wallet =
         create_private_wallet(client.rpc(), client.payer(), keypair.clone(), registry)?;
     mint_to(
