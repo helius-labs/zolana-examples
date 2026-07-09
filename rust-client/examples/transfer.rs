@@ -35,8 +35,8 @@ fn main() -> Result<()> {
     }
     .instruction()?;
 
-    // Prove and send the private transfer. The proof shows the sender owns
-    // the balance being spent and has not already spent it.
+    // Generate proof that the sender owns the private balance and has not
+    // already spent it. Then send the private transfer.
     let signature = rpc.send(&payer).execute(&transfer)?;
 
     // Sync the recipient's private balance and decrypt memo.
