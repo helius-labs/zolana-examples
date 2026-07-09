@@ -1,11 +1,7 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use rust_client_example::{create_test_recipient, env_config, setup_funded_wallet};
-use solana_address::Address;
-use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use zolana_client::{
-    create_transfer_sync, get_private_token_balances, sync_wallet, CreateTransfer, ZolanaClient,
-};
+use zolana_client::{resolve_recipient, sync_wallet, PrivateTransfer, ZolanaClient};
 use zolana_keypair::{ShieldedKeypair, ViewingKey};
 
 fn main() -> Result<()> {
@@ -19,48 +15,37 @@ fn main() -> Result<()> {
     // recipient's private wallet.
     let sender = setup_funded_wallet(&rpc, &payer, rpc.tree(), &sender_keypair, 10_000)?;
     let mut recipient = create_test_recipient(&rpc, &payer, sender.registry)?;
+    let mint = sender.asset.mint;
 
-    // Build and sign the private transfer. If the recipient does not have a
-    // private wallet, the SDK resolves to a private-to-public withdrawal.
-    let sender_address = Address::new_from_array(payer.pubkey().to_bytes());
-    let mint = Address::new_from_array(sender.asset.mint.to_bytes());
-    let transfer = create_transfer_sync(CreateTransfer {
-        rpc: &rpc,
+    // Resolve the recipient's private wallet address: one chain read. If the
+    // recipient does not have a private wallet, the transfer resolves to a
+    // private-to-public withdrawal.
+    let recipient_address = resolve_recipient(&rpc, recipient.keypair.pubkey())?;
+
+    // Build and sign the private transfer. Local only, no network.
+    let transfer = PrivateTransfer {
         wallet: &sender.wallet,
         authority: &sender_keypair,
-        owner_pubkey: Pubkey::default(),
-        payer: sender_address,
-        recipient: recipient.keypair.pubkey(),
+        owner_pubkey: None, // local key: the authority holds one wallet
+        payer: payer.pubkey(),
+        recipient: recipient_address,
         asset: mint, // for SOL: SOL_MINT
         amount: 4_000,
         memo: Some(b"thanks".to_vec()), // encrypted; only the recipient can read it
-    })?;
-    if transfer.recipient.is_public_withdrawal() {
-        return Err(anyhow!(
-            "expected a private transfer, got a public withdrawal"
-        ));
     }
+    .instruction()?;
 
-    // Prove and submit the private transfer. The proof shows the sender owns the
-    // balance being spent and has not already spent it.
-    let signature = rpc.submit(&payer).execute(
-        transfer.signed,
-        transfer.recipient.withdrawal().cloned(),
-        transfer.wait_tag,
-    )?;
+    // Prove and send the private transfer. The proof shows the sender owns
+    // the balance being spent and has not already spent it.
+    let signature = rpc.send(&payer).execute(&transfer)?;
 
-    // Sync the recipient's private balance. The memo arrives with it, decrypted.
+    // Sync the recipient's private balance; the memo arrives with it, decrypted.
     sync_wallet(&mut recipient.wallet, &rpc)?;
-    let balance = get_private_token_balances(&recipient.wallet)?;
-    let memo = recipient
-        .wallet
-        .utxos
-        .iter()
-        .find_map(|entry| entry.utxo.data.memo())
-        .map(String::from_utf8_lossy);
+    let balance = recipient.wallet.private_token_balances()?;
+    let memo = recipient.wallet.last_memo().unwrap_or_default();
 
     println!(
-        "ok private transfer signature={signature} recipient_private_balance={balance:?} memo={memo:?}"
+        "ok private transfer signature={signature} recipient_private_balance={balance:?} memo={memo}"
     );
     Ok(())
 }

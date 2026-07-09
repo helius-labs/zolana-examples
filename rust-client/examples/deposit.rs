@@ -4,12 +4,11 @@ use solana_address::Address;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_signer::Signer;
 use zolana_client::{
-    create_deposit, create_private_wallet, get_private_token_balances, CreateDeposit, Rpc,
-    ZolanaClient, DEFAULT_DEPOSIT_CU_LIMIT,
+    create_deposit, create_private_wallet, get_private_token_balances, Deposit, Rpc, ZolanaClient,
+    DEFAULT_DEPOSIT_CU_LIMIT, SOL_MINT,
 };
 use zolana_keypair::{ShieldedKeypair, ViewingKey};
 use zolana_test_utils::spl::mint_to;
-use zolana_transaction::SOL_MINT;
 
 fn main() -> Result<()> {
     // Load the fee payer and API key from .env, then connect to devnet.
@@ -26,7 +25,7 @@ fn main() -> Result<()> {
     mint_to(&rpc, &payer, &asset.mint, &asset.user_token, 10_000)?;
 
     // Deposit SOL to the private balance.
-    let sol = create_deposit(CreateDeposit {
+    let sol = create_deposit(Deposit {
         recipient: &keypair.shielded_address()?,
         asset: SOL_MINT,
         amount: 5_000_000,
@@ -43,9 +42,9 @@ fn main() -> Result<()> {
     sol.wait_until_synced(&mut wallet, &rpc, sol_sig)?;
 
     // Deposit an SPL token to the private balance.
-    let spl = create_deposit(CreateDeposit {
+    let spl = create_deposit(Deposit {
         recipient: &keypair.shielded_address()?,
-        asset: Address::new_from_array(asset.mint.to_bytes()), // for SOL: SOL_MINT
+        asset: asset.mint, // for SOL: SOL_MINT
         amount: 10_000,
         spl_token_account: Some(asset.user_token), // for SOL: None
         memo: Some(b"deposit note".to_vec()),      // public: readable by anyone onchain

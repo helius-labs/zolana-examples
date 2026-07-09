@@ -2,10 +2,8 @@ use anyhow::Result;
 use rust_client_example::{
     create_test_recipient_token_account, env_config, setup_funded_wallet, FundedWallet,
 };
-use solana_address::Address;
-use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use zolana_client::{create_withdrawal_sync, sync_wallet, CreateWithdrawal, ZolanaClient};
+use zolana_client::{sync_wallet, Withdrawal, ZolanaClient};
 use zolana_keypair::{ShieldedKeypair, ViewingKey};
 
 fn main() -> Result<()> {
@@ -22,26 +20,21 @@ fn main() -> Result<()> {
     let (recipient, token_account) =
         create_test_recipient_token_account(&rpc, &payer, &asset.mint)?;
 
-    // Build and sign the private-to-public withdrawal.
-    let owner_address = Address::new_from_array(payer.pubkey().to_bytes());
-    let mint = Address::new_from_array(asset.mint.to_bytes());
-    let withdrawal = create_withdrawal_sync(CreateWithdrawal {
+    // Build and sign the private-to-public withdrawal. Local only, no network.
+    let withdrawal = Withdrawal {
         wallet: &wallet,
         authority: &keypair,
-        owner_pubkey: Pubkey::default(),
-        payer: owner_address,
+        owner_pubkey: None,
+        payer: payer.pubkey(),
         recipient: recipient.pubkey(),
-        asset: mint, // for SOL: SOL_MINT
+        asset: asset.mint, // for SOL: SOL_MINT
         amount: 4_000,
-    })?;
+    }
+    .instruction()?;
 
-    // Prove and submit the withdrawal. The proof shows the sender owns the balance
-    // being spent and has not already spent it.
-    let signature = rpc.submit(&payer).execute(
-        withdrawal.signed,
-        Some(withdrawal.withdrawal),
-        withdrawal.wait_tag,
-    )?;
+    // Prove and send the withdrawal. The proof shows the sender owns the
+    // balance being spent and has not already spent it.
+    let signature = rpc.send(&payer).execute(&withdrawal)?;
 
     // Sync the private balance.
     sync_wallet(&mut wallet, &rpc)?;

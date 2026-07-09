@@ -11,11 +11,11 @@ use solana_signature::Signature;
 use solana_signer::Signer;
 use zolana_client::{
     create_associated_token_account, create_deposit, create_private_wallet, register_spl_interface,
-    CreateDeposit, Rpc,
+    Deposit, Rpc, SOL_MINT,
 };
 use zolana_keypair::{ShieldedKeypair, ViewingKey};
 use zolana_test_utils::spl::{create_mint, create_token_account, mint_to};
-use zolana_transaction::{AssetRegistry, Wallet, SOL_MINT};
+use zolana_transaction::{AssetRegistry, Wallet};
 
 /// An SPL asset registered for private balances and transactions.
 #[derive(Clone, Copy)]
@@ -150,11 +150,11 @@ fn deposit(
     tree: Pubkey,
     keypair: &ShieldedKeypair,
     wallet: &mut Wallet,
-    asset: Address,
+    asset: Pubkey,
     amount: u64,
     spl_token_account: Option<Pubkey>,
 ) -> Result<()> {
-    let prepared = create_deposit(CreateDeposit {
+    let prepared = create_deposit(Deposit {
         recipient: &keypair.shielded_address()?,
         asset,
         amount,
@@ -196,7 +196,7 @@ pub fn deposit_spl(
         tree,
         keypair,
         wallet,
-        Address::new_from_array(asset.mint.to_bytes()),
+        asset.mint,
         amount,
         Some(asset.user_token),
     )
