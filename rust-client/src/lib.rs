@@ -155,7 +155,7 @@ fn deposit(
     spl_token_account: Option<Pubkey>,
 ) -> Result<()> {
     let prepared = create_deposit(Deposit {
-        recipient: &keypair.shielded_address()?,
+        destination: &keypair.shielded_address()?,
         asset,
         amount,
         spl_token_account,
