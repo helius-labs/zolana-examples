@@ -46,3 +46,7 @@ path = "examples/sync_balance.rs"
 [[example]]
 name = "create_private_wallet"
 path = "examples/create_private_wallet.rs"
+
+[[example]]
+name = "wallet_authority"
+path = "examples/wallet_authority.rs"
