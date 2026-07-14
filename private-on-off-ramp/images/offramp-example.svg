@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="40 30 720 270" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" color="#334155" role="img" aria-labelledby="t d">
+  <title id="t">Off-ramp: the user's notes are spent into a pool note and change</title>
+  <desc id="d">Off-ramp of 35 USDC. The user's three notes of 20, 20, and 10 USDC are spent and two new notes are created: a 35 USDC note for the pool and a 15 USDC change note back to the user. The pool balance is itself fragmented into notes of 30, 12, and 44 USDC; the new 35 USDC note adds to it.</desc>
+  <!-- Single-panel UTXO flow, three input notes. Neutral note boxes; orange #FF6B35 for flow
+       arrows only. Spent input notes are muted/struck; the pool's existing unspent notes are
+       plain neutral boxes. -->
+
+  <defs>
+    <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#FF6B35"/>
+    </marker>
+  </defs>
+
+  <text x="60" y="56" font-size="20" fill="currentColor">Off-ramp</text>
+
+  <!-- three input notes (20, 20, 10) summing to 50, all the user's, all spent (grayish-green);
+       centers 91 / 147 / 203 (cluster center 147) -->
+  <rect x="50" y="73" width="150" height="36" rx="8" fill="#EAF2EC" stroke="#CBD5CB" stroke-width="1.5"/>
+  <text x="125" y="96" font-size="15" fill="#9CA3AF" text-anchor="middle" text-decoration="line-through">20 USDC</text>
+  <rect x="50" y="129" width="150" height="36" rx="8" fill="#EAF2EC" stroke="#CBD5CB" stroke-width="1.5"/>
+  <text x="125" y="152" font-size="15" fill="#9CA3AF" text-anchor="middle" text-decoration="line-through">20 USDC</text>
+  <rect x="50" y="185" width="150" height="36" rx="8" fill="#EAF2EC" stroke="#CBD5CB" stroke-width="1.5"/>
+  <text x="125" y="208" font-size="15" fill="#9CA3AF" text-anchor="middle" text-decoration="line-through">10 USDC</text>
+  <text x="125" y="244" font-size="14" fill="#6B7280" text-anchor="middle">user's notes, spent</text>
+
+  <!-- all three input notes run straight to one convergence point (235,147); two arrows
+       fan from that same point: up-right into the pool, down-right to the user's change -->
+  <line x1="200" y1="91"  x2="235" y2="147" stroke="#FF6B35" stroke-width="1.6"/>
+  <line x1="200" y1="147" x2="235" y2="147" stroke="#FF6B35" stroke-width="1.6"/>
+  <line x1="200" y1="203" x2="235" y2="147" stroke="#FF6B35" stroke-width="1.6"/>
+  <line x1="235" y1="147" x2="551" y2="93" stroke="#FF6B35" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+  <line x1="235" y1="147" x2="361" y2="216" stroke="#FF6B35" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+
+  <!-- change note back to the user (new note, pastel green) -->
+  <rect x="371" y="193" width="150" height="56" rx="9" fill="#DCFCE7" stroke="#86EFAC" stroke-width="1.5"/>
+  <text x="446" y="217" font-size="18" fill="currentColor" text-anchor="middle">15 USDC</text>
+  <text x="446" y="239" font-size="13" fill="#6B7280" text-anchor="middle">change, user</text>
+
+  <!-- ===== the on-offramp pool: the new 35 note joins an already fragmented balance ===== -->
+  <text x="636" y="56" font-size="14" fill="#6B7280" text-anchor="middle">on-offramp pool</text>
+
+  <!-- new note from this off-ramp (pastel purple) -->
+  <rect x="561" y="65" width="150" height="56" rx="9" fill="#F3E8FF" stroke="#D8B4FE" stroke-width="1.5"/>
+  <text x="636" y="89" font-size="18" fill="currentColor" text-anchor="middle">35 USDC</text>
+  <text x="636" y="111" font-size="13" fill="#6B7280" text-anchor="middle">new note, pool</text>
+
+  <!-- the pool's existing unspent notes (plain neutral boxes) -->
+  <rect x="561" y="133" width="150" height="36" rx="8" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1.5"/>
+  <text x="636" y="156" font-size="15" fill="currentColor" text-anchor="middle">30 USDC</text>
+  <rect x="561" y="177" width="150" height="36" rx="8" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1.5"/>
+  <text x="636" y="200" font-size="15" fill="currentColor" text-anchor="middle">12 USDC</text>
+  <rect x="561" y="221" width="150" height="36" rx="8" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1.5"/>
+  <text x="636" y="244" font-size="15" fill="currentColor" text-anchor="middle">44 USDC</text>
+  <text x="636" y="280" font-size="14" fill="#6B7280" text-anchor="middle">pool balance, fragmented</text>
+</svg>
