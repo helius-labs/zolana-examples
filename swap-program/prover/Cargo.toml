@@ -1,0 +1,25 @@
+[package]
+name = "swap-prover"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "swap_prover"
+path = "src/lib.rs"
+
+[[bin]]
+name = "swap-prover-setup"
+path = "src/bin/setup.rs"
+
+[dependencies]
+groth16-solana = { git = "https://github.com/Lightprotocol/groth16-solana", rev = "43fee1a67e91c0df7bb4edad5ba87ae4602aa208", features = ["bsb22", "gnark-vk"] }
+num-bigint = "0.4.6"
+swap-program = { path = "../program" }
+serde_json = "1.0"
+solana-bn254 = "3.2.1"
+thiserror = "2.0"
+zolana-transaction = { path = "../../../zolana-swap/sdk-libs/transaction" }
+
+[build-dependencies]
+bindgen = "0.70"
