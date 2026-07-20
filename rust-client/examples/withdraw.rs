@@ -1,40 +1,52 @@
 use anyhow::Result;
-use rust_client_example::{create_test_recipient_token_account, env_config, setup_funded_wallet};
+use rust_client_example::{
+    authority, client, create_test_recipient_token_account, env_config, setup_funded_wallet,
+};
+use solana_address::Address;
 use solana_signer::Signer;
-use zolana_client::{get_private_token_balances, sync_wallet, Withdrawal, ZolanaClient};
-use zolana_keypair::{ShieldedKeypair, ViewingKey};
+use zolana_client::{
+    create_withdrawal, get_private_token_balances, sign_private_transaction_sync, sync_wallet, Rpc,
+    WithdrawalParams,
+};
 
 fn main() -> Result<()> {
-    // Load the fee payer and API key from .env, then connect to devnet.
-    let (payer, api_key) = env_config()?;
-    let keypair = ShieldedKeypair::from_ed25519(&payer, ViewingKey::new())?;
-    let rpc = ZolanaClient::devnet(&api_key);
+    // Load the fee payer and localnet settings, then connect.
+    let cfg = env_config()?;
+    let client = client(&cfg);
+    let keypair = rust_client_example::shielded_keypair(&cfg.payer)?;
 
-    // Setup: Create test mint with interface PDA for private balances and transactions,
-    // create a funded private wallet.
-    let mut sender = setup_funded_wallet(&rpc, &payer, rpc.tree(), &keypair, 10_000)?;
-    let mint = sender.asset.mint;
+    // Setup: register a test asset and fund a private wallet.
+    let mut sender = setup_funded_wallet(&client, &cfg.payer, &keypair, 10_000)?;
+    let mint = Address::new_from_array(sender.asset.mint.to_bytes());
 
-    // Create a public token account for the recipient: the owner or any third party.
-    let (recipient, token_account) = create_test_recipient_token_account(&rpc, &payer, &mint)?;
+    // Open a public token account for the recipient: the owner or any third party.
+    let (recipient, token_account) =
+        create_test_recipient_token_account(&client, &cfg.payer, &sender.asset.mint)?;
 
-    // Build and sign the private-to-public withdrawal.
-    let withdrawal = Withdrawal {
-        source: &sender.wallet,
-        destination: recipient.pubkey(),
+    // Build the private-to-public withdrawal.
+    let created = create_withdrawal(WithdrawalParams {
+        wallet: &sender.wallet,
+        payer: Address::new_from_array(cfg.payer.pubkey().to_bytes()),
+        recipient: recipient.pubkey(),
         asset: mint, // for SOL: SOL_MINT
         amount: 4_000,
-        authority: &keypair,
-        payer: payer.pubkey(),
-    }
-    .instruction()?;
+    })?;
 
-    // Generate proof that the sender owns the private balance and has not
-    // already spent it. Then send the withdrawal.
-    let signature = rpc.send(&payer).execute(&withdrawal)?;
+    // Sign the withdrawal (its proof is generated during the build), then send
+    // and confirm it.
+    let sender_authority = authority(&cfg.payer, &keypair);
+    let tx = sign_private_transaction_sync(
+        created.transaction,
+        &sender.wallet,
+        &sender_authority,
+        &client,
+        &cfg.payer,
+    )?;
+    let signature = client.send_transaction(&tx)?;
+    client.confirm_private_transaction_sync(signature)?;
 
     // Sync the private balance and read what remains.
-    sync_wallet(&mut sender.wallet, &rpc)?;
+    sync_wallet(&mut sender.wallet, &sender_authority, &client)?;
     let balance = get_private_token_balances(&sender.wallet)?;
 
     println!(

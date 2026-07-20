@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-# Standalone repo: the zolana SDK crates are pulled in by relative path from the
-# sibling zolana checkout (the feature worktree that carries the new client
-# APIs); the solana-* crates are pinned to the versions the SDK builds against.
+# The zolana SDK crates are pulled from the zolana repo by git, pinned to a rev
+# on main; the solana-* crates are pinned to the versions the SDK builds against.
+# The zolana repo is private, so fetching needs an SSO-authorized SSH key and
+# cargo's git-fetch-with-cli (see .cargo/config.toml).
 [dependencies]
 anyhow = "1.0"
 dotenvy = "0.15"
@@ -20,11 +21,12 @@ solana-signature = "3.4"
 solana-signer = "3.0"
 solana-transaction = "3.1"
 shellexpand = "3"
-zolana-client = { path = "../../zolana-devx/sdk-libs/client", features = ["indexer-api", "solana-rpc"] }
-zolana-keypair = { path = "../../zolana-devx/sdk-libs/keypair" }
-zolana-test-utils = { path = "../../zolana-devx/program-tests/test-utils" }
-zolana-transaction = { path = "../../zolana-devx/sdk-libs/transaction" }
-zolana-user-registry-interface = { path = "../../zolana-devx/program-libs/user-registry-interface", features = ["solana"] }
+zolana-client = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009", features = ["indexer-api", "solana-rpc"] }
+zolana-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009", features = ["solana"] }
+zolana-keypair = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009" }
+zolana-test-utils = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009" }
+zolana-transaction = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009" }
+zolana-user-registry-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009", features = ["solana"] }
 solana-system-interface = "3.2.0"
 
 [[example]]

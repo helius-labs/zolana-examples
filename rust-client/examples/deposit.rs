@@ -1,51 +1,27 @@
 use anyhow::Result;
-use rust_client_example::{env_config, register_asset};
-use zolana_client::{
-    create_deposit, create_private_wallet, get_private_token_balances, Deposit, ZolanaClient,
-    SOL_MINT,
+use rust_client_example::{
+    client, deposit_sol, deposit_spl, env_config, register_asset,
 };
-use zolana_keypair::{ShieldedKeypair, ViewingKey};
-use zolana_test_utils::spl::mint_to;
+use zolana_client::get_private_token_balances;
+use zolana_transaction::Wallet;
 
 fn main() -> Result<()> {
-    // Load the fee payer and API key from .env, then connect to devnet.
-    let (payer, api_key) = env_config()?;
-    let keypair = ShieldedKeypair::from_ed25519(&payer, ViewingKey::new())?;
-    let rpc = ZolanaClient::devnet(&api_key);
+    // Load the fee payer and settings, then connect.
+    let cfg = env_config()?;
+    let client = client(&cfg);
+    let keypair = rust_client_example::shielded_keypair(&cfg.payer)?;
 
-    // Setup: Create test mint with interface PDA for private balances and transactions,
-    // create a private wallet, and mint test tokens for the SPL deposit.
-    let (asset, registry) = register_asset(&rpc, &payer)?;
-    let mut wallet = create_private_wallet(&rpc, &payer, keypair.clone(), registry)?;
-    mint_to(&rpc, &payer, &asset.mint, &asset.user_token, 10_000)?;
+    // Setup: register a test mint with its interface PDA and open the wallet.
+    let (asset, registry) = register_asset(&client, &cfg.payer)?;
+    let mut wallet = Wallet::new(keypair.shielded_address()?, registry)?;
 
-    // Deposit SOL to the private balance.
-    let sol = create_deposit(Deposit {
-        destination: &keypair.shielded_address()?,
-        asset: SOL_MINT,
-        amount: 5_000_000,
-        spl_token_account: None,
-        memo: None,
-    })?;
-    let sol_signature = sol.send(&rpc, &payer, rpc.tree(), &payer)?;
-    sol.wait_until_synced(&mut wallet, &rpc, sol_signature)?;
-
-    // Deposit an SPL token to the private balance.
-    let spl = create_deposit(Deposit {
-        destination: &keypair.shielded_address()?,
-        asset: asset.mint, // for SOL: SOL_MINT
-        amount: 10_000,
-        spl_token_account: Some(asset.user_token), // for SOL: None
-        memo: Some(b"deposit note".to_vec()),      // public: readable by anyone onchain
-    })?;
-    let spl_signature = spl.send(&rpc, &payer, rpc.tree(), &payer)?;
-    spl.wait_until_synced(&mut wallet, &rpc, spl_signature)?;
+    // Deposit SOL, then an SPL token, into the private balance.
+    deposit_sol(&client, &cfg.payer, &keypair, &mut wallet, 5_000_000)?;
+    deposit_spl(&client, &cfg.payer, &keypair, &mut wallet, &asset, 10_000)?;
 
     // Read the private balance per asset.
     let balance = get_private_token_balances(&wallet)?;
 
-    println!(
-        "ok deposit sol_signature={sol_signature} spl_signature={spl_signature} private_balance={balance:?}"
-    );
+    println!("ok deposit private_balance={balance:?}");
     Ok(())
 }
