@@ -1,0 +1,8 @@
+# Generated proving/verifying keys, fetched from the escrow-keys release.
+build/gnark/
+# SBF program build output.
+program/sbf-out/
+# Localnet test artifacts.
+test/test-ledger/
+# Lock files (git deps are branch-pinned; match swap convention).
+*/Cargo.lock

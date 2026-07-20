@@ -1,0 +1,48 @@
+[package]
+name = "timelock-escrow-test"
+version = "0.1.0"
+edition = "2021"
+publish = false
+autotests = false
+
+[dependencies]
+anyhow = "1.0"
+timelock-escrow-program = { path = "../program" }
+timelock-escrow-prover = { path = "../prover" }
+timelock-escrow-sdk = { path = "../sdk" }
+solana-address = { version = "2.6", features = ["atomic", "borsh", "bytemuck", "copy", "decode", "wincode"] }
+solana-address-lookup-table-interface = { version = "3.0", features = ["bytemuck", "bincode"] }
+solana-compute-budget-interface = "3.0"
+solana-instruction = "3.4"
+solana-keypair = "3.1.2"
+solana-message = "3.1"
+solana-pubkey = { version = "4.2", features = ["curve25519"] }
+solana-signature = "3.4"
+solana-signer = "3.0"
+solana-transaction = { version = "3.1", features = ["bincode"] }
+zolana-client = { git = "ssh://git@github.com/helius-labs/zolana.git", branch = "jorrit/feat-escrow-example", features = ["indexer-api", "solana-rpc"] }
+zolana-interface = { git = "ssh://git@github.com/helius-labs/zolana.git", branch = "jorrit/feat-escrow-example" }
+zolana-keypair = { git = "ssh://git@github.com/helius-labs/zolana.git", branch = "jorrit/feat-escrow-example" }
+zolana-program-test = { git = "ssh://git@github.com/helius-labs/zolana.git", branch = "jorrit/feat-escrow-example" }
+zolana-test-utils = { git = "ssh://git@github.com/helius-labs/zolana.git", branch = "jorrit/feat-escrow-example" }
+zolana-transaction = { git = "ssh://git@github.com/helius-labs/zolana.git", branch = "jorrit/feat-escrow-example" }
+
+[dev-dependencies]
+bincode = "1.3"
+num-bigint = "0.4.6"
+zolana-hasher = { git = "ssh://git@github.com/helius-labs/zolana.git", branch = "jorrit/feat-escrow-example", features = ["poseidon"] }
+zolana-merkle-tree = { git = "ssh://git@github.com/helius-labs/zolana.git", branch = "jorrit/feat-escrow-example" }
+zolana-tree = { git = "ssh://git@github.com/helius-labs/zolana.git", branch = "jorrit/feat-escrow-example" }
+mollusk-svm = "0.3.0"
+light-program-profiler = { git = "https://github.com/Lightprotocol/light-program-profiler", rev = "862df52dd8c6099c11f795553514c654f3c2c459", features = ["mollusk"] }
+mollusk-solana-account = { package = "solana-account", version = "2.2" }
+mollusk-solana-instruction = { package = "solana-instruction", version = "2.2" }
+mollusk-solana-pubkey = { package = "solana-pubkey", version = "2.2" }
+
+[[test]]
+name = "escrow"
+path = "tests/escrow.rs"
+
+[[test]]
+name = "bench_cu"
+path = "tests/bench_cu.rs"
