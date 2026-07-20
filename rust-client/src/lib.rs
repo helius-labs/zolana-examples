@@ -13,7 +13,7 @@ use zolana_client::{
     create_associated_token_account, create_deposit, ensure_registered, DepositParams, Rpc,
     SolanaRpc, ZolanaClient,
 };
-use zolana_interface::DEFAULT_POOL_TREE_ADDRESS;
+use zolana_interface::DEFAULT_TREE_ADDRESS;
 use zolana_keypair::{ShieldedKeypair, ViewingKey};
 use zolana_test_utils::spl::{
     create_mint, create_spl_interface, create_token_account, ensure_asset_counter, mint_to,
@@ -54,7 +54,7 @@ pub fn env_config() -> Result<Config> {
     let payer_path = shellexpand::tilde(&payer_path).into_owned();
     let payer =
         read_keypair_file(&payer_path).map_err(|e| anyhow!("load payer {payer_path}: {e}"))?;
-    let tree = DEFAULT_POOL_TREE_ADDRESS
+    let tree = DEFAULT_TREE_ADDRESS
         .parse()
         .map_err(|e| anyhow!("parse tree address: {e}"))?;
 
@@ -232,7 +232,7 @@ fn sync_after_deposit(
 ) -> Result<()> {
     for _ in 0..30 {
         let indexed = client
-            .get_encrypted_utxos_by_tags(vec![tag], None, Some(50))?
+            .get_encrypted_utxos_by_tags(vec![tag], None, Some(50), None)?
             .matches
             .iter()
             .any(|m| m.tx_signature == signature);

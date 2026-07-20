@@ -21,12 +21,12 @@ solana-signature = "3.4"
 solana-signer = "3.0"
 solana-transaction = "3.1"
 shellexpand = "3"
-zolana-client = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009", features = ["indexer-api", "solana-rpc"] }
-zolana-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009", features = ["solana"] }
-zolana-keypair = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009" }
-zolana-test-utils = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009" }
-zolana-transaction = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009" }
-zolana-user-registry-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009", features = ["solana"] }
+zolana-client = { git = "ssh://git@github.com/helius-labs/zolana", rev = "4a439b346632208e0fea561945b0445395ab4d10", features = ["indexer-api", "solana-rpc"] }
+zolana-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "4a439b346632208e0fea561945b0445395ab4d10", features = ["solana"] }
+zolana-keypair = { git = "ssh://git@github.com/helius-labs/zolana", rev = "4a439b346632208e0fea561945b0445395ab4d10" }
+zolana-test-utils = { git = "ssh://git@github.com/helius-labs/zolana", rev = "4a439b346632208e0fea561945b0445395ab4d10" }
+zolana-transaction = { git = "ssh://git@github.com/helius-labs/zolana", rev = "4a439b346632208e0fea561945b0445395ab4d10" }
+zolana-user-registry-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "4a439b346632208e0fea561945b0445395ab4d10", features = ["solana"] }
 solana-system-interface = "3.2.0"
 
 [[example]]
