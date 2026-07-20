@@ -20,7 +20,7 @@ fn main() -> Result<()> {
     // matching one of the wallet's tags. Sync runs this query over the wallet's
     // full tag set and decrypts the matches.
     let tags = vec![keypair.recipient_bootstrap_view_tag()];
-    let response = client.get_encrypted_utxos_by_tags(tags, None, None)?;
+    let response = client.get_encrypted_utxos_by_tags(tags, None, None, None)?;
 
     println!(
         "ok private_balance={balance:?} encrypted_matches={}",

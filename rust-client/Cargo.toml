@@ -21,12 +21,12 @@ solana-signature = "3.4"
 solana-signer = "3.0"
 solana-transaction = "3.1"
 shellexpand = "3"
-zolana-client = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009", features = ["indexer-api", "solana-rpc"] }
-zolana-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009", features = ["solana"] }
-zolana-keypair = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009" }
-zolana-test-utils = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009" }
-zolana-transaction = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009" }
-zolana-user-registry-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "6fc677dd72aa41a7b441bd025e8bb076c144d009", features = ["solana"] }
+zolana-client = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c", features = ["indexer-api", "solana-rpc"] }
+zolana-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c", features = ["solana"] }
+zolana-keypair = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c" }
+zolana-test-utils = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c" }
+zolana-transaction = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c" }
+zolana-user-registry-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c", features = ["solana"] }
 solana-system-interface = "3.2.0"
 
 [[example]]
@@ -48,3 +48,15 @@ path = "examples/sync_balance.rs"
 [[example]]
 name = "create_private_wallet"
 path = "examples/create_private_wallet.rs"
+
+[[example]]
+name = "deposit_instruction"
+path = "examples/deposit_instruction.rs"
+
+[[example]]
+name = "transfer_instruction"
+path = "examples/transfer_instruction.rs"
+
+[[example]]
+name = "withdraw_instruction"
+path = "examples/withdraw_instruction.rs"
