@@ -133,6 +133,16 @@ jobs:
             [ -f "$f" ] || continue
             echo "::group::$f"; tail -200 "$f"; echo "::endgroup::"
           done
+          DIR="$HOME/.config/zolana/cache/${ZOLANA_TAG}/accounts"
+          echo "::group::accounts dir $DIR"
+          ls -la "$DIR" || true
+          shopt -s dotglob nullglob
+          for f in "$DIR"/*; do
+            [ -f "$f" ] || continue
+            if iconv -f UTF-8 -t UTF-8 "$f" >/dev/null 2>&1; then u=UTF8OK; else u=NONUTF8; fi
+            printf '%s\t%s\t%s\n' "$u" "$(file -b "$f" 2>/dev/null)" "$(basename "$f")"
+          done
+          echo "::endgroup::"
 
       - name: Stop local zolana stack
         if: always()
