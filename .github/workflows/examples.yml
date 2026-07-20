@@ -17,6 +17,10 @@ concurrency:
 
 env:
   ZOLANA_TAG: v0.1.0-alpha
+  # Match the Anza/agave version the zolana release is built and tested against
+  # (zolana's own CI pins this). `stable` drifts to newer agave whose
+  # solana-test-validator panics reading the pinned account snapshots.
+  AGAVE_VERSION: v4.0.2
 
 jobs:
   run-examples:
@@ -50,7 +54,7 @@ jobs:
 
       - name: Install Anza (Solana) CLI
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
       # Build once from the pinned tag. Cached by tag so reruns are fast.
