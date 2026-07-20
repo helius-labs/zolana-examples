@@ -57,16 +57,19 @@ jobs:
           sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
-      # Build once from the pinned tag. Cached by tag so reruns are fast.
-      - name: Cache zolana CLI
-        id: cache-zolana
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/zolana
-          key: zolana-cli-${{ env.ZOLANA_TAG }}
+      # Download the prebuilt CLI from the pinned release instead of compiling
+      # it. The repo is private, so authenticate the download with a token.
       - name: Install zolana CLI
-        if: steps.cache-zolana.outputs.cache-hit != 'true'
-        run: cargo install --git https://github.com/helius-labs/zolana --tag "$ZOLANA_TAG" zolana-cli
+        env:
+          GH_TOKEN: ${{ secrets.ZOLANA_SDK_TOKEN }}
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          gh release download "$ZOLANA_TAG" --repo helius-labs/zolana \
+            --pattern 'zolana-linux-x64-*' --clobber \
+            --output "$HOME/.local/bin/zolana"
+          chmod +x "$HOME/.local/bin/zolana"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/zolana" --help >/dev/null && echo "zolana CLI ready"
 
       - name: Create the payer keypair
         run: |
