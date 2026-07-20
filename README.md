@@ -21,3 +21,7 @@ build the prerequisites and run them.
 - [`swap-program/`](swap-program/) — a confidential swap between a maker and a
   taker on SPP. An SPP ZK program that verifies a proof of its own swap rules
   and delegates the confidential transfer to SPP.
+- [`escrow-program/`](escrow-program/) — a timelock escrow on SPP. A creator
+  locks funds as a shielded UTXO with a chosen unlock timestamp and reclaims
+  them once it has passed. An SPP ZK program that verifies a proof of its own
+  escrow rules and delegates the confidential transfer to SPP.
