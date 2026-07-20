@@ -99,6 +99,13 @@ jobs:
       # error on localnet, so use the solana-test-validator backend.
       - name: Start local zolana stack
         working-directory: rust-client
+        env:
+          # The account-snapshot tarball is packed on macOS and carries
+          # AppleDouble (._*) sidecars. GNU tar on Linux materializes them as
+          # real files, which solana-test-validator then tries to parse as
+          # account JSON and panics on (non-UTF-8). The CLI shells out to tar,
+          # and GNU tar honors TAR_OPTIONS, so exclude the sidecars.
+          TAR_OPTIONS: "--exclude=._* --exclude=.DS_Store"
         run: |
           zolana test-env --with-photon --no-use-surfpool
           for i in $(seq 1 60); do
