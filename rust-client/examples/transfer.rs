@@ -35,9 +35,8 @@ fn main() -> Result<()> {
         TransferRecipient::PublicWithdrawal { .. } => "public-withdrawal",
     };
 
-    // Sign the transfer (its proof is generated during the build), then send and
-    // confirm it. Custody hosts managing many wallets scope the authority per
-    // user.
+    // Sign and send private transfer. Includes the proof that the sender owns and
+    // can spend the balance.
     let sender_authority = authority(&cfg.payer, &sender_keypair);
     let tx = sign_private_transaction_sync(
         created.transaction,

@@ -32,8 +32,8 @@ fn main() -> Result<()> {
         amount: 4_000,
     })?;
 
-    // Sign the withdrawal (its proof is generated during the build), then send
-    // and confirm it.
+    // Sign and send the withdrawal. Includes the proof that the sender owns and
+    // can spend the balance.
     let sender_authority = authority(&cfg.payer, &keypair);
     let tx = sign_private_transaction_sync(
         created.transaction,
