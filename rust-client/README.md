@@ -1,49 +1,40 @@
-# Zolana - Rust Client
+# Zolana Examples - Rust Client
 
-| Example | Description |
-|---------|-------------|
-| [`create_private_wallet`](examples/create_private_wallet.rs) | Create and register a wallet for a private balance. |
-| [`deposit`](examples/deposit.rs) | Move public tokens into a private balance. |
-| [`transfer`](examples/transfer.rs) | Send a value privately between two private balances. |
-| [`withdraw`](examples/withdraw.rs) | Withdraw a private balance back to a public account. |
-| [`sync_balance`](examples/sync_balance.rs) | Read a wallet's private balance from the indexer. |
+|  |  |  |  |
+|---------|-------------|---------|---------|
+| [`transfer`](examples/transfer.rs) | Transfer between private balances. | [Action](examples/transfer.rs) | [Instruction](examples/transfer_instruction.rs) |
+| [`deposit`](examples/deposit.rs) | Move tokens from a public to a private balance. | [Action](examples/deposit.rs) | [Instruction](examples/deposit_instruction.rs) |
+| [`withdraw`](examples/withdraw.rs) | Move tokens from a private to a public balance. | [Action](examples/withdraw.rs) | [Instruction](examples/withdraw_instruction.rs) |
+| [`create_private_wallet`](examples/create_private_wallet.rs) | Create a private wallet. | [Action](examples/create_private_wallet.rs) |  |
+| [`sync_balance`](examples/sync_balance.rs) | Read a wallet's private balance. | [Action](examples/sync_balance.rs) |  |
 
-## Prerequisites
+## Setup
 
-The examples run against a local stack: a Solana validator, a Photon indexer,
-and the Zolana prover. Start all three from a [zolana](https://github.com/helius-labs/zolana)
-checkout (see its `justfile`); the defaults are:
-
-| Service | URL |
-|---------|-----|
-| Validator RPC | `http://127.0.0.1:8899` |
-| Photon indexer | `http://127.0.0.1:8784` |
-| Prover | `http://127.0.0.1:3001` |
-
-The zolana SDK crates are private git dependencies, so building needs an
-SSO-authorized GitHub SSH key. `.cargo/config.toml` sets `git-fetch-with-cli`
-so cargo fetches them over that key.
-
-## Configure
-
-Copy `.env.example` to `.env`. The payer defaults to the Solana CLI wallet
-(`~/.config/solana/id.json`); override it and the service URLs only if your
-setup differs from the defaults above.
+Copy the env template and set your [Helius API key](https://dashboard.helius.dev/):
 
 ```bash
 cp .env.example .env
 ```
 
+By default, the examples use your CLI wallet as `payer`. Make sure it's funded with [devnet SOL](https://faucet.solana.com/).
+
+To run on localnet, toggle `localnet` in [`src/lib.rs`](src/lib.rs).
+
 ## Run
 
-With the local stack up and `.env` in place:
-
 ```bash
+cargo run -p rust-client-example --example transfer
 cargo run -p rust-client-example --example deposit
+cargo run -p rust-client-example --example withdraw
+cargo run -p rust-client-example --example create_private_wallet
+cargo run -p rust-client-example --example sync_balance
+
+cargo run -p rust-client-example --example transfer_instruction
+cargo run -p rust-client-example --example deposit_instruction
+cargo run -p rust-client-example --example withdraw_instruction
 ```
 
 ## Documentation
 
 - [Documentation](https://helius.dev/docs/privacy)
 - [Source Code](https://github.com/helius-labs/zolana)
-- [AI Skill](https://example.com/zolana-ai-skill)
