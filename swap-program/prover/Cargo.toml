@@ -19,7 +19,7 @@ swap-program = { path = "../program" }
 serde_json = "1.0"
 solana-bn254 = "3.2.1"
 thiserror = "2.0"
-zolana-transaction = { path = "../../../zolana-swap/sdk-libs/transaction" }
+zolana-transaction = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
 
 [build-dependencies]
 bindgen = "0.70"
