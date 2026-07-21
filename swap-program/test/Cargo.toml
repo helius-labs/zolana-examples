@@ -19,13 +19,13 @@ solana-message = "3.1"
 solana-pubkey = { version = "4.2", features = ["curve25519"] }
 solana-signer = "3.0"
 solana-transaction = { version = "3.1", features = ["bincode"] }
-zolana-client = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["indexer-api", "solana-rpc"] }
-zolana-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-keypair = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-program-test = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-test-utils = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-transaction = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-user-registry-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["solana"] }
+zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["indexer-api", "solana-rpc"] }
+zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-program-test = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-user-registry-interface = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["solana"] }
 
 [dev-dependencies]
 bincode = "1.3"
@@ -34,9 +34,9 @@ cucumber = "0.22"
 futures = "0.3.31"
 groth16-solana = { git = "https://github.com/Lightprotocol/groth16-solana", rev = "43fee1a67e91c0df7bb4edad5ba87ae4602aa208", features = ["bsb22"] }
 num-bigint = "0.4.6"
-zolana-hasher = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["poseidon"] }
-zolana-merkle-tree = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-tree = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-hasher = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["poseidon"] }
+zolana-merkle-tree = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-tree = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
 mollusk-svm = "0.3.0"
 light-program-profiler = { git = "https://github.com/Lightprotocol/light-program-profiler", rev = "862df52dd8c6099c11f795553514c654f3c2c459", features = ["mollusk"] }
 mollusk-solana-account = { package = "solana-account", version = "2.2" }

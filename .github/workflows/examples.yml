@@ -35,21 +35,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The zolana SDK crates (examples) and the zolana CLI both live in the
-      # private helius-labs/zolana repo. Fetch every github.com git dep over
-      # HTTPS with a token so both the `ssh://` SDK deps (see
-      # rust-client/.cargo/config.toml, git-fetch-with-cli = true) and the
-      # CLI's `https://` git source authenticate. ZOLANA_SDK_TOKEN must be a
-      # (SSO-authorized) token with read access to helius-labs/zolana.
-      - name: Configure git auth for private zolana deps
-        run: |
-          git config --global \
-            url."https://x-access-token:${{ secrets.ZOLANA_SDK_TOKEN }}@github.com/".insteadOf \
-            "https://github.com/"
-          git config --global \
-            url."https://x-access-token:${{ secrets.ZOLANA_SDK_TOKEN }}@github.com/".insteadOf \
-            "ssh://git@github.com/"
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -64,10 +49,11 @@ jobs:
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
       # Download the prebuilt CLI from the pinned release instead of compiling
-      # it. The repo is private, so authenticate the download with a token.
+      # it. The release is public; gh just needs a token to run in CI, so use
+      # the workflow's own.
       - name: Install zolana CLI
         env:
-          GH_TOKEN: ${{ secrets.ZOLANA_SDK_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$HOME/.local/bin"
           gh release download "$ZOLANA_TAG" --repo helius-labs/zolana \
@@ -167,15 +153,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure git auth for private zolana deps
-        run: |
-          git config --global \
-            url."https://x-access-token:${{ secrets.ZOLANA_SDK_TOKEN }}@github.com/".insteadOf \
-            "https://github.com/"
-          git config --global \
-            url."https://x-access-token:${{ secrets.ZOLANA_SDK_TOKEN }}@github.com/".insteadOf \
-            "ssh://git@github.com/"
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -202,15 +179,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure git auth for private zolana deps
-        run: |
-          git config --global \
-            url."https://x-access-token:${{ secrets.ZOLANA_SDK_TOKEN }}@github.com/".insteadOf \
-            "https://github.com/"
-          git config --global \
-            url."https://x-access-token:${{ secrets.ZOLANA_SDK_TOKEN }}@github.com/".insteadOf \
-            "ssh://git@github.com/"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
