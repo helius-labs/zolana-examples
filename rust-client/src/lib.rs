@@ -10,11 +10,10 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use zolana_client::{
-    create_associated_token_account, create_deposit, ensure_registered, DepositParams, Rpc,
-    SolanaRpc, ZolanaClient,
+    create_deposit, ensure_registered, DepositParams, Rpc, SolanaRpc, ZolanaClient,
 };
 use zolana_interface::DEFAULT_TREE_ADDRESS;
-use zolana_keypair::{ShieldedKeypair, ViewingKey};
+use zolana_keypair::ShieldedKeypair;
 use zolana_test_utils::spl::{
     create_mint, create_spl_interface, create_token_account, ensure_asset_counter, mint_to,
 };
@@ -71,38 +70,9 @@ pub fn env_config() -> Result<Config> {
     })
 }
 
-/// Build the client from a config.
-pub fn client(cfg: &Config) -> ZolanaClient<SolanaRpc> {
-    ZolanaClient::from_urls(
-        SolanaRpc::new(cfg.rpc_url.clone()),
-        &cfg.indexer_url,
-        cfg.prover_url.clone(),
-        cfg.tree,
-    )
-}
-
-/// Derive the shielded keypair from a Solana keypair: one ed25519 key signs
-/// both the Solana account and the private balance.
-pub fn shielded_keypair(payer: &Keypair) -> Result<ShieldedKeypair> {
-    let seed: [u8; 32] = payer.to_bytes()[..32]
-        .try_into()
-        .map_err(|_| anyhow!("keypair seed"))?;
-    Ok(ShieldedKeypair::from_ed25519(&seed, ViewingKey::new())?)
-}
-
-/// The authority that signs a wallet's balance reads and private transactions.
-pub fn authority<'a>(payer: &Keypair, keypair: &'a ShieldedKeypair) -> LocalWalletAuthority<'a> {
-    LocalWalletAuthority::new(Address::new_from_array(payer.pubkey().to_bytes()), keypair)
-}
-
-/// The tree as a `Pubkey`, for the instruction builders that want one.
-pub fn tree_pubkey(client: &ZolanaClient<SolanaRpc>) -> Pubkey {
-    Pubkey::new_from_array(client.tree().to_bytes())
-}
-
 /// Move `lamports` from the payer to `to`. Localnet keys start empty, so the
 /// payer funds the keys the examples need.
-pub fn fund_key(
+fn fund_key(
     rpc: &impl Rpc,
     payer: &Keypair,
     to: &Pubkey,
@@ -128,6 +98,18 @@ pub fn register_asset(rpc: &impl Rpc, payer: &Keypair) -> Result<(SplAsset, Asse
         .map_err(|e| anyhow!("register SPL asset: {e}"))?;
 
     Ok((SplAsset { mint, user_token }, registry))
+}
+
+/// Create a test mint with an interface PDA and fund the payer's token account
+/// with `amount` of the asset.
+pub fn setup_funded_spl_asset(
+    rpc: &impl Rpc,
+    payer: &Keypair,
+    amount: u64,
+) -> Result<(SplAsset, AssetRegistry)> {
+    let (asset, registry) = register_asset(rpc, payer)?;
+    mint_to(rpc, payer, &asset.mint, &asset.user_token, amount)?;
+    Ok((asset, registry))
 }
 
 /// Read the asset id the program assigned to `mint` from its registry PDA.
@@ -159,7 +141,7 @@ pub fn create_test_recipient(
 ) -> Result<TestRecipient> {
     let recipient = Keypair::new();
     fund_key(rpc, payer, &recipient.pubkey(), 20_000_000)?;
-    let shielded_keypair = shielded_keypair(&recipient)?;
+    let shielded_keypair = ShieldedKeypair::from_solana_keypair(&recipient)?;
     ensure_registered(rpc, &recipient, &shielded_keypair)?;
     let wallet = Wallet::new(shielded_keypair.shielded_address()?, registry)?;
     Ok(TestRecipient {
@@ -208,21 +190,9 @@ pub fn setup_funded_sol_wallet(
     Ok(wallet)
 }
 
-/// Create a fresh test recipient and its token account for `mint`.
-pub fn create_test_recipient_token_account(
-    rpc: &impl Rpc,
-    payer: &Keypair,
-    mint: &Pubkey,
-) -> Result<(Keypair, Pubkey)> {
-    let recipient = Keypair::new();
-    let (_signature, token_account) =
-        create_associated_token_account(rpc, payer, &recipient.pubkey(), mint)?;
-    Ok((recipient, token_account))
-}
-
 /// Wait until the indexer has picked up the deposit's output for `tag`, then
 /// sync the wallet so the deposited balance appears.
-fn sync_after_deposit(
+pub fn sync_after_deposit(
     client: &ZolanaClient<SolanaRpc>,
     wallet: &mut Wallet,
     payer: &Keypair,
@@ -241,7 +211,8 @@ fn sync_after_deposit(
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    let authority = authority(payer, keypair);
+    let authority =
+        LocalWalletAuthority::new(Address::new_from_array(payer.pubkey().to_bytes()), keypair);
     zolana_client::sync_wallet(wallet, &authority, client)?;
     Ok(())
 }
@@ -266,13 +237,14 @@ fn deposit(
         spl_token_account,
         memo: None,
     })?;
-    let signature = prepared.send(client, payer, tree_pubkey(client), payer)?;
+    let tree = Pubkey::new_from_array(client.tree().to_bytes());
+    let signature = prepared.send(client, payer, tree, payer)?;
     sync_after_deposit(client, wallet, payer, keypair, prepared.view_tag(), signature)?;
     Ok(())
 }
 
 /// Move `amount` of SOL into the private balance of `keypair`.
-pub fn deposit_sol(
+fn deposit_sol(
     client: &ZolanaClient<SolanaRpc>,
     payer: &Keypair,
     keypair: &ShieldedKeypair,
@@ -284,7 +256,7 @@ pub fn deposit_sol(
 
 /// Fund the token account, then move `amount` of an SPL asset into the private
 /// balance of `keypair`.
-pub fn deposit_spl(
+fn deposit_spl(
     client: &ZolanaClient<SolanaRpc>,
     payer: &Keypair,
     keypair: &ShieldedKeypair,

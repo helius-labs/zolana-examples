@@ -1,77 +1,118 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{
-    client, create_test_recipient, env_config, shielded_keypair, setup_funded_sol_wallet,
-    tree_pubkey,
-};
+use rust_client_example::{create_test_recipient, env_config, setup_funded_sol_wallet};
+use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use zolana_client::{IndexerRpcConfig, Rpc};
+use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::instruction::Transact;
+use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::{
     decrypt_transactions,
     instructions::{transact::ConfidentialTransfer, types::SppProofInputUtxo},
     AssetRegistry, SOL_MINT,
 };
 
-const FUND_AMOUNT: u64 = 1_000_000_000;
-const TRANSFER_AMOUNT: u64 = 300_000_000;
-
-// Send a private transfer to Bob, building the transact instruction by hand.
 fn main() -> Result<()> {
+    // Load the fee payer and localnet settings.
     let cfg = env_config()?;
-    let client = client(&cfg);
-    let assets = AssetRegistry::default();
-    let alice = shielded_keypair(&cfg.payer)?;
-    let alice_address = alice.shielded_address()?;
-    let tree = tree_pubkey(&client);
+    let client = ZolanaClient::from_urls(
+        SolanaRpc::new(cfg.rpc_url.clone()),
+        &cfg.indexer_url,
+        cfg.prover_url.clone(),
+        cfg.tree,
+    );
+    let payer = cfg.payer.pubkey();
+    let asset_registry = AssetRegistry::default();
+    let sender_keypair = ShieldedKeypair::from_solana_keypair(&cfg.payer)?;
+    let sender_address = sender_keypair.shielded_address()?;
+    let state_tree = Pubkey::new_from_array(client.tree().to_bytes());
 
-    // Setup: fund Alice's private balance and create a registered recipient.
-    let wallet = setup_funded_sol_wallet(&client, &cfg.payer, &alice, FUND_AMOUNT)?;
-    let bob = create_test_recipient(&client, &cfg.payer, AssetRegistry::default())?;
-    let bob_address = bob.shielded_keypair.shielded_address()?;
+    // Fund the sender's private balance and create the recipient's private wallet.
+    let sender_wallet = setup_funded_sol_wallet(
+        &client,
+        &cfg.payer,
+        &sender_keypair,
+        1_000_000_000,
+    )?;
+    let recipient = create_test_recipient(&client, &cfg.payer, asset_registry.clone())?;
+    let recipient_keypair = recipient.shielded_keypair;
+    let recipient_address = recipient_keypair.shielded_address()?;
 
-    // Take the balance Alice holds as the spend input.
-    let utxo = wallet
-        .balances(false)
-        .map_err(|e| anyhow!("read alice balance: {e:?}"))?
+    // 1. Select UTXOs that make up the private balance for the transfer.
+    let sender_utxo = sender_wallet
+        .balance(SOL_MINT, None)
+        .map_err(|error| anyhow!("read sender balance: {error:?}"))?
+        .utxos
         .into_iter()
-        .find(|b| b.mint == SOL_MINT)
-        .expect("alice has no sol balance")
-        .utxos[0]
-        .clone();
+        .next()
+        .ok_or_else(|| anyhow!("sender has no spendable SOL UTXO"))?;
 
-    // Route TRANSFER_AMOUNT to Bob and authorize the spend.
-    let mut transfer =
-        ConfidentialTransfer::new(alice_address, vec![SppProofInputUtxo::new(utxo, &alice)], cfg.payer.pubkey());
-    transfer.send(&bob_address, SOL_MINT, TRANSFER_AMOUNT)?;
-    let proof_inputs = transfer.sign(&alice, &assets)?;
+    // 2. Prepare the selected UTXOs as inputs for the zero-knowledge proof.
+    let input_utxos = vec![SppProofInputUtxo::new(
+        sender_utxo,
+        &sender_keypair,
+    )];
 
-    // Build the on-chain data, which includes the proof that Alice owns and can
-    // spend the balance, then send it.
-    let data = client.prove_transact(proof_inputs, Some(IndexerRpcConfig::wait()))?;
-    let transfer_ix = Transact {
-        payer: cfg.payer.pubkey(),
-        tree,
+    // 3. Build and sign the confidential transfer.
+    // Signing encrypts the asset and amount and produces the proof inputs for the ZK prover.
+    let mut transfer = ConfidentialTransfer::new(
+        sender_address,
+        input_utxos,
+        payer,
+    );
+    transfer.send(
+        &recipient_address,
+        SOL_MINT,
+        300_000_000,
+    )?;
+    let proof_inputs = transfer.sign(
+        &sender_keypair,
+        &asset_registry,
+    )?;
+
+    // 4. Fetch the zk proof to prove the sender can spend the balance without revealing asset and amount.
+    let transfer_data = client.prove_transact(
+        proof_inputs,
+        Some(IndexerRpcConfig::wait()),
+    )?;
+
+    // 5. Construct the instruction.
+    let transfer_instruction = Transact {
+        payer,
+        tree: state_tree,
         withdrawal: None,
-        data,
+        data: transfer_data,
     }
     .instruction();
-    let signature =
-        client.create_and_send_transaction(&[transfer_ix], cfg.payer.pubkey(), &[&cfg.payer])?;
+
+    // 6. Send and confirm like any Solana transaction.
+    let signature = client.create_and_send_transaction(
+        &[transfer_instruction],
+        payer,
+        &[&cfg.payer],
+    )?;
     client.confirm_private_transaction_sync(signature)?;
 
-    // Read Bob's balance to confirm the transfer landed.
+    // 7. Fetch and decrypt the recipient's balance.
+    let recipient_tag = recipient_address.confidential_view_tag()?;
     let response = client.get_shielded_transactions_by_tags(
-        vec![bob_address.confidential_view_tag()?],
+        vec![recipient_tag],
         None,
         None,
         Some(IndexerRpcConfig::wait()),
     )?;
-    let bob_balances = decrypt_transactions(&bob.shielded_keypair, &response.transactions, &assets)
-        .map_err(|e| anyhow!("decrypt bob transactions: {e:?}"))?;
-    let bob_balance = bob_balances
+    let recipient_balances = decrypt_transactions(
+        &recipient_keypair,
+        &response.transactions,
+        &asset_registry,
+    )
+    .map_err(|error| anyhow!("decrypt recipient transactions: {error:?}"))?;
+    let recipient_balance = recipient_balances
         .get_balance(SOL_MINT)
-        .expect("failed to fetch bob's balance");
+        .ok_or_else(|| anyhow!("failed to fetch recipient's balance"))?;
 
-    println!("transfer bob_balance={} tx={signature}", bob_balance.amount);
+    println!(
+        "transfer recipient_balance={} tx={signature}",
+        recipient_balance.amount
+    );
     Ok(())
 }

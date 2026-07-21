@@ -1,29 +1,40 @@
 use anyhow::Result;
-use rust_client_example::{
-    authority, client, create_test_recipient_token_account, env_config, setup_funded_wallet,
-};
+use rust_client_example::{env_config, setup_funded_wallet};
 use solana_address::Address;
+use solana_keypair::Keypair;
 use solana_signer::Signer;
 use zolana_client::{
-    create_withdrawal, get_private_token_balances, sign_private_transaction_sync, sync_wallet, Rpc,
-    WithdrawalParams,
+    create_associated_token_account, create_withdrawal, get_private_token_balances,
+    sign_private_transaction_sync, sync_wallet, Rpc, SolanaRpc, WithdrawalParams, ZolanaClient,
 };
+use zolana_keypair::ShieldedKeypair;
+use zolana_transaction::LocalWalletAuthority;
 
 fn main() -> Result<()> {
     // Load the fee payer and localnet settings, then connect.
     let cfg = env_config()?;
-    let client = client(&cfg);
-    let keypair = rust_client_example::shielded_keypair(&cfg.payer)?;
+    let client = ZolanaClient::from_urls(
+        SolanaRpc::new(cfg.rpc_url.clone()),
+        &cfg.indexer_url,
+        cfg.prover_url.clone(),
+        cfg.tree,
+    );
+    let keypair = ShieldedKeypair::from_solana_keypair(&cfg.payer)?;
 
     // Setup: register a test asset and fund a private wallet.
     let mut sender = setup_funded_wallet(&client, &cfg.payer, &keypair, 10_000)?;
     let mint = Address::new_from_array(sender.asset.mint.to_bytes());
 
-    // Open a public token account for the recipient: the owner or any third party.
-    let (recipient, token_account) =
-        create_test_recipient_token_account(&client, &cfg.payer, &sender.asset.mint)?;
+    // 1. Build the withdrawal. Open a public token account for the recipient:
+    // the owner or any third party.
+    let recipient = Keypair::new();
+    let (_signature, token_account) = create_associated_token_account(
+        &client,
+        &cfg.payer,
+        &recipient.pubkey(),
+        &sender.asset.mint,
+    )?;
 
-    // Build the private-to-public withdrawal.
     let created = create_withdrawal(WithdrawalParams {
         wallet: &sender.wallet,
         payer: Address::new_from_array(cfg.payer.pubkey().to_bytes()),
@@ -32,9 +43,12 @@ fn main() -> Result<()> {
         amount: 4_000,
     })?;
 
-    // Sign and send the withdrawal. Includes the proof that the sender owns and
-    // can spend the balance.
-    let sender_authority = authority(&cfg.payer, &keypair);
+    // 2. Sign the withdrawal. Includes the proof that the sender owns and can
+    // spend the balance.
+    let sender_authority = LocalWalletAuthority::new(
+        Address::new_from_array(cfg.payer.pubkey().to_bytes()),
+        &keypair,
+    );
     let tx = sign_private_transaction_sync(
         created.transaction,
         &sender.wallet,
@@ -42,6 +56,8 @@ fn main() -> Result<()> {
         &client,
         &cfg.payer,
     )?;
+
+    // 3. Send and confirm like any Solana transaction.
     let signature = client.send_transaction(&tx)?;
     client.confirm_private_transaction_sync(signature)?;
 

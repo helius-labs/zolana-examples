@@ -1,75 +1,116 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{
-    client, env_config, shielded_keypair, setup_funded_sol_wallet, tree_pubkey,
-};
+use rust_client_example::{env_config, setup_funded_wallet};
 use solana_address::Address;
+use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use zolana_client::{IndexerRpcConfig, Rpc};
-use zolana_interface::instruction::{Transact, TransactSolWithdrawal, TransactWithdrawal};
-use zolana_transaction::{
-    instructions::{
-        transact::{ConfidentialTransfer, WithdrawalTarget},
-        types::SppProofInputUtxo,
-    },
-    AssetRegistry, SOL_MINT,
+use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
+use zolana_interface::{
+    instruction::{Transact, TransactSplWithdrawal, TransactWithdrawal},
+    pda,
+};
+use zolana_keypair::ShieldedKeypair;
+use zolana_transaction::instructions::{
+    transact::{ConfidentialTransfer, WithdrawalTarget},
+    types::SppProofInputUtxo,
 };
 
-const FUND_AMOUNT: u64 = 1_000_000_000;
-const WITHDRAW_AMOUNT: u64 = 300_000_000;
-
-// Withdraw a private balance back to a public account, building the transact
-// instruction by hand.
 fn main() -> Result<()> {
+    // Load the fee payer and localnet settings.
     let cfg = env_config()?;
-    let client = client(&cfg);
-    let assets = AssetRegistry::default();
-    let alice = shielded_keypair(&cfg.payer)?;
-    let alice_address = alice.shielded_address()?;
-    let tree = tree_pubkey(&client);
+    let client = ZolanaClient::from_urls(
+        SolanaRpc::new(cfg.rpc_url.clone()),
+        &cfg.indexer_url,
+        cfg.prover_url.clone(),
+        cfg.tree,
+    );
+    let payer = cfg.payer.pubkey();
+    let sender_keypair = ShieldedKeypair::from_solana_keypair(&cfg.payer)?;
+    let sender_address = sender_keypair.shielded_address()?;
+    let state_tree = Pubkey::new_from_array(client.tree().to_bytes());
 
-    // Setup: fund Alice's private balance.
-    let wallet = setup_funded_sol_wallet(&client, &cfg.payer, &alice, FUND_AMOUNT)?;
+    // Fund the sender's private SPL balance.
+    let funded = setup_funded_wallet(
+        &client,
+        &cfg.payer,
+        &sender_keypair,
+        10_000,
+    )?;
+    let mint = Address::new_from_array(funded.asset.mint.to_bytes());
+    let vault = pda::spl_asset_vault(&funded.asset.mint);
+    let withdraw_amount = 3_000;
 
-    // Take the balance Alice holds as the spend input.
-    let utxo = wallet
-        .balances(false)
-        .map_err(|e| anyhow!("read alice balance: {e:?}"))?
+    // 1. Select UTXOs that make up the private balance for the withdrawal.
+    let sender_utxo = funded
+        .wallet
+        .balance(mint, None)
+        .map_err(|error| anyhow!("read sender balance: {error:?}"))?
+        .utxos
         .into_iter()
-        .find(|b| b.mint == SOL_MINT)
-        .expect("alice has no sol balance")
-        .utxos[0]
-        .clone();
+        .next()
+        .ok_or_else(|| anyhow!("sender has no spendable SPL UTXO"))?;
 
-    // Send WITHDRAW_AMOUNT back to Alice's own Solana account and authorize it.
-    let mut withdrawal =
-        ConfidentialTransfer::new(alice_address, vec![SppProofInputUtxo::new(utxo, &alice)], cfg.payer.pubkey());
+    // 2. Prepare the selected UTXOs as inputs for the zero-knowledge proof.
+    let input_utxos = vec![SppProofInputUtxo::new(
+        sender_utxo,
+        &sender_keypair,
+    )];
+
+    // 3. Build and sign the confidential withdrawal.
+    // Signing encrypts the private change and produces the ZK prover inputs.
+    let mut withdrawal = ConfidentialTransfer::new(
+        sender_address,
+        input_utxos,
+        payer,
+    );
     withdrawal.withdraw(
-        SOL_MINT,
-        WITHDRAW_AMOUNT,
-        WithdrawalTarget::Sol {
-            user_sol_account: Address::new_from_array(cfg.payer.pubkey().to_bytes()),
+        mint,
+        withdraw_amount,
+        WithdrawalTarget::Spl {
+            user_spl_token: Address::new_from_array(
+                funded.asset.user_token.to_bytes(),
+            ),
+            spl_token_interface: Address::new_from_array(vault.to_bytes()),
         },
     )?;
-    let proof_inputs = withdrawal.sign(&alice, &assets)?;
+    let proof_inputs = withdrawal.sign(
+        &sender_keypair,
+        &funded.registry,
+    )?;
 
-    // Build the on-chain data, which includes the proof that Alice owns and can
-    // spend the balance, then send it with the withdrawal accounts.
-    let data = client.prove_transact(proof_inputs, Some(IndexerRpcConfig::wait()))?;
-    let withdraw_ix = Transact {
-        payer: cfg.payer.pubkey(),
-        tree,
-        withdrawal: Some(TransactWithdrawal::Sol(TransactSolWithdrawal {
-            recipient: cfg.payer.pubkey(),
+    // 4. Fetch the ZK proof to prove the sender can spend the balance.
+    let withdrawal_data = client.prove_transact(
+        proof_inputs,
+        Some(IndexerRpcConfig::wait()),
+    )?;
+
+    // 5. Combine the proof and withdrawal accounts in a single instruction.
+    let withdrawal_instruction = Transact {
+        payer,
+        tree: state_tree,
+        withdrawal: Some(TransactWithdrawal::Spl(TransactSplWithdrawal {
+            cpi_authority: Some(pda::shielded_pool_cpi_authority()),
+            spl_token_interface: vault,
+            recipient: payer,
+            user_token_account: funded.asset.user_token,
+            token_program: pda::spl_token_program_id(),
         })),
-        data,
+        data: withdrawal_data,
     }
     .instruction();
-    let signature =
-        client.create_and_send_transaction(&[withdraw_ix], cfg.payer.pubkey(), &[&cfg.payer])?;
+
+    // 6. Send and confirm like any Solana transaction.
+    let signature = client.create_and_send_transaction(
+        &[withdrawal_instruction],
+        payer,
+        &[&cfg.payer],
+    )?;
     client.confirm_private_transaction_sync(signature)?;
 
-    // Confirm the withdrawn amount landed in Alice's Solana balance.
-    let solana_balance = client.get_balance(cfg.payer.pubkey())?;
-    println!("withdraw solana_balance={solana_balance} tx={signature}");
+    // 7. Report the public SPL withdrawal.
+    println!(
+        "withdraw amount={} user_token={} tx={signature}",
+        withdraw_amount,
+        funded.asset.user_token,
+    );
     Ok(())
 }

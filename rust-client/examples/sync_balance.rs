@@ -1,18 +1,30 @@
 use anyhow::Result;
-use rust_client_example::{authority, client, env_config, setup_funded_sol_wallet};
-use zolana_client::{get_private_token_balances, sync_wallet, Rpc};
+use rust_client_example::{env_config, setup_funded_sol_wallet};
+use solana_address::Address;
+use solana_signer::Signer;
+use zolana_client::{get_private_token_balances, sync_wallet, Rpc, SolanaRpc, ZolanaClient};
+use zolana_keypair::ShieldedKeypair;
+use zolana_transaction::LocalWalletAuthority;
 
 fn main() -> Result<()> {
     // Load the fee payer and localnet settings, then connect.
     let cfg = env_config()?;
-    let client = client(&cfg);
-    let keypair = rust_client_example::shielded_keypair(&cfg.payer)?;
+    let client = ZolanaClient::from_urls(
+        SolanaRpc::new(cfg.rpc_url.clone()),
+        &cfg.indexer_url,
+        cfg.prover_url.clone(),
+        cfg.tree,
+    );
+    let keypair = ShieldedKeypair::from_solana_keypair(&cfg.payer)?;
 
     // Setup: register the wallet and deposit SOL into it.
     let mut wallet = setup_funded_sol_wallet(&client, &cfg.payer, &keypair, 5_000_000)?;
 
     // Sync the wallet, then read the private balance per asset.
-    let authority = authority(&cfg.payer, &keypair);
+    let authority = LocalWalletAuthority::new(
+        Address::new_from_array(cfg.payer.pubkey().to_bytes()),
+        &keypair,
+    );
     sync_wallet(&mut wallet, &authority, &client)?;
     let balance = get_private_token_balances(&wallet)?;
 
