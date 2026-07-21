@@ -1,0 +1,156 @@
+name: examples
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "rust-client/**"
+      - ".github/workflows/examples.yml"
+  pull_request:
+    paths:
+      - "rust-client/**"
+      - ".github/workflows/examples.yml"
+
+concurrency:
+  group: examples-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZOLANA_TAG: v0.1.0-alpha
+  # Match the Anza/agave version the zolana release is built and tested against
+  # (zolana's own CI pins this). `stable` drifts to newer agave whose
+  # solana-test-validator panics reading the pinned account snapshots.
+  AGAVE_VERSION: v4.0.2
+
+jobs:
+  run-examples:
+    name: run rust-client examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The zolana SDK crates (examples) and the zolana CLI both live in the
+      # private helius-labs/zolana repo. Fetch every github.com git dep over
+      # HTTPS with a token so both the `ssh://` SDK deps (see
+      # rust-client/.cargo/config.toml, git-fetch-with-cli = true) and the
+      # CLI's `https://` git source authenticate. ZOLANA_SDK_TOKEN must be a
+      # (SSO-authorized) token with read access to helius-labs/zolana.
+      - name: Configure git auth for private zolana deps
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.ZOLANA_SDK_TOKEN }}@github.com/".insteadOf \
+            "https://github.com/"
+          git config --global \
+            url."https://x-access-token:${{ secrets.ZOLANA_SDK_TOKEN }}@github.com/".insteadOf \
+            "ssh://git@github.com/"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-client
+
+      - name: Install Anza (Solana) CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      # Download the prebuilt CLI from the pinned release instead of compiling
+      # it. The repo is private, so authenticate the download with a token.
+      - name: Install zolana CLI
+        env:
+          GH_TOKEN: ${{ secrets.ZOLANA_SDK_TOKEN }}
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          gh release download "$ZOLANA_TAG" --repo helius-labs/zolana \
+            --pattern 'zolana-linux-x64-*' --clobber \
+            --output "$HOME/.local/bin/zolana"
+          chmod +x "$HOME/.local/bin/zolana"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/zolana" --help >/dev/null && echo "zolana CLI ready"
+
+      - name: Create the payer keypair
+        run: |
+          mkdir -p ~/.config/solana
+          solana-keygen new --no-bip39-passphrase --force -o ~/.config/solana/id.json
+
+      # Apply the localnet toggle the examples ship with (the `// localnet:`
+      # lines in src/lib.rs) in the CI checkout only. The committed source keeps
+      # its devnet default.
+      - name: Point examples at localnet
+        working-directory: rust-client
+        run: |
+          sed -i \
+            -e '\|pub const RPC_URL: &str = "https://devnet|d' \
+            -e '\|pub const INDEXER_URL: &str = "http://202\.8|d' \
+            -e '\|pub const PROVER_URL: &str = "http://202\.8|d' \
+            -e '\|let api_key = std::env::var("API_KEY")|d' \
+            -e '\|let rpc_url = format!("{RPC_URL}/?api-key=|d' \
+            -e 's|// localnet: ||g' \
+            src/lib.rs
+          echo "--- localnet URLs now in lib.rs ---"
+          grep -nE 'const (RPC|INDEXER|PROVER)_URL|let rpc_url' src/lib.rs
+
+      # `zolana test-env` downloads the pinned validator/prover/Photon binaries
+      # (no manual Photon install), starts them detached, and returns once ready.
+      # surfpool (the default backend) rejects account creation with a rent
+      # error on localnet, so use the solana-test-validator backend.
+      - name: Start local zolana stack
+        working-directory: rust-client
+        env:
+          # The account-snapshot tarball is packed on macOS and carries
+          # AppleDouble (._*) sidecars. GNU tar on Linux materializes them as
+          # real files, which solana-test-validator then tries to parse as
+          # account JSON and panics on (non-UTF-8). The CLI shells out to tar,
+          # and GNU tar honors TAR_OPTIONS, so exclude the sidecars.
+          TAR_OPTIONS: "--exclude=._* --exclude=.DS_Store"
+        run: |
+          zolana test-env --with-photon --no-use-surfpool
+          for i in $(seq 1 60); do
+            ok=$(curl -s http://127.0.0.1:8899 -X POST \
+              -H 'content-type: application/json' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' || true)
+            case "$ok" in
+              *'"result":"ok"'*) echo "validator healthy"; break ;;
+            esac
+            if [ "$i" -eq 60 ]; then echo "validator never became healthy" >&2; exit 1; fi
+            sleep 2
+          done
+          solana airdrop 100 --url http://127.0.0.1:8899
+
+      - name: Run examples
+        working-directory: rust-client
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          set -euo pipefail
+          for ex in create_private_wallet deposit sync_balance transfer withdraw; do
+            echo "::group::example $ex"
+            cargo run --example "$ex"
+            echo "::endgroup::"
+          done
+
+      - name: Dump service logs on failure
+        if: failure()
+        working-directory: rust-client
+        run: |
+          for f in test-ledger/*.log; do
+            [ -f "$f" ] || continue
+            echo "::group::$f"; tail -200 "$f"; echo "::endgroup::"
+          done
+          DIR="$HOME/.config/zolana/cache/${ZOLANA_TAG}/accounts"
+          echo "::group::accounts dir $DIR"
+          ls -la "$DIR" || true
+          shopt -s dotglob nullglob
+          for f in "$DIR"/*; do
+            [ -f "$f" ] || continue
+            if iconv -f UTF-8 -t UTF-8 "$f" >/dev/null 2>&1; then u=UTF8OK; else u=NONUTF8; fi
+            printf '%s\t%s\t%s\n' "$u" "$(file -b "$f" 2>/dev/null)" "$(basename "$f")"
+          done
+          echo "::endgroup::"
+
+      - name: Stop local zolana stack
+        if: always()
+        run: zolana test-env --stop || true

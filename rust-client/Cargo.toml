@@ -1,0 +1,62 @@
+[package]
+name = "rust-client-example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# The zolana SDK crates are pulled from the zolana repo by git, pinned to a rev
+# on main; the solana-* crates are pinned to the versions the SDK builds against.
+# The zolana repo is private, so fetching needs an SSO-authorized SSH key and
+# cargo's git-fetch-with-cli (see .cargo/config.toml).
+[dependencies]
+anyhow = "1.0"
+dotenvy = "0.15"
+solana-address = { version = "2.6", features = ["atomic", "borsh", "bytemuck", "copy", "decode", "wincode"] }
+solana-compute-budget-interface = "3.0"
+solana-instruction = "3.4"
+solana-keypair = "3.1.2"
+solana-message = "3.1"
+solana-pubkey = { version = "4.2", features = ["curve25519"] }
+solana-signature = "3.4"
+solana-signer = "3.0"
+solana-transaction = "3.1"
+shellexpand = "3"
+zolana-client = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c", features = ["indexer-api", "solana-rpc"] }
+zolana-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c", features = ["solana"] }
+zolana-keypair = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c" }
+zolana-test-utils = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c" }
+zolana-transaction = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c" }
+zolana-user-registry-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c", features = ["solana"] }
+solana-system-interface = "3.2.0"
+
+[[example]]
+name = "deposit"
+path = "examples/deposit.rs"
+
+[[example]]
+name = "transfer"
+path = "examples/transfer.rs"
+
+[[example]]
+name = "withdraw"
+path = "examples/withdraw.rs"
+
+[[example]]
+name = "sync_balance"
+path = "examples/sync_balance.rs"
+
+[[example]]
+name = "create_private_wallet"
+path = "examples/create_private_wallet.rs"
+
+[[example]]
+name = "deposit_instruction"
+path = "examples/deposit_instruction.rs"
+
+[[example]]
+name = "transfer_instruction"
+path = "examples/transfer_instruction.rs"
+
+[[example]]
+name = "withdraw_instruction"
+path = "examples/withdraw_instruction.rs"
