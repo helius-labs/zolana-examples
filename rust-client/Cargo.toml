@@ -6,8 +6,6 @@ publish = false
 
 # The zolana SDK crates are pulled from the zolana repo by git, pinned to a rev
 # on main; the solana-* crates are pinned to the versions the SDK builds against.
-# The zolana repo is private, so fetching needs an SSO-authorized SSH key and
-# cargo's git-fetch-with-cli (see .cargo/config.toml).
 [dependencies]
 anyhow = "1.0"
 dotenvy = "0.15"
@@ -21,12 +19,12 @@ solana-signature = "3.4"
 solana-signer = "3.0"
 solana-transaction = "3.1"
 shellexpand = "3"
-zolana-client = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c", features = ["indexer-api", "solana-rpc"] }
-zolana-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c", features = ["solana"] }
-zolana-keypair = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c" }
-zolana-test-utils = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c" }
-zolana-transaction = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c" }
-zolana-user-registry-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c", features = ["solana"] }
+zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c", features = ["indexer-api", "solana-rpc"] }
+zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c", features = ["solana"] }
+zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c" }
+zolana-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c" }
+zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c" }
+zolana-user-registry-interface = { git = "https://github.com/helius-labs/zolana", rev = "2eba04498ab852e2c3135bf25e20f11e9d28bb2c", features = ["solana"] }
 solana-system-interface = "3.2.0"
 
 [[example]]
