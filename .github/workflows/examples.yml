@@ -35,13 +35,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Some crates still pin the zolana git deps as `ssh://` URLs. The repo
-      # is public, so plain HTTPS works — no token. git-fetch-with-cli in each
-      # crate's .cargo/config.toml makes cargo's fetches honor the rewrite.
-      - name: Rewrite ssh git deps to https
-        run: |
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -160,10 +153,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Rewrite ssh git deps to https
-        run: |
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -190,10 +179,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Rewrite ssh git deps to https
-        run: |
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

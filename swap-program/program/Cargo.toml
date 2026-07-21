@@ -24,9 +24,9 @@ pinocchio = { version = "0.11", features = ["cpi"] }
 solana-program-error = "3.0"
 thiserror = "2.0"
 wincode = { version = "0.5", features = ["derive"] }
-zolana-account-checks = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-hasher = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["poseidon"] }
-zolana-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["solana"] }
+zolana-account-checks = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-hasher = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["poseidon"] }
+zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["solana"] }
 
 [lints.rust.unexpected_cfgs]
 level = "allow"

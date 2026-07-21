@@ -1,3 +1,0 @@
-# Fetch git dependencies with the system git CLI.
-[net]
-git-fetch-with-cli = true

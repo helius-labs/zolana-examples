@@ -5,22 +5,21 @@ members = ["program", "sdk", "prover", "test"]
 [workspace.package]
 edition = "2021"
 
-# The zolana crates are pulled from the private zolana repo by git, pinned to a
-# rev on main; the solana-* and other crates are pinned to the versions the SDK
-# builds against. Fetching the private repo needs an SSO-authorized SSH key and
-# cargo's git-fetch-with-cli (see .cargo/config.toml).
+# The zolana crates are pulled from the zolana repo by git, pinned to a rev on
+# main; the solana-* and other crates are pinned to the versions the SDK builds
+# against.
 [workspace.dependencies]
-zolana-account-checks = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-client = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-hasher = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-interface = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-keypair = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-merkle-tree = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-program-test = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-test-utils = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-transaction = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-tree = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-wallet = { git = "ssh://git@github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-account-checks = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-hasher = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-merkle-tree = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-program-test = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-tree = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
+zolana-wallet = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
 
 groth16-solana = { git = "https://github.com/Lightprotocol/groth16-solana", rev = "43fee1a67e91c0df7bb4edad5ba87ae4602aa208" }
 light-program-profiler = { git = "https://github.com/Lightprotocol/light-program-profiler", rev = "862df52dd8c6099c11f795553514c654f3c2c459" }
