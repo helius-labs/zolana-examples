@@ -2,6 +2,7 @@ target/
 node_modules/
 .DS_Store
 rust-client/.env
+private-on-off-ramp/.env
 rust-client/BUGS.md
 rust-client/test-ledger/
 rust-client/.surfpool/

@@ -18,7 +18,33 @@ cp .env.example .env
 
 By default, the examples use your CLI wallet as `payer`. Make sure it's funded with [devnet SOL](https://faucet.solana.com/).
 
-To run on localnet, toggle `localnet` in [`src/lib.rs`](src/lib.rs).
+### Localnet
+
+Requirements:
+
+- zolana cli (install via `cargo install --git https://github.com/helius-labs/zolana --tag v0.1.0-alpha zolana-cli`)
+- solana cli version 4.x
+
+Start the localnet and fund the payer:
+
+```bash
+zolana test-env --with-photon --no-use-surfpool
+solana airdrop 100 --url http://127.0.0.1:8899
+```
+
+NOTE: `--no-use-surfpool` runs the solana test validator directly; the default
+surfpool backend rejects account creation on localnet.
+
+Point the examples at localnet in [`src/lib.rs`](src/lib.rs): uncomment the
+three `// localnet:` URLs and remove the devnet ones.
+
+`zolana test-env` spawns the following background processes:
+
+1. solana test validator `http://127.0.0.1:8899`
+2. prover server `http://127.0.0.1:3001`
+3. photon indexer `http://127.0.0.1:8784`
+
+Stop them with `zolana test-env --stop`.
 
 ## Run
 
