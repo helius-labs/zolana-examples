@@ -1,17 +1,16 @@
-# Swap Program
+# Timelock Escrow Program
 
-A confidential swap between a maker and a taker on the Solana Privacy Program
-(SPP). The maker commits an order that locks the funds it is selling as a
-shielded UTXO; the taker takes it before expiry, or the maker reclaims it
-after. Amounts and the price stay private. That a swap was made and later
-taken or cancelled is public.
+A timelock escrow on the Solana Privacy Program (SPP). The creator locks funds
+as a shielded UTXO with a chosen unlock timestamp and reclaims them once that
+timestamp has passed. The same creator that locks the funds is the only party
+that can withdraw them. Amounts stay private.
 
-The swap program is an SPP ZK program: it verifies a small proof of its own
-swap rules and delegates the confidential transfer to SPP. It stores no state
-and owns no accounts.
+The timelock escrow program is an SPP ZK program: it verifies a small proof of
+its own escrow rules and delegates the confidential transfer to SPP. It stores
+no state and owns no accounts.
 
-See [`swap_program.md`](swap_program.md) for the full design: the privacy
-model, order terms, instructions, and circuits.
+See [`timelock_escrow.md`](timelock_escrow.md) for the full design: the
+privacy model, escrow terms, instructions, and circuits.
 
 ## Layout
 
@@ -20,7 +19,7 @@ model, order terms, instructions, and circuits.
 - [`prover/`](prover/) — in-process proving engine. Go gnark circuits, ffi
   bindings, and the key-generation binary.
 - [`sdk/`](sdk/) — client library. State, instruction and proof-input
-  builders, UTXO hashing, discovery, encryption codecs, and the prover client.
+  builders, UTXO hashing, and the prover client.
 - [`test/`](test/) — localnet end-to-end tests and CU benchmarks
   ([`BENCHMARK.md`](BENCHMARK.md)).
 
@@ -34,8 +33,8 @@ cargo build
 ```
 
 The circuit tests need the pinned proving and verifying keys, whose hashes are
-in [`swap-keys.CHECKSUM`](swap-keys.CHECKSUM). Generate them with the
-`swap-prover-setup` binary.
+in [`timelock-escrow-keys.CHECKSUM`](timelock-escrow-keys.CHECKSUM). Generate
+them with the `timelock-escrow-prover-setup` binary.
 
 Build the program for deployment:
 
@@ -60,4 +59,4 @@ a solana test validator, photon indexer, and prover server through the
 repository — the shielded-pool, user-registry, and Squads programs in
 `target/deploy/` and the SPP proving keys in `prover/server/proving-keys/`.
 `ZOLANA_CLI_BIN`, `ZOLANA_PHOTON_BIN`, `ZOLANA_PROVER_BIN`, and
-`SWAP_PROGRAM_SO` override the binary paths.
+`TIMELOCK_ESCROW_PROGRAM_SO` override the binary paths.
