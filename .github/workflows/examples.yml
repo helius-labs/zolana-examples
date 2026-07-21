@@ -2,7 +2,6 @@ name: examples
 
 on:
   push:
-    branches: [main]
     paths:
       - "swap-program/**"
       - "escrow-program/**"
@@ -12,6 +11,7 @@ on:
       - "swap-program/**"
       - "escrow-program/**"
       - ".github/workflows/examples.yml"
+  workflow_dispatch:
 
 concurrency:
   group: examples-${{ github.ref }}
