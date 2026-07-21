@@ -1,0 +1,5 @@
+# The zolana git dependencies live in a private repo. Fetch them with the git
+# CLI so cargo uses your SSO-authorized SSH credentials instead of its built-in
+# git, which cannot authenticate to the private remote.
+[net]
+git-fetch-with-cli = true

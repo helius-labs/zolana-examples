@@ -5,11 +5,16 @@ on:
     branches: [main]
     paths:
       - "rust-client/**"
+      - "swap-program/**"
+      - "escrow-program/**"
       - ".github/workflows/examples.yml"
   pull_request:
     paths:
       - "rust-client/**"
+      - "swap-program/**"
+      - "escrow-program/**"
       - ".github/workflows/examples.yml"
+  workflow_dispatch:
 
 concurrency:
   group: examples-${{ github.ref }}
@@ -17,10 +22,11 @@ concurrency:
 
 env:
   ZOLANA_TAG: v0.1.0-alpha
-  # Match the Anza/agave version the zolana release is built and tested against
-  # (zolana's own CI pins this). `stable` drifts to newer agave whose
+  # Match the Anza/agave + SBF toolchain the zolana release is built and tested
+  # against (zolana's own CI pins these). `stable` drifts to newer agave whose
   # solana-test-validator panics reading the pinned account snapshots.
   AGAVE_VERSION: v4.0.2
+  SBF_TOOLS_VERSION: v1.54
 
 jobs:
   run-examples:
@@ -154,3 +160,75 @@ jobs:
       - name: Stop local zolana stack
         if: always()
         run: zolana test-env --stop || true
+
+  swap-build:
+    name: build / swap-program
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git auth for private zolana deps
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.ZOLANA_SDK_TOKEN }}@github.com/".insteadOf \
+            "https://github.com/"
+          git config --global \
+            url."https://x-access-token:${{ secrets.ZOLANA_SDK_TOKEN }}@github.com/".insteadOf \
+            "ssh://git@github.com/"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: swap-program
+
+      - name: Install Anza (Solana) CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Install pinned SBF platform tools
+        working-directory: swap-program/program
+        run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
+
+      - name: Build swap program (SBF)
+        working-directory: swap-program/program
+        run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --features bpf-entrypoint
+
+  escrow-build:
+    name: build / escrow-program
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git auth for private zolana deps
+        run: |
+          git config --global \
+            url."https://x-access-token:${{ secrets.ZOLANA_SDK_TOKEN }}@github.com/".insteadOf \
+            "https://github.com/"
+          git config --global \
+            url."https://x-access-token:${{ secrets.ZOLANA_SDK_TOKEN }}@github.com/".insteadOf \
+            "ssh://git@github.com/"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: escrow-program
+
+      - name: Install Anza (Solana) CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Install pinned SBF platform tools
+        working-directory: escrow-program/program
+        run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
+
+      - name: Build escrow program (SBF)
+        working-directory: escrow-program/program
+        run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --features bpf-entrypoint

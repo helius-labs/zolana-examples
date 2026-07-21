@@ -1,4 +1,4 @@
-# Private Solana Ring Examples 
+# Private Solana Ring Examples
 
 Helius makes privacy on Solana accessible for SOL and any SPL asset via simple APIs.
 Privacy Rings allow for confidential and anonymous transfers, while keeping execution on Solana and custody with the user:
@@ -6,7 +6,7 @@ Privacy Rings allow for confidential and anonymous transfers, while keeping exec
 * For every private transfer, a zero-knowledge proof (ZKP) attests a user owns and can transfer tokens from their private balance. Funds move in a single Solana transaction between public and private balances in Helius Privacy Rings via deposit, withdrawal, or private transfer.
 * The Solana Privacy Program verifies the ZK proof without revealing asset and amount in confidential rings, or anything in anonymous rings.
 
-The level of privacy depends on the Ring a user holds her private balance: 
+The level of privacy depends on the Ring a user holds her private balance:
 
 | | Default Ring (confidential) | Custom Ring (confidential) | Custom Ring (anonymous) |
 | --- | --- | --- | --- |
@@ -18,6 +18,11 @@ The level of privacy depends on the Ring a user holds her private balance:
 
 ### Rust Client
 
+Self-contained Rust binaries that drive the `zolana-client` SDK against a local
+validator, Photon indexer, and prover. They live in
+[`rust-client/`](rust-client/) — see its [README](rust-client/README.md) to
+build the prerequisites and run them.
+
 |  |  |
 |---------|-------------|
 | [`create_private_wallet`](rust-client/examples/create_private_wallet.rs) | Create and register a wallet for a private balance. |
@@ -25,6 +30,16 @@ The level of privacy depends on the Ring a user holds her private balance:
 | [`transfer`](rust-client/examples/transfer.rs) | Send a value privately between two private balances. |
 | [`withdraw`](rust-client/examples/withdraw.rs) | Withdraw a private balance back to a public account. |
 | [`sync_balance`](rust-client/examples/sync_balance.rs) | Read a wallet's private balance from the indexer. |
+
+### Program examples
+
+ZK programs built on the Solana Privacy Program (SPP), each verifying a proof of
+its own rules and delegating the confidential transfer to SPP.
+
+|  |  |
+|---------|-------------|
+| [`swap-program/`](swap-program/) | A confidential swap between a maker and a taker on SPP. |
+| [`escrow-program/`](escrow-program/) | A timelock escrow on SPP: lock a private balance until a deadline, then release or reclaim. |
 
 ## Documentation
 
