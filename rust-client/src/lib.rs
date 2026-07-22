@@ -72,15 +72,9 @@ pub fn env_config() -> Result<Config> {
 
 /// Move `lamports` from the payer to `to`. Localnet keys start empty, so the
 /// payer funds the keys the examples need.
-fn fund_key(
-    rpc: &impl Rpc,
-    payer: &Keypair,
-    to: &Pubkey,
-    lamports: u64,
-) -> Result<Signature> {
+fn fund_key(rpc: &impl Rpc, payer: &Keypair, to: &Pubkey, lamports: u64) -> Result<Signature> {
     let ix = solana_system_interface::instruction::transfer(&payer.pubkey(), to, lamports);
-    let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
-    Ok(rpc.create_and_send_transaction(&[ix], payer_address, &[payer])?)
+    Ok(rpc.create_and_send_transaction(&[ix], payer.pubkey(), &[payer])?)
 }
 
 /// Create a test mint, register its interface PDA, open a funded token account
@@ -94,7 +88,7 @@ pub fn register_asset(rpc: &impl Rpc, payer: &Keypair) -> Result<(SplAsset, Asse
     let asset_id = fetch_asset_id(rpc, &mint)?;
     let mut registry = AssetRegistry::default();
     registry
-        .insert(asset_id, Address::new_from_array(mint.to_bytes()))
+        .insert(asset_id, mint)
         .map_err(|e| anyhow!("register SPL asset: {e}"))?;
 
     Ok((SplAsset { mint, user_token }, registry))
@@ -116,7 +110,7 @@ pub fn setup_funded_spl_asset(
 fn fetch_asset_id(rpc: &impl Rpc, mint: &Pubkey) -> Result<u64> {
     let registry = zolana_interface::pda::spl_asset_registry(mint);
     let account = rpc
-        .get_account(Address::new_from_array(registry.to_bytes()))?
+        .get_account(registry)?
         .ok_or_else(|| anyhow!("SPL asset registry not found for mint {mint}"))?;
     let bytes: [u8; 8] = account.data[40..48]
         .try_into()
@@ -211,8 +205,7 @@ pub fn sync_after_deposit(
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    let authority =
-        LocalWalletAuthority::new(Address::new_from_array(payer.pubkey().to_bytes()), keypair);
+    let authority = LocalWalletAuthority::new(payer.pubkey(), keypair);
     zolana_client::sync_wallet(wallet, &authority, client)?;
     Ok(())
 }
@@ -237,9 +230,15 @@ fn deposit(
         spl_token_account,
         memo: None,
     })?;
-    let tree = Pubkey::new_from_array(client.tree().to_bytes());
-    let signature = prepared.send(client, payer, tree, payer)?;
-    sync_after_deposit(client, wallet, payer, keypair, prepared.view_tag(), signature)?;
+    let signature = prepared.send(client, payer, client.tree(), payer)?;
+    sync_after_deposit(
+        client,
+        wallet,
+        payer,
+        keypair,
+        prepared.view_tag(),
+        signature,
+    )?;
     Ok(())
 }
 
@@ -265,13 +264,12 @@ fn deposit_spl(
     amount: u64,
 ) -> Result<()> {
     mint_to(client, payer, &asset.mint, &asset.user_token, amount)?;
-    let mint = Address::new_from_array(asset.mint.to_bytes());
     deposit(
         client,
         payer,
         keypair,
         wallet,
-        mint,
+        asset.mint,
         amount,
         Some(asset.user_token),
     )

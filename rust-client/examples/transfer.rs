@@ -1,6 +1,5 @@
 use anyhow::Result;
 use rust_client_example::{create_test_recipient, env_config, setup_funded_wallet};
-use solana_address::Address;
 use solana_signer::Signer;
 use zolana_client::{
     create_transfer_sync, get_private_token_balances, sign_private_transaction_sync, sync_wallet,
@@ -24,7 +23,6 @@ fn main() -> Result<()> {
     // registered recipient.
     let sender = setup_funded_wallet(&client, &cfg.payer, &sender_keypair, 10_000)?;
     let mut recipient = create_test_recipient(&client, &cfg.payer, sender.registry)?;
-    let mint = Address::new_from_array(sender.asset.mint.to_bytes());
 
     // 1. Build the transfer. The client resolves the recipient's private
     // wallet by pubkey; if the recipient is not registered it falls back to a
@@ -32,9 +30,9 @@ fn main() -> Result<()> {
     let created = create_transfer_sync(TransferParams {
         rpc: &client,
         wallet: &sender.wallet,
-        payer: Address::new_from_array(cfg.payer.pubkey().to_bytes()),
+        payer: cfg.payer.pubkey(),
         recipient: recipient.keypair.pubkey(),
-        asset: mint, // for SOL: SOL_MINT
+        asset: sender.asset.mint, // for SOL: SOL_MINT
         amount: 4_000,
     })?;
     let routed = match &created.recipient {
@@ -44,10 +42,7 @@ fn main() -> Result<()> {
 
     // 2. Sign the transfer. Includes the proof that the sender owns and can
     // spend the balance.
-    let sender_authority = LocalWalletAuthority::new(
-        Address::new_from_array(cfg.payer.pubkey().to_bytes()),
-        &sender_keypair,
-    );
+    let sender_authority = LocalWalletAuthority::new(cfg.payer.pubkey(), &sender_keypair);
     let tx = sign_private_transaction_sync(
         created.transaction,
         &sender.wallet,
@@ -61,10 +56,8 @@ fn main() -> Result<()> {
     client.confirm_private_transaction_sync(signature)?;
 
     // Sync the recipient's private balance.
-    let recipient_authority = LocalWalletAuthority::new(
-        Address::new_from_array(recipient.keypair.pubkey().to_bytes()),
-        &recipient.shielded_keypair,
-    );
+    let recipient_authority =
+        LocalWalletAuthority::new(recipient.keypair.pubkey(), &recipient.shielded_keypair);
     sync_wallet(&mut recipient.wallet, &recipient_authority, &client)?;
     let balance = get_private_token_balances(&recipient.wallet)?;
 

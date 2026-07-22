@@ -1,6 +1,5 @@
 use anyhow::Result;
 use rust_client_example::{env_config, setup_funded_wallet};
-use solana_address::Address;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 use zolana_client::{
@@ -23,7 +22,6 @@ fn main() -> Result<()> {
 
     // Setup: register a test asset and fund a private wallet.
     let mut sender = setup_funded_wallet(&client, &cfg.payer, &keypair, 10_000)?;
-    let mint = Address::new_from_array(sender.asset.mint.to_bytes());
 
     // 1. Build the withdrawal. Open a public token account for the recipient:
     // the owner or any third party.
@@ -37,18 +35,15 @@ fn main() -> Result<()> {
 
     let created = create_withdrawal(WithdrawalParams {
         wallet: &sender.wallet,
-        payer: Address::new_from_array(cfg.payer.pubkey().to_bytes()),
+        payer: cfg.payer.pubkey(),
         recipient: recipient.pubkey(),
-        asset: mint, // for SOL: SOL_MINT
+        asset: sender.asset.mint, // for SOL: SOL_MINT
         amount: 4_000,
     })?;
 
     // 2. Sign the withdrawal. Includes the proof that the sender owns and can
     // spend the balance.
-    let sender_authority = LocalWalletAuthority::new(
-        Address::new_from_array(cfg.payer.pubkey().to_bytes()),
-        &keypair,
-    );
+    let sender_authority = LocalWalletAuthority::new(cfg.payer.pubkey(), &keypair);
     let tx = sign_private_transaction_sync(
         created.transaction,
         &sender.wallet,

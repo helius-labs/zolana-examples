@@ -1,7 +1,5 @@
 use anyhow::{anyhow, Result};
 use rust_client_example::{env_config, setup_funded_spl_asset};
-use solana_address::Address;
-use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::{
@@ -24,21 +22,15 @@ fn main() -> Result<()> {
     let sender_keypair = ShieldedKeypair::from_solana_keypair(&cfg.payer)?;
     let sender_address = sender_keypair.shielded_address()?;
     let sender_tag = sender_address.confidential_view_tag()?;
-    let state_tree = Pubkey::new_from_array(client.tree().to_bytes());
 
     // Create a test mint with an interface PDA and fund the token account.
     let deposit_amount = 10_000;
-    let (asset, registry) = setup_funded_spl_asset(
-        &client,
-        &cfg.payer,
-        deposit_amount,
-    )?;
-    let mint = Address::new_from_array(asset.mint.to_bytes());
+    let (asset, registry) = setup_funded_spl_asset(&client, &cfg.payer, deposit_amount)?;
     let vault = pda::spl_asset_vault(&asset.mint);
 
     // 1. Move public SPL into the sender's private balance.
     let deposit_instruction = Deposit {
-        tree: state_tree,
+        tree: client.tree(),
         depositor: payer,
         spl: Some(DepositSplAccounts {
             user_token: asset.user_token,
@@ -56,11 +48,8 @@ fn main() -> Result<()> {
     .instruction();
 
     // 2. Send like any Solana transaction.
-    let signature = client.create_and_send_transaction(
-        &[deposit_instruction],
-        payer,
-        &[&cfg.payer],
-    )?;
+    let signature =
+        client.create_and_send_transaction(&[deposit_instruction], payer, &[&cfg.payer])?;
 
     // 3. Read the balance from the indexer. A deposit is a public Solana
     // transaction that reveals the asset and amount.
@@ -70,19 +59,12 @@ fn main() -> Result<()> {
         Some(50),
         Some(IndexerRpcConfig::wait()),
     )?;
-    let sender_balances = decrypt_transactions(
-        &sender_keypair,
-        &response.transactions,
-        &registry,
-    )
-    .map_err(|error| anyhow!("decrypt sender transactions: {error:?}"))?;
+    let sender_balances = decrypt_transactions(&sender_keypair, &response.transactions, &registry)
+        .map_err(|error| anyhow!("decrypt sender transactions: {error:?}"))?;
     let sender_balance = sender_balances
-        .get_balance(mint)
+        .get_balance(asset.mint)
         .ok_or_else(|| anyhow!("failed to fetch sender's balance"))?;
 
-    println!(
-        "deposit balance={} tx={signature}",
-        sender_balance.amount
-    );
+    println!("deposit balance={} tx={signature}", sender_balance.amount);
     Ok(())
 }
