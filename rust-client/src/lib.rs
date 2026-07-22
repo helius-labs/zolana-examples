@@ -12,7 +12,7 @@ use solana_signer::Signer;
 use zolana_client::{
     create_deposit, ensure_registered, DepositParams, Rpc, SolanaRpc, ZolanaClient,
 };
-use zolana_interface::DEFAULT_TREE_ADDRESS;
+use zolana_interface::{state::SplAssetRegistry, DEFAULT_TREE_ADDRESS, SHIELDED_POOL_PROGRAM_ID};
 use zolana_keypair::ShieldedKeypair;
 use zolana_test_utils::spl::{
     create_mint, create_spl_interface, create_token_account, ensure_asset_counter, mint_to,
@@ -78,19 +78,13 @@ fn fund_key(rpc: &impl Rpc, payer: &Keypair, to: &Pubkey, lamports: u64) -> Resu
 }
 
 /// Create a test mint, register its interface PDA, open a funded token account
-/// for the payer, and map the mint to its assigned asset id.
+/// for the payer, and read back the full on-chain asset registry.
 pub fn register_asset(rpc: &impl Rpc, payer: &Keypair) -> Result<(SplAsset, AssetRegistry)> {
     let mint = create_mint(rpc, payer)?;
     ensure_asset_counter(rpc, payer)?;
     create_spl_interface(rpc, payer, &mint)?;
     let user_token = create_token_account(rpc, payer, &mint, &payer.pubkey())?;
-
-    let asset_id = fetch_asset_id(rpc, &mint)?;
-    let mut registry = AssetRegistry::default();
-    registry
-        .insert(asset_id, mint)
-        .map_err(|e| anyhow!("register SPL asset: {e}"))?;
-
+    let registry = chain_asset_registry(rpc)?;
     Ok((SplAsset { mint, user_token }, registry))
 }
 
@@ -106,16 +100,20 @@ pub fn setup_funded_spl_asset(
     Ok((asset, registry))
 }
 
-/// Read the asset id the program assigned to `mint` from its registry PDA.
-fn fetch_asset_id(rpc: &impl Rpc, mint: &Pubkey) -> Result<u64> {
-    let registry = zolana_interface::pda::spl_asset_registry(mint);
-    let account = rpc
-        .get_account(registry)?
-        .ok_or_else(|| anyhow!("SPL asset registry not found for mint {mint}"))?;
-    let bytes: [u8; 8] = account.data[40..48]
-        .try_into()
-        .map_err(|_| anyhow!("read asset id"))?;
-    Ok(u64::from_le_bytes(bytes))
+/// The asset registry read from chain: every registered mint, so decoding a
+/// wallet whose history spans earlier runs never hits an unknown mint.
+pub fn chain_asset_registry(rpc: &impl Rpc) -> Result<AssetRegistry> {
+    let program_id = Address::new_from_array(SHIELDED_POOL_PROGRAM_ID);
+    let mut registry = AssetRegistry::default();
+    for (_, account) in rpc.get_program_accounts(program_id)? {
+        let Ok(entry) = SplAssetRegistry::from_account_bytes(&account.data) else {
+            continue;
+        };
+        registry
+            .insert(entry.asset_id, entry.mint)
+            .map_err(|e| anyhow!("chain asset registry: {e}"))?;
+    }
+    Ok(registry)
 }
 
 /// A funded test recipient with its private wallet.
@@ -179,7 +177,7 @@ pub fn setup_funded_sol_wallet(
     amount: u64,
 ) -> Result<Wallet> {
     ensure_registered(client, payer, keypair)?;
-    let mut wallet = Wallet::new(keypair.shielded_address()?, AssetRegistry::default())?;
+    let mut wallet = Wallet::new(keypair.shielded_address()?, chain_asset_registry(client)?)?;
     deposit_sol(client, payer, keypair, &mut wallet, amount)?;
     Ok(wallet)
 }
