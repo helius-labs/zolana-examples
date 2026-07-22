@@ -1,14 +1,20 @@
 use anyhow::Result;
-use rust_client_example::{client, env_config};
+use rust_client_example::env_config;
 use solana_signer::Signer;
-use zolana_client::{ensure_registered, is_wallet_registered_sync};
+use zolana_client::{ensure_registered, is_wallet_registered_sync, SolanaRpc, ZolanaClient};
+use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::{AssetRegistry, Wallet};
 
 fn main() -> Result<()> {
     // Load the fee payer and localnet settings, then connect.
     let cfg = env_config()?;
-    let client = client(&cfg);
-    let keypair = rust_client_example::shielded_keypair(&cfg.payer)?;
+    let client = ZolanaClient::from_urls(
+        SolanaRpc::new(cfg.rpc_url.clone()),
+        &cfg.indexer_url,
+        cfg.prover_url.clone(),
+        cfg.tree,
+    );
+    let keypair = ShieldedKeypair::from_solana_keypair(&cfg.payer)?;
 
     // A private wallet is an in-memory object; there is nothing on-chain to
     // create for it.

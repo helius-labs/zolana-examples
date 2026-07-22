@@ -10,11 +10,10 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use zolana_client::{
-    create_associated_token_account, create_deposit, ensure_registered, DepositParams, Rpc,
-    SolanaRpc, ZolanaClient,
+    create_deposit, ensure_registered, DepositParams, Rpc, SolanaRpc, ZolanaClient,
 };
-use zolana_interface::DEFAULT_TREE_ADDRESS;
-use zolana_keypair::{ShieldedKeypair, ViewingKey};
+use zolana_interface::{state::SplAssetRegistry, DEFAULT_TREE_ADDRESS, SHIELDED_POOL_PROGRAM_ID};
+use zolana_keypair::ShieldedKeypair;
 use zolana_test_utils::spl::{
     create_mint, create_spl_interface, create_token_account, ensure_asset_counter, mint_to,
 };
@@ -71,75 +70,50 @@ pub fn env_config() -> Result<Config> {
     })
 }
 
-/// Build the client from a config.
-pub fn client(cfg: &Config) -> ZolanaClient<SolanaRpc> {
-    ZolanaClient::from_urls(
-        SolanaRpc::new(cfg.rpc_url.clone()),
-        &cfg.indexer_url,
-        cfg.prover_url.clone(),
-        cfg.tree,
-    )
-}
-
-/// Derive the shielded keypair from a Solana keypair: one ed25519 key signs
-/// both the Solana account and the private balance.
-pub fn shielded_keypair(payer: &Keypair) -> Result<ShieldedKeypair> {
-    let seed: [u8; 32] = payer.to_bytes()[..32]
-        .try_into()
-        .map_err(|_| anyhow!("keypair seed"))?;
-    Ok(ShieldedKeypair::from_ed25519(&seed, ViewingKey::new())?)
-}
-
-/// The authority that signs a wallet's balance reads and private transactions.
-pub fn authority<'a>(payer: &Keypair, keypair: &'a ShieldedKeypair) -> LocalWalletAuthority<'a> {
-    LocalWalletAuthority::new(Address::new_from_array(payer.pubkey().to_bytes()), keypair)
-}
-
-/// The tree as a `Pubkey`, for the instruction builders that want one.
-pub fn tree_pubkey(client: &ZolanaClient<SolanaRpc>) -> Pubkey {
-    Pubkey::new_from_array(client.tree().to_bytes())
-}
-
 /// Move `lamports` from the payer to `to`. Localnet keys start empty, so the
 /// payer funds the keys the examples need.
-pub fn fund_key(
-    rpc: &impl Rpc,
-    payer: &Keypair,
-    to: &Pubkey,
-    lamports: u64,
-) -> Result<Signature> {
+fn fund_key(rpc: &impl Rpc, payer: &Keypair, to: &Pubkey, lamports: u64) -> Result<Signature> {
     let ix = solana_system_interface::instruction::transfer(&payer.pubkey(), to, lamports);
-    let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
-    Ok(rpc.create_and_send_transaction(&[ix], payer_address, &[payer])?)
+    Ok(rpc.create_and_send_transaction(&[ix], payer.pubkey(), &[payer])?)
 }
 
 /// Create a test mint, register its interface PDA, open a funded token account
-/// for the payer, and map the mint to its assigned asset id.
+/// for the payer, and read back the full on-chain asset registry.
 pub fn register_asset(rpc: &impl Rpc, payer: &Keypair) -> Result<(SplAsset, AssetRegistry)> {
     let mint = create_mint(rpc, payer)?;
     ensure_asset_counter(rpc, payer)?;
     create_spl_interface(rpc, payer, &mint)?;
     let user_token = create_token_account(rpc, payer, &mint, &payer.pubkey())?;
-
-    let asset_id = fetch_asset_id(rpc, &mint)?;
-    let mut registry = AssetRegistry::default();
-    registry
-        .insert(asset_id, Address::new_from_array(mint.to_bytes()))
-        .map_err(|e| anyhow!("register SPL asset: {e}"))?;
-
+    let registry = chain_asset_registry(rpc)?;
     Ok((SplAsset { mint, user_token }, registry))
 }
 
-/// Read the asset id the program assigned to `mint` from its registry PDA.
-fn fetch_asset_id(rpc: &impl Rpc, mint: &Pubkey) -> Result<u64> {
-    let registry = zolana_interface::pda::spl_asset_registry(mint);
-    let account = rpc
-        .get_account(Address::new_from_array(registry.to_bytes()))?
-        .ok_or_else(|| anyhow!("SPL asset registry not found for mint {mint}"))?;
-    let bytes: [u8; 8] = account.data[40..48]
-        .try_into()
-        .map_err(|_| anyhow!("read asset id"))?;
-    Ok(u64::from_le_bytes(bytes))
+/// Create a test mint with an interface PDA and fund the payer's token account
+/// with `amount` of the asset.
+pub fn setup_funded_spl_asset(
+    rpc: &impl Rpc,
+    payer: &Keypair,
+    amount: u64,
+) -> Result<(SplAsset, AssetRegistry)> {
+    let (asset, registry) = register_asset(rpc, payer)?;
+    mint_to(rpc, payer, &asset.mint, &asset.user_token, amount)?;
+    Ok((asset, registry))
+}
+
+/// The asset registry read from chain: every registered mint, so decoding a
+/// wallet whose history spans earlier runs never hits an unknown mint.
+pub fn chain_asset_registry(rpc: &impl Rpc) -> Result<AssetRegistry> {
+    let program_id = Address::new_from_array(SHIELDED_POOL_PROGRAM_ID);
+    let mut registry = AssetRegistry::default();
+    for (_, account) in rpc.get_program_accounts(program_id)? {
+        let Ok(entry) = SplAssetRegistry::from_account_bytes(&account.data) else {
+            continue;
+        };
+        registry
+            .insert(entry.asset_id, entry.mint)
+            .map_err(|e| anyhow!("chain asset registry: {e}"))?;
+    }
+    Ok(registry)
 }
 
 /// A funded test recipient with its private wallet.
@@ -159,7 +133,7 @@ pub fn create_test_recipient(
 ) -> Result<TestRecipient> {
     let recipient = Keypair::new();
     fund_key(rpc, payer, &recipient.pubkey(), 20_000_000)?;
-    let shielded_keypair = shielded_keypair(&recipient)?;
+    let shielded_keypair = ShieldedKeypair::from_solana_keypair(&recipient)?;
     ensure_registered(rpc, &recipient, &shielded_keypair)?;
     let wallet = Wallet::new(shielded_keypair.shielded_address()?, registry)?;
     Ok(TestRecipient {
@@ -203,26 +177,14 @@ pub fn setup_funded_sol_wallet(
     amount: u64,
 ) -> Result<Wallet> {
     ensure_registered(client, payer, keypair)?;
-    let mut wallet = Wallet::new(keypair.shielded_address()?, AssetRegistry::default())?;
+    let mut wallet = Wallet::new(keypair.shielded_address()?, chain_asset_registry(client)?)?;
     deposit_sol(client, payer, keypair, &mut wallet, amount)?;
     Ok(wallet)
 }
 
-/// Create a fresh test recipient and its token account for `mint`.
-pub fn create_test_recipient_token_account(
-    rpc: &impl Rpc,
-    payer: &Keypair,
-    mint: &Pubkey,
-) -> Result<(Keypair, Pubkey)> {
-    let recipient = Keypair::new();
-    let (_signature, token_account) =
-        create_associated_token_account(rpc, payer, &recipient.pubkey(), mint)?;
-    Ok((recipient, token_account))
-}
-
 /// Wait until the indexer has picked up the deposit's output for `tag`, then
 /// sync the wallet so the deposited balance appears.
-fn sync_after_deposit(
+pub fn sync_after_deposit(
     client: &ZolanaClient<SolanaRpc>,
     wallet: &mut Wallet,
     payer: &Keypair,
@@ -241,7 +203,7 @@ fn sync_after_deposit(
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    let authority = authority(payer, keypair);
+    let authority = LocalWalletAuthority::new(payer.pubkey(), keypair);
     zolana_client::sync_wallet(wallet, &authority, client)?;
     Ok(())
 }
@@ -266,13 +228,20 @@ fn deposit(
         spl_token_account,
         memo: None,
     })?;
-    let signature = prepared.send(client, payer, tree_pubkey(client), payer)?;
-    sync_after_deposit(client, wallet, payer, keypair, prepared.view_tag(), signature)?;
+    let signature = prepared.send(client, payer, client.tree(), payer)?;
+    sync_after_deposit(
+        client,
+        wallet,
+        payer,
+        keypair,
+        prepared.view_tag(),
+        signature,
+    )?;
     Ok(())
 }
 
 /// Move `amount` of SOL into the private balance of `keypair`.
-pub fn deposit_sol(
+fn deposit_sol(
     client: &ZolanaClient<SolanaRpc>,
     payer: &Keypair,
     keypair: &ShieldedKeypair,
@@ -284,7 +253,7 @@ pub fn deposit_sol(
 
 /// Fund the token account, then move `amount` of an SPL asset into the private
 /// balance of `keypair`.
-pub fn deposit_spl(
+fn deposit_spl(
     client: &ZolanaClient<SolanaRpc>,
     payer: &Keypair,
     keypair: &ShieldedKeypair,
@@ -293,13 +262,12 @@ pub fn deposit_spl(
     amount: u64,
 ) -> Result<()> {
     mint_to(client, payer, &asset.mint, &asset.user_token, amount)?;
-    let mint = Address::new_from_array(asset.mint.to_bytes());
     deposit(
         client,
         payer,
         keypair,
         wallet,
-        mint,
+        asset.mint,
         amount,
         Some(asset.user_token),
     )
