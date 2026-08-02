@@ -1,10 +1,10 @@
-# Zolana Examples - Rust Client
+# Zolana examples: Rust client
 
 |  |  |  |  |
 |---------|-------------|---------|---------|
-| [`transfer`](examples/transfer.rs) | Transfer between private balances. | [Action](examples/transfer.rs) | [Instruction](examples/transfer_instruction.rs) |
-| [`deposit`](examples/deposit.rs) | Move tokens from a public to a private balance. | [Action](examples/deposit.rs) | [Instruction](examples/deposit_instruction.rs) |
-| [`withdraw`](examples/withdraw.rs) | Move tokens from a private to a public balance. | [Action](examples/withdraw.rs) | [Instruction](examples/withdraw_instruction.rs) |
+| [`transfer`](examples/transfer.rs) | Transfer SOL between private balances. | [Action](examples/transfer.rs) | [Instruction](examples/transfer_instruction.rs) |
+| [`deposit`](examples/deposit.rs) | Move SOL from a public to a private balance. | [Action](examples/deposit.rs) | [Instruction](examples/deposit_instruction.rs) |
+| [`withdraw`](examples/withdraw.rs) | Move SOL from a private to a public balance. | [Action](examples/withdraw.rs) | [Instruction](examples/withdraw_instruction.rs) |
 | [`create_private_wallet`](examples/create_private_wallet.rs) | Create a private wallet. | [Action](examples/create_private_wallet.rs) |  |
 | [`sync_balance`](examples/sync_balance.rs) | Read a wallet's private balance. | [Action](examples/sync_balance.rs) |  |
 

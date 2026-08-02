@@ -1,14 +1,12 @@
 use anyhow::Result;
-use rust_client_example::{env_config, register_asset, sync_after_deposit};
-use zolana_client::{
-    create_deposit, get_private_token_balances, DepositParams, SolanaRpc, ZolanaClient,
-};
+use rust_client_example::{env_config, sync_after_deposit};
+use zolana_client::{SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
-use zolana_test_utils::spl::mint_to;
-use zolana_transaction::{Wallet, SOL_MINT};
+use zolana_transaction::{AssetRegistry, Wallet, SOL_MINT};
+use zolana_wallet::{create_deposit, get_private_token_balances, DepositParams};
 
 fn main() -> Result<()> {
-    // Load the fee payer and settings, then connect.
+    // Load the funded fee payer and network settings, then connect.
     let cfg = env_config()?;
     let client = ZolanaClient::from_urls(
         SolanaRpc::new(cfg.rpc_url.clone()),
@@ -18,20 +16,30 @@ fn main() -> Result<()> {
     );
     let keypair = ShieldedKeypair::from_solana_keypair(&cfg.payer)?;
 
-    // Setup: register a test mint with its interface PDA and open the wallet.
-    let (asset, registry) = register_asset(&client, &cfg.payer)?;
-    let mut wallet = Wallet::new(keypair.shielded_address()?, registry)?;
-    let tree = client.tree();
+    // Initialize the sender's private wallet. A wallet is local state; the
+    // deposit creates its first private balance on-chain.
+    let mut wallet = Wallet::new(keypair.shielded_address()?, AssetRegistry::default())?;
+    let tree = cfg.tree_pubkey();
 
-    // Deposit SOL into the private balance, then wait for the indexer and sync.
+    // Deposit SOL into the sender's private balance.
+    // A deposit from a public balance reveals sender, recipient, asset, and
+    // amount. Alternatively, you can onramp fiat directly to a private balance.
+
+    // 1. Build the public-to-private deposit.
     let deposit = create_deposit(DepositParams {
         recipient: &keypair.shielded_address()?,
         asset: SOL_MINT,
         amount: 5_000_000,
         spl_token_account: None,
+        spl_token_program: None,
         memo: None,
     })?;
+
+    // 2. Send like any Solana transaction.
     let signature = deposit.send(&client, &cfg.payer, tree, &cfg.payer)?;
+
+    // 3. Wait until Photon has indexed the output, then decrypt it locally and
+    // update the private balance.
     sync_after_deposit(
         &client,
         &mut wallet,
@@ -41,28 +49,9 @@ fn main() -> Result<()> {
         signature,
     )?;
 
-    // Fund the token account, then deposit the SPL token the same way.
-    mint_to(&client, &cfg.payer, &asset.mint, &asset.user_token, 10_000)?;
-    let deposit = create_deposit(DepositParams {
-        recipient: &keypair.shielded_address()?,
-        asset: asset.mint,
-        amount: 10_000,
-        spl_token_account: Some(asset.user_token),
-        memo: None,
-    })?;
-    let signature = deposit.send(&client, &cfg.payer, tree, &cfg.payer)?;
-    sync_after_deposit(
-        &client,
-        &mut wallet,
-        &cfg.payer,
-        &keypair,
-        deposit.view_tag(),
-        signature,
-    )?;
-
-    // Read the private balance per asset.
+    // 4. Read the private balance per asset.
     let balance = get_private_token_balances(&wallet)?;
 
-    println!("ok deposit private_balance={balance:?}");
+    println!("ok deposit signature={signature} private_balance={balance:?}");
     Ok(())
 }

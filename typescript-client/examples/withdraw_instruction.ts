@@ -1,0 +1,139 @@
+import {
+  DEFAULT_TREE_ADDRESS,
+  SOL_MINT,
+  syncWallet,
+} from "@zolana/sdk";
+import {
+  InterfaceAccounts,
+  transactInstruction,
+} from "@zolana/sdk/interface";
+import {
+  ConfidentialTransfer,
+  ProofInputUtxo,
+  WithdrawalTarget,
+} from "@zolana/sdk/transaction";
+
+import { setupFundedWallet } from "../src/lib.js";
+
+const DEPOSIT_AMOUNT = 1_000_000_000n;
+const WITHDRAW_AMOUNT = 300_000_000n;
+
+async function main(): Promise<void> {
+  // Setup: connect and fund the sender's private SOL balance.
+  const {
+    client,
+    signer: senderSigner,
+    keypair: senderKeypair,
+    wallet: senderWallet,
+    authority: senderAuthority,
+    assets,
+  } = await setupFundedWallet(DEPOSIT_AMOUNT);
+  const senderAddress =
+    senderKeypair.shieldedAddress();
+
+  // Withdraw SOL from the sender's private balance to their public balance.
+  // A withdrawal reveals sender, recipient, asset, and amount.
+
+  // 1. Select private token accounts (UTXOs) that make up the private balance
+  // for the withdrawal.
+  const withdrawalUtxo =
+    senderWallet.balance(SOL_MINT).utxos[0]!;
+  // SPL: const withdrawalUtxo = senderWallet.balance(spl.mint).utxos[0]!;
+
+  // 2. Prepare the selected UTXOs as inputs for the zero-knowledge proof.
+  const withdrawalInput =
+    ProofInputUtxo.fromKeypair(
+      withdrawalUtxo,
+      senderKeypair,
+    );
+
+  // 3. Build and sign the private-to-public withdrawal.
+  // Signing encrypts the asset and amount of the remaining private balance and
+  // produces the proof inputs for the ZK prover.
+  const withdrawal = new ConfidentialTransfer(
+    senderAddress,
+    [withdrawalInput],
+    senderSigner.address,
+  );
+  withdrawal.withdraw(
+    SOL_MINT,
+    WITHDRAW_AMOUNT,
+    WithdrawalTarget.sol({
+      recipient: senderSigner.address,
+    }),
+  );
+  // SPL alternative:
+  // withdrawal.withdraw(
+  //   spl.mint,
+  //   WITHDRAW_AMOUNT,
+  //   WithdrawalTarget.spl({
+  //     recipientTokenAccount: spl.recipientTokenAccount,
+  //     splTokenInterface: spl.splTokenInterface,
+  //   }),
+  // );
+  const withdrawalProofInputs = withdrawal.sign(
+    senderKeypair,
+    assets,
+  );
+
+  // 4. Fetch the ZK proof to prove the sender can spend the balance.
+  const withdrawalData =
+    await client.proveTransact(
+      withdrawalProofInputs,
+    );
+
+  // 5. Build the instruction with the state Merkle tree and public Solana
+  // account required for the withdrawal.
+  const withdrawalIx = transactInstruction({
+    feePayer: senderSigner,
+    inputTree: DEFAULT_TREE_ADDRESS,
+    outputTree: DEFAULT_TREE_ADDRESS,
+    interfaceAccounts: [
+      InterfaceAccounts.sol({
+        recipient: senderSigner.address,
+      }),
+      // SPL alternative:
+      // InterfaceAccounts.splWithdrawal({
+      //   mint: spl.mint,
+      //   splInterfacePda: spl.splInterfacePda,
+      //   recipientTokenAccount: spl.recipientTokenAccount,
+      //   tokenProgram: spl.tokenProgram,
+      // }),
+    ],
+    data: withdrawalData,
+  });
+
+  // 6. Send and confirm like any Solana transaction.
+  const withdrawalSignature =
+    await client.signAndSendInstructions({
+      feePayer: senderSigner,
+      instructions: [withdrawalIx],
+    });
+  await client.confirmPrivateTransaction(
+    withdrawalSignature,
+    [
+      ...withdrawalProofInputs.externalData
+        .resolvedOwnerTags,
+      ...withdrawalProofInputs.externalData.messages.map(
+        (message) => message.viewTag,
+      ),
+    ],
+  );
+
+  // 7. Sync the sender's wallet and read the remaining private balance.
+  await syncWallet({
+    client,
+    wallet: senderWallet,
+    authority: senderAuthority,
+  });
+
+  // 8. Report the public SOL withdrawal.
+  const solanaBalance = await client.getBalance(
+    senderSigner.address,
+  );
+  console.log(
+    `ok withdrawal solana_balance=${solanaBalance} remaining_private_sol=${senderWallet.balance(SOL_MINT).amount} tx=${withdrawalSignature}`,
+  );
+}
+
+await main();

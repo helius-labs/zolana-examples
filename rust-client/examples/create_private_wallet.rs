@@ -1,12 +1,13 @@
 use anyhow::Result;
 use rust_client_example::env_config;
 use solana_signer::Signer;
-use zolana_client::{ensure_registered, is_wallet_registered_sync, SolanaRpc, ZolanaClient};
+use zolana_client::{SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::{AssetRegistry, Wallet};
+use zolana_wallet::{ensure_registered, is_wallet_registered_sync};
 
 fn main() -> Result<()> {
-    // Load the fee payer and localnet settings, then connect.
+    // Load the funded fee payer and network settings, then connect.
     let cfg = env_config()?;
     let client = ZolanaClient::from_urls(
         SolanaRpc::new(cfg.rpc_url.clone()),
