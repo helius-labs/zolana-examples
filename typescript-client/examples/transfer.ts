@@ -23,9 +23,7 @@ async function main(): Promise<void> {
   // or amount.
 
   // 1. Build, sign, prove, and submit the transfer. The action resolves the
-  // recipient's registered private wallet from its Solana address. Unlike the
-  // Rust action, TypeScript rejects an unregistered recipient instead of
-  // changing the payment into a public withdrawal.
+  // recipient's private wallet from its Solana address.
   const submitted = await transfer({
     client,
     wallet,

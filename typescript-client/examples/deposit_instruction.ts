@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   // amount. Alternatively, you can onramp fiat directly to a private balance.
 
   // 1. Move public SOL into the sender's private balance.
-  const depositViewTag =
+  const senderViewTag =
     senderAddress.viewingPublicKey.x();
   const depositIx = await depositInstruction({
     tree: DEFAULT_TREE_ADDRESS,
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
         //   sourceTokenAccount: spl.sourceTokenAccount,
         //   tokenProgram: spl.tokenProgram,
         // }),
-        viewTag: depositViewTag,
+        viewTag: senderViewTag,
         recipientOwnerHash:
           senderAddress.ownerHash(),
         blinding: randomBlinding(),
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
     });
   await client.confirmPrivateTransaction(
     depositSignature,
-    [depositViewTag],
+    [senderViewTag],
   );
 
   // 3. Fetch transaction outputs from the indexer. The indexer returns
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
   // Confidential Rings.
   const depositResponse =
     await client.getShieldedTransactionsByTags(
-      depositViewTag,
+      senderViewTag,
     );
 
   // 4. The sender decrypts the transaction outputs locally to update the

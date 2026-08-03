@@ -41,18 +41,19 @@ async function main(): Promise<void> {
   // SPL: const transferUtxo = senderWallet.balance(spl.mint).utxos[0]!;
 
   // 2. Prepare the selected UTXOs as inputs for the zero-knowledge proof.
-  const transferInput =
+  const inputUtxos = [
     ProofInputUtxo.fromKeypair(
       transferUtxo,
       senderKeypair,
-    );
+    ),
+  ];
 
   // 3. Build and sign the confidential transfer.
   // Signing encrypts the asset and amount and produces the proof inputs for the
   // ZK prover.
   const transfer = new ConfidentialTransfer(
     senderAddress,
-    [transferInput],
+    inputUtxos,
     senderSigner.address,
   );
   transfer.send(
