@@ -83,6 +83,7 @@ fn main() -> Result<()> {
     // the public SOL account required for the withdrawal.
     let withdrawal_instruction = Transact {
         payer,
+        owner_signers: Vec::new(),
         input_tree: cfg.tree_pubkey(),
         output_tree: cfg.tree_pubkey(),
         interface_transfer_accounts: vec![TransactInterfaceTransferAccounts::Sol(

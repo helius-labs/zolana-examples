@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   // tag set and decrypts matching transactions.
   const viewTag = keypair
     .shieldedAddress()
-    .viewingPublicKey.x();
+    .confidentialViewTag();
   const response =
     await client.getShieldedTransactionsByTags(
       viewTag,

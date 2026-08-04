@@ -1,10 +1,13 @@
 import {
   Wallet,
-  ensureRegistered,
+  buildRegistrationTransaction,
 } from "@zolana/sdk";
 import { isWalletRegistered } from "@zolana/sdk/wallet";
 
-import { exampleContext } from "../src/lib.js";
+import {
+  exampleContext,
+  sendAndConfirmTransaction,
+} from "../src/lib.js";
 
 async function main(): Promise<void> {
   // Load the funded fee payer and network settings, then connect.
@@ -25,11 +28,19 @@ async function main(): Promise<void> {
       rpc: client,
       owner: signer.address,
     });
-  const signature = await ensureRegistered({
-    client,
-    funding: signer,
-    keypair,
-  });
+  const transaction =
+    await buildRegistrationTransaction({
+      client,
+      owner: signer.address,
+      address: keypair.shieldedAddress(),
+    });
+  const signature = transaction
+    ? await sendAndConfirmTransaction(
+        client,
+        signer,
+        transaction,
+      )
+    : undefined;
 
   console.log(
     `ok private wallet solana_address=${signer.address} shielded_address=${wallet.identity.toString()} registered_before=${String(

@@ -16,11 +16,11 @@ solana-signature = "3.4"
 solana-signer = "3.0"
 shellexpand = "3"
 solana-system-interface = "3.2.0"
-zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "c7a86a7f45bf89b7a5f83d71c986519900756902", features = ["indexer-api", "solana-rpc"] }
-zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "c7a86a7f45bf89b7a5f83d71c986519900756902", features = ["solana"] }
-zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "c7a86a7f45bf89b7a5f83d71c986519900756902" }
-zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "c7a86a7f45bf89b7a5f83d71c986519900756902" }
-zolana-wallet = { git = "https://github.com/helius-labs/zolana", rev = "c7a86a7f45bf89b7a5f83d71c986519900756902" }
+zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "683a6c415962ba02c1e4e498d545e01ab38c0084", features = ["indexer-api", "solana-rpc"] }
+zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "683a6c415962ba02c1e4e498d545e01ab38c0084", features = ["solana"] }
+zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "683a6c415962ba02c1e4e498d545e01ab38c0084" }
+zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "683a6c415962ba02c1e4e498d545e01ab38c0084" }
+zolana-wallet = { git = "https://github.com/helius-labs/zolana", rev = "683a6c415962ba02c1e4e498d545e01ab38c0084" }
 
 [[example]]
 name = "deposit"

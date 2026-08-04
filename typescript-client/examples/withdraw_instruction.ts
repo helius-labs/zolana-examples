@@ -1,19 +1,22 @@
 import {
   DEFAULT_TREE_ADDRESS,
   SOL_MINT,
-  syncWallet,
 } from "@zolana/sdk";
 import {
-  InterfaceAccounts,
+  TransactWithdrawal,
   transactInstruction,
 } from "@zolana/sdk/interface";
 import {
   ConfidentialTransfer,
   ProofInputUtxo,
   WithdrawalTarget,
+  decryptToBalances,
 } from "@zolana/sdk/transaction";
 
-import { setupFundedWallet } from "../src/lib.js";
+import {
+  sendAndConfirmInstructions,
+  setupFundedWallet,
+} from "../src/lib.js";
 
 const DEPOSIT_AMOUNT = 1_000_000_000n;
 const WITHDRAW_AMOUNT = 300_000_000n;
@@ -25,7 +28,6 @@ async function main(): Promise<void> {
     signer: senderSigner,
     keypair: senderKeypair,
     wallet: senderWallet,
-    authority: senderAuthority,
     assets,
   } = await setupFundedWallet(DEPOSIT_AMOUNT);
   const senderAddress =
@@ -88,43 +90,39 @@ async function main(): Promise<void> {
     feePayer: senderSigner,
     inputTree: DEFAULT_TREE_ADDRESS,
     outputTree: DEFAULT_TREE_ADDRESS,
-    interfaceAccounts: [
-      InterfaceAccounts.sol({
-        recipient: senderSigner.address,
-      }),
-      // SPL alternative:
-      // InterfaceAccounts.splWithdrawal({
-      //   mint: spl.mint,
-      //   splInterfacePda: spl.splInterfacePda,
-      //   recipientTokenAccount: spl.recipientTokenAccount,
-      //   tokenProgram: spl.tokenProgram,
-      // }),
-    ],
+    withdrawal: TransactWithdrawal.sol({
+      recipient: senderSigner.address,
+    }),
+    // SPL alternative:
+    // withdrawal: TransactWithdrawal.spl({
+    //   mint: spl.mint,
+    //   splTokenInterface: spl.splTokenInterface,
+    //   recipientTokenAccount: spl.recipientTokenAccount,
+    //   tokenProgram: spl.tokenProgram,
+    // }),
     data: withdrawalData,
   });
 
   // 6. Send and confirm like any Solana transaction.
   const withdrawalSignature =
-    await client.signAndSendInstructions({
-      feePayer: senderSigner,
-      instructions: [withdrawalIx],
-    });
+    await sendAndConfirmInstructions(
+      client,
+      senderSigner,
+      [withdrawalIx],
+    );
   await client.confirmPrivateTransaction(
     withdrawalSignature,
-    [
-      ...withdrawalProofInputs.externalData
-        .resolvedOwnerTags,
-      ...withdrawalProofInputs.externalData.messages.map(
-        (message) => message.viewTag,
-      ),
-    ],
   );
 
-  // 7. Sync the sender's wallet and read the remaining private balance.
-  await syncWallet({
-    client,
-    wallet: senderWallet,
-    authority: senderAuthority,
+  // 7. Fetch and decrypt the sender's remaining outputs.
+  const response =
+    await client.getShieldedTransactionsByTags(
+      senderAddress.confidentialViewTag(),
+    );
+  const balances = decryptToBalances({
+    keypair: senderKeypair,
+    registry: assets,
+    transactions: response.transactions,
   });
 
   // 8. Report the public SOL withdrawal.
@@ -132,7 +130,7 @@ async function main(): Promise<void> {
     senderSigner.address,
   );
   console.log(
-    `ok withdrawal solana_balance=${solanaBalance} remaining_private_sol=${senderWallet.balance(SOL_MINT).amount} tx=${withdrawalSignature}`,
+    `ok withdrawal solana_balance=${solanaBalance} remaining_private_sol=${balances.balance(SOL_MINT).amount} tx=${withdrawalSignature}`,
   );
 }
 

@@ -10,15 +10,16 @@ The examples show the same SDK flows at two levels:
 | [`create_private_wallet`](examples/create_private_wallet.ts) | Create and register a private wallet.        | [Action](examples/create_private_wallet.ts) |                                                 |
 | [`sync_balance`](examples/sync_balance.ts)                   | Read a wallet's private balance.             | [Action](examples/sync_balance.ts)          |                                                 |
 
-The action examples use the high-level `deposit`, `transfer`, and `withdraw`
-functions. The instruction examples keep UTXO selection, proof construction,
-instruction assembly, submission, and wallet sync visible.
+The action examples use `buildDepositTransaction`,
+`buildTransferTransaction`, and `buildWithdrawalTransaction`. These builders
+produce unsigned Kit transactions; the application signs and submits them. The
+instruction examples keep UTXO selection, proof construction, instruction
+assembly, submission, and balance decryption visible.
 
 ## Setup
 
-Install Node.js 24+, pnpm, and Rust. The TypeScript SDK is pinned directly to
-the Zolana git revision used by the Rust examples; installing it builds the
-Poseidon WASM package.
+Install Node.js 24+ and pnpm. The TypeScript SDK is pinned directly to the
+Zolana git revision used by the Rust examples.
 
 ```bash
 pnpm install

@@ -2,12 +2,15 @@ import {
   LocalWalletAuthority,
   SOL_MINT,
   Wallet,
-  deposit,
+  buildDepositTransaction,
   getPrivateTokenBalances,
   syncWallet,
 } from "@zolana/sdk";
 
-import { exampleContext } from "../src/lib.js";
+import {
+  exampleContext,
+  sendAndConfirmTransaction,
+} from "../src/lib.js";
 
 const DEPOSIT_AMOUNT = 1_000_000_000n;
 
@@ -32,12 +35,22 @@ async function main(): Promise<void> {
   // amount. Alternatively, you can onramp fiat directly to a private balance.
 
   // 1. Build, sign, and send the public-to-private deposit.
-  const signature = await deposit({
-    client,
-    sender: signer,
-    recipient: keypair.shieldedAddress(),
-    amount: DEPOSIT_AMOUNT,
-  });
+  const transaction =
+    await buildDepositTransaction({
+      client,
+      feePayer: signer.address,
+      recipient: keypair.shieldedAddress(),
+      amount: DEPOSIT_AMOUNT,
+    });
+  const signature =
+    await sendAndConfirmTransaction(
+      client,
+      signer,
+      transaction,
+    );
+  await client.confirmPrivateTransaction(
+    signature,
+  );
 
   // 2. Fetch and decrypt the sender's matching outputs from the indexer.
   await syncWallet({

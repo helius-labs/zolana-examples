@@ -1,12 +1,14 @@
 import {
   SOL_MINT,
+  buildWithdrawalTransaction,
   syncWallet,
-  withdraw,
 } from "@zolana/sdk";
 
 import {
   recipientAddress,
+  sendAndConfirmTransaction,
   setupFundedWallet,
+  walletAuthorityFromSync,
 } from "../src/lib.js";
 
 const DEPOSIT_AMOUNT = 1_000_000_000n;
@@ -23,14 +25,25 @@ async function main(): Promise<void> {
 
   // 1. Build, sign, prove, and submit the private-to-public withdrawal. The
   // recipient can be the owner or any third party.
-  const submitted = await withdraw({
-    client,
-    wallet,
-    authority,
-    feePayer: signer,
-    recipient,
-    amount: WITHDRAW_AMOUNT,
-  });
+  const transaction =
+    await buildWithdrawalTransaction({
+      client,
+      wallet,
+      authority:
+        walletAuthorityFromSync(authority),
+      feePayer: signer.address,
+      recipient,
+      amount: WITHDRAW_AMOUNT,
+    });
+  const signature =
+    await sendAndConfirmTransaction(
+      client,
+      signer,
+      transaction,
+    );
+  await client.confirmPrivateTransaction(
+    signature,
+  );
 
   // 2. Sync the sender's wallet to decrypt the remaining private change.
   await syncWallet({
@@ -42,7 +55,7 @@ async function main(): Promise<void> {
 
   // 3. Report the public recipient and remaining private balance.
   console.log(
-    `ok withdrawal signature=${submitted.signature} recipient=${recipient} remaining_private_sol=${wallet.balance(SOL_MINT).amount}`,
+    `ok withdrawal signature=${signature} recipient=${recipient} remaining_private_sol=${wallet.balance(SOL_MINT).amount}`,
   );
 }
 

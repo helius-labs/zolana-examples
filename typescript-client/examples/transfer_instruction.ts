@@ -2,15 +2,18 @@ import {
   DEFAULT_TREE_ADDRESS,
   SOL_MINT,
   ShieldedKeypair,
-  syncWallet,
 } from "@zolana/sdk";
 import { transactInstruction } from "@zolana/sdk/interface";
 import {
   ConfidentialTransfer,
   ProofInputUtxo,
+  decryptToBalances,
 } from "@zolana/sdk/transaction";
 
-import { setupFundedWallet } from "../src/lib.js";
+import {
+  sendAndConfirmInstructions,
+  setupFundedWallet,
+} from "../src/lib.js";
 
 const DEPOSIT_AMOUNT = 1_000_000_000n;
 const TRANSFER_AMOUNT = 300_000_000n;
@@ -22,7 +25,6 @@ async function main(): Promise<void> {
     signer: senderSigner,
     keypair: senderKeypair,
     wallet: senderWallet,
-    authority: senderAuthority,
     assets,
   } = await setupFundedWallet(DEPOSIT_AMOUNT);
   const senderAddress =
@@ -41,19 +43,18 @@ async function main(): Promise<void> {
   // SPL: const transferUtxo = senderWallet.balance(spl.mint).utxos[0]!;
 
   // 2. Prepare the selected UTXOs as inputs for the zero-knowledge proof.
-  const inputUtxos = [
+  const transferInput =
     ProofInputUtxo.fromKeypair(
       transferUtxo,
       senderKeypair,
-    ),
-  ];
+    );
 
   // 3. Build and sign the confidential transfer.
   // Signing encrypts the asset and amount and produces the proof inputs for the
   // ZK prover.
   const transfer = new ConfidentialTransfer(
     senderAddress,
-    inputUtxos,
+    [transferInput],
     senderSigner.address,
   );
   transfer.send(
@@ -84,45 +85,33 @@ async function main(): Promise<void> {
     feePayer: senderSigner,
     inputTree: DEFAULT_TREE_ADDRESS,
     outputTree: DEFAULT_TREE_ADDRESS,
-    interfaceAccounts: [],
     data: transferData,
   });
 
   // 6. Send and confirm like any Solana transaction.
   const transferSignature =
-    await client.signAndSendInstructions({
-      feePayer: senderSigner,
-      instructions: [transferIx],
-    });
+    await sendAndConfirmInstructions(
+      client,
+      senderSigner,
+      [transferIx],
+    );
   await client.confirmPrivateTransaction(
     transferSignature,
-    [
-      ...transferProofInputs.externalData
-        .resolvedOwnerTags,
-      ...transferProofInputs.externalData.messages.map(
-        (message) => message.viewTag,
-      ),
-    ],
   );
 
-  // 7. Fetch transaction outputs from the indexer. The indexer returns
-  // encrypted outputs by view tag: the recipient's public viewing key in
-  // Confidential Rings.
-  const recipientViewTag =
-    recipient.viewingPublicKey.x();
-  await client.getShieldedTransactionsByTags(
-    recipientViewTag,
-  );
-
-  // 8. Sync the sender's wallet to decrypt the remaining private balance.
-  await syncWallet({
-    client,
-    wallet: senderWallet,
-    authority: senderAuthority,
+  // 7. Fetch the sender's outputs again and read the remaining private balance.
+  const response =
+    await client.getShieldedTransactionsByTags(
+      senderAddress.confidentialViewTag(),
+    );
+  const balances = decryptToBalances({
+    keypair: senderKeypair,
+    registry: assets,
+    transactions: response.transactions,
   });
 
   console.log(
-    `ok private transfer signature=${transferSignature} remaining_private_sol=${senderWallet.balance(SOL_MINT).amount}`,
+    `ok private transfer signature=${transferSignature} remaining_private_sol=${balances.balance(SOL_MINT).amount}`,
   );
 }
 

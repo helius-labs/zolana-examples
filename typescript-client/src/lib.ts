@@ -5,17 +5,31 @@ import { homedir } from "node:os";
 
 import {
   address,
-  createKeyPairSignerFromPrivateKeyBytes,
+  appendTransactionMessageInstructions,
+  assertIsFullySignedTransaction,
+  assertIsTransactionWithBlockhashLifetime,
+  createTransactionMessage,
+  getSignatureFromTransaction,
+  pipe,
+  sendAndConfirmTransactionFactory,
+  setTransactionMessageFeePayerSigner,
+  setTransactionMessageLifetimeUsingBlockhash,
+  signTransactionMessageWithSigners,
+  signTransactionWithSigners,
   type Address,
+  type Instruction,
+  type Signature,
+  type Transaction,
 } from "@solana/kit";
 import {
   LocalWalletAuthority,
   ShieldedKeypair,
   Wallet,
+  buildDepositTransaction,
+  buildRegistrationTransaction,
   createZolanaClient,
-  deposit,
-  ensureRegistered,
   syncWallet,
+  walletAuthorityFromSync,
   type Bytes32,
 } from "@zolana/sdk";
 import { AssetRegistry } from "@zolana/sdk/transaction";
@@ -23,9 +37,7 @@ import { AssetRegistry } from "@zolana/sdk/transaction";
 export const DEFAULT_RECIPIENT = "DNRJcGsGR6SGEYuNAaRtbZ8a86snwVcH5CJh1VcSLxx";
 
 export type Client = Awaited<ReturnType<typeof createZolanaClient>>;
-export type Signer = Awaited<
-  ReturnType<typeof createKeyPairSignerFromPrivateKeyBytes>
->;
+export type Signer = ReturnType<ShieldedKeypair["toSolanaSigner"]>;
 
 export interface ExampleContext {
   readonly client: Client;
@@ -65,10 +77,15 @@ async function senderKeys(): Promise<
   // Solana CLI keypair files contain the 32-byte Ed25519 seed followed by the
   // public key. Derive the Solana signer and private wallet from the same seed.
   const seed = Uint8Array.from(secret.slice(0, 32)) as Bytes32;
-  const signer = await createKeyPairSignerFromPrivateKeyBytes(seed);
-  const keypair = ShieldedKeypair.fromEd25519(seed, 0);
-  seed.fill(0);
-  return Object.freeze({ signer, keypair });
+  try {
+    const keypair = ShieldedKeypair.fromEd25519(seed, 0);
+    return Object.freeze({
+      signer: keypair.toSolanaSigner(),
+      keypair,
+    });
+  } finally {
+    seed.fill(0);
+  }
 }
 
 export async function exampleContext(): Promise<ExampleContext> {
@@ -76,7 +93,7 @@ export async function exampleContext(): Promise<ExampleContext> {
   // Client construction initializes Poseidon before shielded keys are derived.
   // With no endpoint the SDK uses its local validator, Photon, and prover URLs.
   const client = await createZolanaClient(
-    endpoint === "" ? undefined : endpoint,
+    endpoint ? { solanaRpcUrl: endpoint } : {},
   );
   const { signer, keypair } = await senderKeys();
   return Object.freeze({ client, signer, keypair });
@@ -86,6 +103,51 @@ export function recipientAddress(): Address {
   return address(process.env["ZOLANA_RECIPIENT"] ?? DEFAULT_RECIPIENT);
 }
 
+function transactionSender(client: Client) {
+  return sendAndConfirmTransactionFactory({
+    rpc: client.solanaRpc,
+    rpcSubscriptions: client.solanaRpcSubscriptions,
+  });
+}
+
+export async function sendAndConfirmTransaction(
+  client: Client,
+  signer: Signer,
+  transaction: Transaction,
+): Promise<Signature> {
+  const signed = await signTransactionWithSigners([signer], transaction);
+  assertIsFullySignedTransaction(signed);
+  assertIsTransactionWithBlockhashLifetime(signed);
+  await transactionSender(client)(signed, {
+    commitment: "confirmed",
+  });
+  return getSignatureFromTransaction(signed);
+}
+
+export async function sendAndConfirmInstructions(
+  client: Client,
+  signer: Signer,
+  instructions: readonly Instruction[],
+): Promise<Signature> {
+  const { value: lifetime } = await client.solanaRpc
+    .getLatestBlockhash()
+    .send();
+  const signed = await signTransactionMessageWithSigners(
+    pipe(
+      createTransactionMessage({ version: 0 }),
+      (message) => setTransactionMessageFeePayerSigner(signer, message),
+      (message) =>
+        setTransactionMessageLifetimeUsingBlockhash(lifetime, message),
+      (message) => appendTransactionMessageInstructions(instructions, message),
+    ),
+  );
+  assertIsTransactionWithBlockhashLifetime(signed);
+  await transactionSender(client)(signed, {
+    commitment: "confirmed",
+  });
+  return getSignatureFromTransaction(signed);
+}
+
 /**
  * Setup shorthand used by transfer, withdrawal, and balance examples. The
  * examples themselves keep the operation under discussion visible.
@@ -93,11 +155,14 @@ export function recipientAddress(): Address {
 export async function setupFundedWallet(amount: bigint): Promise<FundedWallet> {
   const context = await exampleContext();
   const { client, signer, keypair } = context;
-  await ensureRegistered({
+  const registration = await buildRegistrationTransaction({
     client,
-    funding: signer,
-    keypair,
+    owner: signer.address,
+    address: keypair.shieldedAddress(),
   });
+  if (registration) {
+    await sendAndConfirmTransaction(client, signer, registration);
+  }
 
   const assets = new AssetRegistry();
   const wallet = new Wallet({
@@ -109,12 +174,18 @@ export async function setupFundedWallet(amount: bigint): Promise<FundedWallet> {
     keypair,
   });
 
-  await deposit({
+  const deposit = await buildDepositTransaction({
     client,
-    sender: signer,
+    feePayer: signer.address,
     recipient: keypair.shieldedAddress(),
     amount,
   });
+  const depositSignature = await sendAndConfirmTransaction(
+    client,
+    signer,
+    deposit,
+  );
+  await client.confirmPrivateTransaction(depositSignature);
   await syncWallet({
     client,
     wallet,
@@ -129,3 +200,5 @@ export async function setupFundedWallet(amount: bigint): Promise<FundedWallet> {
     wallet,
   });
 }
+
+export { walletAuthorityFromSync };

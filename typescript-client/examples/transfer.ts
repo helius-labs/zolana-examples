@@ -1,12 +1,14 @@
 import {
   SOL_MINT,
+  buildTransferTransaction,
   syncWallet,
-  transfer,
 } from "@zolana/sdk";
 
 import {
   recipientAddress,
+  sendAndConfirmTransaction,
   setupFundedWallet,
+  walletAuthorityFromSync,
 } from "../src/lib.js";
 
 const DEPOSIT_AMOUNT = 1_000_000_000n;
@@ -24,14 +26,25 @@ async function main(): Promise<void> {
 
   // 1. Build, sign, prove, and submit the transfer. The action resolves the
   // recipient's private wallet from its Solana address.
-  const submitted = await transfer({
-    client,
-    wallet,
-    authority,
-    feePayer: signer,
-    recipient,
-    amount: TRANSFER_AMOUNT,
-  });
+  const transaction =
+    await buildTransferTransaction({
+      client,
+      wallet,
+      authority:
+        walletAuthorityFromSync(authority),
+      feePayer: signer.address,
+      recipient,
+      amount: TRANSFER_AMOUNT,
+    });
+  const signature =
+    await sendAndConfirmTransaction(
+      client,
+      signer,
+      transaction,
+    );
+  await client.confirmPrivateTransaction(
+    signature,
+  );
 
   // 2. Sync the sender's wallet to decrypt the private change.
   await syncWallet({
@@ -43,7 +56,7 @@ async function main(): Promise<void> {
 
   // 3. Read the remaining private balance.
   console.log(
-    `ok private transfer signature=${submitted.signature} routed_as=${submitted.recipient.kind} remaining_private_sol=${wallet.balance(SOL_MINT).amount}`,
+    `ok private transfer signature=${signature} remaining_private_sol=${wallet.balance(SOL_MINT).amount}`,
   );
 }
 

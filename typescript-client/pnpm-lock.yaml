@@ -12,8 +12,8 @@ importers:
         specifier: ^7.0.0
         version: 7.0.0(typescript@7.0.2)
       '@zolana/sdk':
-        specifier: git+https://github.com/helius-labs/zolana.git#c7a86a7f45bf89b7a5f83d71c986519900756902&path:/sdk-libs/ts
-        version: https://codeload.github.com/helius-labs/zolana/tar.gz/c7a86a7f45bf89b7a5f83d71c986519900756902#path:/sdk-libs/ts(@solana/kit@7.0.0(typescript@7.0.2))(typescript@7.0.2)
+        specifier: git+https://github.com/helius-labs/zolana.git#683a6c415962ba02c1e4e498d545e01ab38c0084&path:/sdk-libs/ts
+        version: https://codeload.github.com/helius-labs/zolana/tar.gz/683a6c415962ba02c1e4e498d545e01ab38c0084#path:/sdk-libs/ts(@solana/kit@7.0.0(typescript@7.0.2))
       dotenv:
         specifier: latest
         version: 17.4.2
@@ -26,7 +26,7 @@ importers:
         version: 0.61.0
       tsx:
         specifier: latest
-        version: 4.23.1
+        version: 4.23.5
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -188,6 +188,9 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@lightprotocol/hasher.rs@0.2.1':
+    resolution: {integrity: sha512-uslXM+t8kIOeQKccS8eJIPhVglnaIrz06AUVYJjeR9RHM/26KFEKK431a5mBxvaAwVhRLM0s9ZFN+C9wKgNAjA==}
 
   '@noble/ciphers@2.2.0':
     resolution: {integrity: sha512-Z6pjIZ/8IJcCGzb2S/0Px5J81yij85xASuk1teLNeg75bfT07MV3a/O2Mtn1I2se43k3lkVEcFaR10N4cgQcZA==}
@@ -854,12 +857,15 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@zolana/sdk@https://codeload.github.com/helius-labs/zolana/tar.gz/c7a86a7f45bf89b7a5f83d71c986519900756902#path:/sdk-libs/ts':
-    resolution: {gitHosted: true, integrity: sha512-/CWnOJUc9iHbbAQtrxNxciZp6cSfhjh2BNNwkopz6Nw+nZogiBCy5NvPj29IpEQKXRc/JnI820Y2gSfYEZKOtQ==, path: /sdk-libs/ts, tarball: https://codeload.github.com/helius-labs/zolana/tar.gz/c7a86a7f45bf89b7a5f83d71c986519900756902}
+  '@zolana/sdk@https://codeload.github.com/helius-labs/zolana/tar.gz/683a6c415962ba02c1e4e498d545e01ab38c0084#path:/sdk-libs/ts':
+    resolution: {gitHosted: true, integrity: sha512-7yuN3MIm4UoP5v2lgheS1Pszr9ELDNepRC2KkEWB2zzg3gXHEjCCWhcZnomfFBfBfbpRmbXJlN4RiutTE17XCw==, path: /sdk-libs/ts, tarball: https://codeload.github.com/helius-labs/zolana/tar.gz/683a6c415962ba02c1e4e498d545e01ab38c0084}
     version: 0.1.0
     engines: {node: '>=24'}
     peerDependencies:
       '@solana/kit': ^7.0.0
+
+  bn.js@5.2.5:
+    resolution: {integrity: sha512-Vq886eXykuP5E6HcKSSStP3bJgrE6In5WKxVUvJ8XGpWWYs2xZHWqUwzCtGgEtBcxyd57KBFDPFoUfNzdaHCNg==}
 
   chalk@5.6.2:
     resolution: {integrity: sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA==}
@@ -900,8 +906,8 @@ packages:
     resolution: {integrity: sha512-Pugqs6M0m7Lv1I7FtxN4aoyToKg1C4tu+/381vH35y8oENM/Ai7f7C4StcoK4/+BSw9ebcS8jRiVrORFKCALLw==}
     engines: {node: ^20.0.0 || >=22.0.0}
 
-  tsx@4.23.1:
-    resolution: {integrity: sha512-GQHnkIfxyx1wYCOS/wonik5MVRZU9hi1TEZmzGZSCJB1y9YgoZ8H6itNE/u4suE+yLmOzuE4E5S4TZ/ZX2wcWQ==}
+  tsx@4.23.5:
+    resolution: {integrity: sha512-rw55FUaqOoI7RvlQwLbhO4nSDApnQ4/CykPuiQ/EPvtrX3WA9Ig55jIt9VvbBJbzJuj12ueRu4PMZ2SxPVbihg==}
     engines: {node: '>=18.0.0'}
     hasBin: true
 
@@ -1007,6 +1013,8 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.1':
     optional: true
+
+  '@lightprotocol/hasher.rs@0.2.1': {}
 
   '@noble/ciphers@2.2.0': {}
 
@@ -1639,20 +1647,18 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@zolana/sdk@https://codeload.github.com/helius-labs/zolana/tar.gz/c7a86a7f45bf89b7a5f83d71c986519900756902#path:/sdk-libs/ts(@solana/kit@7.0.0(typescript@7.0.2))(typescript@7.0.2)':
+  '@zolana/sdk@https://codeload.github.com/helius-labs/zolana/tar.gz/683a6c415962ba02c1e4e498d545e01ab38c0084#path:/sdk-libs/ts(@solana/kit@7.0.0(typescript@7.0.2))':
     dependencies:
+      '@lightprotocol/hasher.rs': 0.2.1
       '@noble/ciphers': 2.2.0
       '@noble/curves': 2.2.0
       '@noble/hashes': 2.2.0
       '@solana-program/compute-budget': 0.17.0(@solana/kit@7.0.0(typescript@7.0.2))
       '@solana-program/token': 0.15.0(@solana/kit@7.0.0(typescript@7.0.2))
       '@solana/kit': 7.0.0(typescript@7.0.2)
-      '@solana/transaction-confirmation': 7.0.0(typescript@7.0.2)
-    transitivePeerDependencies:
-      - bufferutil
-      - fastestsmallesttextencoderdecoder
-      - typescript
-      - utf-8-validate
+      bn.js: 5.2.5
+
+  bn.js@5.2.5: {}
 
   chalk@5.6.2: {}
 
@@ -1718,7 +1724,7 @@ snapshots:
 
   tinypool@2.1.0: {}
 
-  tsx@4.23.1:
+  tsx@4.23.5:
     dependencies:
       esbuild: 0.28.1
     optionalDependencies:

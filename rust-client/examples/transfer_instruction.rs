@@ -71,6 +71,7 @@ fn main() -> Result<()> {
     // they require no public interface accounts.
     let transfer_instruction = Transact {
         payer,
+        owner_signers: Vec::new(),
         input_tree: cfg.tree_pubkey(),
         output_tree: cfg.tree_pubkey(),
         interface_transfer_accounts: Vec::new(),
