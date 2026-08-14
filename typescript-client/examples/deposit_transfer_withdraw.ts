@@ -1,6 +1,6 @@
 import {
   SOL_MINT,
-  ShieldedKeypair,
+  createZolanaClient,
 } from "@zolana/sdk";
 import { atSlot } from "@zolana/sdk/client";
 import {
@@ -19,8 +19,8 @@ import {
 } from "@zolana/sdk/transaction";
 
 import {
-  exampleContext,
   sendAndConfirmFactory,
+  setup,
 } from "../src/lib.js";
 
 const DEPOSIT_AMOUNT = 1_000_000_000n;
@@ -29,23 +29,38 @@ const WITHDRAW_AMOUNT = 300_000_000n;
 
 async function main(): Promise<void> {
   const {
-    client,
-    signer: senderSigner,
-    keypair: senderKeypair,
-  } = await exampleContext();
-  const recipient =
-    ShieldedKeypair.generate().shieldedAddress();
-  const sendAndConfirm = sendAndConfirmFactory(
-    client,
-    senderSigner,
-  );
-  const assets = new AssetRegistry();
+    sender: senderKeypair,
+    recipient: recipientKeypair,
+    clientConfig,
+  } = await setup();
+
+  // Connect to localnet; the config is empty (all default ports) unless the
+  // test recipe runs the stack on ZOLANA_PORT_OFFSET-shifted URLs.
+  const client =
+    await createZolanaClient(clientConfig);
+  // devnet: one url serves the RPC, the indexer, and the prover.
+  // const client = await createZolanaClient({
+  //     solanaRpcUrl: `https://devnet.helius-rpc.com?api-key=${process.env.API_KEY!}`,
+  // });
 
   // Initialize the sender's private wallet and local authority
   // to decrypt transactions and sync balances.
   // The Solana signer and private wallet are derived from the same Ed25519 seed.
+  const senderSigner =
+    senderKeypair.toSolanaSigner();
   const senderAddress =
     senderKeypair.shieldedAddress();
+  const recipient =
+    recipientKeypair.shieldedAddress();
+
+  // The SDK hands back instructions; the app owns signing and sending.
+  const sendAndConfirm = sendAndConfirmFactory(
+    client,
+    senderSigner,
+  );
+
+  // Mints that are registered with Solana Rings for privacy.
+  const assets = new AssetRegistry();
 
   // Deposit SOL into the sender's private balance.
   // A deposit from a public balance reveals

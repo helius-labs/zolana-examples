@@ -2,9 +2,7 @@
 
 |  |  |
 |---------|-------------|
-| [`deposit`](examples/deposit_instruction.rs) | Move SOL from a public to a private balance. |
-| [`transfer`](examples/transfer_instruction.rs) | Transfer SOL between private balances. |
-| [`withdraw`](examples/withdraw_instruction.rs) | Move SOL from a private to a public balance. |
+| [`deposit_transfer_withdraw`](examples/deposit_transfer_withdraw.rs) | Deposit, private transfer, and withdraw. |
 
 ## Setup
 
@@ -21,9 +19,7 @@ To run on localnet, toggle `localnet` in [`src/lib.rs`](src/lib.rs).
 ## Run
 
 ```bash
-cargo run -p rust-client-example --example deposit_instruction
-cargo run -p rust-client-example --example transfer_instruction
-cargo run -p rust-client-example --example withdraw_instruction
+cargo run -p rust-client-example --example deposit_transfer_withdraw
 ```
 
 ## Documentation

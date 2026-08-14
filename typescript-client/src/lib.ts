@@ -17,15 +17,20 @@ import {
   type Signature,
   type TransactionSigner,
 } from "@solana/kit";
-import { ShieldedKeypair, createZolanaClient, type Bytes32 } from "@zolana/sdk";
+import {
+  ShieldedKeypair,
+  createZolanaClient,
+  initializePoseidon,
+  type Bytes32,
+  type ZolanaClientConfig,
+} from "@zolana/sdk";
 
 export type Client = Awaited<ReturnType<typeof createZolanaClient>>;
-export type Signer = ReturnType<ShieldedKeypair["toSolanaSigner"]>;
 
-export interface ExampleContext {
-  readonly client: Client;
-  readonly signer: Signer;
-  readonly keypair: ShieldedKeypair;
+export interface ExampleSetup {
+  readonly sender: ShieldedKeypair;
+  readonly recipient: ShieldedKeypair;
+  readonly clientConfig: ZolanaClientConfig;
 }
 
 export interface ConfirmedTransaction {
@@ -42,9 +47,7 @@ function expandedPath(value: string): string {
       : value;
 }
 
-async function senderKeys(): Promise<
-  Readonly<{ signer: Signer; keypair: ShieldedKeypair }>
-> {
+async function senderKeypair(): Promise<ShieldedKeypair> {
   const payerPath = expandedPath(
     process.env["ZOLANA_PAYER_KEYPAIR"] ?? "~/.config/solana/id.json",
   );
@@ -61,33 +64,31 @@ async function senderKeys(): Promise<
   // public key. Derive the Solana signer and private wallet from the same seed.
   const seed = Uint8Array.from(secret.slice(0, 32)) as Bytes32;
   try {
-    const keypair = ShieldedKeypair.fromEd25519(seed, 0);
-    return Object.freeze({
-      signer: keypair.toSolanaSigner(),
-      keypair,
-    });
+    return ShieldedKeypair.fromEd25519(seed, 0);
   } finally {
     seed.fill(0);
   }
 }
 
-export async function exampleContext(): Promise<ExampleContext> {
+function clientConfigFromEnv(): ZolanaClientConfig {
   const endpoint = process.env["ZOLANA_ENDPOINT"]?.trim();
   const indexerUrl = process.env["ZOLANA_INDEXER_URL"]?.trim();
   const proverUrl = process.env["ZOLANA_PROVER_URL"]?.trim();
-  // Client construction initializes Poseidon before shielded keys are derived.
-  // With no endpoint the SDK uses its local validator, Photon, and prover URLs.
-  const client = await createZolanaClient(
-    endpoint || indexerUrl || proverUrl
-      ? {
-          ...(endpoint ? { solanaRpcUrl: endpoint } : {}),
-          ...(indexerUrl ? { indexerUrl } : {}),
-          ...(proverUrl ? { proverUrl } : {}),
-        }
-      : {},
-  );
-  const { signer, keypair } = await senderKeys();
-  return Object.freeze({ client, signer, keypair });
+  return Object.freeze({
+    ...(endpoint ? { solanaRpcUrl: endpoint } : {}),
+    ...(indexerUrl ? { indexerUrl } : {}),
+    ...(proverUrl ? { proverUrl } : {}),
+  });
+}
+
+export async function setup(): Promise<ExampleSetup> {
+  await initializePoseidon();
+  const sender = await senderKeypair();
+  return Object.freeze({
+    sender,
+    recipient: ShieldedKeypair.generate(),
+    clientConfig: clientConfigFromEnv(),
+  });
 }
 
 /**

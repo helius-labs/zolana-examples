@@ -21,13 +21,5 @@ zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "5705c78
 zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606" }
 
 [[example]]
-name = "deposit_instruction"
-path = "examples/deposit_instruction.rs"
-
-[[example]]
-name = "transfer_instruction"
-path = "examples/transfer_instruction.rs"
-
-[[example]]
-name = "withdraw_instruction"
-path = "examples/withdraw_instruction.rs"
+name = "deposit_transfer_withdraw"
+path = "examples/deposit_transfer_withdraw.rs"

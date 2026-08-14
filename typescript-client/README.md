@@ -1,10 +1,8 @@
 # Zolana examples: TypeScript client
 
-|                                                |                                              |
-| ---------------------------------------------- | -------------------------------------------- |
-| [`deposit`](examples/deposit_instruction.ts)   | Move SOL from a public to a private balance. |
-| [`transfer`](examples/transfer_instruction.ts) | Transfer between private balances.           |
-| [`withdraw`](examples/withdraw_instruction.ts) | Move SOL from a private to a public balance. |
+|                                                                      |                                          |
+| -------------------------------------------------------------------- | ---------------------------------------- |
+| [`deposit_transfer_withdraw`](examples/deposit_transfer_withdraw.ts) | Deposit, private transfer, and withdraw. |
 
 ## Setup
 
@@ -28,9 +26,7 @@ to those services. Hosted indexer and prover URLs must be HTTPS; loopback
 ## Run
 
 ```bash
-pnpm example examples/deposit_instruction.ts
-pnpm example examples/transfer_instruction.ts
-pnpm example examples/withdraw_instruction.ts
+pnpm example examples/deposit_transfer_withdraw.ts
 ```
 
 ## Documentation

@@ -1,10 +1,11 @@
-//! Shared environment settings for the instruction examples: the fee payer,
+//! Shared environment settings for the instruction example: the fee payer,
 //! Helius RPC, Photon indexer, and prover.
 
 use anyhow::{anyhow, Result};
 use solana_address::Address;
 use solana_keypair::{read_keypair_file, Keypair};
 use zolana_interface::DEFAULT_TREE_ADDRESS;
+use zolana_keypair::{ShieldedAddress, ShieldedKeypair};
 
 /// The RPC, Photon indexer, and prover the examples talk to.
 pub const RPC_URL: &str = "https://devnet.helius-rpc.com";
@@ -14,19 +15,20 @@ pub const PROVER_URL: &str = "http://zolnet-devnet-1779374825.eu-north-1.elb.ama
 // localnet: pub const INDEXER_URL: &str = "http://127.0.0.1:8784";
 // localnet: pub const PROVER_URL: &str = "http://127.0.0.1:3001";
 
-/// Service URLs and the fee payer.
-pub struct Config {
-    pub payer: Keypair,
+/// Service URLs, the funded sender, and a fresh recipient address.
+pub struct SetupContext {
     pub rpc_url: String,
     pub indexer_url: String,
     pub prover_url: String,
     pub tree: Address,
+    pub sender: ShieldedKeypair,
+    pub recipient_address: ShieldedAddress,
 }
 
 /// Read the environment settings: the fee payer (`ZOLANA_PAYER_KEYPAIR`,
 /// defaults to the Solana CLI wallet) and the `API_KEY` for the Helius devnet
 /// RPC. Toggle the `localnet:` lines to run against a local stack instead.
-pub fn env_config() -> Result<Config> {
+pub fn setup() -> Result<SetupContext> {
     dotenvy::dotenv().ok();
     let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR")
         .unwrap_or_else(|_| "~/.config/solana/id.json".to_string());
@@ -41,11 +43,16 @@ pub fn env_config() -> Result<Config> {
     let rpc_url = format!("{RPC_URL}/?api-key={api_key}");
     // localnet: let rpc_url = RPC_URL.to_string();
 
-    Ok(Config {
-        payer,
+    let sender = ShieldedKeypair::from_solana_keypair(&payer)?;
+    let recipient_address =
+        ShieldedKeypair::from_solana_keypair(&Keypair::new())?.shielded_address()?;
+
+    Ok(SetupContext {
         rpc_url,
         indexer_url: INDEXER_URL.to_string(),
         prover_url: PROVER_URL.to_string(),
         tree,
+        sender,
+        recipient_address,
     })
 }
