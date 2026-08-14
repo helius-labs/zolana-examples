@@ -17,7 +17,6 @@ async function main(): Promise<void> {
     client,
     wallet,
     authority,
-    config: { waitForIndexer: true },
   });
   const balances =
     getPrivateTokenBalances(wallet);
@@ -29,9 +28,9 @@ async function main(): Promise<void> {
     .shieldedAddress()
     .confidentialViewTag();
   const response =
-    await client.getShieldedTransactionsByTags(
-      viewTag,
-    );
+    await client.getShieldedTransactionsByTags({
+      tags: [viewTag],
+    });
 
   console.log(
     `ok private_balances=${String(balances.length)} encrypted_transactions=${String(

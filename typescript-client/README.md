@@ -30,9 +30,13 @@ cp .env.example .env
 the selected network.
 
 With no `ZOLANA_ENDPOINT`, the SDK uses its local validator, Photon, and prover
-defaults. For a hosted deployment, set `ZOLANA_ENDPOINT` to its single Zolana
-gateway URL. `ZOLANA_RECIPIENT` must identify a registered private wallet for
-the action-level transfer.
+defaults. For Helius devnet RPC plus a separate Photon/prover host, set
+`ZOLANA_ENDPOINT` to the RPC URL and `ZOLANA_INDEXER_URL` / `ZOLANA_PROVER_URL`
+to those services. Hosted indexer and prover URLs must be HTTPS; loopback
+`http://127.0.0.1` is allowed. Plain HTTP to a non-loopback host is accepted
+only when the examples set `allowInsecureHttp` for that case.
+`ZOLANA_RECIPIENT` must identify a registered private wallet for the
+action-level transfer.
 
 ## Run
 

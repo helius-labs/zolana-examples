@@ -1,7 +1,5 @@
-import {
-  DEFAULT_TREE_ADDRESS,
-  SOL_MINT,
-} from "@zolana/sdk";
+import { SOL_MINT } from "@zolana/sdk";
+import { atSlot } from "@zolana/sdk/client";
 import {
   TransactWithdrawal,
   transactInstruction,
@@ -87,9 +85,9 @@ async function main(): Promise<void> {
   // 5. Build the instruction with the state Merkle tree and public Solana
   // account required for the withdrawal.
   const withdrawalIx = transactInstruction({
-    feePayer: senderSigner,
-    inputTree: DEFAULT_TREE_ADDRESS,
-    outputTree: DEFAULT_TREE_ADDRESS,
+    payer: senderSigner,
+    inputTree: client.tree,
+    outputTree: client.tree,
     withdrawal: TransactWithdrawal.sol({
       recipient: senderSigner.address,
     }),
@@ -110,16 +108,21 @@ async function main(): Promise<void> {
       senderSigner,
       [withdrawalIx],
     );
-  await client.confirmPrivateTransaction(
+  const slot = await client.confirmTransaction(
     withdrawalSignature,
   );
 
   // 7. Fetch and decrypt the sender's remaining outputs.
   const response =
     await client.getShieldedTransactionsByTags(
-      senderAddress.confidentialViewTag(),
+      {
+        tags: [
+          senderAddress.confidentialViewTag(),
+        ],
+      },
+      atSlot(slot),
     );
-  const balances = decryptToBalances({
+  const balances = await decryptToBalances({
     keypair: senderKeypair,
     registry: assets,
     transactions: response.transactions,

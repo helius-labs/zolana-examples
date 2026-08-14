@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@solana/kit": "^7.0.0",
-    "@zolana/sdk": "git+https://github.com/helius-labs/zolana.git#683a6c415962ba02c1e4e498d545e01ab38c0084&path:/sdk-libs/ts",
+    "@zolana/sdk": "git+https://github.com/helius-labs/zolana.git#5705c78ee4283d82ed445474f285b0daf4865606&path:/sdk-libs/ts",
     "dotenv": "latest"
   },
   "devDependencies": {

@@ -8,7 +8,6 @@ import {
   recipientAddress,
   sendAndConfirmTransaction,
   setupFundedWallet,
-  walletAuthorityFromSync,
 } from "../src/lib.js";
 
 const DEPOSIT_AMOUNT = 1_000_000_000n;
@@ -29,8 +28,7 @@ async function main(): Promise<void> {
     await buildWithdrawalTransaction({
       client,
       wallet,
-      authority:
-        walletAuthorityFromSync(authority),
+      authority,
       feePayer: signer.address,
       recipient,
       amount: WITHDRAW_AMOUNT,
@@ -50,7 +48,6 @@ async function main(): Promise<void> {
     client,
     wallet,
     authority,
-    config: { waitForIndexer: true },
   });
 
   // 3. Report the public recipient and remaining private balance.

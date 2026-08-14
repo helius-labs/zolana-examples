@@ -1,8 +1,8 @@
 import {
-  DEFAULT_TREE_ADDRESS,
   SOL_MINT,
   ShieldedKeypair,
 } from "@zolana/sdk";
+import { atSlot } from "@zolana/sdk/client";
 import { transactInstruction } from "@zolana/sdk/interface";
 import {
   ConfidentialTransfer,
@@ -82,9 +82,9 @@ async function main(): Promise<void> {
   // required for the transfer. Private transfers move balances only between
   // private token accounts, not public token accounts.
   const transferIx = transactInstruction({
-    feePayer: senderSigner,
-    inputTree: DEFAULT_TREE_ADDRESS,
-    outputTree: DEFAULT_TREE_ADDRESS,
+    payer: senderSigner,
+    inputTree: client.tree,
+    outputTree: client.tree,
     data: transferData,
   });
 
@@ -95,16 +95,21 @@ async function main(): Promise<void> {
       senderSigner,
       [transferIx],
     );
-  await client.confirmPrivateTransaction(
+  const slot = await client.confirmTransaction(
     transferSignature,
   );
 
   // 7. Fetch the sender's outputs again and read the remaining private balance.
   const response =
     await client.getShieldedTransactionsByTags(
-      senderAddress.confidentialViewTag(),
+      {
+        tags: [
+          senderAddress.confidentialViewTag(),
+        ],
+      },
+      atSlot(slot),
     );
-  const balances = decryptToBalances({
+  const balances = await decryptToBalances({
     keypair: senderKeypair,
     registry: assets,
     transactions: response.transactions,

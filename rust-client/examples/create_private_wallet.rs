@@ -9,7 +9,7 @@ use zolana_wallet::{ensure_registered, is_wallet_registered_sync};
 fn main() -> Result<()> {
     // Load the funded fee payer and network settings, then connect.
     let cfg = env_config()?;
-    let client = ZolanaClient::from_urls(
+    let client = ZolanaClient::from_urls_allowing_insecure_http(
         SolanaRpc::new(cfg.rpc_url.clone()),
         &cfg.indexer_url,
         cfg.prover_url.clone(),

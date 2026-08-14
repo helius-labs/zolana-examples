@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use rust_client_example::env_config;
 use rust_client_example::setup_funded_sol_wallet;
 use solana_signer::Signer;
-use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::instruction::{
     Transact, TransactInterfaceTransferAccounts, TransactSolTransferAccounts,
 };
@@ -18,7 +18,7 @@ use zolana_transaction::{
 fn main() -> Result<()> {
     // Load the funded fee payer and network settings, then connect.
     let cfg = env_config()?;
-    let client = ZolanaClient::from_urls(
+    let client = ZolanaClient::from_urls_allowing_insecure_http(
         SolanaRpc::new(cfg.rpc_url.clone()),
         &cfg.indexer_url,
         cfg.prover_url.clone(),
@@ -73,11 +73,7 @@ fn main() -> Result<()> {
     let proof_inputs = withdrawal.sign(&sender_keypair, &assets)?;
 
     // 4. Fetch the ZK proof to prove the sender can spend the balance.
-    let withdrawal_data = client.prove_transact(
-        cfg.tree_pubkey(),
-        proof_inputs,
-        Some(IndexerRpcConfig::wait()),
-    )?;
+    let withdrawal_data = client.prove_transact(cfg.tree_pubkey(), proof_inputs, None)?;
 
     // 5. Build the instruction with the input and output state Merkle trees and
     // the public SOL account required for the withdrawal.

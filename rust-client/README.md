@@ -20,6 +20,8 @@ By default, the examples use your CLI wallet as `payer`. Make sure it's funded w
 
 To run on localnet, toggle `localnet` in [`src/lib.rs`](src/lib.rs).
 
+Devnet Photon and prover URLs in [`src/lib.rs`](src/lib.rs) are plain HTTP on a LAN host, so the examples call `ZolanaClient::from_urls_allowing_insecure_http`. Switch to `from_urls` when those services are HTTPS, or HTTP on loopback.
+
 ## Run
 
 ```bash

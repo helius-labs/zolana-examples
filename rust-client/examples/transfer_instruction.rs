@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use rust_client_example::{env_config, setup_funded_sol_wallet, DEFAULT_RECIPIENT};
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::instruction::Transact;
 use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::{
@@ -14,7 +14,7 @@ use zolana_wallet::resolve_registered_address;
 fn main() -> Result<()> {
     // Load the funded fee payer and network settings, then connect.
     let cfg = env_config()?;
-    let client = ZolanaClient::from_urls(
+    let client = ZolanaClient::from_urls_allowing_insecure_http(
         SolanaRpc::new(cfg.rpc_url.clone()),
         &cfg.indexer_url,
         cfg.prover_url.clone(),
@@ -60,11 +60,7 @@ fn main() -> Result<()> {
 
     // 4. Fetch the ZK proof to prove the sender can spend the balance without
     // revealing asset and amount.
-    let transfer_data = client.prove_transact(
-        cfg.tree_pubkey(),
-        proof_inputs,
-        Some(IndexerRpcConfig::wait()),
-    )?;
+    let transfer_data = client.prove_transact(cfg.tree_pubkey(), proof_inputs, None)?;
 
     // 5. Build the instruction with the input and output state Merkle trees.
     // Private transfers move balances only between private token accounts, so
@@ -88,12 +84,8 @@ fn main() -> Result<()> {
     // viewing key.
     let mut delivered = false;
     for _ in 0..30 {
-        let response = client.get_shielded_transactions_by_tags(
-            vec![recipient.view_tag],
-            None,
-            None,
-            Some(IndexerRpcConfig::wait()),
-        )?;
+        let response =
+            client.get_shielded_transactions_by_tags(vec![recipient.view_tag], None, None, None)?;
         delivered = response
             .transactions
             .iter()

@@ -8,7 +8,7 @@ use zolana_wallet::{get_private_token_balances, sync_wallet, LocalWalletAuthorit
 fn main() -> Result<()> {
     // Load the funded fee payer and network settings, then connect.
     let cfg = env_config()?;
-    let client = ZolanaClient::from_urls(
+    let client = ZolanaClient::from_urls_allowing_insecure_http(
         SolanaRpc::new(cfg.rpc_url.clone()),
         &cfg.indexer_url,
         cfg.prover_url.clone(),

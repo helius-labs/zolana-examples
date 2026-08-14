@@ -12,8 +12,8 @@ importers:
         specifier: ^7.0.0
         version: 7.0.0(typescript@7.0.2)
       '@zolana/sdk':
-        specifier: git+https://github.com/helius-labs/zolana.git#683a6c415962ba02c1e4e498d545e01ab38c0084&path:/sdk-libs/ts
-        version: https://codeload.github.com/helius-labs/zolana/tar.gz/683a6c415962ba02c1e4e498d545e01ab38c0084#path:/sdk-libs/ts(@solana/kit@7.0.0(typescript@7.0.2))
+        specifier: git+https://github.com/helius-labs/zolana.git#5705c78ee4283d82ed445474f285b0daf4865606&path:/sdk-libs/ts
+        version: https://codeload.github.com/helius-labs/zolana/tar.gz/5705c78ee4283d82ed445474f285b0daf4865606#path:/sdk-libs/ts(@solana/kit@7.0.0(typescript@7.0.2))
       dotenv:
         specifier: latest
         version: 17.4.2
@@ -26,7 +26,7 @@ importers:
         version: 0.61.0
       tsx:
         specifier: latest
-        version: 4.23.5
+        version: 4.23.12
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -857,8 +857,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@zolana/sdk@https://codeload.github.com/helius-labs/zolana/tar.gz/683a6c415962ba02c1e4e498d545e01ab38c0084#path:/sdk-libs/ts':
-    resolution: {gitHosted: true, integrity: sha512-7yuN3MIm4UoP5v2lgheS1Pszr9ELDNepRC2KkEWB2zzg3gXHEjCCWhcZnomfFBfBfbpRmbXJlN4RiutTE17XCw==, path: /sdk-libs/ts, tarball: https://codeload.github.com/helius-labs/zolana/tar.gz/683a6c415962ba02c1e4e498d545e01ab38c0084}
+  '@zolana/sdk@https://codeload.github.com/helius-labs/zolana/tar.gz/5705c78ee4283d82ed445474f285b0daf4865606#path:/sdk-libs/ts':
+    resolution: {gitHosted: true, integrity: sha512-bC6nr7vNVjVsoZwmfZuqokMU/TaWhVw9HUDqfOs0dcqoQ647ko1VOqFHzJHDkDKIaImrhuzOcPdgW+lj70SCPg==, path: /sdk-libs/ts, tarball: https://codeload.github.com/helius-labs/zolana/tar.gz/5705c78ee4283d82ed445474f285b0daf4865606}
     version: 0.1.0
     engines: {node: '>=24'}
     peerDependencies:
@@ -906,8 +906,8 @@ packages:
     resolution: {integrity: sha512-Pugqs6M0m7Lv1I7FtxN4aoyToKg1C4tu+/381vH35y8oENM/Ai7f7C4StcoK4/+BSw9ebcS8jRiVrORFKCALLw==}
     engines: {node: ^20.0.0 || >=22.0.0}
 
-  tsx@4.23.5:
-    resolution: {integrity: sha512-rw55FUaqOoI7RvlQwLbhO4nSDApnQ4/CykPuiQ/EPvtrX3WA9Ig55jIt9VvbBJbzJuj12ueRu4PMZ2SxPVbihg==}
+  tsx@4.23.12:
+    resolution: {integrity: sha512-FDf4L4sYzKtzWYhU/Xm0AQFdTjdIxNo9ElTf2mxXM6k8YMHXzYUe4yODVaXP4V9uMFbVg8c0qyBccK2OOxb45Q==}
     engines: {node: '>=18.0.0'}
     hasBin: true
 
@@ -1647,7 +1647,7 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@zolana/sdk@https://codeload.github.com/helius-labs/zolana/tar.gz/683a6c415962ba02c1e4e498d545e01ab38c0084#path:/sdk-libs/ts(@solana/kit@7.0.0(typescript@7.0.2))':
+  '@zolana/sdk@https://codeload.github.com/helius-labs/zolana/tar.gz/5705c78ee4283d82ed445474f285b0daf4865606#path:/sdk-libs/ts(@solana/kit@7.0.0(typescript@7.0.2))':
     dependencies:
       '@lightprotocol/hasher.rs': 0.2.1
       '@noble/ciphers': 2.2.0
@@ -1724,7 +1724,7 @@ snapshots:
 
   tinypool@2.1.0: {}
 
-  tsx@4.23.5:
+  tsx@4.23.12:
     dependencies:
       esbuild: 0.28.1
     optionalDependencies:

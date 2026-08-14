@@ -57,7 +57,6 @@ async function main(): Promise<void> {
     client,
     wallet,
     authority,
-    config: { waitForIndexer: true },
   });
 
   // 3. Read the private balance per asset.

@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use rust_client_example::env_config;
 use solana_signer::Signer;
-use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::instruction::{AssetDeposit, Deposit, DepositAsset};
 use zolana_keypair::{random_blinding, ShieldedKeypair};
 use zolana_transaction::{decrypt_transactions, AssetRegistry, SOL_MINT};
@@ -9,7 +9,7 @@ use zolana_transaction::{decrypt_transactions, AssetRegistry, SOL_MINT};
 fn main() -> Result<()> {
     // Load the funded fee payer and network settings, then connect.
     let cfg = env_config()?;
-    let client = ZolanaClient::from_urls(
+    let client = ZolanaClient::from_urls_allowing_insecure_http(
         SolanaRpc::new(cfg.rpc_url.clone()),
         &cfg.indexer_url,
         cfg.prover_url.clone(),
@@ -56,12 +56,8 @@ fn main() -> Result<()> {
     // 3. Fetch transaction outputs from the indexer. The indexer returns
     // encrypted outputs by view tag: the sender's public viewing key in
     // Confidential Rings.
-    let response = client.get_shielded_transactions_by_tags(
-        vec![sender_tag],
-        None,
-        Some(50),
-        Some(IndexerRpcConfig::wait()),
-    )?;
+    let response =
+        client.get_shielded_transactions_by_tags(vec![sender_tag], None, Some(50), None)?;
 
     // 4. The sender decrypts the transaction outputs locally to update the
     // private balance.

@@ -1,7 +1,5 @@
-import {
-  DEFAULT_TREE_ADDRESS,
-  SOL_MINT,
-} from "@zolana/sdk";
+import { SOL_MINT } from "@zolana/sdk";
+import { atSlot } from "@zolana/sdk/client";
 import {
   DepositAsset,
   depositInstruction,
@@ -42,8 +40,8 @@ async function main(): Promise<void> {
   const senderViewTag =
     senderAddress.confidentialViewTag();
   const depositIx = await depositInstruction({
-    tree: DEFAULT_TREE_ADDRESS,
-    sender: senderSigner,
+    tree: client.tree,
+    depositor: senderSigner,
     deposits: [
       {
         asset: DepositAsset.sol(),
@@ -69,7 +67,7 @@ async function main(): Promise<void> {
       senderSigner,
       [depositIx],
     );
-  await client.confirmPrivateTransaction(
+  const slot = await client.confirmTransaction(
     depositSignature,
   );
 
@@ -78,12 +76,13 @@ async function main(): Promise<void> {
   // Confidential Rings.
   const depositResponse =
     await client.getShieldedTransactionsByTags(
-      senderViewTag,
+      { tags: [senderViewTag] },
+      atSlot(slot),
     );
 
   // 4. The sender decrypts the transaction outputs locally to read the private
   // balance.
-  const balances = decryptToBalances({
+  const balances = await decryptToBalances({
     keypair: senderKeypair,
     registry: assets,
     transactions: depositResponse.transactions,

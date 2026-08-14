@@ -29,7 +29,6 @@ import {
   buildRegistrationTransaction,
   createZolanaClient,
   syncWallet,
-  walletAuthorityFromSync,
   type Bytes32,
 } from "@zolana/sdk";
 import { AssetRegistry } from "@zolana/sdk/transaction";
@@ -88,12 +87,40 @@ async function senderKeys(): Promise<
   }
 }
 
+function isNonLoopbackHttp(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url);
+    if (protocol !== "http:") {
+      return false;
+    }
+    return (
+      hostname !== "localhost" &&
+      hostname !== "::1" &&
+      !hostname.startsWith("127.")
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function exampleContext(): Promise<ExampleContext> {
   const endpoint = process.env["ZOLANA_ENDPOINT"]?.trim();
+  const indexerUrl = process.env["ZOLANA_INDEXER_URL"]?.trim();
+  const proverUrl = process.env["ZOLANA_PROVER_URL"]?.trim();
+  const allowInsecureHttp = [indexerUrl, proverUrl].some(
+    (url) => url !== undefined && isNonLoopbackHttp(url),
+  );
   // Client construction initializes Poseidon before shielded keys are derived.
   // With no endpoint the SDK uses its local validator, Photon, and prover URLs.
   const client = await createZolanaClient(
-    endpoint ? { solanaRpcUrl: endpoint } : {},
+    endpoint || indexerUrl || proverUrl
+      ? {
+          ...(endpoint ? { solanaRpcUrl: endpoint } : {}),
+          ...(indexerUrl ? { indexerUrl } : {}),
+          ...(proverUrl ? { proverUrl } : {}),
+          ...(allowInsecureHttp ? { allowInsecureHttp: true } : {}),
+        }
+      : {},
   );
   const { signer, keypair } = await senderKeys();
   return Object.freeze({ client, signer, keypair });
@@ -190,7 +217,6 @@ export async function setupFundedWallet(amount: bigint): Promise<FundedWallet> {
     client,
     wallet,
     authority,
-    config: { waitForIndexer: true },
   });
 
   return Object.freeze({
@@ -200,5 +226,3 @@ export async function setupFundedWallet(amount: bigint): Promise<FundedWallet> {
     wallet,
   });
 }
-
-export { walletAuthorityFromSync };
