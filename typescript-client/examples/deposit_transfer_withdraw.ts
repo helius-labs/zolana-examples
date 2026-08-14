@@ -34,14 +34,9 @@ async function main(): Promise<void> {
     clientConfig,
   } = await setup();
 
-  // Connect to localnet; the config is empty (all default ports) unless the
-  // test recipe runs the stack on ZOLANA_PORT_OFFSET-shifted URLs.
+  // Connect to Helius devnet RPC plus the Photon indexer and prover.
   const client =
     await createZolanaClient(clientConfig);
-  // devnet: one url serves the RPC, the indexer, and the prover.
-  // const client = await createZolanaClient({
-  //     solanaRpcUrl: `https://devnet.helius-rpc.com?api-key=${process.env.API_KEY!}`,
-  // });
 
   // Initialize the sender's private wallet and local authority
   // to decrypt transactions and sync balances.

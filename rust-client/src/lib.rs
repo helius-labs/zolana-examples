@@ -4,6 +4,8 @@
 use anyhow::{anyhow, Result};
 use solana_address::Address;
 use solana_keypair::{read_keypair_file, Keypair};
+use solana_signer::Signer;
+use zolana_client::{Rpc, SolanaRpc};
 use zolana_interface::DEFAULT_TREE_ADDRESS;
 use zolana_keypair::{ShieldedAddress, ShieldedKeypair};
 
@@ -15,7 +17,10 @@ pub const PROVER_URL: &str = "http://zolnet-devnet-1779374825.eu-north-1.elb.ama
 // localnet: pub const INDEXER_URL: &str = "http://127.0.0.1:8784";
 // localnet: pub const PROVER_URL: &str = "http://127.0.0.1:3001";
 
-/// Service URLs, the funded sender, and a fresh recipient address.
+/// Enough public SOL for the 1 SOL deposit plus fees.
+const SENDER_LAMPORTS: u64 = 2_000_000_000;
+
+/// Service URLs, a funded sender, and a fresh recipient address.
 pub struct SetupContext {
     pub rpc_url: String,
     pub indexer_url: String,
@@ -27,7 +32,8 @@ pub struct SetupContext {
 
 /// Read the environment settings: the fee payer (`ZOLANA_PAYER_KEYPAIR`,
 /// defaults to the Solana CLI wallet) and the `API_KEY` for the Helius devnet
-/// RPC. Toggle the `localnet:` lines to run against a local stack instead.
+/// RPC. Defaults are Helius plus the Photon/prover ALB. Toggle the
+/// `localnet:` lines to run against a local stack instead.
 pub fn setup() -> Result<SetupContext> {
     dotenvy::dotenv().ok();
     let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR")
@@ -43,7 +49,16 @@ pub fn setup() -> Result<SetupContext> {
     let rpc_url = format!("{RPC_URL}/?api-key={api_key}");
     // localnet: let rpc_url = RPC_URL.to_string();
 
-    let sender = ShieldedKeypair::from_solana_keypair(&payer)?;
+    let sender_solana = Keypair::new();
+    let rpc = SolanaRpc::new(rpc_url.clone());
+    let ix = solana_system_interface::instruction::transfer(
+        &payer.pubkey(),
+        &sender_solana.pubkey(),
+        SENDER_LAMPORTS,
+    );
+    rpc.create_and_send_transaction(&[ix], payer.pubkey(), &[&payer])?;
+
+    let sender = ShieldedKeypair::from_solana_keypair(&sender_solana)?;
     let recipient_address =
         ShieldedKeypair::from_solana_keypair(&Keypair::new())?.shielded_address()?;
 

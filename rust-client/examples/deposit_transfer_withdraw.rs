@@ -31,8 +31,14 @@ fn main() -> Result<()> {
         recipient_address,
     } = setup()?;
 
-    // Load the funded fee payer and localnet settings, then connect.
-    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url, tree)?;
+    // Load the funded fee payer and devnet settings, then connect.
+    // Photon and the prover are HTTP on this ALB, so the constructor permits that.
+    let client = ZolanaClient::from_urls_allowing_insecure_http(
+        SolanaRpc::new(rpc_url),
+        &indexer_url,
+        prover_url,
+        tree,
+    );
 
     // Mints that are registered with Solana Rings for privacy.
     let assets = AssetRegistry::default();

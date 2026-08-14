@@ -14,6 +14,7 @@ solana-keypair = "3.1.2"
 solana-pubkey = { version = "4.2", features = ["curve25519"] }
 solana-signature = "3.4"
 solana-signer = "3.0"
+solana-system-interface = "3.2.0"
 shellexpand = "3"
 zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606", features = ["indexer-api", "solana-rpc"] }
 zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606", features = ["solana"] }

@@ -4,15 +4,21 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 
 import {
+  AccountRole,
+  address,
   appendTransactionMessageInstructions,
   assertIsTransactionWithBlockhashLifetime,
+  createSolanaRpc,
+  createSolanaRpcSubscriptions,
   createTransactionMessage,
   getSignatureFromTransaction,
   pipe,
+  sendAndConfirmTransactionFactory,
   sendTransactionWithoutConfirmingFactory,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
+  type Address,
   type Instruction,
   type Signature,
   type TransactionSigner,
@@ -39,6 +45,17 @@ export interface ConfirmedTransaction {
   readonly slot: bigint;
 }
 
+const RPC_URL = "https://devnet.helius-rpc.com";
+const INDEXER_URL =
+  "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com";
+const PROVER_URL =
+  "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com:3001";
+// localnet: const RPC_URL = "http://127.0.0.1:8899";
+// localnet: const INDEXER_URL = "http://127.0.0.1:8784";
+// localnet: const PROVER_URL = "http://127.0.0.1:3001";
+const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
+const SENDER_LAMPORTS = 2_000_000_000n;
+
 function expandedPath(value: string): string {
   return value === "~"
     ? homedir()
@@ -47,7 +64,7 @@ function expandedPath(value: string): string {
       : value;
 }
 
-async function senderKeypair(): Promise<ShieldedKeypair> {
+async function funderKeypair(): Promise<ShieldedKeypair> {
   const payerPath = expandedPath(
     process.env["ZOLANA_PAYER_KEYPAIR"] ?? "~/.config/solana/id.json",
   );
@@ -72,22 +89,89 @@ async function senderKeypair(): Promise<ShieldedKeypair> {
 
 function clientConfigFromEnv(): ZolanaClientConfig {
   const endpoint = process.env["ZOLANA_ENDPOINT"]?.trim();
-  const indexerUrl = process.env["ZOLANA_INDEXER_URL"]?.trim();
-  const proverUrl = process.env["ZOLANA_PROVER_URL"]?.trim();
+  const apiKey = process.env["API_KEY"]?.trim();
+  const solanaRpcUrl =
+    endpoint || (apiKey ? `${RPC_URL}/?api-key=${apiKey}` : undefined);
+  // localnet: const solanaRpcUrl = endpoint || RPC_URL;
+  if (!solanaRpcUrl) {
+    throw new Error("set API_KEY or ZOLANA_ENDPOINT");
+  }
   return Object.freeze({
-    ...(endpoint ? { solanaRpcUrl: endpoint } : {}),
-    ...(indexerUrl ? { indexerUrl } : {}),
-    ...(proverUrl ? { proverUrl } : {}),
+    solanaRpcUrl,
+    indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || INDEXER_URL,
+    proverUrl: process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL,
+    // The Photon/prover ALB is HTTP. Loopback HTTP is already allowed.
+    allowInsecureHttp: true,
   });
+}
+
+function subscriptionsUrl(rpcUrl: string): string {
+  const url = new URL(rpcUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.href;
+}
+
+function transferSolIx(
+  from: Address,
+  to: Address,
+  lamports: bigint,
+): Instruction {
+  const data = new Uint8Array(12);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, 2, true);
+  view.setBigUint64(4, lamports, true);
+  return {
+    programAddress: SYSTEM_PROGRAM,
+    accounts: [
+      { address: from, role: AccountRole.WRITABLE_SIGNER },
+      { address: to, role: AccountRole.WRITABLE },
+    ],
+    data,
+  };
+}
+
+async function fundSender(
+  rpcUrl: string,
+  funder: TransactionSigner,
+  recipient: Address,
+): Promise<void> {
+  const rpc = createSolanaRpc(rpcUrl);
+  const sendAndConfirm = sendAndConfirmTransactionFactory({
+    rpc,
+    rpcSubscriptions: createSolanaRpcSubscriptions(subscriptionsUrl(rpcUrl)),
+  });
+  const { value: lifetime } = await rpc.getLatestBlockhash().send();
+  const signed = await signTransactionMessageWithSigners(
+    pipe(
+      createTransactionMessage({ version: 0 }),
+      (message) => setTransactionMessageFeePayerSigner(funder, message),
+      (message) =>
+        setTransactionMessageLifetimeUsingBlockhash(lifetime, message),
+      (message) =>
+        appendTransactionMessageInstructions(
+          [transferSolIx(funder.address, recipient, SENDER_LAMPORTS)],
+          message,
+        ),
+    ),
+  );
+  assertIsTransactionWithBlockhashLifetime(signed);
+  await sendAndConfirm(signed, { commitment: "confirmed" });
 }
 
 export async function setup(): Promise<ExampleSetup> {
   await initializePoseidon();
-  const sender = await senderKeypair();
+  const clientConfig = clientConfigFromEnv();
+  const funder = await funderKeypair();
+  const sender = ShieldedKeypair.generate();
+  await fundSender(
+    String(clientConfig.solanaRpcUrl),
+    funder.toSolanaSigner(),
+    sender.toSolanaSigner().address,
+  );
   return Object.freeze({
     sender,
     recipient: ShieldedKeypair.generate(),
-    clientConfig: clientConfigFromEnv(),
+    clientConfig,
   });
 }
 

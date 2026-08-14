@@ -15,13 +15,11 @@ cp .env.example .env
 ```
 
 `ZOLANA_PAYER_KEYPAIR` defaults to the Solana CLI wallet. It must be funded on
-the selected network.
+the selected network. Set `API_KEY` for the Helius RPC. The example talks to
+Helius plus the Photon/prover ALB unless you override `ZOLANA_ENDPOINT` /
+`ZOLANA_INDEXER_URL` / `ZOLANA_PROVER_URL`.
 
-With no `ZOLANA_ENDPOINT`, the SDK uses its local validator, Photon, and prover
-defaults. For Helius devnet RPC plus a separate Photon/prover host, set
-`ZOLANA_ENDPOINT` to the RPC URL and `ZOLANA_INDEXER_URL` / `ZOLANA_PROVER_URL`
-to those services. Hosted indexer and prover URLs must be HTTPS; loopback
-`http://127.0.0.1` is allowed.
+To run on localnet, toggle `localnet` in [`src/lib.ts`](src/lib.ts).
 
 ## Run
 
