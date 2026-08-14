@@ -19,23 +19,19 @@ Rings enable confidential transfers for SOL and any SPL asset, while keeping exe
 
 ### [Rust client](rust-client/README.md)
 
-|  |  |  |  |
-|---------|-------------|---------|---------|
-| [`transfer`](rust-client/examples/transfer.rs) | Transfer privately between private balances. | [Action](rust-client/examples/transfer.rs) | [Instruction](rust-client/examples/transfer_instruction.rs) |
-| [`deposit`](rust-client/examples/deposit.rs) | Move tokens from a public to a private balance. | [Action](rust-client/examples/deposit.rs) | [Instruction](rust-client/examples/deposit_instruction.rs) |
-| [`withdraw`](rust-client/examples/withdraw.rs) | Move tokens from a private to a public balance. | [Action](rust-client/examples/withdraw.rs) | [Instruction](rust-client/examples/withdraw_instruction.rs) |
-| [`create_private_wallet`](rust-client/examples/create_private_wallet.rs) | Create a private wallet. | [Action](rust-client/examples/create_private_wallet.rs) |  |
-| [`sync_balance`](rust-client/examples/sync_balance.rs) | Read a wallet's private balance. | [Action](rust-client/examples/sync_balance.rs) |  |
+|  |  |
+|---------|-------------|
+| [`deposit`](rust-client/examples/deposit_instruction.rs) | Move tokens from a public to a private balance. |
+| [`transfer`](rust-client/examples/transfer_instruction.rs) | Transfer privately between private balances. |
+| [`withdraw`](rust-client/examples/withdraw_instruction.rs) | Move tokens from a private to a public balance. |
 
 ### [TypeScript client](typescript-client/README.md)
 
-|  |  |  |  |
-|---------|-------------|---------|---------|
-| [`transfer`](typescript-client/examples/transfer.ts) | Transfer SOL privately between private balances. | [Action](typescript-client/examples/transfer.ts) | [Instruction](typescript-client/examples/transfer_instruction.ts) |
-| [`deposit`](typescript-client/examples/deposit.ts) | Move SOL from a public to a private balance. | [Action](typescript-client/examples/deposit.ts) | [Instruction](typescript-client/examples/deposit_instruction.ts) |
-| [`withdraw`](typescript-client/examples/withdraw.ts) | Move SOL from a private to a public balance. | [Action](typescript-client/examples/withdraw.ts) | [Instruction](typescript-client/examples/withdraw_instruction.ts) |
-| [`create_private_wallet`](typescript-client/examples/create_private_wallet.ts) | Create and register a private wallet. | [Action](typescript-client/examples/create_private_wallet.ts) |  |
-| [`sync_balance`](typescript-client/examples/sync_balance.ts) | Read a wallet's private balance. | [Action](typescript-client/examples/sync_balance.ts) |  |
+|  |  |
+|---------|-------------|
+| [`deposit`](typescript-client/examples/deposit_instruction.ts) | Move SOL from a public to a private balance. |
+| [`transfer`](typescript-client/examples/transfer_instruction.ts) | Transfer SOL privately between private balances. |
+| [`withdraw`](typescript-client/examples/withdraw_instruction.ts) | Move SOL from a private to a public balance. |
 
 ### Program examples
 

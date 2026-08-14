@@ -15,32 +15,10 @@ solana-pubkey = { version = "4.2", features = ["curve25519"] }
 solana-signature = "3.4"
 solana-signer = "3.0"
 shellexpand = "3"
-solana-system-interface = "3.2.0"
 zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606", features = ["indexer-api", "solana-rpc"] }
 zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606", features = ["solana"] }
 zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606" }
 zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606" }
-zolana-wallet = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606" }
-
-[[example]]
-name = "deposit"
-path = "examples/deposit.rs"
-
-[[example]]
-name = "transfer"
-path = "examples/transfer.rs"
-
-[[example]]
-name = "withdraw"
-path = "examples/withdraw.rs"
-
-[[example]]
-name = "sync_balance"
-path = "examples/sync_balance.rs"
-
-[[example]]
-name = "create_private_wallet"
-path = "examples/create_private_wallet.rs"
 
 [[example]]
 name = "deposit_instruction"

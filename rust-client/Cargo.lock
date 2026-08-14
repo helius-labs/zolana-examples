@@ -931,21 +931,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
-name = "foreign-types"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1"
-dependencies = [
- "foreign-types-shared",
-]
-
-[[package]]
-name = "foreign-types-shared"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
-
-[[package]]
 name = "form_urlencoded"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1646,43 +1631,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
-name = "openssl"
-version = "0.10.81"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77823a27f0babb03091cb9ed9ef80af3b39dbc82f97e8fa530374b7dafd87a45"
-dependencies = [
- "bitflags",
- "cfg-if",
- "foreign-types",
- "libc",
- "openssl-macros",
- "openssl-sys",
-]
-
-[[package]]
-name = "openssl-macros"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "openssl-sys"
-version = "0.9.117"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b47e7e6bb2c38cd930d25a23b40fa52e068c10e85f3e03a7f5ba5aaca5713695"
-dependencies = [
- "cc",
- "libc",
- "pkg-config",
- "vcpkg",
-]
-
-[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2172,12 +2120,10 @@ dependencies = [
  "solana-pubkey 4.2.0",
  "solana-signature",
  "solana-signer",
- "solana-system-interface 3.2.0",
  "zolana-client",
  "zolana-interface",
  "zolana-keypair",
  "zolana-transaction",
- "zolana-wallet",
 ]
 
 [[package]]
@@ -3263,18 +3209,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "solana-secp256r1-program"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "445d8e12592631d76fc4dc57858bae66c9fd7cc838c306c62a472547fc9d0ce6"
-dependencies = [
- "bytemuck",
- "openssl",
- "solana-instruction",
- "solana-sdk-ids",
-]
-
-[[package]]
 name = "solana-seed-derivable"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4244,12 +4178,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
-name = "vcpkg"
-version = "0.2.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
-
-[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4831,43 +4759,6 @@ dependencies = [
  "wincode",
  "zolana-batched-merkle-tree",
  "zolana-hasher",
-]
-
-[[package]]
-name = "zolana-user-registry-interface"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=5705c78ee4283d82ed445474f285b0daf4865606#5705c78ee4283d82ed445474f285b0daf4865606"
-dependencies = [
- "borsh",
- "solana-instruction",
- "solana-pubkey 4.2.0",
- "solana-secp256r1-program",
-]
-
-[[package]]
-name = "zolana-wallet"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=5705c78ee4283d82ed445474f285b0daf4865606#5705c78ee4283d82ed445474f285b0daf4865606"
-dependencies = [
- "async-trait",
- "borsh",
- "futures",
- "solana-account 4.3.1",
- "solana-address 2.6.1",
- "solana-compute-budget-interface",
- "solana-hash",
- "solana-instruction",
- "solana-keypair",
- "solana-message",
- "solana-pubkey 4.2.0",
- "solana-signature",
- "solana-signer",
- "solana-transaction",
- "zolana-client",
- "zolana-interface",
- "zolana-keypair",
- "zolana-transaction",
- "zolana-user-registry-interface",
 ]
 
 [[package]]

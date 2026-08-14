@@ -4,36 +4,20 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 
 import {
-  address,
   appendTransactionMessageInstructions,
-  assertIsFullySignedTransaction,
   assertIsTransactionWithBlockhashLifetime,
   createTransactionMessage,
   getSignatureFromTransaction,
   pipe,
-  sendAndConfirmTransactionFactory,
+  sendTransactionWithoutConfirmingFactory,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
-  signTransactionWithSigners,
-  type Address,
   type Instruction,
   type Signature,
-  type Transaction,
+  type TransactionSigner,
 } from "@solana/kit";
-import {
-  LocalWalletAuthority,
-  ShieldedKeypair,
-  Wallet,
-  buildDepositTransaction,
-  buildRegistrationTransaction,
-  createZolanaClient,
-  syncWallet,
-  type Bytes32,
-} from "@zolana/sdk";
-import { AssetRegistry } from "@zolana/sdk/transaction";
-
-export const DEFAULT_RECIPIENT = "DNRJcGsGR6SGEYuNAaRtbZ8a86snwVcH5CJh1VcSLxx";
+import { ShieldedKeypair, createZolanaClient, type Bytes32 } from "@zolana/sdk";
 
 export type Client = Awaited<ReturnType<typeof createZolanaClient>>;
 export type Signer = ReturnType<ShieldedKeypair["toSolanaSigner"]>;
@@ -44,10 +28,10 @@ export interface ExampleContext {
   readonly keypair: ShieldedKeypair;
 }
 
-export interface FundedWallet extends ExampleContext {
-  readonly assets: AssetRegistry;
-  readonly authority: LocalWalletAuthority;
-  readonly wallet: Wallet;
+export interface ConfirmedTransaction {
+  readonly signature: Signature;
+  /** Slot the transaction landed in; drives the indexer freshness gates. */
+  readonly slot: bigint;
 }
 
 function expandedPath(value: string): string {
@@ -87,29 +71,10 @@ async function senderKeys(): Promise<
   }
 }
 
-function isNonLoopbackHttp(url: string): boolean {
-  try {
-    const { protocol, hostname } = new URL(url);
-    if (protocol !== "http:") {
-      return false;
-    }
-    return (
-      hostname !== "localhost" &&
-      hostname !== "::1" &&
-      !hostname.startsWith("127.")
-    );
-  } catch {
-    return false;
-  }
-}
-
 export async function exampleContext(): Promise<ExampleContext> {
   const endpoint = process.env["ZOLANA_ENDPOINT"]?.trim();
   const indexerUrl = process.env["ZOLANA_INDEXER_URL"]?.trim();
   const proverUrl = process.env["ZOLANA_PROVER_URL"]?.trim();
-  const allowInsecureHttp = [indexerUrl, proverUrl].some(
-    (url) => url !== undefined && isNonLoopbackHttp(url),
-  );
   // Client construction initializes Poseidon before shielded keys are derived.
   // With no endpoint the SDK uses its local validator, Photon, and prover URLs.
   const client = await createZolanaClient(
@@ -118,7 +83,6 @@ export async function exampleContext(): Promise<ExampleContext> {
           ...(endpoint ? { solanaRpcUrl: endpoint } : {}),
           ...(indexerUrl ? { indexerUrl } : {}),
           ...(proverUrl ? { proverUrl } : {}),
-          ...(allowInsecureHttp ? { allowInsecureHttp: true } : {}),
         }
       : {},
   );
@@ -126,103 +90,44 @@ export async function exampleContext(): Promise<ExampleContext> {
   return Object.freeze({ client, signer, keypair });
 }
 
-export function recipientAddress(): Address {
-  return address(process.env["ZOLANA_RECIPIENT"] ?? DEFAULT_RECIPIENT);
-}
-
-function transactionSender(client: Client) {
-  return sendAndConfirmTransactionFactory({
-    rpc: client.solanaRpc,
-    rpcSubscriptions: client.solanaRpcSubscriptions,
-  });
-}
-
-export async function sendAndConfirmTransaction(
-  client: Client,
-  signer: Signer,
-  transaction: Transaction,
-): Promise<Signature> {
-  const signed = await signTransactionWithSigners([signer], transaction);
-  assertIsFullySignedTransaction(signed);
-  assertIsTransactionWithBlockhashLifetime(signed);
-  await transactionSender(client)(signed, {
-    commitment: "confirmed",
-  });
-  return getSignatureFromTransaction(signed);
-}
-
-export async function sendAndConfirmInstructions(
-  client: Client,
-  signer: Signer,
-  instructions: readonly Instruction[],
-): Promise<Signature> {
-  const { value: lifetime } = await client.solanaRpc
-    .getLatestBlockhash()
-    .send();
-  const signed = await signTransactionMessageWithSigners(
-    pipe(
-      createTransactionMessage({ version: 0 }),
-      (message) => setTransactionMessageFeePayerSigner(signer, message),
-      (message) =>
-        setTransactionMessageLifetimeUsingBlockhash(lifetime, message),
-      (message) => appendTransactionMessageInstructions(instructions, message),
-    ),
-  );
-  assertIsTransactionWithBlockhashLifetime(signed);
-  await transactionSender(client)(signed, {
-    commitment: "confirmed",
-  });
-  return getSignatureFromTransaction(signed);
-}
-
 /**
- * Setup shorthand used by transfer, withdrawal, and balance examples. The
- * examples themselves keep the operation under discussion visible.
+ * Sign and send instructions as the given fee payer, then wait for the
+ * transaction to confirm.
+ *
+ * The SDK returns instructions and leaves signing and sending to the
+ * application, so a Kit app owns this step. It lives here rather than in the
+ * example so the example stays about the shielded-pool calls. The SDK's
+ * `confirmTransaction` is the confirmation, and the status response that
+ * confirms also carries the landed slot, so no request is issued twice.
  */
-export async function setupFundedWallet(amount: bigint): Promise<FundedWallet> {
-  const context = await exampleContext();
-  const { client, signer, keypair } = context;
-  const registration = await buildRegistrationTransaction({
-    client,
-    owner: signer.address,
-    address: keypair.shieldedAddress(),
-  });
-  if (registration) {
-    await sendAndConfirmTransaction(client, signer, registration);
-  }
-
-  const assets = new AssetRegistry();
-  const wallet = new Wallet({
-    identity: keypair.shieldedAddress(),
-    registry: assets,
-  });
-  const authority = new LocalWalletAuthority({
-    solanaPublicKey: signer.address,
-    keypair,
+export function sendAndConfirmFactory(
+  client: Client,
+  feePayer: TransactionSigner,
+): (instructions: readonly Instruction[]) => Promise<ConfirmedTransaction> {
+  const sendTransaction = sendTransactionWithoutConfirmingFactory({
+    rpc: client.solanaRpc,
   });
 
-  const deposit = await buildDepositTransaction({
-    client,
-    feePayer: signer.address,
-    recipient: keypair.shieldedAddress(),
-    amount,
-  });
-  const depositSignature = await sendAndConfirmTransaction(
-    client,
-    signer,
-    deposit,
-  );
-  await client.confirmPrivateTransaction(depositSignature);
-  await syncWallet({
-    client,
-    wallet,
-    authority,
-  });
-
-  return Object.freeze({
-    ...context,
-    assets,
-    authority,
-    wallet,
-  });
+  return async function sendAndConfirm(
+    instructions: readonly Instruction[],
+  ): Promise<ConfirmedTransaction> {
+    const { value: lifetime } = await client.solanaRpc
+      .getLatestBlockhash()
+      .send();
+    const signed = await signTransactionMessageWithSigners(
+      pipe(
+        createTransactionMessage({ version: 0 }),
+        (message) => setTransactionMessageFeePayerSigner(feePayer, message),
+        (message) =>
+          setTransactionMessageLifetimeUsingBlockhash(lifetime, message),
+        (message) =>
+          appendTransactionMessageInstructions(instructions, message),
+      ),
+    );
+    assertIsTransactionWithBlockhashLifetime(signed);
+    await sendTransaction(signed, { commitment: "confirmed" });
+    const signature = getSignatureFromTransaction(signed);
+    const slot = await client.confirmTransaction(signature);
+    return { signature, slot };
+  };
 }
