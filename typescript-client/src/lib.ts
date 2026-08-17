@@ -29,7 +29,7 @@ import {
   initializePoseidon,
   type Bytes32,
   type ZolanaClientConfig,
-} from "@zolana/sdk";
+} from "@heliuslabs/zolana";
 
 export type Client = Awaited<ReturnType<typeof createZolanaClient>>;
 
@@ -45,6 +45,7 @@ export interface ConfirmedTransaction {
   readonly slot: bigint;
 }
 
+// Will be exposed through a single devnet URL. Currently exposed as they are.
 const RPC_URL = "https://devnet.helius-rpc.com";
 const INDEXER_URL =
   "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com";

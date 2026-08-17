@@ -6,8 +6,7 @@
 
 ## Setup
 
-Install Node.js 24+ and pnpm. The TypeScript SDK is pinned directly to the
-Zolana git revision used by the Rust examples.
+Install Node.js 24+ and pnpm.
 
 ```bash
 pnpm install
