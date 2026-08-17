@@ -1,22 +1,22 @@
 import {
   SOL_MINT,
   createZolanaClient,
-} from "@zolana/sdk";
-import { atSlot } from "@zolana/sdk/client";
+} from "@heliuslabs/zolana";
+import { atSlot } from "@heliuslabs/zolana/client";
 import {
   depositInstruction,
   transactInstruction,
   DepositAsset,
   TransactWithdrawal,
-} from "@zolana/sdk/interface";
-import { randomBlinding } from "@zolana/sdk/keypair";
+} from "@heliuslabs/zolana/interface";
+import { randomBlinding } from "@heliuslabs/zolana/keypair";
 import {
   AssetRegistry,
   ConfidentialTransfer,
   ProofInputUtxo,
   decryptToBalances,
   WithdrawalTarget,
-} from "@zolana/sdk/transaction";
+} from "@heliuslabs/zolana/transaction";
 
 import {
   sendAndConfirmFactory,

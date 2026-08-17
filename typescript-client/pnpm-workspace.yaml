@@ -1,3 +1,2 @@
 allowBuilds:
-  "@zolana/sdk@https://codeload.github.com/helius-labs/zolana/tar.gz/5705c78ee4283d82ed445474f285b0daf4865606#path:/sdk-libs/ts": true
   esbuild: true
