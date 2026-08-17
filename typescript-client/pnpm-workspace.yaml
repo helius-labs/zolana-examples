@@ -1,2 +1,4 @@
 allowBuilds:
   esbuild: true
+minimumReleaseAgeExclude:
+  - "@heliuslabs/zolana@0.1.0-alpha"
