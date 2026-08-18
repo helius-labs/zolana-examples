@@ -1,22 +1,5 @@
 # Examples for private Solana rings
 
-Rings enable confidential transfers for SOL and any SPL asset, while keeping execution on Solana and custody with the user:
-* Users hold private balances of SOL or any SPL asset in a Ring. This balance is encrypted onchain.
-* Funds move in a single Solana transaction between public and private balances via deposit, withdrawal, or private transfer.
-* A zero-knowledge proof attests that the sender owns and can spend the private balance used by a transfer.
-* The Solana Privacy Program verifies the ZK proof without revealing asset and amount.
-
-
-### Privacy guarantees
-
-| | Default Ring | Custom Ring |
-| --- | --- | --- |
-| Amount | Private | Private |
-| Asset | Private | Private |
-| Sender | Public | Public | Private |
-| Recipient | Public | Public | Private |
-| Access | Permissionless | Custom policy and compliance controls |
-
 ### [Rust client](rust-client/README.md)
 
 |  |  |

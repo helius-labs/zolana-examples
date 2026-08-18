@@ -1,8 +1,8 @@
 # Zolana examples: TypeScript client
 
-|                                                                      |                                          |
-| -------------------------------------------------------------------- | ---------------------------------------- |
-| [`deposit_transfer_withdraw`](examples/deposit_transfer_withdraw.ts) | Deposit, private transfer, and withdraw. |
+TypeScript client examples for `@heliuslabs/zolana`.
+
+- **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw
 
 ## Setup
 
