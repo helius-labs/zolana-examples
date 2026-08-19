@@ -25,6 +25,7 @@ import {
 } from "@solana/kit";
 import {
   ShieldedKeypair,
+  SigningKey,
   createZolanaClient,
   initializePoseidon,
   type Bytes32,
@@ -82,7 +83,7 @@ async function funderKeypair(): Promise<ShieldedKeypair> {
   // public key. Derive the Solana signer and private wallet from the same seed.
   const seed = Uint8Array.from(secret.slice(0, 32)) as Bytes32;
   try {
-    return ShieldedKeypair.fromEd25519(seed, 0);
+    return ShieldedKeypair.fromKeypair(SigningKey.fromEd25519Bytes(seed));
   } finally {
     seed.fill(0);
   }
