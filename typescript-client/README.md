@@ -6,8 +6,10 @@ TypeScript client examples for `@heliuslabs/zolana`.
 
 ## Setup
 
+Install Node.js 24+ and pnpm.
+
 ```bash
-pnpm install
+npm install @heliuslabs/zolana@alpha @solana/kit
 ```
 
 For Devnet:
