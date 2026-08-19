@@ -8,7 +8,7 @@
     "example": "tsx"
   },
   "dependencies": {
-    "@heliuslabs/zolana": "0.1.0-alpha",
+    "@heliuslabs/zolana": "git+https://github.com/helius-labs/zolana.git#460265be57ed8b0ee16b087241330e8796582cc2&path:/sdk-libs/ts",
     "@solana/kit": "^7.0.0",
     "dotenv": "latest"
   },
