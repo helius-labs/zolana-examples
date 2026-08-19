@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@heliuslabs/zolana':
-        specifier: git+https://github.com/helius-labs/zolana.git#460265be57ed8b0ee16b087241330e8796582cc2&path:/sdk-libs/ts
-        version: https://codeload.github.com/helius-labs/zolana/tar.gz/460265be57ed8b0ee16b087241330e8796582cc2#path:/sdk-libs/ts(@solana/kit@7.0.0(typescript@7.0.2))
+        specifier: git+https://github.com/helius-labs/zolana.git#93ad5acc79c4ad22ea96db8c1b7e23afc535063c&path:/sdk-libs/ts
+        version: https://codeload.github.com/helius-labs/zolana/tar.gz/93ad5acc79c4ad22ea96db8c1b7e23afc535063c#path:/sdk-libs/ts(@solana/kit@7.0.0(typescript@7.0.2))
       '@solana/kit':
         specifier: ^7.0.0
         version: 7.0.0(typescript@7.0.2)
@@ -189,8 +189,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@heliuslabs/zolana@https://codeload.github.com/helius-labs/zolana/tar.gz/460265be57ed8b0ee16b087241330e8796582cc2#path:/sdk-libs/ts':
-    resolution: {gitHosted: true, integrity: sha512-cCs4sEw7c1mpfkxNjCSJaPZGjCKZ/Lbto90bAgTF5qxB8OgXUf2XlfKEdO+aMMzXbkyg6Z70qsBamyn8fPhjrw==, path: /sdk-libs/ts, tarball: https://codeload.github.com/helius-labs/zolana/tar.gz/460265be57ed8b0ee16b087241330e8796582cc2}
+  '@heliuslabs/zolana@https://codeload.github.com/helius-labs/zolana/tar.gz/93ad5acc79c4ad22ea96db8c1b7e23afc535063c#path:/sdk-libs/ts':
+    resolution: {gitHosted: true, integrity: sha512-nBqSZ1DDbtCuQnhJNgG1mS7nZi8R+/THnEBUVLbvojZGHXBdMLZ8vo6MLZ0U5Jopw0SsNw/Dbcc/rvuV/7ZuQQ==, path: /sdk-libs/ts, tarball: https://codeload.github.com/helius-labs/zolana/tar.gz/93ad5acc79c4ad22ea96db8c1b7e23afc535063c}
     version: 0.1.0
     engines: {node: '>=24'}
     peerDependencies:
@@ -1014,7 +1014,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@heliuslabs/zolana@https://codeload.github.com/helius-labs/zolana/tar.gz/460265be57ed8b0ee16b087241330e8796582cc2#path:/sdk-libs/ts(@solana/kit@7.0.0(typescript@7.0.2))':
+  '@heliuslabs/zolana@https://codeload.github.com/helius-labs/zolana/tar.gz/93ad5acc79c4ad22ea96db8c1b7e23afc535063c#path:/sdk-libs/ts(@solana/kit@7.0.0(typescript@7.0.2))':
     dependencies:
       '@lightprotocol/hasher.rs': 0.2.1
       '@noble/ciphers': 2.2.0

@@ -15,6 +15,8 @@ pnpm install
 
 **Devnet:**
 
+The example uses devnet by default.
+
 Get an API key from [Helius](https://helius.dev) and add to .env:
 
 ```bash
@@ -28,6 +30,12 @@ To run on localnet, configure in [`src/lib.ts`](src/lib.ts) and install:
 ```bash
 cargo install --git https://github.com/helius-labs/zolana --tag v0.1.0-alpha zolana-cli
 zolana dev start
+```
+
+```typescript
+const RPC_URL = "http://127.0.0.1:8899";
+const INDEXER_URL = "http://127.0.0.1:8784";
+const PROVER_URL = "http://127.0.0.1:3001";
 ```
 
 ## Run
