@@ -13,35 +13,21 @@ npm install @heliuslabs/zolana@alpha @solana/kit
 pnpm install
 ```
 
-For Devnet:
+**Devnet:**
+
+Get an API key from [Helius](https://helius.dev) and add to .env:
 
 ```bash
 cp .env.example .env # ...and set API_KEY
 ```
 
-```ts
-import { createZolanaClient } from "@heliuslabs/zolana";
+**Localnet**:
 
-const client = await createZolanaClient({
-  solanaRpcUrl: "https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY",
-  indexerUrl: "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com",
-  proverUrl:
-    "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com:3001",
-  allowInsecureHttp: true,
-});
-```
-
-For Localnet:
+To run on localnet, configure in [`src/lib.ts`](src/lib.ts) and install:
 
 ```bash
 cargo install --git https://github.com/helius-labs/zolana --tag v0.1.0-alpha zolana-cli
 zolana dev start
-```
-
-```ts
-import { createZolanaClient } from "@heliuslabs/zolana";
-
-const client = await createZolanaClient({});
 ```
 
 ## Run
