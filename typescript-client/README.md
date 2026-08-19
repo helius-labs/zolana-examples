@@ -10,6 +10,7 @@ Install Node.js 24+ and pnpm.
 
 ```bash
 npm install @heliuslabs/zolana@alpha @solana/kit
+pnpm install
 ```
 
 For Devnet:
@@ -24,7 +25,8 @@ import { createZolanaClient } from "@heliuslabs/zolana";
 const client = await createZolanaClient({
   solanaRpcUrl: "https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY",
   indexerUrl: "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com",
-  proverUrl: "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com:3001",
+  proverUrl:
+    "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com:3001",
   allowInsecureHttp: true,
 });
 ```
