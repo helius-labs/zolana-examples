@@ -6,19 +6,39 @@ TypeScript client examples for `@heliuslabs/zolana`.
 
 ## Setup
 
-Install Node.js 24+ and pnpm.
-
 ```bash
 pnpm install
-cp .env.example .env
 ```
 
-`ZOLANA_PAYER_KEYPAIR` defaults to the Solana CLI wallet. It must be funded on
-the selected network. Set `API_KEY` for the Helius RPC. The example talks to
-Helius plus the Photon/prover ALB unless you override `ZOLANA_ENDPOINT` /
-`ZOLANA_INDEXER_URL` / `ZOLANA_PROVER_URL`.
+For Devnet:
 
-To run on localnet, toggle `localnet` in [`src/lib.ts`](src/lib.ts).
+```bash
+cp .env.example .env # ...and set API_KEY
+```
+
+```ts
+import { createZolanaClient } from "@heliuslabs/zolana";
+
+const client = await createZolanaClient({
+  solanaRpcUrl: "https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY",
+  indexerUrl: "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com",
+  proverUrl: "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com:3001",
+  allowInsecureHttp: true,
+});
+```
+
+For Localnet:
+
+```bash
+cargo install --git https://github.com/helius-labs/zolana --tag v0.1.0-alpha zolana-cli
+zolana dev start
+```
+
+```ts
+import { createZolanaClient } from "@heliuslabs/zolana";
+
+const client = await createZolanaClient({});
+```
 
 ## Run
 
@@ -28,5 +48,6 @@ pnpm example examples/deposit_transfer_withdraw.ts
 
 ## Documentation
 
+- [Connect](https://www.helius.dev/docs/privacy/connect)
 - [Documentation](https://helius.dev/docs/privacy)
 - [Source Code](https://github.com/helius-labs/zolana)
