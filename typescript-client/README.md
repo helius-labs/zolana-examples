@@ -3,6 +3,7 @@
 TypeScript client examples for `@heliuslabs/zolana`.
 
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw
+- **[sign-with-wallet-adapter](examples/sign-with-wallet-adapter/)** - Sign deposit, private transfer, and withdraw with Wallet Adapter
 
 ## Setup
 
@@ -42,6 +43,9 @@ const PROVER_URL = "http://127.0.0.1:3001";
 
 ```bash
 pnpm example examples/deposit_transfer_withdraw.ts
+pnpm --dir examples/sign-with-wallet-adapter install
+pnpm --dir examples/sign-with-wallet-adapter dev
+pnpm --dir examples/sign-with-wallet-adapter test:integration
 ```
 
 ## Documentation

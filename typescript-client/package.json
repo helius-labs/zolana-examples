@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "oxfmt --check . && tsc --noEmit",
+    "check": "oxfmt --check . '!examples/sign-with-wallet-adapter/**' && tsc --noEmit",
+    "check:wallet-adapter": "pnpm --dir examples/sign-with-wallet-adapter check",
     "example": "tsx"
   },
   "dependencies": {

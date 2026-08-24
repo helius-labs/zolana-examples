@@ -1,0 +1,20 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 2rem;
+  max-width: 40rem;
+}
+
+section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+button,
+input {
+  padding: 0.5rem 0.75rem;
+}
+
+button:disabled {
+  opacity: 0.5;
+}

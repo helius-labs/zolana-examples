@@ -3,6 +3,8 @@ node_modules/
 .DS_Store
 rust-client/.env
 typescript-client/.env
+typescript-client/examples/sign-with-wallet-adapter/.env
+typescript-client/examples/sign-with-wallet-adapter/dist
 rust-client/BUGS.md
 rust-client/test-ledger/
 rust-client/.surfpool/
