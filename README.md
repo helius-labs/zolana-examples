@@ -4,12 +4,14 @@
 
 |  |  |
 |---------|-------------|
+| [`create_private_wallet`](rust-client/examples/create_private_wallet.rs) | Create and register a private wallet. |
 | [`deposit_transfer_withdraw`](rust-client/examples/deposit_transfer_withdraw.rs) | Deposit, private transfer, and withdraw. |
 
 ### [TypeScript client](typescript-client/README.md)
 
 |  |  |
 |---------|-------------|
+| [`create_private_wallet`](typescript-client/examples/create_private_wallet.ts) | Create and register a private wallet. |
 | [`deposit_transfer_withdraw`](typescript-client/examples/deposit_transfer_withdraw.ts) | Deposit, private transfer, and withdraw. |
 
 ### Program examples
