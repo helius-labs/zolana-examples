@@ -34,7 +34,7 @@ export default function App() {
         <h1>Private balances</h1>
         <p>
           Connect a wallet. One message signature derives viewing and
-          nullifier keys. The wallet keeps the Ed25519 secret.
+          nullifier keys.
         </p>
         <WalletMultiButton />
       </section>
