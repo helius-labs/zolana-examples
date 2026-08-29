@@ -4,16 +4,12 @@ use light_program_profiler::{
     mollusk::{register_profiling_syscalls, take_profiling_entries},
     report::{CuBenchmark, ReadmeConfig, SectionTable},
 };
-use mollusk_solana_account::Account as MolluskAccount;
-use mollusk_solana_instruction::{
-    AccountMeta as MolluskAccountMeta, Instruction as MolluskInstruction,
-};
-use mollusk_solana_pubkey::Pubkey as MolluskPubkey;
-use mollusk_svm::{program::loader_keys::LOADER_V3, result::Check, Mollusk};
+use mollusk_svm::{result::Check, Mollusk};
 use num_bigint::BigUint;
+use solana_account::Account;
 use solana_address::Address;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
-use solana_instruction::Instruction;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_message::{v0, AddressLookupTableAccount, Message, VersionedMessage};
 use solana_pubkey::Pubkey;
@@ -46,7 +42,7 @@ use zolana_interface::{
     },
     SHIELDED_POOL_PROGRAM_ID,
 };
-use zolana_keypair::{random_blinding, ShieldedKeypair, ViewingKey};
+use zolana_keypair::{random_blinding, ShieldedKeypair, SigningKey};
 use zolana_merkle_tree::{indexed::IndexedMerkleTree, MerkleTree};
 use zolana_transaction::{
     instructions::{
@@ -62,22 +58,17 @@ use zolana_tree::TreeAccount;
 
 const PROFILING_SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../target/swap-bench");
 const OUTPUT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../BENCHMARK.md");
-const PROVER_KEYS_DIR: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../../prover/server/proving-keys"
-);
-
-fn to_mollusk_pubkey(key: &Pubkey) -> MolluskPubkey {
-    MolluskPubkey::new_from_array(key.to_bytes())
+fn to_mollusk_pubkey(key: &Pubkey) -> Pubkey {
+    Pubkey::new_from_array(key.to_bytes())
 }
 
-fn to_mollusk_instruction(ix: &Instruction) -> MolluskInstruction {
-    MolluskInstruction {
+fn to_mollusk_instruction(ix: &Instruction) -> Instruction {
+    Instruction {
         program_id: to_mollusk_pubkey(&ix.program_id),
         accounts: ix
             .accounts
             .iter()
-            .map(|meta| MolluskAccountMeta {
+            .map(|meta| AccountMeta {
                 pubkey: to_mollusk_pubkey(&meta.pubkey),
                 is_signer: meta.is_signer,
                 is_writable: meta.is_writable,
@@ -87,25 +78,22 @@ fn to_mollusk_instruction(ix: &Instruction) -> MolluskInstruction {
     }
 }
 
-fn mollusk_program_account(program_id: &MolluskPubkey) -> (MolluskPubkey, MolluskAccount) {
+fn mollusk_program_account(program_id: &Pubkey) -> (Pubkey, Account) {
     let account = mollusk_svm::program::create_program_account_loader_v3(program_id);
     (*program_id, account)
 }
 
-fn system_owned_account(lamports: u64) -> MolluskAccount {
-    MolluskAccount {
+fn system_owned_account(lamports: u64) -> Account {
+    Account {
         lamports,
         data: Vec::new(),
-        owner: MolluskPubkey::new_from_array([0u8; 32]),
+        owner: Pubkey::new_from_array([0u8; 32]),
         executable: false,
         rent_epoch: 0,
     }
 }
 
-fn build_tree_fixture(
-    tree: &Pubkey,
-    leaves: &[[u8; 32]],
-) -> (MolluskAccount, [u8; 32], [u8; 32], u16) {
+fn build_tree_fixture(tree: &Pubkey, leaves: &[[u8; 32]]) -> (Account, [u8; 32], [u8; 32], u16) {
     let mut tree_account_bytes = vec![0u8; tree_account_size()];
     let root_index = leaves.len() as u16;
     let (utxo_root, nullifier_root) = {
@@ -113,23 +101,22 @@ fn build_tree_fixture(
             &mut tree_account_bytes,
             TREE_ACCOUNT_DISCRIMINATOR,
             STATE_HEIGHT as u8,
-            [1u8; 32],
             tree.to_bytes(),
             address_tree_params(),
         )
         .expect("init tree account");
         for leaf in leaves {
-            account.utxo_tree().append(*leaf);
+            account.utxo_tree().append(*leaf).expect("append leaf");
         }
         (
             account.get_utxo_tree_root(root_index).expect("utxo root"),
             account.get_nullifier_tree_root(0).expect("nullifier root"),
         )
     };
-    let fixture = MolluskAccount {
+    let fixture = Account {
         lamports: 1_000_000_000_000,
         data: tree_account_bytes,
-        owner: MolluskPubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID),
+        owner: Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID),
         executable: false,
         rent_epoch: 0,
     };
@@ -208,9 +195,9 @@ fn build_spend_proofs(
 
 fn assemble_accounts(
     ix: &Instruction,
-    spp_id: &MolluskPubkey,
-    fixtures: &[(Pubkey, MolluskAccount)],
-) -> Vec<(MolluskPubkey, MolluskAccount)> {
+    spp_id: &Pubkey,
+    fixtures: &[(Pubkey, Account)],
+) -> Vec<(Pubkey, Account)> {
     let spp = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
     ix.accounts
         .iter()
@@ -236,7 +223,8 @@ fn keypair_from_payer(payer: &Keypair) -> ShieldedKeypair {
     let seed: [u8; 32] = payer.to_bytes()[..32]
         .try_into()
         .expect("ed25519 seed is the first 32 bytes");
-    ShieldedKeypair::from_ed25519(&seed, ViewingKey::new()).expect("keypair from payer")
+    ShieldedKeypair::from_keypair(SigningKey::from_ed25519_bytes(&seed))
+        .expect("keypair from payer")
 }
 
 fn prove_transact_timed(
@@ -245,21 +233,13 @@ fn prove_transact_timed(
     prover: &ProverClient,
 ) -> (TransactIxData, Duration) {
     prover
-        .prove_transact(proof_inputs.clone(), spend_proofs)
+        .prove_transact(proof_inputs.clone(), spend_proofs, &[])
         .expect("warm prove transact");
     let start = Instant::now();
     let transact = prover
-        .prove_transact(proof_inputs, spend_proofs)
+        .prove_transact(proof_inputs, spend_proofs, &[])
         .expect("prove transact");
     (transact, start.elapsed())
-}
-
-fn start_prover() {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| {
-        std::env::set_var("ZOLANA_PROVER_KEYS_DIR", PROVER_KEYS_DIR);
-    });
-    zolana_client::spawn_prover().expect("spawn prover");
 }
 
 fn proving_time_table(spp: Duration, swap: Duration) -> SectionTable {
@@ -335,13 +315,13 @@ fn tx_size_table(ix: &Instruction, payer: &Pubkey) -> SectionTable {
 fn bench_cu_swap() {
     std::env::set_var("SBF_OUT_DIR", PROFILING_SBF_DIR);
 
-    let swap_id = MolluskPubkey::new_from_array(*swap_program::ID.as_array());
-    let spp_id = MolluskPubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
+    let swap_id = Pubkey::new_from_array(*swap_program::ID.as_array());
+    let spp_id = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
 
     let mut mollusk = Mollusk::default();
     register_profiling_syscalls(&mut mollusk);
-    mollusk.add_program(&swap_id, "swap_program", &LOADER_V3);
-    mollusk.add_program(&spp_id, "shielded_pool_program", &LOADER_V3);
+    mollusk.add_program(&swap_id, "swap_program");
+    mollusk.add_program(&spp_id, "shielded_pool_program");
 
     let mut bench = CuBenchmark::new(ReadmeConfig {
         title: "Confidential Swap -- CU Benchmark".into(),
@@ -364,7 +344,7 @@ fn bench_cu_swap() {
         ..Default::default()
     });
 
-    start_prover();
+    zolana_test_utils::prover::spawn_workspace_prover();
     preload(CircuitId::Make).expect("preload make keys");
     preload(CircuitId::Take).expect("preload take keys");
     preload(CircuitId::TakeVerifiableEncryption).expect("preload take_verifiable_encryption keys");
@@ -378,7 +358,7 @@ fn bench_cu_swap() {
     bench.generate().expect("write BENCHMARK.md");
 }
 
-fn bench_make(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBenchmark) {
+fn bench_make(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     const INPUT_AMOUNT: u64 = 1_000_000;
     const SOURCE_AMOUNT: u64 = 400_000;
     const EXPIRY: u64 = 1_900_000_000;
@@ -393,12 +373,12 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
         asset: SOL_MINT,
         amount: INPUT_AMOUNT,
         blinding: input_blinding,
-        zone_program_id: None,
+        ring_program_id: None,
         data: Data::default(),
     };
 
-    let taker = ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([0x4d; 32]))
-        .expect("taker keypair");
+    let taker =
+        ShieldedKeypair::from_keypair(&Keypair::new_from_array([0x4d; 32])).expect("taker keypair");
     let taker_address = taker.shielded_address().expect("taker address");
     let terms = OrderTerms {
         destination_mint: Address::new_from_array([7u8; 32]),
@@ -530,7 +510,7 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
     bench.add_table("make", tx_size_table(&ix, &payer.pubkey()));
 }
 
-fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBenchmark) {
+fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     const SOURCE_AMOUNT: u64 = 400_000;
     const DESTINATION_AMOUNT: u64 = 250;
     const EXPIRY: u64 = 1_900_000_000;
@@ -539,8 +519,8 @@ fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut
     let taker_payer = Keypair::new();
     let taker = keypair_from_payer(&taker_payer);
     let taker_address = taker.shielded_address().expect("taker address");
-    let maker = ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([0x51; 32]))
-        .expect("maker keypair");
+    let maker =
+        ShieldedKeypair::from_keypair(&Keypair::new_from_array([0x51; 32])).expect("maker keypair");
     let maker_address = maker.shielded_address().expect("maker address");
 
     let terms = OrderTerms {
@@ -574,7 +554,7 @@ fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut
         asset: SOL_MINT,
         amount: DESTINATION_AMOUNT,
         blinding: taker_in_blinding,
-        zone_program_id: None,
+        ring_program_id: None,
         data: Data::default(),
     };
     let taker_spend = SppProofInputUtxo::new(taker_utxo, &taker);
@@ -674,7 +654,7 @@ fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut
     bench.add_table("take", tx_size_table(&ix, &taker_payer.pubkey()));
 }
 
-fn bench_take(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBenchmark) {
+fn bench_take(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     const SOURCE_AMOUNT: u64 = 400_000;
     const DESTINATION_AMOUNT: u64 = 250;
     const EXPIRY: u64 = 1_900_000_000;
@@ -683,8 +663,8 @@ fn bench_take(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
     let taker_payer = Keypair::new();
     let taker = keypair_from_payer(&taker_payer);
     let taker_address = taker.shielded_address().expect("taker address");
-    let maker = ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([0x51; 32]))
-        .expect("maker keypair");
+    let maker =
+        ShieldedKeypair::from_keypair(&Keypair::new_from_array([0x51; 32])).expect("maker keypair");
     let maker_address = maker.shielded_address().expect("maker address");
 
     let terms = OrderTerms {
@@ -721,7 +701,7 @@ fn bench_take(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
         asset: SOL_MINT,
         amount: DESTINATION_AMOUNT,
         blinding: taker_in_blinding,
-        zone_program_id: None,
+        ring_program_id: None,
         data: Data::default(),
     };
     let taker_spend = SppProofInputUtxo::new(taker_utxo, &taker);
@@ -844,7 +824,7 @@ fn bench_take(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
     );
 }
 
-fn bench_cancel(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBenchmark) {
+fn bench_cancel(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     const SOURCE_AMOUNT: u64 = 400_000;
     const ORDER_EXPIRY: u64 = 1_000_000;
     const SPP_RELAYER_DEADLINE: u64 = u64::MAX;
@@ -853,8 +833,8 @@ fn bench_cancel(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBen
     let maker_payer = Keypair::new();
     let maker = keypair_from_payer(&maker_payer);
     let maker_address = maker.shielded_address().expect("maker address");
-    let taker = ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([0x4d; 32]))
-        .expect("taker keypair");
+    let taker =
+        ShieldedKeypair::from_keypair(&Keypair::new_from_array([0x4d; 32])).expect("taker keypair");
     let taker_viewing_pubkey = taker
         .shielded_address()
         .expect("taker address")

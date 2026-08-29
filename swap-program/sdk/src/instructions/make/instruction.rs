@@ -8,7 +8,7 @@ use zolana_interface::{
 use zolana_keypair::ShieldedAddress;
 use zolana_transaction::TransactionError;
 
-use crate::{err, tag, MakeIxData, MakeProof, MarkerData};
+use crate::{err, order_authority_pda, tag, MakeIxData, MakeProof, MarkerData};
 
 pub struct OrderMarker {
     pub order_utxo_hash: [u8; 32],
@@ -48,7 +48,6 @@ impl Make {
         if let Some(marker) = spp_proof.messages.first_mut() {
             marker.data = Vec::new();
         }
-
         let serialized_ix = wincode::serialize(&MakeIxData {
             proof: make_proof,
             transact: spp_proof,
@@ -59,7 +58,10 @@ impl Make {
             AccountMeta::new(payer, true),
             AccountMeta::new(payer, true),
             AccountMeta::new(tree, false),
+            AccountMeta::new(tree, false),
             AccountMeta::new_readonly(Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID), false),
+            AccountMeta::new_readonly(Pubkey::default(), false),
+            AccountMeta::new_readonly(order_authority_pda(), false),
         ];
         let mut instruction_data = vec![tag::MAKE];
         instruction_data.extend_from_slice(&serialized_ix);
@@ -75,7 +77,7 @@ impl Make {
 mod tests {
     use solana_address::Address;
     use solana_keypair::Keypair;
-    use zolana_keypair::{constants::BLINDING_LEN, shielded::ShieldedKeypair};
+    use zolana_keypair::shielded::ShieldedKeypair;
     use zolana_transaction::{
         instructions::{
             transact::{
@@ -98,15 +100,12 @@ mod tests {
 
     #[test]
     fn sign_order_utxo_make_layout() {
-        let owner_keypair =
-            ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([7u8; 32]))
-                .expect("owner keypair");
-        let order_keypair =
-            ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([9u8; 32]))
-                .expect("order keypair");
-        let taker_keypair =
-            ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([13u8; 32]))
-                .expect("market maker keypair");
+        let owner_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([7u8; 32]))
+            .expect("owner keypair");
+        let order_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([9u8; 32]))
+            .expect("order keypair");
+        let taker_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([13u8; 32]))
+            .expect("market maker keypair");
         let assets = AssetRegistry::default();
 
         let input_amount = 1_000_000u64;
@@ -116,8 +115,8 @@ mod tests {
             owner: owner_keypair.signing_pubkey(),
             asset: SOL_MINT,
             amount: input_amount,
-            blinding: [5u8; BLINDING_LEN],
-            zone_program_id: None,
+            blinding: crate::shared::test_blinding(5),
+            ring_program_id: None,
             data: Data::default(),
         };
         let spend = SppProofInputUtxo::new(input_utxo, &owner_keypair);
@@ -126,7 +125,7 @@ mod tests {
             owner_address: Some(order_keypair.shielded_address().expect("order address")),
             asset: SOL_MINT,
             amount: order_utxo_amount,
-            blinding: [11u8; BLINDING_LEN],
+            blinding: crate::shared::test_blinding(11),
             ..Default::default()
         }
         .with_utxo_data(vec![1, 2, 3, 4], data_hash_bytes(0xAB));
@@ -231,20 +230,16 @@ mod tests {
             zolana_keypair::hash::sha256(&expected),
             spp_proof_inputs.message_hash().expect("message hash")
         );
-        assert_eq!(spp_proof_inputs.p256_signature, None);
     }
 
     #[test]
     fn sign_order_utxo_make_zero_change_utxo() {
-        let owner_keypair =
-            ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([3u8; 32]))
-                .expect("owner keypair");
-        let order_keypair =
-            ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([4u8; 32]))
-                .expect("order keypair");
-        let taker_keypair =
-            ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([14u8; 32]))
-                .expect("market maker keypair");
+        let owner_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([3u8; 32]))
+            .expect("owner keypair");
+        let order_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([4u8; 32]))
+            .expect("order keypair");
+        let taker_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([14u8; 32]))
+            .expect("market maker keypair");
         let assets = AssetRegistry::default();
 
         let amount = 250_000u64;
@@ -252,8 +247,8 @@ mod tests {
             owner: owner_keypair.signing_pubkey(),
             asset: SOL_MINT,
             amount,
-            blinding: [6u8; BLINDING_LEN],
-            zone_program_id: None,
+            blinding: crate::shared::test_blinding(6),
+            ring_program_id: None,
             data: Data::default(),
         };
         let spend = SppProofInputUtxo::new(input_utxo, &owner_keypair);
@@ -262,7 +257,7 @@ mod tests {
             owner_address: Some(order_keypair.shielded_address().expect("order address")),
             asset: SOL_MINT,
             amount,
-            blinding: [12u8; BLINDING_LEN],
+            blinding: crate::shared::test_blinding(12),
             ..Default::default()
         }
         .with_utxo_data(vec![9, 9], data_hash_bytes(0xCD));
