@@ -12,9 +12,7 @@ use solana_message::{v0, AddressLookupTableAccount, Message, VersionedMessage};
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::{versioned::VersionedTransaction, Transaction};
-use zolana_client::{
-    spawn_prover, sync_wallet, Deposit, DepositParams, Rpc, SolanaRpc, ZolanaIndexer,
-};
+use zolana_client::{spawn_prover, Rpc, SolanaRpc, ZolanaIndexer};
 use zolana_interface::{
     instruction::{CreateAssetCounter, CreateProtocolConfig, CreateSplInterface, CreateTree},
     pda,
@@ -30,6 +28,7 @@ use zolana_test_utils::{
 };
 use zolana_transaction::{AssetRegistry, Filter, LocalWalletAuthority, Wallet, SOL_MINT};
 use zolana_user_registry_interface::user_registry_program_id;
+use zolana_wallet::{sync_wallet, Deposit, DepositParams};
 
 // SPL the maker shields into the order UTXO (source), and SOL the taker pays (destination).
 pub const MAKER_SHIELD_SPL: u64 = 1_000_000_000;

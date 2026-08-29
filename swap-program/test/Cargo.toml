@@ -26,6 +26,7 @@ zolana-program-test = { git = "https://github.com/helius-labs/zolana", rev = "8d
 zolana-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
 zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
 zolana-user-registry-interface = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["solana"] }
+zolana-wallet = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
 
 [dev-dependencies]
 bincode = "1.3"
