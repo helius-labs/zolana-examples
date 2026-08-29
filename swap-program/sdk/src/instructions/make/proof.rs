@@ -41,10 +41,10 @@ impl MakeProofInputParams {
             bail!("change asset does not match order source mint");
         }
         if self.change.data_hash.is_some()
-            || self.change.zone_data_hash.is_some()
-            || self.change.zone_program_id.is_some()
+            || self.change.ring_data_hash.is_some()
+            || self.change.ring_program_id.is_some()
         {
-            bail!("change output must not carry data or zone commitments");
+            bail!("change output must not carry data or ring commitments");
         }
         let order = OrderTermsProofInput::try_from(terms)?;
         let order_utxo =
@@ -73,7 +73,7 @@ mod tests {
     use solana_address::Address;
     use solana_keypair::Keypair;
     use swap_prover::TAKE_MODE_DERIVED;
-    use zolana_keypair::{constants::BLINDING_LEN, shielded::ShieldedKeypair};
+    use zolana_keypair::shielded::ShieldedKeypair;
     use zolana_transaction::SOL_MINT;
 
     use super::*;
@@ -87,11 +87,10 @@ mod tests {
     // than the SPP transact it CPIs into and the instruction can never land.
     #[test]
     fn zero_change_folds_real_hash_matching_spp() {
-        let destination =
-            ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([21u8; 32]))
-                .expect("destination keypair")
-                .shielded_address()
-                .expect("destination address");
+        let destination = ShieldedKeypair::from_keypair(&Keypair::new_from_array([21u8; 32]))
+            .expect("destination keypair")
+            .shielded_address()
+            .expect("destination address");
 
         let order_utxo = OrderUtxo {
             terms: OrderTerms {
@@ -102,7 +101,7 @@ mod tests {
                 expiry: 1_700_000_000,
                 take_mode: TAKE_MODE_DERIVED,
             },
-            blinding: [11u8; BLINDING_LEN],
+            blinding: crate::shared::test_blinding(11),
             source_mint: SOL_MINT,
             source_amount: 400_000,
             destination_asset_id: 1,

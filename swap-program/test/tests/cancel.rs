@@ -24,7 +24,7 @@ use zolana_transaction::{
         },
         types::SppProofInputUtxo,
     },
-    Filter, SOL_ASSET_ID, SOL_MINT,
+    SOL_ASSET_ID, SOL_MINT,
 };
 use zolana_wallet::ensure_registered;
 
@@ -51,16 +51,16 @@ const SPP_RELAYER_DEADLINE: u64 = 2_000_000_000;
 #[test]
 fn make_and_cancel_swap_inline() -> Result<()> {
     let TestEnv {
-        rpc,
-        indexer,
+        client,
         tree,
         mut maker,
+        maker_input,
         taker,
         spl_mint,
     } = setup()?;
     let swap_prover_client = SwapProverClient::new();
     {
-        ensure_registered(&rpc, &maker.keypair.to_solana_keypair()?, &maker.keypair)
+        ensure_registered(client.rpc(), &maker.keypair, &maker.keypair)
             .map_err(|e| anyhow!("register maker: {e:?}"))?;
 
         let taker_address = taker.keypair.shielded_address()?;
@@ -88,14 +88,7 @@ fn make_and_cancel_swap_inline() -> Result<()> {
         };
         let order_output_utxo = order_utxo.output_utxo(taker_address.viewing_pubkey)?;
 
-        let maker_input_utxo = maker
-            .balance(spl_mint, Some(Filter::MinAmount(SOURCE_AMOUNT)))?
-            .utxos
-            .first()
-            .cloned()
-            .ok_or_else(|| anyhow!("no spendable utxo of {spl_mint} >= {SOURCE_AMOUNT}"))?;
-        let make_spend = SppProofInputUtxo::new(maker_input_utxo, &maker.keypair);
-        let input_utxos = vec![make_spend, SppProofInputUtxo::new_dummy()];
+        let input_utxos = vec![maker_input, SppProofInputUtxo::new_dummy()];
 
         let order_utxo_asset = order_output_utxo.asset;
         let leftover =
@@ -138,7 +131,8 @@ fn make_and_cancel_swap_inline() -> Result<()> {
             maker_address.solana_address()?,
         );
 
-        let spp_proof = indexer
+        let spp_proof = client
+            .indexer()
             .prove_transact(tree, spp_proof_inputs.clone())
             .map_err(|e| anyhow!("make transact proof: {e:?}"))?;
 
@@ -160,7 +154,10 @@ fn make_and_cancel_swap_inline() -> Result<()> {
         }
         .instruction()?;
 
-        send_v0_with_lookup_table(&rpc, &maker.keypair.to_solana_keypair()?, make_ix)?;
+        let make_signature = send_v0_with_lookup_table(client.rpc(), &maker.keypair, make_ix)?;
+        client
+            .confirm_private_transaction_sync(make_signature)
+            .map_err(|e| anyhow!("confirm make indexed: {e:?}"))?;
     }
 
     {
@@ -169,7 +166,7 @@ fn make_and_cancel_swap_inline() -> Result<()> {
         let order = index_maker(
             &mut maker.wallet,
             &maker.keypair,
-            &indexer,
+            client.indexer(),
             Duration::from_secs(60),
         )?
         .pop()
@@ -222,7 +219,8 @@ fn make_and_cancel_swap_inline() -> Result<()> {
                 .map_err(|e| anyhow!("cancel external data hash: {e:?}"))?,
         };
 
-        let spp_proof = indexer
+        let spp_proof = client
+            .indexer()
             .prove_transact(tree, cancel_spp_proof_inputs)
             .map_err(|e| anyhow!("cancel transact proof: {e:?}"))?;
 
@@ -240,9 +238,13 @@ fn make_and_cancel_swap_inline() -> Result<()> {
         }
         .instruction()?;
 
-        send_v0_with_lookup_table(&rpc, &maker.keypair.to_solana_keypair()?, cancel_ix)?;
+        let cancel_signature = send_v0_with_lookup_table(client.rpc(), &maker.keypair, cancel_ix)?;
+        client
+            .confirm_private_transaction_sync(cancel_signature)
+            .map_err(|e| anyhow!("confirm cancel indexed: {e:?}"))?;
 
-        indexer
+        client
+            .indexer()
             .get_merkle_proofs(tree, vec![source_output_hash], None)
             .map_err(|e| anyhow!("cancel output index: {e}"))?;
     }

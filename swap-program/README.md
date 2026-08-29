@@ -31,8 +31,10 @@ alongside Rust. The circuits import shared gadgets from the
 [zolana](https://github.com/helius-labs/zolana) monorepo through a local
 `replace` that resolves to `prover/server` four directories above
 `prover/circuits`. Check out the monorepo at the rev pinned in the Cargo
-manifests and place this repository inside its root, or symlink the checkout's
-`prover` directory next to this repository.
+manifests and place this repository inside its root. A `prover` symlink next
+to this repository also satisfies the build and the circuit tests, but the
+localnet tests resolve every artifact from the monorepo root and need the
+nested checkout.
 
 ```bash
 cargo build
@@ -40,12 +42,12 @@ cargo build
 
 The circuit tests and the localnet tests need the pinned proving and verifying
 keys, whose hashes are in [`swap-keys.CHECKSUM`](swap-keys.CHECKSUM). Download
-them from the `swap-keys-v3` release:
+them from the `swap-keys-v4` release:
 
 ```bash
 for c in make take cancel take_verifiable_encryption; do
   for k in pk vk; do
-    gh release download swap-keys-v3 --repo helius-labs/zolana \
+    gh release download swap-keys-v4 --repo helius-labs/zolana \
       --pattern "${c}_${k}.bin" --output "build/gnark/$c/$k.bin"
   done
 done

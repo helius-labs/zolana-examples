@@ -8,13 +8,16 @@ use swap_sdk::{
     index::index_taker,
     instructions::{
         make::{Make, MakeProofInputParams, OrderMarker, SppTxHashes},
-        take::{Take, TakeProofInputParams},
+        take_verifiable_encryption::{
+            TakeVerifiableEncryption, TakeVerifiableEncryptionProofInputParams,
+        },
     },
     prover::SwapProverClient,
     shared::input_sum,
     state::{OrderTerms, OrderUtxo},
 };
 use zolana_client::Rpc;
+use zolana_interface::instruction::instruction_data::transact::{OwnerTag, TransactOutput};
 use zolana_keypair::random_blinding;
 use zolana_transaction::{
     instructions::{
@@ -26,33 +29,27 @@ use zolana_transaction::{
     },
     Filter, SOL_ASSET_ID, SOL_MINT,
 };
-use zolana_wallet::ensure_registered;
+use zolana_wallet::{ensure_registered, sync_wallet};
 
 const EXPIRY: u64 = 2_000_000_000;
 
-// Confidential SOL<->SPL swap on the shielded pool -- make then derived take --
-// driven against a real localnet (validator + Photon indexer + prover) that
-// `setup()` starts, including registering an SPL asset with the pool.
+// Confidential SOL<->SPL swap settled through the verifiable-encryption take
+// rail (`take_verifiable_encryption`), driven against a real localnet
+// (validator + Photon indexer + prover) that `setup()` starts. This is the
+// runnable positive for the only instruction exercising the BSB22-committed
+// swap verifier.
 //
-// The maker orders an SPL token and wants SOL; the taker pays SOL and receives the
-// SPL. Destination is SOL, so the derived take rail applies; the SPL source stays
-// in shielded UTXOs (the SPP transact is asset-generic for a purely-shielded
-// spend, and the make/take flows denominate change in the order asset).
+// The flow mirrors `swap.rs` up to the take: the maker escrows 0.4 SPL into an
+// order UTXO whose terms select `TAKE_MODE_VERIFIABLE`. The taker then spends
+// the order UTXO plus its own 0.25 SOL note; unlike the derived rail, the
+// maker-bound destination output carries a fresh blinding and a verifiable
+// ciphertext the circuit proves consistent with the output commitment.
 //
-// Flow:
-//   1. Fund (in setup): maker shields 1.0 SPL, taker shields 0.25 SOL; each wallet
-//      syncs from the indexer to discover and decrypt its own note.
-//   2. Make: maker spends its 1.0 SPL UTXO -> order UTXO 0.4 SPL (taker-owned, held
-//      under the order-authority PDA), marker (0-value taker-owned discovery
-//      note), change 0.6 SPL (back to maker). ZK make proof, v0 tx via ALT.
-//   3. Take (derived): taker spends the order UTXO (0.4 SPL) + its own 0.25 SOL UTXO ->
-//      source_output 0.4 SPL (to taker), destination_output 0.25 SOL (to maker).
-//      ZK take proof, v0 tx.
-//   4. Assert both take outputs are indexed.
-//
-// Net: maker 1.0 SPL -> 0.6 SPL + 0.25 SOL; taker 0.25 SOL -> 0.4 SPL.
+// Resulting escrow state asserted at the end: both take outputs are appended
+// to the tree (indexed with Merkle proofs), and the taker's synced wallet
+// spends down its SOL note and now holds the escrowed 0.4 SPL.
 #[test]
-fn make_and_take_swap_inline() -> Result<()> {
+fn make_and_take_verifiable_encryption() -> Result<()> {
     let TestEnv {
         client,
         tree,
@@ -66,22 +63,20 @@ fn make_and_take_swap_inline() -> Result<()> {
         ensure_registered(client.rpc(), &maker.keypair, &maker.keypair)
             .map_err(|e| anyhow!("register maker: {e:?}"))?;
 
-        // 1. Set order terms.
         let taker_address = taker.keypair.shielded_address()?;
-        // The taker's ed25519 authorization identity: the take's taker input UTXO
-        // owner must match the order-committed taker.
         let taker_authorization_address = taker_address
             .solana_address()
             .map_err(|e| anyhow!("taker solana address: {e:?}"))?;
 
+        // The verifiable-encryption rail: the take must publish a ciphertext of
+        // the destination output that the TVE circuit proves well-formed.
         let terms = OrderTerms {
             destination_mint: SOL_MINT,
             destination_amount: DESTINATION_AMOUNT,
-            // The swap settlement goes to the maker's shielded address.
             destination: maker.keypair.shielded_address()?,
             taker: taker_authorization_address,
             expiry: EXPIRY,
-            take_mode: swap_prover::TAKE_MODE_DERIVED,
+            take_mode: swap_prover::TAKE_MODE_VERIFIABLE,
         };
 
         let maker_address = maker.keypair.shielded_address()?;
@@ -94,12 +89,12 @@ fn make_and_take_swap_inline() -> Result<()> {
         };
         let order_output_utxo = order_utxo.output_utxo(taker_address.viewing_pubkey)?;
 
-        // 2. Select input utxos.
+        // The maker's SPL note is program-owned (signing = swap PDA, nullifier
+        // = order key), so the maker wallet can never discover it; the fixture
+        // retains it explicitly for exactly this spend (mirrors swap.rs).
         let input_utxos = vec![maker_input, SppProofInputUtxo::new_dummy()];
 
-        // 3. create output utxos.
         let order_utxo_asset = order_output_utxo.asset;
-
         let leftover =
             input_sum(&input_utxos, &order_utxo_asset) - i128::from(order_output_utxo.amount);
         let change_amount = u64::try_from(leftover)
@@ -109,8 +104,6 @@ fn make_and_take_swap_inline() -> Result<()> {
         let order_utxo_hash = order_output_utxo
             .hash()
             .map_err(|e| anyhow!("order output hash: {e:?}"))?;
-
-        // 4. Encrypt output utxos.
 
         let transaction_viewing_key = get_transaction_viewing_key(&maker.keypair, &input_utxos)
             .map_err(|e| anyhow!("transaction viewing key: {e:?}"))?;
@@ -142,7 +135,6 @@ fn make_and_take_swap_inline() -> Result<()> {
         );
 
         let spp_tx_hashes = SppTxHashes::new(&spp_proof_inputs)?;
-        // 5. create spp proof.
         let spp_proof = client
             .indexer()
             .prove_transact(tree, spp_proof_inputs)
@@ -153,7 +145,6 @@ fn make_and_take_swap_inline() -> Result<()> {
             change,
             spp_tx_hashes,
         };
-
         let make_proof = swap_prover_client
             .prove_make(&make_proof_inputs.to_proof_inputs()?)
             .map_err(|e| anyhow!("make proof: {e:?}"))?;
@@ -172,7 +163,7 @@ fn make_and_take_swap_inline() -> Result<()> {
             .map_err(|e| anyhow!("confirm make indexed: {e:?}"))?;
     }
 
-    {
+    let (source_output_hash, destination_output_hash) = {
         let taker_address = taker.keypair.shielded_address()?;
         let order = index_taker(
             &mut taker.wallet,
@@ -203,9 +194,13 @@ fn make_and_take_swap_inline() -> Result<()> {
             })?;
         let taker_in = order_utxo.destination_output(taker_address, taker_input_utxo.blinding);
         let source_output = order_utxo.source_output(taker_address, random_blinding());
-        let destination_output = order_utxo
-            .derived_destination_output(terms.destination)
-            .map_err(|e| anyhow!("destination output: {e:?}"))?;
+        // The TVE destination output carries a fresh blinding; the circuit
+        // proves the published ciphertext encrypts exactly this output.
+        let destination_output =
+            order_utxo.destination_output(terms.destination, random_blinding());
+        let destination_ciphertext = order_utxo
+            .destination_ciphertext(&destination_output)
+            .map_err(|e| anyhow!("destination ciphertext: {e:?}"))?;
         let source_output_hash = source_output
             .hash()
             .map_err(|e| anyhow!("source output hash: {e:?}"))?;
@@ -217,17 +212,31 @@ fn make_and_take_swap_inline() -> Result<()> {
             .to_input_utxo()
             .map_err(|e| anyhow!("order spend: {e:?}"))?;
         let taker_spend = SppProofInputUtxo::new(taker_input_utxo, &taker.keypair);
-
         let inputs = vec![order_input_utxo, taker_spend];
 
         let transaction_viewing_key = get_transaction_viewing_key(&taker.keypair, &inputs)
             .map_err(|e| anyhow!("transaction viewing key: {e:?}"))?;
 
-        let encoded = encrypt_transaction_data(
-            &[source_output.clone(), destination_output.clone()],
+        // Only the source slot is encrypted conventionally; the destination
+        // slot is appended by hand with the verifiable ciphertext as its data
+        // and the maker's view tag inline.
+        let mut encoded = encrypt_transaction_data(
+            std::slice::from_ref(&source_output),
             &taker.registry,
             &transaction_viewing_key,
         )?;
+        let destination_view_tag = terms
+            .destination
+            .signing_pubkey
+            .confidential_view_tag()
+            .map_err(|e| anyhow!("maker view tag: {e:?}"))?;
+        encoded.outputs.push(TransactOutput {
+            utxo_hash: destination_output_hash,
+            owner_tag: OwnerTag::Inline(destination_view_tag),
+            data: Some(destination_ciphertext),
+        });
+        encoded.resolved_owner_tags.push(destination_view_tag);
+        encoded.output_utxos.push(destination_output.clone());
 
         let mut external_data = ExternalData::new(
             *transaction_viewing_key.pubkey().as_bytes(),
@@ -244,7 +253,7 @@ fn make_and_take_swap_inline() -> Result<()> {
             taker_address.solana_address()?,
         );
 
-        let take_proof_inputs = TakeProofInputParams {
+        let take_proof_inputs = TakeVerifiableEncryptionProofInputParams {
             order_utxo,
             taker_in,
             source_output,
@@ -261,13 +270,15 @@ fn make_and_take_swap_inline() -> Result<()> {
             .map_err(|e| anyhow!("take transact proof: {e:?}"))?;
 
         let take_proof = swap_prover_client
-            .prove_take(&take_proof_inputs.to_proof_inputs()?)
-            .map_err(|e| anyhow!("take proof: {e:?}"))?;
+            .prove_take_verifiable_encryption(&take_proof_inputs.to_proof_inputs()?)
+            .map_err(|e| anyhow!("take_verifiable_encryption proof: {e:?}"))?;
 
-        let take_ix = Take {
+        let take_ix = TakeVerifiableEncryption {
             payer: taker_address.solana_address()?,
             tree,
-            take_proof: take_proof.into(),
+            take_proof: take_proof
+                .try_into()
+                .map_err(|e| anyhow!("tve proof must carry a BSB22 commitment: {e:?}"))?,
             spp_proof,
         }
         .instruction()?;
@@ -277,14 +288,35 @@ fn make_and_take_swap_inline() -> Result<()> {
             .confirm_private_transaction_sync(take_signature)
             .map_err(|e| anyhow!("confirm take indexed: {e:?}"))?;
 
-        client
-            .indexer()
-            .get_merkle_proofs(
-                tree,
-                vec![source_output_hash, destination_output_hash],
-                None,
-            )
-            .map_err(|e| anyhow!("take outputs index: {e}"))?;
-    }
+        (source_output_hash, destination_output_hash)
+    };
+
+    // Resulting escrow state: both take outputs landed in the tree, and the
+    // taker's wallet (re-synced from the indexer) now spends the escrowed
+    // source amount while its destination-side SOL note is gone.
+    client
+        .indexer()
+        .get_merkle_proofs(
+            tree,
+            vec![source_output_hash, destination_output_hash],
+            None,
+        )
+        .map_err(|e| anyhow!("take outputs index: {e}"))?;
+
+    sync_wallet(&mut taker.wallet, &taker.keypair, client.indexer())
+        .map_err(|e| anyhow!("sync taker after take: {e:?}"))?;
+    let taker_spl = taker.balance(spl_mint, None)?;
+    assert!(
+        taker_spl
+            .utxos
+            .iter()
+            .any(|utxo| utxo.amount == SOURCE_AMOUNT),
+        "taker must hold the escrowed source note of {SOURCE_AMOUNT} after the take"
+    );
+    let taker_sol = taker.balance(SOL_MINT, Some(Filter::MinAmount(DESTINATION_AMOUNT)))?;
+    assert!(
+        taker_sol.utxos.is_empty(),
+        "the taker's destination-side SOL note must be spent by the take"
+    );
     Ok(())
 }
