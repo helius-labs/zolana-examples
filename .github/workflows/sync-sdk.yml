@@ -1,0 +1,184 @@
+name: sync-sdk
+
+on:
+  repository_dispatch:
+    types: [sdk-changed]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: zolana SHA to pin
+        required: true
+        type: string
+      html_url:
+        description: zolana commit URL
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-sdk
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "11.18.0"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve payload
+        id: payload
+        env:
+          DISPATCH_SHA: ${{ github.event.client_payload.sha }}
+          DISPATCH_URL: ${{ github.event.client_payload.html_url }}
+          INPUT_SHA: ${{ github.event.inputs.sha }}
+          INPUT_URL: ${{ github.event.inputs.html_url }}
+        run: |
+          set -euo pipefail
+          sha="${DISPATCH_SHA:-$INPUT_SHA}"
+          if [[ -z "$sha" ]]; then
+            echo "missing zolana sha" >&2
+            exit 1
+          fi
+          url="${DISPATCH_URL:-$INPUT_URL}"
+          if [[ -z "$url" ]]; then
+            url="https://github.com/helius-labs/zolana/commit/$sha"
+          fi
+          {
+            echo "sha=$sha"
+            echo "html_url=$url"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: typescript-client/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Record before pins
+        id: before
+        run: |
+          set -euo pipefail
+          ts="$(python3 -c 'import json; print(json.load(open("typescript-client/package.json"))["dependencies"]["@heliuslabs/zolana"])')"
+          rust="$(python3 -c '
+          import re
+          text = open("rust-client/Cargo.toml").read()
+          m = re.search(r"rev = \"([0-9a-f]+)\"", text)
+          print(m.group(1) if m else "")
+          ')"
+          {
+            echo "ts=$ts"
+            echo "rust=$rust"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Bump SDK pins
+        env:
+          SHA: ${{ steps.payload.outputs.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re
+          sha = os.environ["SHA"]
+          path = "typescript-client/package.json"
+          pkg = json.load(open(path))
+          pkg["dependencies"]["@heliuslabs/zolana"] = (
+              f"git+https://github.com/helius-labs/zolana.git#{sha}&path:/sdk-libs/ts"
+          )
+          json.dump(pkg, open(path, "w"), indent=2)
+          open(path, "a").write("\n")
+          cargo = open("rust-client/Cargo.toml").read()
+          cargo, n = re.subn(
+              r'(git = "https://github.com/helius-labs/zolana", )rev = "[0-9a-f]+"',
+              rf'\1rev = "{sha}"',
+              cargo,
+          )
+          if n != 4:
+              raise SystemExit(f"expected 4 rust-client zolana rev fields, replaced {n}")
+          open("rust-client/Cargo.toml", "w").write(cargo)
+          PY
+          (cd typescript-client && pnpm install)
+          (cd rust-client && cargo update -p zolana-client -p zolana-interface -p zolana-keypair -p zolana-transaction)
+
+      - name: Check examples
+        id: check
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          (cd typescript-client && pnpm check)
+          (cd rust-client && cargo check --all-targets --locked)
+
+      - name: Codex compile fix
+        if: steps.check.outcome == 'failure'
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: workspace-write
+          prompt: |
+            Read and follow .github/codex/prompts/sync-sdk.md.
+
+            ## Payload
+            sha: ${{ steps.payload.outputs.sha }}
+            html_url: ${{ steps.payload.outputs.html_url }}
+
+            Pins are already set. Fix only compile errors in the two example sources.
+
+      - name: Re-check examples
+        if: steps.check.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          (cd typescript-client && pnpm check)
+          (cd rust-client && cargo check --all-targets --locked)
+
+      - name: Guard allowlist
+        run: |
+          set -euo pipefail
+          extra="$(git diff --name-only -- . | python3 -c '
+          import sys
+          allow = {
+              "typescript-client/package.json",
+              "typescript-client/pnpm-lock.yaml",
+              "rust-client/Cargo.toml",
+              "rust-client/Cargo.lock",
+              "typescript-client/examples/deposit_transfer_withdraw.ts",
+              "rust-client/examples/deposit_transfer_withdraw.rs",
+          }
+          extra = [line.strip() for line in sys.stdin if line.strip() and line.strip() not in allow]
+          print("\n".join(extra), end="")
+          ')"
+          if [[ -n "$extra" ]]; then
+            echo "files outside allowlist:" >&2
+            echo "$extra" >&2
+            exit 1
+          fi
+
+      - uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: sync/sdk
+          delete-branch: false
+          title: "sync: pin SDK ${{ steps.payload.outputs.sha }}"
+          commit-message: "sync: pin zolana SDK to ${{ steps.payload.outputs.sha }}"
+          body: |
+            ## Why
+            zolana SDK changed. Source: ${{ steps.payload.outputs.html_url }}
+
+            ## Before
+            - TS pin ${{ steps.before.outputs.ts }}
+            - rust-client rev ${{ steps.before.outputs.rust }}
+
+            ## After
+            - TS pin git+https://github.com/helius-labs/zolana.git#${{ steps.payload.outputs.sha }}&path:/sdk-libs/ts
+            - rust-client rev ${{ steps.payload.outputs.sha }}
