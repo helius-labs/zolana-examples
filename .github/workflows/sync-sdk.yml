@@ -51,8 +51,10 @@ jobs:
           if [[ -z "$url" ]]; then
             url="https://github.com/helius-labs/zolana/commit/$sha"
           fi
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "html_url=$url" >> "$GITHUB_OUTPUT"
+          {
+            echo "sha=$sha"
+            echo "html_url=$url"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: pnpm/action-setup@v4
         with:
@@ -77,8 +79,10 @@ jobs:
           m = re.search(r"rev = \"([0-9a-f]+)\"", text)
           print(m.group(1) if m else "")
           ')"
-          echo "ts=$ts" >> "$GITHUB_OUTPUT"
-          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          {
+            echo "ts=$ts"
+            echo "rust=$rust"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Bump SDK pins
         env:
@@ -121,7 +125,7 @@ jobs:
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          permission-profile: ":workspace"
+          sandbox: workspace-write
           prompt: |
             Read and follow .github/codex/prompts/sync-sdk.md.
 

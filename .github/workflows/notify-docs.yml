@@ -28,8 +28,10 @@ jobs:
         run: |
           set -euo pipefail
           sha="${INPUT_SHA:-$PUSH_SHA}"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "html_url=${{ github.server_url }}/helius-labs/zolana-examples/commit/$sha" >> "$GITHUB_OUTPUT"
+          {
+            echo "sha=$sha"
+            echo "html_url=${{ github.server_url }}/helius-labs/zolana-examples/commit/$sha"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: peter-evans/repository-dispatch@v3
         with:
