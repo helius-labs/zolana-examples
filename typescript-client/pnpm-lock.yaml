@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@heliuslabs/zolana':
-        specifier: 0.1.1-alpha
-        version: 0.1.1-alpha(@solana/kit@7.0.0(typescript@7.0.2))
+        specifier: 0.1.2-alpha
+        version: 0.1.2-alpha(@solana/kit@7.0.0(typescript@7.0.2))
       '@solana/kit':
         specifier: ^7.0.0
         version: 7.0.0(typescript@7.0.2)
@@ -189,8 +189,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@heliuslabs/zolana@0.1.1-alpha':
-    resolution: {integrity: sha512-H8vOu/j5x/qqANvnfEchwH39TU5F8MssHuKWrPrA+2EneoZncNsxKUTxZ61fpBwrFr2F9g3gBCuJ+kQqXsgm2g==}
+  '@heliuslabs/zolana@0.1.2-alpha':
+    resolution: {integrity: sha512-+TPLUxv9/Oik16zHcWQu63l/nzwGyGir5t7ZQnJz8DAjbs06vrNEoBqW8DWwwoiV1vpZdv+/q4R5Vf2jOFtSBA==}
     engines: {node: '>=24'}
     peerDependencies:
       '@solana/kit': ^7.0.0
@@ -331,6 +331,12 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [win32]
+
+  '@solana-program/address-lookup-table@0.13.0':
+    resolution: {integrity: sha512-UCxrapY8AA3wFzGpfYcXvs41alPTVFWdM7MGoz8IL6F+EL3BJ+4XVcUIj3UT3K9Sp14hPVPAIMFqnE4iOX7VMw==}
+    engines: {node: '>=24.0.0'}
+    peerDependencies:
+      '@solana/kit': ^7.0.0
 
   '@solana-program/compute-budget@0.17.0':
     resolution: {integrity: sha512-A87tabCdAhJJbZrAuTmVdt/SdkxFQQEzj4lFAvEeGZ96KcZ8ySomt0MHf4jquiqFAdc68xLfpPUHGUM/tswUtA==}
@@ -1013,12 +1019,13 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@heliuslabs/zolana@0.1.1-alpha(@solana/kit@7.0.0(typescript@7.0.2))':
+  '@heliuslabs/zolana@0.1.2-alpha(@solana/kit@7.0.0(typescript@7.0.2))':
     dependencies:
       '@lightprotocol/hasher.rs': 0.2.1
       '@noble/ciphers': 2.2.0
       '@noble/curves': 2.2.0
       '@noble/hashes': 2.2.0
+      '@solana-program/address-lookup-table': 0.13.0(@solana/kit@7.0.0(typescript@7.0.2))
       '@solana-program/compute-budget': 0.17.0(@solana/kit@7.0.0(typescript@7.0.2))
       '@solana-program/token': 0.15.0(@solana/kit@7.0.0(typescript@7.0.2))
       '@solana/kit': 7.0.0(typescript@7.0.2)
@@ -1090,6 +1097,10 @@ snapshots:
 
   '@oxfmt/binding-win32-x64-msvc@0.61.0':
     optional: true
+
+  '@solana-program/address-lookup-table@0.13.0(@solana/kit@7.0.0(typescript@7.0.2))':
+    dependencies:
+      '@solana/kit': 7.0.0(typescript@7.0.2)
 
   '@solana-program/compute-budget@0.17.0(@solana/kit@7.0.0(typescript@7.0.2))':
     dependencies:

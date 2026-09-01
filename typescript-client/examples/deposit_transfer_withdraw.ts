@@ -34,7 +34,7 @@ async function main(): Promise<void> {
     clientConfig,
   } = await setup();
 
-  // Connect to Helius devnet RPC plus the Photon indexer and prover.
+  // Connect to the RPC, indexer, and prover.
   const client =
     await createZolanaClient(clientConfig);
 

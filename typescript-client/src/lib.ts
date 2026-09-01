@@ -46,15 +46,12 @@ export interface ConfirmedTransaction {
   readonly slot: bigint;
 }
 
-// Will be exposed through a single devnet URL. Currently exposed as they are.
+// One Helius URL will serve all three. Photon and the prover are still on the ALB.
 const RPC_URL = "https://devnet.helius-rpc.com";
 const INDEXER_URL =
   "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com";
 const PROVER_URL =
   "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com:3001";
-// localnet: const RPC_URL = "http://127.0.0.1:8899";
-// localnet: const INDEXER_URL = "http://127.0.0.1:8784";
-// localnet: const PROVER_URL = "http://127.0.0.1:3001";
 const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
 const SENDER_LAMPORTS = 2_000_000_000n;
 
@@ -90,11 +87,11 @@ async function funderKeypair(): Promise<ShieldedKeypair> {
 }
 
 function clientConfigFromEnv(): ZolanaClientConfig {
+  // localnet: return Object.freeze({});
   const endpoint = process.env["ZOLANA_ENDPOINT"]?.trim();
   const apiKey = process.env["API_KEY"]?.trim();
   const solanaRpcUrl =
     endpoint || (apiKey ? `${RPC_URL}/?api-key=${apiKey}` : undefined);
-  // localnet: const solanaRpcUrl = endpoint || RPC_URL;
   if (!solanaRpcUrl) {
     throw new Error("set API_KEY or ZOLANA_ENDPOINT");
   }
@@ -109,6 +106,9 @@ function clientConfigFromEnv(): ZolanaClientConfig {
 
 function subscriptionsUrl(rpcUrl: string): string {
   const url = new URL(rpcUrl);
+  if (url.port !== "") {
+    url.port = String(Number(url.port) + 1);
+  }
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.href;
 }

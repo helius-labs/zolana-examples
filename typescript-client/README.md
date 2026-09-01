@@ -25,18 +25,17 @@ cp .env.example .env # ...and set API_KEY
 
 **Localnet**:
 
-To run on localnet, configure in [`src/lib.ts`](src/lib.ts) and install:
+To run on localnet, uncomment `return Object.freeze({});` in
+[`src/lib.ts`](src/lib.ts) and start the local stack:
 
 ```bash
 cargo install --git https://github.com/helius-labs/zolana --tag v0.1.0-alpha zolana-cli
 zolana dev start
 ```
 
-```typescript
-const RPC_URL = "http://127.0.0.1:8899";
-const INDEXER_URL = "http://127.0.0.1:8784";
-const PROVER_URL = "http://127.0.0.1:3001";
-```
+An empty client config uses `127.0.0.1:8899` (RPC), `:8784` (indexer), and
+`:3001` (prover). Alternatively, set `ZOLANA_ENDPOINT`, `ZOLANA_INDEXER_URL`,
+and `ZOLANA_PROVER_URL` to those addresses.
 
 ## Run
 
