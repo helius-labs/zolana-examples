@@ -5,8 +5,7 @@
 | [`create_private_wallet`](examples/create_private_wallet.rs) | Create a private wallet and register its Solana address. |
 | [`create_private_wallet_spl`](examples/create_private_wallet_spl.rs) | Create a private wallet and register its Solana address. |
 | [`deposit_transfer_withdraw`](examples/deposit_transfer_withdraw.rs) | Deposit, private transfer, and withdraw. |
-| [`sync_balance`](examples/sync_balance.rs) | Deposit SOL, then read the private balance. |
-| [`sync_balance_spl`](examples/sync_balance_spl.rs) | Deposit SPL, then read the private balance. |
+| [`sync_balance`](examples/sync_balance.rs) | Read the private SOL and SPL balances. |
 
 ## Setup
 
@@ -27,7 +26,6 @@ cargo run -p rust-client-example --example create_private_wallet
 cargo run -p rust-client-example --example create_private_wallet_spl
 cargo run -p rust-client-example --example deposit_transfer_withdraw
 cargo run -p rust-client-example --example sync_balance
-cargo run -p rust-client-example --example sync_balance_spl
 ```
 
 ## Documentation

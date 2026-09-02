@@ -30,19 +30,11 @@ import {
 import {
   ShieldedKeypair,
   SigningKey,
-  SPL_TOKEN_PROGRAM_ID,
   createZolanaClient,
   initializePoseidon,
   type Bytes32,
   type ZolanaClientConfig,
 } from "@heliuslabs/zolana";
-import {
-  getAssociatedTokenAddress,
-  getSplAssetRegistryAddress,
-} from "@heliuslabs/zolana/addresses";
-import { decodeSplAssetRegistry } from "@heliuslabs/zolana/interface";
-import { getCreateAssociatedTokenAccountInstructionAsync } from "@heliuslabs/zolana/instructions";
-
 export type Client = Awaited<ReturnType<typeof createZolanaClient>>;
 
 export interface ExampleSetup {
@@ -51,11 +43,9 @@ export interface ExampleSetup {
   readonly clientConfig: ZolanaClientConfig;
 }
 
-export interface SplAsset {
-  readonly assetId: bigint;
-  readonly mint: Address;
-  readonly sourceTokenAccount: Address;
-  readonly tokenProgram: Address;
+export interface ConnectContext {
+  readonly wallet: ShieldedKeypair;
+  readonly clientConfig: ZolanaClientConfig;
 }
 
 export interface ConfirmedTransaction {
@@ -75,7 +65,6 @@ const PROVER_URL =
 // localnet: const PROVER_URL = "http://127.0.0.1:3001";
 const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
 const SENDER_LAMPORTS = 2_000_000_000n;
-const SPL_DEPOSIT_AMOUNT = 1_000_000_000n;
 
 function expandedPath(value: string): string {
   return value === "~"
@@ -197,139 +186,14 @@ export async function setup(): Promise<ExampleSetup> {
 }
 
 /**
- * Load the usual example setup, then the registered SPL mint from
- * `ZOLANA_SPL_MINT`.
+ * Load the CLI wallet and service URLs, without creating a throwaway sender.
  */
-export async function setupSpl(): Promise<
-  ExampleSetup & { readonly spl: SplAsset }
-> {
-  const base = await setup();
-  const mintStr = process.env["ZOLANA_SPL_MINT"]?.trim();
-  if (!mintStr) {
-    throw new Error("set ZOLANA_SPL_MINT");
-  }
-  const mint = address(mintStr);
-  const rpcUrl = String(base.clientConfig.solanaRpcUrl);
-  const rpc = createSolanaRpc(rpcUrl);
-  const registryAddress = await getSplAssetRegistryAddress(mint);
-  const { value: registryAccount } = await rpc
-    .getAccountInfo(registryAddress, { encoding: "base64" })
-    .send();
-  if (!registryAccount) {
-    throw new Error(
-      `SPL asset registry not found for mint ${mint}; set ZOLANA_SPL_MINT to a registered mint`,
-    );
-  }
-  const registry = decodeSplAssetRegistry(
-    accountDataBytes(registryAccount.data),
-  );
-
-  const funder = await funderKeypair();
-  const funderSigner = funder.toSolanaSigner();
-  const senderAddress = base.sender.toSolanaSigner().address;
-  const sourceTokenAccount = await getAssociatedTokenAddress(
-    senderAddress,
-    mint,
-  );
-  const payerAta = await getAssociatedTokenAddress(funderSigner.address, mint);
-  const { value: payerToken } = await rpc
-    .getAccountInfo(payerAta, { encoding: "base64" })
-    .send();
-  if (!payerToken) {
-    throw new Error(
-      `payer ATA ${payerAta} is missing; the payer must hold mint ${mint}`,
-    );
-  }
-  const payerAmount = tokenAccountAmount(accountDataBytes(payerToken.data));
-  if (payerAmount < SPL_DEPOSIT_AMOUNT) {
-    throw new Error(
-      `payer ATA ${payerAta} has ${payerAmount}, need ${SPL_DEPOSIT_AMOUNT}`,
-    );
-  }
-
-  const createAtaIx = await getCreateAssociatedTokenAccountInstructionAsync({
-    payer: funderSigner,
-    owner: senderAddress,
-    mint,
-  });
-  await sendConfirmedInstructions(rpcUrl, funderSigner, [
-    createAtaIx,
-    transferSplIx(
-      payerAta,
-      sourceTokenAccount,
-      funderSigner.address,
-      SPL_DEPOSIT_AMOUNT,
-    ),
-  ]);
-
+export async function connect(): Promise<ConnectContext> {
+  await initializePoseidon();
   return Object.freeze({
-    ...base,
-    spl: Object.freeze({
-      assetId: registry.assetId,
-      mint,
-      sourceTokenAccount,
-      tokenProgram: SPL_TOKEN_PROGRAM_ID,
-    }),
+    wallet: await funderKeypair(),
+    clientConfig: clientConfigFromEnv(),
   });
-}
-
-function accountDataBytes(data: readonly [string, string]): Uint8Array {
-  return Uint8Array.from(Buffer.from(data[0], "base64"));
-}
-
-function tokenAccountAmount(data: Uint8Array): bigint {
-  if (data.length < 72) {
-    throw new Error("token account data too short");
-  }
-  return new DataView(
-    data.buffer,
-    data.byteOffset,
-    data.byteLength,
-  ).getBigUint64(64, true);
-}
-
-function transferSplIx(
-  source: Address,
-  destination: Address,
-  owner: Address,
-  amount: bigint,
-): Instruction {
-  const data = new Uint8Array(9);
-  data[0] = 3;
-  new DataView(data.buffer).setBigUint64(1, amount, true);
-  return {
-    programAddress: SPL_TOKEN_PROGRAM_ID,
-    accounts: [
-      { address: source, role: AccountRole.WRITABLE },
-      { address: destination, role: AccountRole.WRITABLE },
-      { address: owner, role: AccountRole.READONLY_SIGNER },
-    ],
-    data,
-  };
-}
-
-async function sendConfirmedInstructions(
-  rpcUrl: string,
-  funder: TransactionSigner,
-  instructions: readonly Instruction[],
-): Promise<void> {
-  const rpc = createSolanaRpc(rpcUrl);
-  const sendAndConfirm = sendAndConfirmTransactionFactory({
-    rpc,
-    rpcSubscriptions: createSolanaRpcSubscriptions(subscriptionsUrl(rpcUrl)),
-  });
-  const { value: lifetime } = await rpc.getLatestBlockhash().send();
-  const signed = await signTransactionMessageWithSigners(
-    pipe(
-      createTransactionMessage({ version: 0 }),
-      (message) => setTransactionMessageFeePayerSigner(funder, message),
-      (message) =>
-        setTransactionMessageLifetimeUsingBlockhash(lifetime, message),
-      (message) => appendTransactionMessageInstructions(instructions, message),
-    ),
-  );
-  assertIsTransactionWithBlockhashLifetime(signed);
-  await sendAndConfirm(signed, { commitment: "confirmed" });
 }
 
 /**
