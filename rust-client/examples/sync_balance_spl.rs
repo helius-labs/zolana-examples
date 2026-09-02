@@ -1,23 +1,27 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{setup, SetupContext};
+use rust_client_example::{setup_spl, SetupContext};
+use solana_address::Address;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::instruction::{AssetDeposit, Deposit, DepositAsset};
 use zolana_keypair::random_blinding;
-use zolana_transaction::{decrypt_transactions, AssetRegistry, SOL_MINT};
+use zolana_transaction::{decrypt_transactions, AssetRegistry};
 
 const DEPOSIT_AMOUNT: u64 = 1_000_000_000;
 
 fn main() -> Result<()> {
-    let SetupContext {
-        rpc_url,
-        indexer_url,
-        prover_url,
-        tree,
-        sender,
-        ..
-    } = setup()?;
+    let (
+        SetupContext {
+            rpc_url,
+            indexer_url,
+            prover_url,
+            tree,
+            sender,
+            ..
+        },
+        spl,
+    ) = setup_spl()?;
 
     // Load the funded fee payer and devnet settings, then connect.
     let client = ZolanaClient::from_urls_allowing_insecure_http(
@@ -28,8 +32,8 @@ fn main() -> Result<()> {
     );
 
     // Mints that are registered with Solana Rings for privacy.
-    let assets = AssetRegistry::default();
-    // SPL: assets.insert(spl.asset_id, spl.mint)?;
+    let mut assets = AssetRegistry::default();
+    assets.insert(spl.asset_id, Address::new_from_array(spl.mint.to_bytes()))?;
 
     // Initialize the sender's private wallet and local authority
     // to decrypt transactions and sync balances.
@@ -37,22 +41,21 @@ fn main() -> Result<()> {
     let sender_solana_keypair = sender.to_solana_keypair()?;
     let sender_shielded_address = sender.shielded_address()?;
 
-    // Deposit SOL into the sender's private balance.
+    // Deposit SPL into the sender's private balance.
     // A deposit from a public balance reveals
     // sender, recipient, asset and amount.
     // Alternatively, you can onramp fiat directly to a private balance.
 
-    // 1. Move public SOL into the sender's private balance.
+    // 1. Move public SPL into the sender's private balance.
     let deposit_ix = Deposit {
         tree,
         depositor: sender_solana_keypair.pubkey(),
         deposits: vec![AssetDeposit {
-            asset: DepositAsset::Sol,
-            // SPL: asset: DepositAsset::Spl(zolana_interface::instruction::DepositSplAccounts {
-            // SPL:     mint: spl.mint,
-            // SPL:     user_token: spl.user_token_account,
-            // SPL:     token_program: spl.token_program,
-            // SPL: }),
+            asset: DepositAsset::Spl(zolana_interface::instruction::DepositSplAccounts {
+                mint: spl.mint,
+                user_token: spl.user_token_account,
+                token_program: spl.token_program,
+            }),
             view_tag: sender_shielded_address.confidential_view_tag()?,
             owner: sender_shielded_address.owner_hash()?,
             blinding: random_blinding(),
@@ -87,8 +90,7 @@ fn main() -> Result<()> {
         .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?;
 
     let sender_balance = balances
-        .get_balance(SOL_MINT)
-        // SPL: .get_balance(spl.mint)
+        .get_balance(Address::new_from_array(spl.mint.to_bytes()))
         .expect("failed to fetch sender's utxo");
     assert_eq!(sender_balance.amount, DEPOSIT_AMOUNT);
     assert_eq!(sender_balance.utxos.len(), 1);

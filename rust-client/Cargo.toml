@@ -10,6 +10,7 @@ publish = false
 anyhow = "1.0"
 dotenvy = "0.15"
 solana-address = { version = "2.6", features = ["atomic", "borsh", "bytemuck", "copy", "decode", "wincode"] }
+solana-instruction = "3.4"
 solana-keypair = "3.1.2"
 solana-pubkey = { version = "4.2", features = ["curve25519"] }
 solana-signature = "3.4"
@@ -33,3 +34,11 @@ path = "examples/deposit_transfer_withdraw.rs"
 [[example]]
 name = "sync_balance"
 path = "examples/sync_balance.rs"
+
+[[example]]
+name = "create_private_wallet_spl"
+path = "examples/create_private_wallet_spl.rs"
+
+[[example]]
+name = "sync_balance_spl"
+path = "examples/sync_balance_spl.rs"
