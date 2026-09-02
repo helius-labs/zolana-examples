@@ -27,6 +27,6 @@ require (
 	golang.org/x/sys v0.36.0 // indirect
 )
 
-replace zolana/prover => ../../../../zolana-swap/prover/server
+replace zolana/prover => ../../../../prover/server
 
 replace github.com/reilabs/gnark-lean-extractor/v3 => github.com/Lightprotocol/gnark-lean-extractor/v3 v3.0.0-20250920122823-aa0219463107
