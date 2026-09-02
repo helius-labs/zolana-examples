@@ -242,10 +242,7 @@ export function sendTransactionFactory(
   return async function sendAndConfirmTransaction(
     transaction: Transaction,
   ): Promise<ConfirmedTransaction> {
-    const signed = await signTransactionWithSigners(
-      [feePayer],
-      transaction,
-    );
+    const signed = await signTransactionWithSigners([feePayer], transaction);
     assertIsTransactionWithBlockhashLifetime(signed);
     await sendTransaction(signed, { commitment: "confirmed" });
     const signature = getSignatureFromTransaction(signed);

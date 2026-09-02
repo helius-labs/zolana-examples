@@ -10,10 +10,8 @@ import {
 } from "../src/lib.js";
 
 async function main(): Promise<void> {
-  const {
-    sender: senderKeypair,
-    clientConfig,
-  } = await setup();
+  const { sender: senderKeypair, clientConfig } =
+    await setup();
 
   // Connect to the RPC, indexer, and prover.
   const client =
