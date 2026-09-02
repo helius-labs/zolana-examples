@@ -18,9 +18,13 @@ import {
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
+  signTransactionWithSigners,
   type Address,
   type Instruction,
   type Signature,
+  type Transaction,
+  type TransactionModifyingSigner,
+  type TransactionPartialSigner,
   type TransactionSigner,
 } from "@solana/kit";
 import {
@@ -210,6 +214,37 @@ export function sendAndConfirmFactory(
         (message) =>
           appendTransactionMessageInstructions(instructions, message),
       ),
+    );
+    assertIsTransactionWithBlockhashLifetime(signed);
+    await sendTransaction(signed, { commitment: "confirmed" });
+    const signature = getSignatureFromTransaction(signed);
+    const slot = await client.confirmTransaction(signature);
+    return { signature, slot };
+  };
+}
+
+/**
+ * Sign and send a compiled transaction as the given fee payer, then wait
+ * for the transaction to confirm.
+ *
+ * `buildRegistrationTransaction` returns a compiled transaction, not
+ * instructions, so this path signs that transaction instead of building
+ * a new message. Confirmation reuses the SDK's `confirmTransaction`.
+ */
+export function sendTransactionFactory(
+  client: Client,
+  feePayer: TransactionPartialSigner | TransactionModifyingSigner,
+): (transaction: Transaction) => Promise<ConfirmedTransaction> {
+  const sendTransaction = sendTransactionWithoutConfirmingFactory({
+    rpc: client.solanaRpc,
+  });
+
+  return async function sendAndConfirmTransaction(
+    transaction: Transaction,
+  ): Promise<ConfirmedTransaction> {
+    const signed = await signTransactionWithSigners(
+      [feePayer],
+      transaction,
     );
     assertIsTransactionWithBlockhashLifetime(signed);
     await sendTransaction(signed, { commitment: "confirmed" });

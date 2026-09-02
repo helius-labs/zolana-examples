@@ -2,7 +2,9 @@
 
 |  |  |
 |---------|-------------|
+| [`create_private_wallet`](examples/create_private_wallet.rs) | Create a private wallet and register its Solana address. |
 | [`deposit_transfer_withdraw`](examples/deposit_transfer_withdraw.rs) | Deposit, private transfer, and withdraw. |
+| [`sync_balance`](examples/sync_balance.rs) | Deposit SOL, then read the private balance. |
 
 ## Setup
 
@@ -19,7 +21,9 @@ To run on localnet, toggle `localnet` in [`src/lib.rs`](src/lib.rs).
 ## Run
 
 ```bash
+cargo run -p rust-client-example --example create_private_wallet
 cargo run -p rust-client-example --example deposit_transfer_withdraw
+cargo run -p rust-client-example --example sync_balance
 ```
 
 ## Documentation

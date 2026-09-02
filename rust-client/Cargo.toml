@@ -20,7 +20,16 @@ zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "5705c78e
 zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606", features = ["solana"] }
 zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606" }
 zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606" }
+zolana-wallet = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606" }
+
+[[example]]
+name = "create_private_wallet"
+path = "examples/create_private_wallet.rs"
 
 [[example]]
 name = "deposit_transfer_withdraw"
 path = "examples/deposit_transfer_withdraw.rs"
+
+[[example]]
+name = "sync_balance"
+path = "examples/sync_balance.rs"
