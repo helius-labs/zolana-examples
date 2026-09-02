@@ -74,13 +74,18 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: typescript-client/pnpm-lock.yaml
+          cache-dependency-path: |
+            typescript-client/pnpm-lock.yaml
+            typescript-client/examples/sign-with-wallet-adapter/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Check examples
         run: pnpm check
+
+      - name: Check wallet-adapter example
+        run: pnpm --dir examples/sign-with-wallet-adapter install --frozen-lockfile && pnpm --dir examples/sign-with-wallet-adapter check
 
   swap-build:
     name: build / swap-program
