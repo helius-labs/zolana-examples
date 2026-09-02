@@ -25,19 +25,11 @@ fn main() -> Result<()> {
     // Initialize the sender's private wallet and local authority
     // to decrypt transactions and sync balances.
     // The Solana signer and private wallet are derived from the same Ed25519 seed.
-    let sender_solana_keypair = sender.to_solana_keypair()?;
-
     // Create a private wallet. This registers inbox -> shielded_public_key in the protocol registry.
-    ensure_registered(&client, &sender_solana_keypair, &sender)?;
+    ensure_registered(&client, &sender, &sender)?;
 
-    assert!(is_wallet_registered_sync(
-        &client,
-        sender_solana_keypair.pubkey(),
-    )?);
+    assert!(is_wallet_registered_sync(&client, sender.pubkey())?);
 
-    println!(
-        "ok private wallet solana_address={}",
-        sender_solana_keypair.pubkey()
-    );
+    println!("ok private wallet solana_address={}", sender.pubkey());
     Ok(())
 }
