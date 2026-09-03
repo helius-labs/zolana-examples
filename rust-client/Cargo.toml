@@ -33,5 +33,9 @@ name = "sync_balance"
 path = "examples/sync_balance.rs"
 
 [[example]]
+name = "read_history"
+path = "examples/read_history.rs"
+
+[[example]]
 name = "create_private_wallet_spl"
 path = "examples/create_private_wallet_spl.rs"
