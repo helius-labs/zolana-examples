@@ -43,6 +43,9 @@ fn main() -> Result<()> {
     let assets = AssetRegistry::default();
     // SPL: assets.insert(spl.asset_id, spl.mint)?;
 
+    // Initialize the sender's private wallet and local authority
+    // to decrypt transactions and sync balances.
+    // The Solana signer and private wallet are derived from the same Ed25519 seed.
     let sender = ShieldedKeypair::from_keypair(&cli_keypair()?)?;
     let recipient = ShieldedKeypair::from_keypair(&Keypair::new())?;
     let sender_shielded_address = sender.shielded_address()?;

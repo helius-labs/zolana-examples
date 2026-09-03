@@ -16,6 +16,9 @@ async function main(): Promise<void> {
   const client =
     await createZolanaClient(clientConfig);
 
+  // Initialize the sender's private wallet and local authority
+  // to decrypt transactions and sync balances.
+  // The Solana signer and private wallet are derived from the same Ed25519 seed.
   const sender = ShieldedKeypair.fromKeypair(
     await cliKeypair(),
   );

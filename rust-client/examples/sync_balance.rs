@@ -21,6 +21,9 @@ fn main() -> Result<()> {
         tree,
     );
 
+    // Initialize the sender's private wallet and local authority
+    // to decrypt transactions and sync balances.
+    // The Solana signer and private wallet are derived from the same Ed25519 seed.
     let sender = ShieldedKeypair::from_keypair(&cli_keypair()?)?;
     let assets = AssetRegistry::default();
 
