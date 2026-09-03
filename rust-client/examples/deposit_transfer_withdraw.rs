@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{setup, SetupContext};
+use rust_client_example::{cli_keypair, setup, SetupContext};
+use solana_keypair::Keypair;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
@@ -7,7 +8,7 @@ use zolana_interface::instruction::{
     AssetDeposit, Deposit, DepositAsset, Transact, TransactInterfaceTransferAccounts,
     TransactSolTransferAccounts,
 };
-use zolana_keypair::random_blinding;
+use zolana_keypair::{random_blinding, ShieldedKeypair};
 use zolana_transaction::{
     decrypt_transactions,
     instructions::{
@@ -27,11 +28,9 @@ fn main() -> Result<()> {
         indexer_url,
         prover_url,
         tree,
-        sender,
-        recipient_address,
     } = setup()?;
 
-    // Load the funded fee payer and devnet settings, then connect.
+    // Connect to the RPC, indexer, and prover.
     // Photon and the prover are HTTP on this ALB, so the constructor permits that.
     let client = ZolanaClient::from_urls_allowing_insecure_http(
         SolanaRpc::new(rpc_url),
@@ -44,9 +43,8 @@ fn main() -> Result<()> {
     let assets = AssetRegistry::default();
     // SPL: assets.insert(spl.asset_id, spl.mint)?;
 
-    // Initialize the sender's private wallet and local authority
-    // to decrypt transactions and sync balances.
-    // The Solana signer and private wallet are derived from the same Ed25519 seed.
+    let sender = ShieldedKeypair::from_keypair(&cli_keypair()?)?;
+    let recipient = ShieldedKeypair::from_keypair(&Keypair::new())?;
     let sender_shielded_address = sender.shielded_address()?;
 
     // Deposit SOL into the sender's private balance.
@@ -128,8 +126,8 @@ fn main() -> Result<()> {
             vec![transfer_input_utxo],
             sender.pubkey(),
         );
-        transfer.send(&recipient_address, SOL_MINT, TRANSFER_AMOUNT)?;
-        // SPL: transfer.send(&recipient_address, spl.mint, TRANSFER_AMOUNT)?;
+        transfer.send(&recipient.shielded_address()?, SOL_MINT, TRANSFER_AMOUNT)?;
+        // SPL: transfer.send(&recipient.shielded_address()?, spl.mint, TRANSFER_AMOUNT)?;
         let proof_inputs = transfer.sign(&sender, &assets)?;
 
         // 4. Fetch the zk proof to prove the sender can spend the balance without revealing asset and amount.

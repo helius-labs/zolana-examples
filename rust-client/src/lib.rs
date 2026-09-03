@@ -4,10 +4,7 @@
 use anyhow::{anyhow, Result};
 use solana_address::Address;
 use solana_keypair::{read_keypair_file, Keypair};
-use solana_signer::Signer;
-use zolana_client::{Rpc, SolanaRpc};
 use zolana_interface::DEFAULT_TREE_ADDRESS;
-use zolana_keypair::{ShieldedAddress, ShieldedKeypair};
 
 /// The RPC, Photon indexer, and prover the examples talk to.
 pub const RPC_URL: &str = "https://devnet.helius-rpc.com";
@@ -17,91 +14,39 @@ pub const PROVER_URL: &str = "http://zolnet-devnet-1779374825.eu-north-1.elb.ama
 // localnet: pub const INDEXER_URL: &str = "http://127.0.0.1:8784";
 // localnet: pub const PROVER_URL: &str = "http://127.0.0.1:3001";
 
-/// Enough public SOL for the 1 SOL deposit plus fees.
-const SENDER_LAMPORTS: u64 = 2_000_000_000;
-
-/// Service URLs, a funded sender, and a fresh recipient address.
+/// Service URLs and the default tree.
 pub struct SetupContext {
     pub rpc_url: String,
     pub indexer_url: String,
     pub prover_url: String,
     pub tree: Address,
-    pub sender: ShieldedKeypair,
-    pub recipient_address: ShieldedAddress,
 }
 
-/// Read the environment settings: the fee payer (`ZOLANA_PAYER_KEYPAIR`,
-/// defaults to the Solana CLI wallet) and the `API_KEY` for the Helius devnet
-/// RPC. Defaults are Helius plus the Photon/prover ALB. Toggle the
-/// `localnet:` lines to run against a local stack instead.
+/// Read the environment settings and the `API_KEY` for the Helius devnet RPC.
+/// Defaults are Helius plus the Photon/prover ALB. Toggle the `localnet:`
+/// lines to run against a local stack instead.
 pub fn setup() -> Result<SetupContext> {
     dotenvy::dotenv().ok();
-    let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR")
-        .unwrap_or_else(|_| "~/.config/solana/id.json".to_string());
-    let payer_path = shellexpand::tilde(&payer_path).into_owned();
-    let payer =
-        read_keypair_file(&payer_path).map_err(|e| anyhow!("load payer {payer_path}: {e}"))?;
     let tree = DEFAULT_TREE_ADDRESS
         .parse()
         .map_err(|e| anyhow!("parse tree address: {e}"))?;
-
     let api_key = std::env::var("API_KEY").map_err(|_| anyhow!("set API_KEY"))?;
     let rpc_url = format!("{RPC_URL}/?api-key={api_key}");
     // localnet: let rpc_url = RPC_URL.to_string();
-
-    let sender_solana = Keypair::new();
-    let rpc = SolanaRpc::new(rpc_url.clone());
-    let ix = solana_system_interface::instruction::transfer(
-        &payer.pubkey(),
-        &sender_solana.pubkey(),
-        SENDER_LAMPORTS,
-    );
-    rpc.create_and_send_transaction(&[ix], payer.pubkey(), &[&payer])?;
-
-    let sender = ShieldedKeypair::from_keypair(&sender_solana)?;
-    let recipient_address = ShieldedKeypair::from_keypair(&Keypair::new())?.shielded_address()?;
 
     Ok(SetupContext {
         rpc_url,
         indexer_url: INDEXER_URL.to_string(),
         prover_url: PROVER_URL.to_string(),
         tree,
-        sender,
-        recipient_address,
     })
 }
 
-/// Service URLs and the CLI wallet, with no funding transfer.
-pub struct ConnectContext {
-    pub rpc_url: String,
-    pub indexer_url: String,
-    pub prover_url: String,
-    pub tree: Address,
-    pub wallet: ShieldedKeypair,
-}
-
-/// Load the CLI wallet and the same service URLs as [`setup`], without
-/// creating a throwaway sender.
-pub fn connect() -> Result<ConnectContext> {
-    dotenvy::dotenv().ok();
-    let payer_path = std::env::var("ZOLANA_PAYER_KEYPAIR")
+/// The Solana CLI wallet (`ZOLANA_PAYER_KEYPAIR`, defaults to
+/// `~/.config/solana/id.json`).
+pub fn cli_keypair() -> Result<Keypair> {
+    let path = std::env::var("ZOLANA_PAYER_KEYPAIR")
         .unwrap_or_else(|_| "~/.config/solana/id.json".to_string());
-    let payer_path = shellexpand::tilde(&payer_path).into_owned();
-    let payer =
-        read_keypair_file(&payer_path).map_err(|e| anyhow!("load payer {payer_path}: {e}"))?;
-    let tree = DEFAULT_TREE_ADDRESS
-        .parse()
-        .map_err(|e| anyhow!("parse tree address: {e}"))?;
-
-    let api_key = std::env::var("API_KEY").map_err(|_| anyhow!("set API_KEY"))?;
-    let rpc_url = format!("{RPC_URL}/?api-key={api_key}");
-    // localnet: let rpc_url = RPC_URL.to_string();
-
-    Ok(ConnectContext {
-        rpc_url,
-        indexer_url: INDEXER_URL.to_string(),
-        prover_url: PROVER_URL.to_string(),
-        tree,
-        wallet: ShieldedKeypair::from_keypair(&payer)?,
-    })
+    let path = shellexpand::tilde(&path).into_owned();
+    read_keypair_file(&path).map_err(|e| anyhow!("load keypair {path}: {e}"))
 }

@@ -1,29 +1,27 @@
 import {
+  ShieldedKeypair,
   buildRegistrationTransaction,
   createZolanaClient,
 } from "@heliuslabs/zolana";
 import { isWalletRegistered } from "@heliuslabs/zolana/wallet";
 
 import {
+  cliKeypair,
   sendTransactionFactory,
   setup,
 } from "../src/lib.js";
 
 async function main(): Promise<void> {
-  const { sender: senderKeypair, clientConfig } =
-    await setup();
+  const { clientConfig } = await setup();
 
   // Connect to the RPC, indexer, and prover.
   const client =
     await createZolanaClient(clientConfig);
 
-  // Initialize the sender's private wallet and local authority
-  // to decrypt transactions and sync balances.
-  // The Solana signer and private wallet are derived from the same Ed25519 seed.
-  const senderSigner =
-    senderKeypair.toSolanaSigner();
-  const senderAddress =
-    senderKeypair.shieldedAddress();
+  const sender = ShieldedKeypair.fromKeypair(
+    await cliKeypair(),
+  );
+  const senderSigner = sender.toSolanaSigner();
 
   // The SDK hands back a transaction; the app owns signing and sending.
   const sendTransaction = sendTransactionFactory(
@@ -36,7 +34,7 @@ async function main(): Promise<void> {
     await buildRegistrationTransaction({
       client,
       owner: senderSigner.address,
-      address: senderAddress,
+      address: sender.shieldedAddress(),
     });
   if (registration !== undefined) {
     await sendTransaction(registration);
