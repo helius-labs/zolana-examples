@@ -2,7 +2,10 @@
 
 TypeScript client examples for `@heliuslabs/zolana`.
 
+- **[create_private_wallet](examples/create_private_wallet.ts)** - Create a private wallet and register its Solana address
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw
+- **[sync_balance](examples/sync_balance.ts)** - Read the private SOL and SPL balances
+- **[read_history](examples/read_history.ts)** - Read the private transaction history
 
 ## Setup
 
@@ -41,7 +44,10 @@ const PROVER_URL = "http://127.0.0.1:3001";
 ## Run
 
 ```bash
+pnpm example examples/create_private_wallet.ts
 pnpm example examples/deposit_transfer_withdraw.ts
+pnpm example examples/sync_balance.ts
+pnpm example examples/read_history.ts
 ```
 
 ## Documentation

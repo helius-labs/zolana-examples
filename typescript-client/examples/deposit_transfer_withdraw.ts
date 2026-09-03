@@ -1,8 +1,12 @@
 import {
   SOL_MINT,
+  ShieldedKeypair,
   createZolanaClient,
 } from "@heliuslabs/zolana";
-import { atSlot } from "@heliuslabs/zolana/client";
+import {
+  LocalKeys,
+  atSlot,
+} from "@heliuslabs/zolana/client";
 import {
   depositInstruction,
   transactInstruction,
@@ -19,6 +23,7 @@ import {
 } from "@heliuslabs/zolana/transaction";
 
 import {
+  cliKeypair,
   sendAndConfirmFactory,
   setup,
 } from "../src/lib.js";
@@ -28,11 +33,7 @@ const TRANSFER_AMOUNT = 300_000_000n;
 const WITHDRAW_AMOUNT = 300_000_000n;
 
 async function main(): Promise<void> {
-  const {
-    sender: senderKeypair,
-    recipient: recipientKeypair,
-    clientConfig,
-  } = await setup();
+  const { clientConfig } = await setup();
 
   // Connect to Helius devnet RPC plus the Photon indexer and prover.
   const client =
@@ -41,12 +42,16 @@ async function main(): Promise<void> {
   // Initialize the sender's private wallet and local authority
   // to decrypt transactions and sync balances.
   // The Solana signer and private wallet are derived from the same Ed25519 seed.
-  const senderSigner =
-    senderKeypair.toSolanaSigner();
-  const senderAddress =
-    senderKeypair.shieldedAddress();
-  const recipient =
-    recipientKeypair.shieldedAddress();
+  const sender = ShieldedKeypair.fromKeypair(
+    await cliKeypair(),
+  );
+  const recipient = ShieldedKeypair.generate();
+  const senderSigner = sender.toSolanaSigner();
+  const senderAddress = sender.shieldedAddress();
+  const senderKeys = LocalKeys.fromKeypair(
+    sender,
+    client.proofService,
+  );
 
   // The SDK hands back instructions; the app owns signing and sending.
   const sendAndConfirm = sendAndConfirmFactory(
@@ -98,7 +103,7 @@ async function main(): Promise<void> {
   // 4. The sender decrypts the transaction outputs locally to read the private balance.
   const balancesAfterDeposit =
     await decryptToBalances({
-      keypair: senderKeypair,
+      keypair: sender,
       registry: assets,
       transactions: depositResponse.transactions,
     });
@@ -126,7 +131,7 @@ async function main(): Promise<void> {
   const transferInput =
     ProofInputUtxo.fromKeypair(
       transferUtxo,
-      senderKeypair,
+      sender,
     );
 
   // 3. Build and sign the confidential transfer.
@@ -137,18 +142,19 @@ async function main(): Promise<void> {
     senderSigner.address,
   );
   transfer.send(
-    recipient,
+    recipient.shieldedAddress(),
     SOL_MINT,
     TRANSFER_AMOUNT,
   );
   const transferProofInputs = transfer.sign(
-    senderKeypair,
+    sender,
     assets,
   );
 
   // 4. Fetch the ZK proof to prove the sender can spend the balance without revealing asset and amount.
   const transferData = await client.proveTransact(
     transferProofInputs,
+    senderKeys,
   );
 
   // 5. Build the instruction with the state Merkle tree and Solana accounts required for the transfer.
@@ -176,7 +182,7 @@ async function main(): Promise<void> {
     );
   const balancesAfterTransfer =
     await decryptToBalances({
-      keypair: senderKeypair,
+      keypair: sender,
       registry: assets,
       transactions: transferResponse.transactions,
     });
@@ -207,7 +213,7 @@ async function main(): Promise<void> {
   const withdrawalInput =
     ProofInputUtxo.fromKeypair(
       withdrawalUtxo,
-      senderKeypair,
+      sender,
     );
 
   // 3. Build and sign the private-to-public withdrawal.
@@ -226,7 +232,7 @@ async function main(): Promise<void> {
     }),
   );
   const withdrawalProofInputs = withdrawal.sign(
-    senderKeypair,
+    sender,
     assets,
   );
 
@@ -234,6 +240,7 @@ async function main(): Promise<void> {
   const withdrawalData =
     await client.proveTransact(
       withdrawalProofInputs,
+      senderKeys,
     );
 
   // 5. Build the instruction with the state Merkle tree and Solana accounts required for the withdrawal.
@@ -262,7 +269,7 @@ async function main(): Promise<void> {
     );
   const balancesAfterWithdrawal =
     await decryptToBalances({
-      keypair: senderKeypair,
+      keypair: sender,
       registry: assets,
       transactions:
         withdrawalResponse.transactions,

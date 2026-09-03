@@ -4,39 +4,33 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 
 import {
-  AccountRole,
-  address,
   appendTransactionMessageInstructions,
   assertIsTransactionWithBlockhashLifetime,
-  createSolanaRpc,
-  createSolanaRpcSubscriptions,
   createTransactionMessage,
   getSignatureFromTransaction,
   pipe,
-  sendAndConfirmTransactionFactory,
   sendTransactionWithoutConfirmingFactory,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
-  type Address,
+  signTransactionWithSigners,
   type Instruction,
   type Signature,
+  type Transaction,
+  type TransactionModifyingSigner,
+  type TransactionPartialSigner,
   type TransactionSigner,
 } from "@solana/kit";
 import {
-  ShieldedKeypair,
   SigningKey,
   createZolanaClient,
   initializePoseidon,
   type Bytes32,
   type ZolanaClientConfig,
 } from "@heliuslabs/zolana";
-
 export type Client = Awaited<ReturnType<typeof createZolanaClient>>;
 
 export interface ExampleSetup {
-  readonly sender: ShieldedKeypair;
-  readonly recipient: ShieldedKeypair;
   readonly clientConfig: ZolanaClientConfig;
 }
 
@@ -55,8 +49,6 @@ const PROVER_URL =
 // localnet: const RPC_URL = "http://127.0.0.1:8899";
 // localnet: const INDEXER_URL = "http://127.0.0.1:8784";
 // localnet: const PROVER_URL = "http://127.0.0.1:3001";
-const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
-const SENDER_LAMPORTS = 2_000_000_000n;
 
 function expandedPath(value: string): string {
   return value === "~"
@@ -66,7 +58,11 @@ function expandedPath(value: string): string {
       : value;
 }
 
-async function funderKeypair(): Promise<ShieldedKeypair> {
+/**
+ * The Solana CLI wallet (`ZOLANA_PAYER_KEYPAIR`, defaults to
+ * `~/.config/solana/id.json`).
+ */
+export async function cliKeypair(): Promise<SigningKey> {
   const payerPath = expandedPath(
     process.env["ZOLANA_PAYER_KEYPAIR"] ?? "~/.config/solana/id.json",
   );
@@ -80,10 +76,10 @@ async function funderKeypair(): Promise<ShieldedKeypair> {
   }
 
   // Solana CLI keypair files contain the 32-byte Ed25519 seed followed by the
-  // public key. Derive the Solana signer and private wallet from the same seed.
+  // public key.
   const seed = Uint8Array.from(secret.slice(0, 32)) as Bytes32;
   try {
-    return ShieldedKeypair.fromKeypair(SigningKey.fromEd25519Bytes(seed));
+    return SigningKey.fromEd25519Bytes(seed);
   } finally {
     seed.fill(0);
   }
@@ -107,73 +103,10 @@ function clientConfigFromEnv(): ZolanaClientConfig {
   });
 }
 
-function subscriptionsUrl(rpcUrl: string): string {
-  const url = new URL(rpcUrl);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return url.href;
-}
-
-function transferSolIx(
-  from: Address,
-  to: Address,
-  lamports: bigint,
-): Instruction {
-  const data = new Uint8Array(12);
-  const view = new DataView(data.buffer);
-  view.setUint32(0, 2, true);
-  view.setBigUint64(4, lamports, true);
-  return {
-    programAddress: SYSTEM_PROGRAM,
-    accounts: [
-      { address: from, role: AccountRole.WRITABLE_SIGNER },
-      { address: to, role: AccountRole.WRITABLE },
-    ],
-    data,
-  };
-}
-
-async function fundSender(
-  rpcUrl: string,
-  funder: TransactionSigner,
-  recipient: Address,
-): Promise<void> {
-  const rpc = createSolanaRpc(rpcUrl);
-  const sendAndConfirm = sendAndConfirmTransactionFactory({
-    rpc,
-    rpcSubscriptions: createSolanaRpcSubscriptions(subscriptionsUrl(rpcUrl)),
-  });
-  const { value: lifetime } = await rpc.getLatestBlockhash().send();
-  const signed = await signTransactionMessageWithSigners(
-    pipe(
-      createTransactionMessage({ version: 0 }),
-      (message) => setTransactionMessageFeePayerSigner(funder, message),
-      (message) =>
-        setTransactionMessageLifetimeUsingBlockhash(lifetime, message),
-      (message) =>
-        appendTransactionMessageInstructions(
-          [transferSolIx(funder.address, recipient, SENDER_LAMPORTS)],
-          message,
-        ),
-    ),
-  );
-  assertIsTransactionWithBlockhashLifetime(signed);
-  await sendAndConfirm(signed, { commitment: "confirmed" });
-}
-
 export async function setup(): Promise<ExampleSetup> {
   await initializePoseidon();
-  const clientConfig = clientConfigFromEnv();
-  const funder = await funderKeypair();
-  const sender = ShieldedKeypair.generate();
-  await fundSender(
-    String(clientConfig.solanaRpcUrl),
-    funder.toSolanaSigner(),
-    sender.toSolanaSigner().address,
-  );
   return Object.freeze({
-    sender,
-    recipient: ShieldedKeypair.generate(),
-    clientConfig,
+    clientConfig: clientConfigFromEnv(),
   });
 }
 
@@ -211,6 +144,34 @@ export function sendAndConfirmFactory(
           appendTransactionMessageInstructions(instructions, message),
       ),
     );
+    assertIsTransactionWithBlockhashLifetime(signed);
+    await sendTransaction(signed, { commitment: "confirmed" });
+    const signature = getSignatureFromTransaction(signed);
+    const slot = await client.confirmTransaction(signature);
+    return { signature, slot };
+  };
+}
+
+/**
+ * Sign and send a compiled transaction as the given fee payer, then wait
+ * for the transaction to confirm.
+ *
+ * `buildRegistrationTransaction` returns a compiled transaction, not
+ * instructions, so this path signs that transaction instead of building
+ * a new message. Confirmation reuses the SDK's `confirmTransaction`.
+ */
+export function sendTransactionFactory(
+  client: Client,
+  feePayer: TransactionPartialSigner | TransactionModifyingSigner,
+): (transaction: Transaction) => Promise<ConfirmedTransaction> {
+  const sendTransaction = sendTransactionWithoutConfirmingFactory({
+    rpc: client.solanaRpc,
+  });
+
+  return async function sendAndConfirmTransaction(
+    transaction: Transaction,
+  ): Promise<ConfirmedTransaction> {
+    const signed = await signTransactionWithSigners([feePayer], transaction);
     assertIsTransactionWithBlockhashLifetime(signed);
     await sendTransaction(signed, { commitment: "confirmed" });
     const signature = getSignatureFromTransaction(signed);
