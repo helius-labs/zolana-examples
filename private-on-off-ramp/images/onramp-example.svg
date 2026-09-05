@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="40 30 520 240" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" color="#334155" role="img" aria-labelledby="t d">
+  <title id="t">On-ramp: the pool's note is spent into a user note and change</title>
+  <desc id="d">On-ramp of 35 USDC. The pool's single 50 USDC note is spent and two new notes are created: a 35 USDC note for the user and a 15 USDC change note back to the pool.</desc>
+  <!-- Single-panel UTXO flow. Neutral note boxes; orange #FF6B35 reserved for flow arrows only.
+       Spent input note is muted/struck. -->
+
+  <defs>
+    <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#FF6B35"/>
+    </marker>
+  </defs>
+
+  <text x="60" y="56" font-size="20" fill="currentColor">On-ramp</text>
+
+  <!-- input note: the pool's, spent (grayish-green); box y135..191, center 163 -->
+  <rect x="60" y="135" width="160" height="56" rx="9" fill="#EAF2EC" stroke="#CBD5CB" stroke-width="1.5"/>
+  <text x="140" y="159" font-size="18" fill="#9CA3AF" text-anchor="middle" text-decoration="line-through">50 USDC</text>
+  <text x="140" y="181" font-size="13" fill="#9CA3AF" text-anchor="middle">pool note, spent</text>
+
+  <!-- orange flow arrows fanning symmetrically from the input note's right edge (x220, y163) -->
+  <line x1="224" y1="156" x2="361" y2="110" stroke="#FF6B35" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+  <line x1="224" y1="170" x2="361" y2="216" stroke="#FF6B35" stroke-width="1.8" marker-end="url(#arrowhead)"/>
+
+  <!-- output note 1: 35 USDC to the user (new note, pastel purple) -->
+  <rect x="371" y="77" width="150" height="56" rx="9" fill="#F3E8FF" stroke="#D8B4FE" stroke-width="1.5"/>
+  <text x="446" y="101" font-size="18" fill="currentColor" text-anchor="middle">35 USDC</text>
+  <text x="446" y="123" font-size="13" fill="#6B7280" text-anchor="middle">new note, user</text>
+
+  <!-- output note 2: 15 USDC change back to the pool (new note, pastel green) -->
+  <rect x="371" y="193" width="150" height="56" rx="9" fill="#DCFCE7" stroke="#86EFAC" stroke-width="1.5"/>
+  <text x="446" y="217" font-size="18" fill="currentColor" text-anchor="middle">15 USDC</text>
+  <text x="446" y="239" font-size="13" fill="#6B7280" text-anchor="middle">change, pool</text>
+</svg>

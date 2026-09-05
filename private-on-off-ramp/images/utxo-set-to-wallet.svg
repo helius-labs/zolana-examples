@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="30 72 700 276" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" color="#737373" role="img" aria-labelledby="t d">
+  <title id="t">A private wallet balance is the sum of a set of UTXO notes</title>
+  <desc id="d">A Private Wallet box on the left shows a balance of 35 USDC. On the right, three separate UTXO notes hold 20 USDC, 10 USDC, and 5 USDC. Gray dashed connector lines link each note to the wallet, showing that the individual notes together make up the wallet balance.</desc>
+  <!-- Transparent background — works on light and dark. Text uses currentColor.
+       Family conventions borrowed from privacy-network.svg: gray box/zone chrome (#9CA3AF,
+       stroke-width 1.6), seated white title chip on the box border with a #chipCutout mask so
+       no border line strikes through the chip text. The dashed gray connector lines are
+       membership/grouping links (UTXO note belongs to wallet), NOT flow — so they stay gray,
+       never orange. Orange (#FF6B35) is reserved for flow arrows and is intentionally unused here.
+       No @media dark-mode block, to stay 1:1 with the images/privacy family. -->
+
+  <defs>
+    <!-- mask: hide box borders where chips sit, so no line runs behind the title text.
+         White = visible, black = hidden. Black rects match each chip footprint (+1px bleed). -->
+    <mask id="chipCutout">
+      <rect x="0" y="0" width="760" height="420" fill="#FFFFFF"/>
+      <rect x="96" y="121" width="148" height="26" rx="7" fill="#000000"/>
+    </mask>
+  </defs>
+
+  <!-- ========== CONNECTORS (gray dashed membership links, drawn first so boxes sit on top) ========== -->
+  <!-- Each line runs from the wallet's right edge (x=290) to the left edge of one UTXO note (x=470). -->
+  <line x1="290" y1="210" x2="470" y2="118" stroke="#9CA3AF" stroke-width="1.6" stroke-dasharray="7 6"/>
+  <line x1="290" y1="210" x2="470" y2="210" stroke="#9CA3AF" stroke-width="1.6" stroke-dasharray="7 6"/>
+  <line x1="290" y1="210" x2="470" y2="302" stroke="#9CA3AF" stroke-width="1.6" stroke-dasharray="7 6"/>
+
+  <!-- ========== PRIVATE WALLET (left card; seated white chip header; balance inside) ========== -->
+  <rect x="50" y="134" width="240" height="152" rx="11" fill="none" stroke="#9CA3AF" stroke-width="1.6" mask="url(#chipCutout)"/>
+  <rect x="97" y="122" width="146" height="24" rx="7" fill="#FFFFFF" stroke="#9CA3AF" stroke-width="1.6"/>
+  <text x="170" y="139" font-size="16" font-weight="500" fill="currentColor" text-anchor="middle">Private Wallet</text>
+  <text x="170" y="206" font-size="34" font-weight="600" fill="currentColor" text-anchor="middle">35</text>
+  <text x="170" y="240" font-size="16" fill="currentColor" text-anchor="middle">USDC balance</text>
+
+  <!-- ========== UTXO NOTES (three white note-chips; each one unspent output of one asset) ========== -->
+  <!-- Each note covers the connector that lands on it (boxes drawn after lines). -->
+  <rect x="470" y="92" width="240" height="52" rx="9" fill="#FFFFFF" stroke="#9CA3AF" stroke-width="1.6"/>
+  <text x="494" y="124" font-size="17" font-weight="600" fill="currentColor">20 USDC</text>
+  <text x="686" y="124" font-size="13" fill="currentColor" text-anchor="end">UTXO note</text>
+
+  <rect x="470" y="184" width="240" height="52" rx="9" fill="#FFFFFF" stroke="#9CA3AF" stroke-width="1.6"/>
+  <text x="494" y="216" font-size="17" font-weight="600" fill="currentColor">10 USDC</text>
+  <text x="686" y="216" font-size="13" fill="currentColor" text-anchor="end">UTXO note</text>
+
+  <rect x="470" y="276" width="240" height="52" rx="9" fill="#FFFFFF" stroke="#9CA3AF" stroke-width="1.6"/>
+  <text x="494" y="308" font-size="17" font-weight="600" fill="currentColor">5 USDC</text>
+  <text x="686" y="308" font-size="13" fill="currentColor" text-anchor="end">UTXO note</text>
+</svg>
