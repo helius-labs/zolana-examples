@@ -32,7 +32,7 @@ async function main(): Promise<void> {
     senderSigner,
   );
 
-  // Create a private wallet. This registers inbox -> shielded_public_key in the protocol registry.
+  // Register a private wallet. This registers inbox -> shielded_public_key in the protocol registry.
   const registration =
     await buildRegistrationTransaction({
       client,

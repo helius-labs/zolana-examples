@@ -21,8 +21,8 @@ zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "665
 zolana-wallet = { git = "https://github.com/helius-labs/zolana", rev = "6657ca201c4bfa517e629cfd0bc7d2c256789db2" }
 
 [[example]]
-name = "create_private_wallet"
-path = "examples/create_private_wallet.rs"
+name = "register_private_wallet"
+path = "examples/register_private_wallet.rs"
 
 [[example]]
 name = "deposit_transfer_withdraw"
