@@ -1,9 +1,9 @@
 use anyhow::Result;
 use rust_client_example::{cli_keypair, setup, SetupContext};
 use solana_signer::Signer;
-use zolana_client::{SolanaRpc, ZolanaClient};
+use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
-use zolana_wallet::{ensure_registered, is_wallet_registered_sync};
+use zolana_wallet::{build_registration_transaction_sync, is_wallet_registered_sync};
 
 fn main() -> Result<()> {
     let SetupContext {
@@ -26,8 +26,17 @@ fn main() -> Result<()> {
     // The Solana signer and private wallet are derived from the same Ed25519 seed.
     let sender = ShieldedKeypair::from_keypair(&cli_keypair()?)?;
 
-    // Create a private wallet. This registers inbox -> shielded_public_key in the protocol registry.
-    ensure_registered(&client, &sender, &sender)?;
+    // The SDK hands back a transaction; the app owns signing and sending.
+    if let Some(mut registration) = build_registration_transaction_sync(
+        &client,
+        sender.pubkey(),
+        &sender.shielded_address()?,
+        None,
+    )? {
+        let blockhash = registration.message.recent_blockhash;
+        registration.try_sign(&[&sender], blockhash)?;
+        client.send_transaction(&registration)?;
+    }
 
     assert!(is_wallet_registered_sync(&client, sender.pubkey())?);
 
