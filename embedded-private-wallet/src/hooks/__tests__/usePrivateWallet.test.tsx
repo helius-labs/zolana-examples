@@ -1,9 +1,10 @@
+import { getPrivateSolBalance } from "../../operations/read/getBalance";
 // @vitest-environment jsdom
 import { StrictMode, type PropsWithChildren } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useEmbeddedWallet } from "../useEmbeddedWallet";
-import { buildRegistrationTransaction, syncWallet } from "@heliuslabs/zolana";
+import { buildRegistrationTransaction } from "@heliuslabs/zolana";
 import { checkRegistration } from "../../lib/registration";
 import { connectClient } from "../../lib/client";
 import { openTvcWallet } from "../../lib/tvc";
@@ -12,12 +13,14 @@ vi.mock("../useEmbeddedWallet", () => ({ useEmbeddedWallet: vi.fn() }));
 vi.mock("../useBootstrapApproval", () => ({
   useBootstrapApproval: () => vi.fn(),
 }));
+vi.mock("../../operations/read/getBalance", () => ({
+  getPrivateSolBalance: vi.fn(),
+}));
 vi.mock("../../lib/client", () => ({ connectClient: vi.fn() }));
 vi.mock("../../lib/tvc", () => ({ openTvcWallet: vi.fn() }));
 vi.mock("../../lib/registration", () => ({ checkRegistration: vi.fn() }));
 vi.mock("@heliuslabs/zolana", () => ({
   buildRegistrationTransaction: vi.fn(),
-  syncWallet: vi.fn(),
   Wallet: class {
     balance() {
       return { amount: 0n };
@@ -74,7 +77,7 @@ beforeEach(() => {
   vi.mocked(openTvcWallet).mockResolvedValue(tvc);
   vi.mocked(checkRegistration).mockResolvedValue(true);
   vi.mocked(buildRegistrationTransaction).mockResolvedValue({} as never);
-  vi.mocked(syncWallet).mockResolvedValue(undefined as never);
+  vi.mocked(getPrivateSolBalance).mockResolvedValue(undefined as never);
 });
 afterEach(cleanup);
 describe("explicit TVC activation", () => {
@@ -100,8 +103,9 @@ describe("explicit TVC activation", () => {
       await work;
     });
     expect(result.current.ready).toBe(true);
+    expect(result.current.ctx).not.toHaveProperty("wallet");
     expect(buildRegistrationTransaction).not.toHaveBeenCalled();
-    expect(syncWallet).toHaveBeenCalledTimes(1);
+    expect(getPrivateSolBalance).toHaveBeenCalledTimes(1);
   });
   it("registers a new wallet, verifies its record and syncs", async () => {
     vi.mocked(checkRegistration)
@@ -204,7 +208,7 @@ describe("explicit TVC activation", () => {
       pending.resolve({} as never);
       await work;
     });
-    expect(syncWallet).not.toHaveBeenCalled();
+    expect(getPrivateSolBalance).not.toHaveBeenCalled();
     expect(result.current.ready).toBe(false);
   });
   it("invalidates a context after unmount", async () => {

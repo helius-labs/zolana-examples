@@ -53,10 +53,23 @@ export async function openTvcWallet(input: OpenTvcWalletInput) {
       ]),
     });
     assertActive();
-    if (!response.ok)
-      throw new Error(
-        `TVC ${path.split("/").at(-1)} failed (HTTP ${response.status}).`,
-      );
+    if (!response.ok) {
+      const failure = `TVC ${path.split("/").at(-1)} failed (HTTP ${response.status}).`;
+      // Surface only recognized public error codes, never an arbitrary service body.
+      const body: unknown = await response.json().catch(() => null);
+      assertActive();
+      const code =
+        body && typeof body === "object" && "error" in body ? body.error : null;
+      if (code === "CrossOriginRequestDenied")
+        throw new Error(
+          `${failure} The TVC backend rejected this site's origin (CrossOriginRequestDenied). Its backend or proxy origin configuration must be corrected before activation can continue.`,
+        );
+      if (code === "LocalProxyRequestDenied")
+        throw new Error(
+          `${failure} The local proxy rejected this request. Open the app directly at http://127.0.0.1:5173/ and retry.`,
+        );
+      throw new Error(failure);
+    }
     return response;
   }
   async function post(path: string, body: unknown): Promise<unknown> {

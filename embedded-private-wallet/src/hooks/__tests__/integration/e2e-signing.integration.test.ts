@@ -1,3 +1,4 @@
+import { getPrivateSolBalance } from "../../../operations/read/getBalance";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -11,13 +12,7 @@ import {
 } from "@solana/web3.js";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { address, getAddressEncoder } from "@solana/kit";
-import {
-  LocalKeys,
-  buildRegistrationTransaction,
-  SOL_MINT,
-  syncWallet,
-  Wallet,
-} from "@heliuslabs/zolana";
+import { LocalKeys, buildRegistrationTransaction } from "@heliuslabs/zolana";
 import { isWalletRegistered } from "@heliuslabs/zolana/wallet";
 import type { Bytes32 } from "@heliuslabs/zolana/keypair";
 import { connectClient } from "../../../lib/client";
@@ -29,9 +24,9 @@ import {
   TRANSFER_AMOUNT,
   WITHDRAW_AMOUNT,
 } from "../../../lib/amounts";
-import { depositSol } from "../../../operations/deposit";
-import { transferSol } from "../../../operations/transfer";
-import { withdrawSol } from "../../../operations/withdraw";
+import { depositSol } from "../../../operations/send/deposit";
+import { transferSol } from "../../../operations/send/transfer";
+import { withdrawSol } from "../../../operations/send/withdraw";
 import type { AdapterWalletAuthority } from "../../../lib/deriveAuthority";
 import type { PrivateWalletContext } from "../../../lib/walletContext";
 
@@ -62,7 +57,7 @@ async function contextFor(keypair: Keypair): Promise<PrivateWalletContext> {
   const client = await connectClient();
   const owner = address(keypair.publicKey.toBase58());
   const ed25519Pk = Uint8Array.from(
-    getAddressEncoder().encode(owner)
+    getAddressEncoder().encode(owner),
   ) as Bytes32;
   const seed = seed32(keypair);
   const authority: AdapterWalletAuthority = await deriveAdapterAuthority({
@@ -78,9 +73,6 @@ async function contextFor(keypair: Keypair): Promise<PrivateWalletContext> {
     },
   });
   const submit = submitFactory(client, signer);
-  const wallet = new Wallet({
-    identity: await authority.shieldedAddress(),
-  });
   if (!(await isWalletRegistered({ rpc: client, owner }))) {
     const registration = await buildRegistrationTransaction({
       client,
@@ -95,13 +87,11 @@ async function contextFor(keypair: Keypair): Promise<PrivateWalletContext> {
       viewingKeys: await authority.viewingKeys(),
       nullifierKey: await authority.spendNullifierKey(),
     },
-    client.proofService
+    client.proofService,
   );
-  await syncWallet({ client, wallet, keys });
   return {
     owner,
     keys,
-    wallet,
     submit,
     client,
     assertActive: () => {},
@@ -111,16 +101,16 @@ async function contextFor(keypair: Keypair): Promise<PrivateWalletContext> {
 
 const ENABLED = Boolean(
   process.env.API_KEY ||
-    process.env.VITE_API_KEY ||
-    process.env.ZOLANA_ENDPOINT ||
-    process.env.VITE_ZOLANA_ENDPOINT
+  process.env.VITE_API_KEY ||
+  process.env.ZOLANA_ENDPOINT ||
+  process.env.VITE_ZOLANA_ENDPOINT,
 );
 
 describe.runIf(ENABLED)("e2e signing (devnet)", () => {
   it("deposits, transfers, and withdraws with a keypair stand-in", async () => {
     const payer = loadKeypair();
     const ctx = await contextFor(payer);
-    const startPrivate = ctx.wallet.balance(SOL_MINT).amount;
+    const startPrivate = await getPrivateSolBalance(ctx);
     const sol = await ctx.client.getBalance(ctx.owner);
     expect(sol).toBeGreaterThan(50_000_000n);
 
@@ -131,7 +121,7 @@ describe.runIf(ENABLED)("e2e signing (devnet)", () => {
         fromPubkey: payer.publicKey,
         toPubkey: recipientKey.publicKey,
         lamports: 50_000_000,
-      })
+      }),
     );
     fund.feePayer = payer.publicKey;
     fund.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
@@ -145,15 +135,15 @@ describe.runIf(ENABLED)("e2e signing (devnet)", () => {
 
     const afterTransfer = await transferSol(
       ctx,
-      address(recipientKey.publicKey.toBase58())
+      address(recipientKey.publicKey.toBase58()),
     );
     expect(afterTransfer.privateBalance).toBe(
-      startPrivate + DEPOSIT_AMOUNT - TRANSFER_AMOUNT
+      startPrivate + DEPOSIT_AMOUNT - TRANSFER_AMOUNT,
     );
 
     const afterWithdraw = await withdrawSol(ctx);
     expect(afterWithdraw.privateBalance).toBe(
-      startPrivate + DEPOSIT_AMOUNT - TRANSFER_AMOUNT - WITHDRAW_AMOUNT
+      startPrivate + DEPOSIT_AMOUNT - TRANSFER_AMOUNT - WITHDRAW_AMOUNT,
     );
   });
 });

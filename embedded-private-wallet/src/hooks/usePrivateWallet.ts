@@ -1,9 +1,8 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { address } from "@solana/kit";
-import { Wallet } from "@heliuslabs/zolana";
 import type { PrivateWalletContext } from "../lib/walletContext";
-import { registerPrivateWallet } from "../operations/registerWallet";
-import { syncPrivateWallet } from "../operations/syncWallet";
+import { registerPrivateWallet } from "../operations/send/registerWallet";
+import { getPrivateSolBalance } from "../operations/read/getBalance";
 import { useEmbeddedWallet } from "./useEmbeddedWallet";
 import { useBootstrapApproval } from "./useBootstrapApproval";
 import { connectClient } from "../lib/client";
@@ -29,7 +28,7 @@ export function usePrivateWallet() {
   const embedded = useEmbeddedWallet();
   const { owner, connected, sessionKey } = embedded;
   const withApproval = useBootstrapApproval(
-    privacyWalletTrustMaterial().turnkeyServicePublicKey
+    privacyWalletTrustMaterial().turnkeyServicePublicKey,
   );
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<PrivateWalletStatus>("disconnected");
@@ -46,7 +45,7 @@ export function usePrivateWallet() {
     setStatus(connected && owner ? "connected" : "disconnected");
     return () => {
       controller.abort(
-        new Error("Wallet session changed. Activate your current wallet.")
+        new Error("Wallet session changed. Activate your current wallet."),
       );
     };
   }, [connected, owner, sessionKey]);
@@ -104,8 +103,6 @@ export function usePrivateWallet() {
       });
       assertActive();
       const ownerAddress = address(owner);
-      const identity = tvc.keys.address();
-      const wallet = new Wallet({ identity });
       const signer = turnkeyTransactionSigner(ownerAddress, async (bytes) => {
         assertActive();
         const signed = await embedded.signTransaction(bytes);
@@ -116,7 +113,6 @@ export function usePrivateWallet() {
       const context: PrivateWalletContext = {
         owner: ownerAddress,
         keys: tvc.keys,
-        wallet,
         submit,
         client,
         assertActive,
@@ -127,7 +123,7 @@ export function usePrivateWallet() {
       await tvc.markRegistered();
       assertActive();
       setStatus("syncing");
-      await syncPrivateWallet(context);
+      await getPrivateSolBalance(context);
       assertActive();
       setCtx(context);
       setStatus("ready");

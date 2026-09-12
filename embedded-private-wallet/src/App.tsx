@@ -6,7 +6,6 @@ import {
   useState,
 } from "react";
 import { useEmbeddedWallet } from "./hooks/useEmbeddedWallet";
-import { useRpcConnection } from "./hooks/useRpcConnection";
 import { address } from "@solana/kit";
 import { usePrivateWallet } from "./hooks/usePrivateWallet";
 import { BalanceSyncError } from "./lib/syncAfterTransaction";
@@ -15,14 +14,15 @@ import {
   TRANSFER_AMOUNT,
   WITHDRAW_AMOUNT,
 } from "./lib/amounts";
-import { depositSol } from "./operations/deposit";
-import { transferSol } from "./operations/transfer";
-import { withdrawSol } from "./operations/withdraw";
+import { depositSol } from "./operations/send/deposit";
+import { transferSol } from "./operations/send/transfer";
+import { transferPublicSol } from "./operations/send/publicTransfer";
+import { createPublicWalletContext } from "./lib/publicWalletContext";
+import { withdrawSol } from "./operations/send/withdraw";
 import {
   getPublicSolBalance,
   getPrivateSolBalance,
-} from "./operations/getBalance";
-import { syncPrivateWallet } from "./operations/syncWallet";
+} from "./operations/read/getBalance";
 import { parseSol } from "./lib/parseSol";
 import { walletError } from "./lib/walletError";
 import { formatSol } from "./lib/formatSol";
@@ -121,8 +121,8 @@ export default function App() {
                 {authenticated ? "Your embedded wallet" : "Your private wallet"}
               </h2>
               <p>
-                Sign in with Turnkey to view your balance and test private
-                transfers.
+                Sign in with Turnkey to view your balances and send public or
+                private SOL.
               </p>
               <button
                 className="primary-button"
@@ -132,10 +132,10 @@ export default function App() {
                 {!ready
                   ? "Loading wallet…"
                   : creating
-                  ? "Opening wallet…"
-                  : authenticated
-                  ? "Sign in again"
-                  : "Sign in with Turnkey"}
+                    ? "Opening wallet…"
+                    : authenticated
+                      ? "Sign in again"
+                      : "Sign in with Turnkey"}
               </button>
               {authenticated && (
                 <button className="text-button" onClick={() => void logout()}>
@@ -175,16 +175,18 @@ export default function App() {
 }
 
 function ConnectedWallet() {
-  const { sessionKey, logout } = useEmbeddedWallet();
-  const connection = useRpcConnection();
+  const { sessionKey, logout, signTransaction } = useEmbeddedWallet();
   const { ready, status, error, ctx, owner, initialize } = usePrivateWallet();
-  const [action, setAction] = useState<Action>("Deposit");
+  const [source, setSource] = useState<"private" | "public">("private");
+  const [action, setAction] = useState<Action>("Transfer");
+  const [publicAmount, setPublicAmount] = useState(formatSol(TRANSFER_AMOUNT));
   const [amountInputs, setAmountInputs] = useState<Record<Action, string>>({
     Deposit: formatSol(DEPOSIT_AMOUNT),
     Transfer: formatSol(TRANSFER_AMOUNT),
     Withdraw: formatSol(WITHDRAW_AMOUNT),
   });
   const [recipient, setRecipient] = useState("");
+  const [recipientMode, setRecipientMode] = useState<"own" | "other">("own");
   const [signature, setSignature] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -192,22 +194,53 @@ function ConnectedWallet() {
     useState<TransferProgress | null>(null);
   const [publicBalance, setPublicBalance] = useState<bigint | null>(null);
   const [privateBalance, setPrivateBalance] = useState<bigint | null>(null);
-  const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [publicBalanceError, setPublicBalanceError] = useState<string | null>(
+    null,
+  );
+  const [privateBalanceError, setPrivateBalanceError] = useState<string | null>(
+    null,
+  );
+  const balanceError = [publicBalanceError, privateBalanceError]
+    .filter(Boolean)
+    .join(" ");
   const [refreshing, setRefreshing] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
   const session = useRef(0);
   const operation = useRef(false);
   const balanceRequest = useRef(0);
+  const balanceAbort = useRef<AbortController | null>(null);
+  const actionAbort = useRef<AbortController | null>(null);
+  const [publicRefreshing, setPublicRefreshing] = useState(false);
   const initializing = status in progress;
+  const publicTransfer = source === "public" && action === "Transfer";
+  const amountInput = publicTransfer ? publicAmount : amountInputs[action];
+  const busyReading = publicTransfer ? publicRefreshing : refreshing;
+  const blockedBalance = publicTransfer
+    ? publicBalance === null
+    : Boolean(balanceError) ||
+      privateBalance === null ||
+      publicBalance === null;
+  const needsActivation = !ready && !publicTransfer;
+  const actions: Action[] = ["Deposit", "Transfer", "Withdraw"];
+  const fundingSource =
+    action === "Deposit"
+      ? "public"
+      : action === "Withdraw"
+        ? "private"
+        : source;
+  const customRecipient = action === "Transfer" || recipientMode === "other";
+  const totalBalance =
+    publicBalance === null || privateBalance === null
+      ? null
+      : publicBalance + privateBalance;
   let amount: bigint | null = null;
   let amountError: string | null = null;
   try {
-    amount = parseSol(amountInputs[action]);
-    const available = action === "Deposit" ? publicBalance : privateBalance;
+    amount = parseSol(amountInput);
+    const available =
+      fundingSource === "public" ? publicBalance : privateBalance;
     if (available !== null && amount > available) {
-      amountError = `Amount exceeds your ${
-        action === "Deposit" ? "public" : "private"
-      } SOL balance.`;
+      amountError = `Amount exceeds your ${fundingSource} SOL balance.`;
     }
   } catch (error) {
     amountError = errorText(error);
@@ -221,9 +254,14 @@ function ConnectedWallet() {
     setTxError(null);
     setPublicBalance(null);
     setPrivateBalance(null);
-    setBalanceError(null);
+    setPublicBalanceError(null);
+    setPrivateBalanceError(null);
     setCopyStatus("");
     setRecipient("");
+    setRecipientMode("own");
+    setSource("private");
+    setAction("Transfer");
+    setPublicAmount(formatSol(TRANSFER_AMOUNT));
     setAmountInputs({
       Deposit: formatSol(DEPOSIT_AMOUNT),
       Transfer: formatSol(TRANSFER_AMOUNT),
@@ -232,38 +270,57 @@ function ConnectedWallet() {
     setPending(false);
     setTransferProgress(null);
     setRefreshing(false);
+    setPublicRefreshing(false);
     return () => {
       session.current += 1;
       balanceRequest.current += 1;
+      balanceAbort.current?.abort();
+      actionAbort.current?.abort();
     };
   }, [owner, sessionKey]);
 
   const loadBalances = useCallback(
-    async (syncPrivate = false) => {
+    async (knownPrivateBalance?: bigint) => {
       if (!owner) return false;
       const currentSession = session.current;
       const request = ++balanceRequest.current;
+      balanceAbort.current?.abort();
+      const controller = new AbortController();
+      balanceAbort.current = controller;
       const active = () =>
         session.current === currentSession &&
         balanceRequest.current === request;
       setRefreshing(true);
-      setBalanceError(null);
+      setPublicRefreshing(true);
+      setPublicBalanceError(null);
+      setPrivateBalanceError(null);
       const results = await Promise.allSettled([
-        withTimeout(getPublicSolBalance(connection, owner)).then((balance) => {
-          if (active()) setPublicBalance(balance);
-          return balance;
-        }),
+        withTimeout(
+          getPublicSolBalance(
+            owner,
+            ctx?.client,
+            AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+          ),
+        )
+          .then((balance) => {
+            if (active()) setPublicBalance(balance);
+            return balance;
+          })
+          .finally(() => {
+            if (active()) setPublicRefreshing(false);
+          }),
         withTimeout(
           (async () => {
             if (!ctx) return null;
-            if (syncPrivate)
-              await syncPrivateWallet(
-                ctx,
-                undefined,
-                AbortSignal.timeout(15_000)
-              );
-            return getPrivateSolBalance(ctx);
-          })()
+            if (knownPrivateBalance !== undefined) return knownPrivateBalance;
+            return getPrivateSolBalance(ctx, {
+              signal: AbortSignal.any([
+                controller.signal,
+                AbortSignal.timeout(60_000),
+              ]),
+            });
+          })(),
+          60_000,
         ).then((balance) => {
           if (active()) setPrivateBalance(balance);
           return balance;
@@ -271,30 +328,26 @@ function ConnectedWallet() {
       ]);
       if (!active()) return false;
       setPublicBalance(
-        results[0].status === "fulfilled" ? results[0].value : null
+        results[0].status === "fulfilled" ? results[0].value : null,
       );
       setPrivateBalance(
-        results[1].status === "fulfilled" ? results[1].value : null
+        results[1].status === "fulfilled" ? results[1].value : null,
       );
       const failed = results.some((result) => result.status === "rejected");
-      if (failed) {
-        setBalanceError(
-          [
-            results[0].status === "rejected"
-              ? "Couldn’t refresh public SOL. Check the RPC connection and try again."
-              : "",
-            results[1].status === "rejected"
-              ? "Couldn’t sync private SOL. Try refreshing again."
-              : "",
-          ]
-            .filter(Boolean)
-            .join(" ")
-        );
-      }
+      setPublicBalanceError(
+        results[0].status === "rejected"
+          ? "Couldn’t refresh public SOL. Check the RPC connection and try again."
+          : null,
+      );
+      setPrivateBalanceError(
+        results[1].status === "rejected"
+          ? "Couldn’t sync private SOL. Try refreshing again."
+          : null,
+      );
       setRefreshing(false);
       return !failed;
     },
-    [connection, owner, ctx]
+    [owner, ctx],
   );
 
   useEffect(() => {
@@ -302,11 +355,50 @@ function ConnectedWallet() {
   }, [loadBalances]);
 
   async function refresh() {
-    if (operation.current || initializing || refreshing) return;
+    if (operation.current || initializing || busyReading) return;
     operation.current = true;
     const currentSession = session.current;
     try {
-      const refreshed = await loadBalances(true);
+      if (publicTransfer) {
+        const controller = new AbortController();
+        const request = ++balanceRequest.current;
+        balanceAbort.current?.abort();
+        balanceAbort.current = controller;
+        setRefreshing(true);
+        setPublicRefreshing(true);
+        const active = () =>
+          session.current === currentSession &&
+          balanceRequest.current === request;
+        try {
+          const balance = await withTimeout(
+            getPublicSolBalance(
+              owner,
+              ctx?.client,
+              AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+            ),
+          );
+          if (active()) {
+            setPublicBalance(balance);
+            setPublicBalanceError(null);
+            setTxError(null);
+            setTransferProgress(null);
+          }
+        } catch {
+          if (active()) {
+            setPublicBalance(null);
+            setPublicBalanceError(
+              "Couldn’t refresh public SOL. Check the RPC connection and try again.",
+            );
+          }
+        } finally {
+          if (active()) {
+            setRefreshing(false);
+            setPublicRefreshing(false);
+          }
+        }
+        return;
+      }
+      const refreshed = await loadBalances();
       if (refreshed && session.current === currentSession && signature) {
         setTxError(null);
         setTransferProgress(null);
@@ -317,17 +409,35 @@ function ConnectedWallet() {
   }
 
   async function run() {
-    if (!ready || !ctx || operation.current || refreshing || balanceError)
+    if (
+      (!publicTransfer && (!ready || !ctx)) ||
+      operation.current ||
+      busyReading ||
+      blockedBalance
+    )
       return;
     operation.current = true;
     const currentSession = session.current;
+    const controller = new AbortController();
+    actionAbort.current = controller;
+    const assertActive = () => {
+      controller.signal.throwIfAborted();
+      if (session.current !== currentSession)
+        throw new Error("Wallet session changed.");
+    };
+    if (publicTransfer) {
+      balanceRequest.current += 1;
+      balanceAbort.current?.abort();
+      setRefreshing(false);
+      setPublicRefreshing(false);
+    }
     setPending(true);
     setTxError(null);
     setSignature(null);
     setTransferProgress(null);
     const reportProgress: TransferProgressCallback = (
       stage,
-      confirmedSignature
+      confirmedSignature,
     ) => {
       if (session.current !== currentSession) return;
       const at = performance.now();
@@ -342,49 +452,102 @@ function ConnectedWallet() {
       if (confirmedSignature) setSignature(confirmedSignature);
     };
     try {
-      const selectedAmount = parseSol(amountInputs[action]);
-      const available = action === "Deposit" ? publicBalance : privateBalance;
+      const selectedAmount = parseSol(amountInput);
+      const available =
+        fundingSource === "public" ? publicBalance : privateBalance;
       if (available !== null && selectedAmount > available)
-        throw new Error(
-          `Amount exceeds your ${
-            action === "Deposit" ? "public" : "private"
-          } SOL balance.`
-        );
-      let result: { signature: string };
+        throw new Error(`Amount exceeds your ${fundingSource} SOL balance.`);
+      let destination;
+      try {
+        destination = address(customRecipient ? recipient.trim() : owner);
+      } catch {
+        throw new Error("Enter a valid Solana recipient address.");
+      }
+      let result: { signature: string; privateBalance: bigint };
       if (action === "Transfer") {
-        let destination;
-        try {
-          destination = address(recipient.trim());
-        } catch {
-          throw new Error("Enter a valid Solana recipient address.");
-        }
         reportProgress("preparing");
+        if (publicTransfer) {
+          const publicCtx = await createPublicWalletContext(
+            owner,
+            signTransaction,
+            controller.signal,
+            assertActive,
+          );
+          const confirmed = await transferPublicSol(
+            publicCtx,
+            destination,
+            selectedAmount,
+            reportProgress,
+          );
+          assertActive();
+          setSignature(confirmed.signature);
+          try {
+            const balance = await withTimeout(
+              getPublicSolBalance(
+                owner,
+                publicCtx.client,
+                AbortSignal.any([
+                  controller.signal,
+                  AbortSignal.timeout(15_000),
+                ]),
+              ),
+            );
+            assertActive();
+            setPublicBalance(balance);
+            reportProgress("done");
+          } catch (error) {
+            assertActive();
+            setPublicBalance(null);
+            throw new Error(
+              "Transfer confirmed, but public balance could not refresh. Refresh balances to try again.",
+            );
+          }
+          return;
+        }
         result = await transferSol(
-          ctx,
+          ctx!,
           destination,
           selectedAmount,
-          reportProgress
+          reportProgress,
         );
       } else {
         result = await (action === "Deposit"
-          ? depositSol(ctx, selectedAmount)
-          : withdrawSol(ctx, selectedAmount));
+          ? depositSol(ctx!, selectedAmount, destination)
+          : withdrawSol(ctx!, selectedAmount, destination));
       }
       if (session.current !== currentSession) return;
       setSignature(result.signature);
-      await loadBalances();
+      await loadBalances(result.privateBalance);
     } catch (e: unknown) {
       if (session.current === currentSession) {
         if (e instanceof BalanceSyncError) {
           setSignature(e.signature);
           setPrivateBalance(null);
-          setBalanceError(
-            "Refresh balances before making another transaction."
+          const request = ++balanceRequest.current;
+          balanceAbort.current?.abort();
+          const controller = new AbortController();
+          balanceAbort.current = controller;
+          const active = () =>
+            session.current === currentSession &&
+            balanceRequest.current === request;
+          void getPublicSolBalance(
+            owner,
+            ctx?.client,
+            AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+          )
+            .then((balance) => {
+              if (active()) setPublicBalance(balance);
+            })
+            .catch(() => {
+              if (active()) setPublicBalance(null);
+            });
+          setPrivateBalanceError(
+            "Refresh balances before making another transaction.",
           );
         }
         setTxError(walletError(e));
         setTransferProgress((previous) =>
-          previous ? { ...previous, failed: true } : null
+          previous ? { ...previous, failed: true } : null,
         );
       }
     } finally {
@@ -438,36 +601,71 @@ function ConnectedWallet() {
       </MotionRegion>
 
       <div className="balance-section">
-        <span className="eyebrow">Private balance</span>
-        <MotionRegion>
-          <p className="balance" aria-label="Private SOL balance">
+        <MotionRegion className="total-balance">
+          <span className="eyebrow">Total balance</span>
+          <p className="balance" aria-label="Total SOL balance">
             <span
               className="balance-value"
-              key={privateBalance?.toString() ?? "loading"}
+              key={totalBalance?.toString() ?? "loading"}
             >
-              {privateBalance === null ? "—" : formatSol(privateBalance)}
+              {totalBalance === null ? "—" : formatSol(totalBalance)}
             </span>{" "}
             <span className="balance-unit">SOL</span>
           </p>
+          <p className="help-text">
+            {totalBalance === null
+              ? "Total appears when both balances are available."
+              : "Public and private SOL"}
+          </p>
         </MotionRegion>
-        <MotionRegion>
-          <div className="public-balance-row">
-            <span>Public balance</span>
-            <span
-              className="numeric balance-value"
-              key={publicBalance?.toString() ?? "loading"}
-            >
-              {publicBalance === null ? "—" : formatSol(publicBalance)} SOL
-            </span>
-          </div>
-        </MotionRegion>
+        <fieldset className="balance-picker" disabled={pending || initializing}>
+          <legend className="sr-only">Balance to use</legend>
+          {(["private", "public"] as const).map((option) => {
+            const balance =
+              option === "private" ? privateBalance : publicBalance;
+            const label = option === "private" ? "Private" : "Public";
+            return (
+              <label className="balance-option" key={option}>
+                <input
+                  type="radio"
+                  name="balance-source"
+                  value={option}
+                  aria-label={`${label} balance`}
+                  checked={source === option}
+                  onChange={() => {
+                    if (operation.current) return;
+                    setSource(option);
+                    setRecipient("");
+                    setRecipientMode("own");
+                    setSignature(null);
+                    setTxError(null);
+                    setTransferProgress(null);
+                  }}
+                />
+                <span className="balance-card">
+                  <span className="balance-card-label">
+                    {label} balance
+                    <span className="selection-dot" aria-hidden="true" />
+                  </span>
+                  <span
+                    className="balance-card-value"
+                    aria-label={`${label} SOL balance`}
+                  >
+                    {balance === null ? "—" : formatSol(balance)}{" "}
+                    <span className="balance-unit">SOL</span>
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+        </fieldset>
         <div className="refresh-row">
           <button
             className="text-button"
-            disabled={pending || initializing || refreshing}
+            disabled={pending || initializing || busyReading}
             onClick={() => void refresh()}
           >
-            {refreshing ? "Refreshing…" : "Refresh balances"}
+            {busyReading ? "Refreshing…" : "Refresh balances"}
           </button>
         </div>
         <MotionRegion>
@@ -479,200 +677,271 @@ function ConnectedWallet() {
         </MotionRegion>
       </div>
 
-      <MotionRegion transitionKey={ready}>
-        {!ready ? (
-          <div className="enable-section">
-            <h2>Activate your private wallet</h2>
-            <p className="help-text">
-              Activate your private wallet with Turnkey. First-time setup
-              registers your wallet address onchain so others can send you
-              private transfers. Learn more in the{" "}
-              <a
-                href="https://www.helius.dev/docs/privacy/concepts"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Docs
-              </a>
-              .
-            </p>
-            <button
-              className="primary-button"
-              disabled={initializing}
-              onClick={() => void initialize()}
-            >
-              {initializing ? (
-                <>
-                  <span className="spinner" aria-hidden="true" />
-                  Activating…
-                </>
-              ) : error ? (
-                "Try again"
-              ) : (
-                "Activate private wallet"
-              )}
-            </button>
-            <MotionRegion>
-              <p className="status-message" role="status">
-                {initializing ? progress[status as keyof typeof progress] : ""}
+      <div className="action-section">
+        <fieldset
+          className="action-picker"
+          data-action={action}
+          disabled={pending || busyReading || initializing}
+        >
+          <legend className="sr-only">Action</legend>
+          {actions.map((option) => (
+            <label key={option}>
+              <input
+                type="radio"
+                name="action"
+                value={option}
+                checked={action === option}
+                onChange={() => {
+                  setAction(option);
+                  setRecipient("");
+                  setRecipientMode("own");
+                  setTxError(null);
+                  setTransferProgress(null);
+                  setSignature(null);
+                }}
+              />
+              <span>
+                {option === "Transfer"
+                  ? source === "private"
+                    ? "Private Transfer"
+                    : "Public Transfer"
+                  : option}
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <MotionRegion transitionKey={`${source}:${action}:${needsActivation}`}>
+          {needsActivation ? (
+            <div className="enable-section">
+              <h2>Activate your private wallet</h2>
+              <p className="help-text">
+                Activate your private wallet with Turnkey. First-time setup
+                registers your wallet address onchain so others can send you
+                private transfers. Learn more in the{" "}
+                <a
+                  href="https://www.helius.dev/docs/privacy/concepts"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Docs
+                </a>
+                .
               </p>
-              {error && (
-                <p className="error-message" role="alert">
-                  {error}
-                </p>
-              )}
-            </MotionRegion>
-          </div>
-        ) : (
-          <form
-            className="transaction-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void run();
-            }}
-          >
-            <fieldset
-              className="action-picker"
-              data-action={action}
-              disabled={pending || refreshing}
-            >
-              <legend className="sr-only">Action</legend>
-              {(Object.keys(amounts) as Action[]).map((option) => (
-                <label key={option}>
-                  <input
-                    type="radio"
-                    name="action"
-                    value={option}
-                    checked={action === option}
-                    onChange={() => {
-                      setAction(option);
-                      setTxError(null);
-                      setTransferProgress(null);
-                      setSignature(null);
-                    }}
-                  />
-                  <span>{option}</span>
-                </label>
-              ))}
-            </fieldset>
-            <div className="amount-row">
-              <label htmlFor="amount">Amount</label>
-              <div className="amount-input">
-                <input
-                  id="amount"
-                  type="text"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={amountInputs[action]}
-                  onChange={(event) => {
-                    setAmountInputs((current) => ({
-                      ...current,
-                      [action]: event.target.value,
-                    }));
-                    setTxError(null);
-                  }}
-                  disabled={pending || refreshing}
-                  aria-invalid={Boolean(amountError)}
-                  aria-describedby={amountError ? "amount-error" : undefined}
-                />
-                <span>SOL</span>
-              </div>
-            </div>
-            <MotionRegion>
-              {amountError && (
-                <p id="amount-error" className="error-message" role="status">
-                  {amountError}
-                </p>
-              )}
-            </MotionRegion>
-            <MotionRegion>
-              <div className="action-content" key={action}>
-                {action === "Transfer" ? (
-                  <div className="recipient-field">
-                    <label htmlFor="recipient">Recipient</label>
-                    <input
-                      id="recipient"
-                      value={recipient}
-                      onChange={(event) => setRecipient(event.target.value)}
-                      placeholder="Solana address"
-                      autoComplete="off"
-                      autoCapitalize="none"
-                      spellCheck={false}
-                      disabled={pending}
-                      aria-describedby="recipient-help"
-                    />
-                    <p id="recipient-help" className="help-text">
-                      Use an address with an enabled private wallet.
-                    </p>
-                  </div>
+              <button
+                className="primary-button"
+                disabled={initializing}
+                onClick={() => void initialize()}
+              >
+                {initializing ? (
+                  <>
+                    <span className="spinner" aria-hidden="true" />
+                    Activating…
+                  </>
+                ) : error ? (
+                  "Try again"
                 ) : (
-                  <p className="destination">
-                    {action === "Deposit"
-                      ? "From your connected wallet to your private balance."
-                      : "From your private balance to your connected wallet."}
+                  "Activate private wallet"
+                )}
+              </button>
+              <MotionRegion>
+                <p className="status-message" role="status">
+                  {initializing
+                    ? progress[status as keyof typeof progress]
+                    : ""}
+                </p>
+                {error && (
+                  <p className="error-message" role="alert">
+                    {error}
                   </p>
                 )}
-              </div>
-            </MotionRegion>
-            <button
-              className="primary-button"
-              type="submit"
-              disabled={
-                pending ||
-                refreshing ||
-                Boolean(balanceError) ||
-                Boolean(amountError) ||
-                (action === "Transfer" && !recipient.trim())
-              }
+              </MotionRegion>
+            </div>
+          ) : (
+            <form
+              className="transaction-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void run();
+              }}
             >
-              {pending ? (
-                <>
-                  <span className="spinner" aria-hidden="true" />
-                  {action === "Deposit"
-                    ? "Depositing…"
-                    : action === "Transfer"
-                    ? "Transferring…"
-                    : "Withdrawing…"}
-                </>
-              ) : amount !== null && !amountError ? (
-                `${action} ${formatSol(amount)} SOL`
-              ) : (
-                action
-              )}
-            </button>
-            <MotionRegion>
-              {transferProgress && (
-                <TransferStepper progress={transferProgress} />
-              )}
-              <div className="transaction-result" role="status">
-                {pending && !transferProgress && (
-                  <p>Approve in your wallet, then wait for confirmation.</p>
-                )}
-                {signature && (
-                  <>
-                    <a
-                      href={`https://explorer.solana.com/tx/${signature}?cluster=devnet`}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={signature}
-                    >
-                      View transaction{" "}
-                      <span className="signature">{shorten(signature)}</span>
-                      <span aria-hidden="true"> ↗</span>
-                    </a>
-                  </>
-                )}
+              <h2>
+                {action === "Transfer"
+                  ? publicTransfer
+                    ? "Public transfer"
+                    : "Private transfer"
+                  : action === "Deposit"
+                    ? "Deposit to private balance"
+                    : "Withdraw to public balance"}
+              </h2>
+              <div className="amount-row">
+                <label htmlFor="amount">Amount</label>
+                <div className="amount-input">
+                  <input
+                    id="amount"
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={amountInput}
+                    onChange={(event) => {
+                      if (publicTransfer) setPublicAmount(event.target.value);
+                      else
+                        setAmountInputs((current) => ({
+                          ...current,
+                          [action]: event.target.value,
+                        }));
+                      setTxError(null);
+                    }}
+                    disabled={pending || busyReading}
+                    aria-invalid={Boolean(amountError)}
+                    aria-describedby={amountError ? "amount-error" : undefined}
+                  />
+                  <span>SOL</span>
+                </div>
               </div>
-              {txError && (
-                <p className="error-message" role="alert">
-                  {txError}
+              <MotionRegion>
+                {amountError && (
+                  <p id="amount-error" className="error-message" role="status">
+                    {amountError}
+                  </p>
+                )}
+              </MotionRegion>
+              <div className="action-content" key={action}>
+                <p className="destination">
+                  {action === "Deposit"
+                    ? "From your public balance to a private wallet."
+                    : action === "Withdraw"
+                      ? "From your private balance to a public wallet."
+                      : publicTransfer
+                        ? "From your public balance to a public wallet."
+                        : "From your private balance to a private wallet."}
                 </p>
-              )}
-            </MotionRegion>
-          </form>
-        )}
-      </MotionRegion>
+                {action !== "Transfer" && (
+                  <fieldset
+                    className="recipient-picker"
+                    disabled={pending || busyReading}
+                  >
+                    <legend>Recipient</legend>
+                    {(["own", "other"] as const).map((mode) => (
+                      <label key={mode}>
+                        <input
+                          type="radio"
+                          name="recipient-mode"
+                          value={mode}
+                          checked={recipientMode === mode}
+                          onChange={() => {
+                            setRecipientMode(mode);
+                            setRecipient("");
+                            setTxError(null);
+                          }}
+                        />
+                        <span>
+                          {mode === "own" ? "My wallet" : "Another wallet"}
+                        </span>
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
+                <MotionRegion transitionKey={customRecipient}>
+                  {customRecipient ? (
+                    <div className="recipient-field">
+                      <label htmlFor="recipient">
+                        {action === "Transfer"
+                          ? "Recipient"
+                          : "Recipient address"}
+                      </label>
+                      <input
+                        id="recipient"
+                        value={recipient}
+                        onChange={(event) => {
+                          setRecipient(event.target.value);
+                          setTxError(null);
+                        }}
+                        placeholder="Solana address"
+                        autoComplete="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        disabled={pending || busyReading}
+                        aria-describedby="recipient-help"
+                      />
+                      <p id="recipient-help" className="help-text">
+                        {action === "Withdraw" || publicTransfer
+                          ? "Enter the recipient’s Solana address."
+                          : "Use an address with a registered private wallet."}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="own-recipient">
+                      <span className="help-text">Your connected wallet</span>
+                      <span className="recipient-address" title={owner}>
+                        {shorten(owner)}
+                      </span>
+                    </div>
+                  )}
+                </MotionRegion>
+              </div>
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={
+                  pending ||
+                  busyReading ||
+                  blockedBalance ||
+                  Boolean(amountError) ||
+                  (customRecipient && !recipient.trim())
+                }
+              >
+                {pending ? (
+                  <>
+                    <span className="spinner" aria-hidden="true" />
+                    {action === "Deposit"
+                      ? "Depositing…"
+                      : action === "Transfer"
+                        ? "Transferring…"
+                        : "Withdrawing…"}
+                  </>
+                ) : amount !== null && !amountError ? (
+                  `${action} ${formatSol(amount)} SOL`
+                ) : (
+                  action
+                )}
+              </button>
+              <MotionRegion>
+                {transferProgress && (
+                  <TransferStepper
+                    progress={transferProgress}
+                    kind={publicTransfer ? "public" : "private"}
+                  />
+                )}
+                <div className="transaction-result" role="status">
+                  {pending && !transferProgress && (
+                    <p>Approve in your wallet, then wait for confirmation.</p>
+                  )}
+                  {signature && (
+                    <>
+                      <a
+                        href={`https://explorer.solana.com/tx/${signature}?cluster=devnet`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={signature}
+                      >
+                        View transaction{" "}
+                        <span className="signature">{shorten(signature)}</span>
+                        <span aria-hidden="true"> ↗</span>
+                      </a>
+                    </>
+                  )}
+                </div>
+                {txError && (
+                  <p className="error-message" role="alert">
+                    {txError}
+                  </p>
+                )}
+              </MotionRegion>
+            </form>
+          )}
+        </MotionRegion>
+      </div>
     </section>
   );
 }

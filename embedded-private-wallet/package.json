@@ -17,6 +17,7 @@
     "@lightprotocol/hasher.rs": "^0.2.1",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
+    "@solana-program/compute-budget": "0.17.0",
     "@solana-program/memo": "^0.10.0",
     "@solana-program/system": "^0.10.0",
     "@solana-program/token": "^0.9.0",

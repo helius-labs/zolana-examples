@@ -1,6 +1,6 @@
 import { buildRegistrationTransaction } from "@heliuslabs/zolana";
-import { checkRegistration } from "../lib/registration";
-import type { PrivateWalletContext } from "../lib/walletContext";
+import { checkRegistration } from "../../lib/registration";
+import type { PrivateWalletContext } from "../../lib/walletContext";
 
 /** Reuses only a verified, matching registration; never overwrites another identity. */
 export async function registerPrivateWallet(

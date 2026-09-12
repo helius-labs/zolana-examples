@@ -10,25 +10,36 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Signature } from "@solana/kit";
 import { useEmbeddedWallet } from "./hooks/useEmbeddedWallet";
-import { useRpcConnection } from "./hooks/useRpcConnection";
-import { syncWallet } from "@heliuslabs/zolana";
+import {
+  getPublicSolBalance,
+  getPrivateSolBalance,
+} from "./operations/read/getBalance";
 import { usePrivateWallet } from "./hooks/usePrivateWallet";
 import { BalanceSyncError } from "./lib/syncAfterTransaction";
-import { depositSol } from "./operations/deposit";
-import { transferSol } from "./operations/transfer";
-import { withdrawSol } from "./operations/withdraw";
+import { depositSol } from "./operations/send/deposit";
+import { transferSol } from "./operations/send/transfer";
+import { withdrawSol } from "./operations/send/withdraw";
+import { transferPublicSol } from "./operations/send/publicTransfer";
+import { createPublicWalletContext } from "./lib/publicWalletContext";
 import App from "./App";
+vi.mock("./operations/send/publicTransfer", () => ({
+  transferPublicSol: vi.fn(),
+}));
+vi.mock("./lib/publicWalletContext", () => ({
+  createPublicWalletContext: vi.fn(),
+}));
 
 vi.mock("./hooks/useEmbeddedWallet", () => ({ useEmbeddedWallet: vi.fn() }));
-vi.mock("./hooks/useRpcConnection", () => ({ useRpcConnection: vi.fn() }));
-vi.mock("@heliuslabs/zolana", () => ({ SOL_MINT: "sol", syncWallet: vi.fn() }));
+vi.mock("./operations/read/getBalance", () => ({
+  getPublicSolBalance: vi.fn(),
+  getPrivateSolBalance: vi.fn(),
+}));
 vi.mock("./hooks/usePrivateWallet", () => ({ usePrivateWallet: vi.fn() }));
-vi.mock("./operations/deposit", () => ({ depositSol: vi.fn() }));
-vi.mock("./operations/transfer", () => ({ transferSol: vi.fn() }));
-vi.mock("./operations/withdraw", () => ({ withdrawSol: vi.fn() }));
+vi.mock("./operations/send/deposit", () => ({ depositSol: vi.fn() }));
+vi.mock("./operations/send/transfer", () => ({ transferSol: vi.fn() }));
+vi.mock("./operations/send/withdraw", () => ({ withdrawSol: vi.fn() }));
 let adapter: ReturnType<typeof useEmbeddedWallet>;
 let state: ReturnType<typeof usePrivateWallet>;
-const connection = { getBalance: vi.fn() };
 let privateLamports = 10_000_000n;
 
 beforeEach(() => {
@@ -53,16 +64,28 @@ beforeEach(() => {
     ctx: {
       assertActive: () => {},
       signal: new AbortController().signal,
-      wallet: { balance: () => ({ amount: privateLamports }) },
     } as never,
   };
-  vi.mocked(useEmbeddedWallet).mockImplementation(() => adapter);
-  vi.mocked(useRpcConnection).mockReturnValue(
-    connection as unknown as ReturnType<typeof useRpcConnection>
+  vi.mocked(createPublicWalletContext).mockImplementation(
+    async (owner, _sign, signal, assertActive) => {
+      assertActive();
+      return { owner, signal, assertActive, client: {} } as never;
+    },
   );
+  vi.mocked(transferPublicSol).mockImplementation(
+    async (_ctx, _recipient, _amount, progress) => {
+      progress?.("signing");
+      progress?.("sending");
+      progress?.("confirmed", "public-signature");
+      return { signature: "public-signature" as Signature, slot: 100n };
+    },
+  );
+  vi.mocked(useEmbeddedWallet).mockImplementation(() => adapter);
   vi.mocked(usePrivateWallet).mockImplementation(() => state);
-  connection.getBalance.mockResolvedValue(1_000_000_000);
-  vi.mocked(syncWallet).mockResolvedValue(undefined as never);
+  vi.mocked(getPublicSolBalance).mockResolvedValue(1_000_000_000n);
+  vi.mocked(getPrivateSolBalance).mockImplementation(
+    async () => privateLamports,
+  );
   vi.mocked(depositSol).mockResolvedValue({
     signature: "deposit-signature" as Signature,
     privateBalance: 20_000_000n,
@@ -79,14 +102,17 @@ beforeEach(() => {
 afterEach(cleanup);
 async function renderReady() {
   const view = render(<App />);
+  await waitFor(() => expect(screen.queryByText("Refreshing…")).toBeNull());
+  fireEvent.click(screen.getByRole("radio", { name: "Public balance" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Deposit" }));
   await waitFor(() =>
     expect(
       (
         screen.getByRole("button", {
           name: "Deposit 0.01 SOL",
         }) as HTMLButtonElement
-      ).disabled
-    ).toBe(false)
+      ).disabled,
+    ).toBe(false),
   );
   return view;
 }
@@ -97,10 +123,10 @@ describe("wallet interface", () => {
     adapter.authenticated = false;
     render(<App />);
     expect(
-      screen.getByRole("button", { name: "Sign in with Turnkey" })
+      screen.getByRole("button", { name: "Sign in with Turnkey" }),
     ).toBeTruthy();
     expect(
-      screen.queryByRole("button", { name: "Deposit 0.01 SOL" })
+      screen.queryByRole("button", { name: "Deposit 0.01 SOL" }),
     ).toBeNull();
     expect(state.initialize).not.toHaveBeenCalled();
   });
@@ -110,67 +136,71 @@ describe("wallet interface", () => {
     render(<App />);
     expect(state.initialize).not.toHaveBeenCalled();
     fireEvent.click(
-      screen.getByRole("button", { name: "Activate private wallet" })
+      screen.getByRole("button", { name: "Activate private wallet" }),
     );
     expect(state.initialize).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByText("Refreshing…")).toBeNull());
     expect(screen.getByLabelText("Private SOL balance").textContent).toContain(
-      "—"
+      "—",
     );
   });
 
   it("formats balances and refreshes without requesting a signature", async () => {
     await renderReady();
     expect(screen.getByLabelText("Private SOL balance").textContent).toBe(
-      "0.01 SOL"
+      "0.01 SOL",
     );
-    expect(screen.getByText("1 SOL")).toBeTruthy();
+    expect(screen.getByLabelText("Public SOL balance").textContent).toBe(
+      "1 SOL",
+    );
     privateLamports = 123_456_789n;
     fireEvent.click(screen.getByRole("button", { name: "Refresh balances" }));
     await waitFor(() =>
       expect(screen.getByLabelText("Private SOL balance").textContent).toBe(
-        "0.123456789 SOL"
-      )
+        "0.123456789 SOL",
+      ),
     );
-    expect(syncWallet).toHaveBeenCalledTimes(1);
+    expect(getPrivateSolBalance).toHaveBeenCalledTimes(2);
     expect(state.initialize).not.toHaveBeenCalled();
   });
 
   it("validates a recipient before building a transfer", async () => {
     await renderReady();
-    fireEvent.click(screen.getByRole("radio", { name: "Transfer" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Private balance" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Private Transfer" }));
     fireEvent.change(screen.getByLabelText("Recipient"), {
       target: { value: "not an address" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Transfer 0.003 SOL" }));
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain("valid Solana")
+      expect(screen.getByRole("alert").textContent).toContain("valid Solana"),
     );
     expect(transferSol).not.toHaveBeenCalled();
   });
 
   it("passes a trimmed recipient and shows a devnet explorer link", async () => {
     await renderReady();
-    fireEvent.click(screen.getByRole("radio", { name: "Transfer" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Private balance" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Private Transfer" }));
     fireEvent.change(screen.getByLabelText("Recipient"), {
       target: { value: ` ${state.owner} ` },
     });
     fireEvent.click(screen.getByRole("button", { name: "Transfer 0.003 SOL" }));
     await waitFor(() =>
       expect(
-        screen.getByRole("link", { name: /View transaction/ })
-      ).toBeTruthy()
+        screen.getByRole("link", { name: /View transaction/ }),
+      ).toBeTruthy(),
     );
     expect(transferSol).toHaveBeenCalledWith(
       state.ctx,
       state.owner,
       3_000_000n,
-      expect.any(Function)
+      expect.any(Function),
     );
     expect(
       screen
         .getByRole("link", { name: /View transaction/ })
-        .getAttribute("href")
+        .getAttribute("href"),
     ).toBe("https://explorer.solana.com/tx/transfer-signature?cluster=devnet");
   });
 
@@ -179,7 +209,7 @@ describe("wallet interface", () => {
     vi.mocked(depositSol).mockReturnValue(
       new Promise((resolve) => {
         complete = resolve;
-      })
+      }),
     );
     await renderReady();
     const button = screen.getByRole("button", { name: "Deposit 0.01 SOL" });
@@ -188,7 +218,7 @@ describe("wallet interface", () => {
     expect(depositSol).toHaveBeenCalledTimes(1);
     expect(
       (screen.getByRole("button", { name: "Depositing…" }) as HTMLButtonElement)
-        .disabled
+        .disabled,
     ).toBe(true);
     await act(async () => {
       complete({
@@ -203,7 +233,7 @@ describe("wallet interface", () => {
     vi.mocked(depositSol).mockReturnValue(
       new Promise((resolve) => {
         complete = resolve;
-      })
+      }),
     );
     const view = await renderReady();
     fireEvent.click(screen.getByRole("button", { name: "Deposit 0.01 SOL" }));
@@ -229,46 +259,48 @@ describe("wallet interface", () => {
     expect(screen.queryByText("Transaction confirmed")).toBeNull();
     expect(screen.queryByRole("link", { name: /View transaction/ })).toBeNull();
     expect(screen.getByLabelText("Private SOL balance").textContent).toContain(
-      "—"
+      "—",
     );
   });
 
   it("shows a balance error without displaying a false zero and can retry", async () => {
-    connection.getBalance.mockRejectedValueOnce(new Error("offline"));
+    vi.mocked(getPublicSolBalance).mockRejectedValueOnce(new Error("offline"));
     render(<App />);
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toContain(
-        "Couldn’t refresh"
-      )
+        "Couldn’t refresh",
+      ),
     );
     expect(screen.queryByText("0 SOL")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Refresh balances" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-    expect(screen.getByText("1 SOL")).toBeTruthy();
+    expect(screen.getByLabelText("Public SOL balance").textContent).toBe(
+      "1 SOL",
+    );
   });
 
   it("preserves a confirmed receipt on sync failure and requires a refresh", async () => {
     vi.mocked(depositSol).mockRejectedValueOnce(
-      new BalanceSyncError("confirmed-before-sync")
+      new BalanceSyncError("confirmed-before-sync"),
     );
     await renderReady();
     fireEvent.click(screen.getByRole("button", { name: "Deposit 0.01 SOL" }));
     await waitFor(() =>
       expect(
-        screen.getByRole("link", { name: /View transaction/ })
-      ).toBeTruthy()
+        screen.getByRole("link", { name: /View transaction/ }),
+      ).toBeTruthy(),
     );
     expect(
       screen
         .getByRole("link", { name: /View transaction/ })
-        .getAttribute("href")
+        .getAttribute("href"),
     ).toContain("confirmed-before-sync");
     expect(
       (
         screen.getByRole("button", {
           name: "Deposit 0.01 SOL",
         }) as HTMLButtonElement
-      ).disabled
+      ).disabled,
     ).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Refresh balances" }));
     await waitFor(() =>
@@ -277,28 +309,32 @@ describe("wallet interface", () => {
           screen.getByRole("button", {
             name: "Deposit 0.01 SOL",
           }) as HTMLButtonElement
-        ).disabled
-      ).toBe(false)
+        ).disabled,
+      ).toBe(false),
     );
     expect(screen.queryByRole("alert")).toBeNull();
   });
   it("updates public SOL without waiting for a slow private sync", async () => {
     let finishSync!: () => void;
-    vi.mocked(syncWallet).mockReturnValue(
-      new Promise((resolve) => {
-        finishSync = () => resolve(undefined as never);
-      })
-    );
     await renderReady();
-    connection.getBalance.mockResolvedValue(2_000_000_000);
+    vi.mocked(getPrivateSolBalance).mockReturnValue(
+      new Promise((resolve) => {
+        finishSync = () => resolve(privateLamports);
+      }),
+    );
+    vi.mocked(getPublicSolBalance).mockResolvedValue(2_000_000_000n);
     fireEvent.click(screen.getByRole("button", { name: "Refresh balances" }));
-    await waitFor(() => expect(screen.getByText("2 SOL")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByLabelText("Public SOL balance").textContent).toBe(
+        "2 SOL",
+      ),
+    );
     expect(screen.getByRole("button", { name: "Refreshing…" })).toBeTruthy();
     await act(async () => {
       finishSync();
     });
     expect(
-      screen.getByRole("button", { name: "Refresh balances" })
+      screen.getByRole("button", { name: "Refresh balances" }),
     ).toBeTruthy();
   });
 });
@@ -308,19 +344,21 @@ it("submits the chosen amount and remembers separate amounts per action", async 
   fireEvent.change(screen.getByLabelText("Amount"), {
     target: { value: "0.001234567" },
   });
-  fireEvent.click(screen.getByRole("radio", { name: "Transfer" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Private balance" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Private Transfer" }));
   expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe(
-    "0.003"
+    "0.003",
   );
+  fireEvent.click(screen.getByRole("radio", { name: "Public balance" }));
   fireEvent.click(screen.getByRole("radio", { name: "Deposit" }));
   expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe(
-    "0.001234567"
+    "0.001234567",
   );
   fireEvent.click(
-    screen.getByRole("button", { name: "Deposit 0.001234567 SOL" })
+    screen.getByRole("button", { name: "Deposit 0.001234567 SOL" }),
   );
   await waitFor(() =>
-    expect(depositSol).toHaveBeenCalledWith(state.ctx, 1_234_567n)
+    expect(depositSol).toHaveBeenCalledWith(state.ctx, 1_234_567n, state.owner),
   );
 });
 it.each(["0", "0.0000000001", "-1", "2"])(
@@ -330,11 +368,11 @@ it.each(["0", "0.0000000001", "-1", "2"])(
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value } });
     expect(
       (screen.getByRole("button", { name: "Deposit" }) as HTMLButtonElement)
-        .disabled
+        .disabled,
     ).toBe(true);
     fireEvent.submit(screen.getByLabelText("Amount").closest("form")!);
     expect(depositSol).not.toHaveBeenCalled();
-  }
+  },
 );
 
 it("shows real transfer stages, holds confirmation through sync, and blocks duplicate clicks", async () => {
@@ -346,10 +384,11 @@ it("shows real transfer stages, holds confirmation through sync, and blocks dupl
       return new Promise((resolve) => {
         finish = resolve;
       });
-    }
+    },
   );
   await renderReady();
-  fireEvent.click(screen.getByRole("radio", { name: "Transfer" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Private balance" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Private Transfer" }));
   fireEvent.change(screen.getByLabelText("Recipient"), {
     target: { value: state.owner },
   });
@@ -358,15 +397,15 @@ it("shows real transfer stages, holds confirmation through sync, and blocks dupl
   fireEvent.click(button);
   expect(transferSol).toHaveBeenCalledTimes(1);
   expect(
-    screen.getByText("Looking up the recipient and preparing the transfer…")
+    screen.getByText("Looking up the recipient and preparing the transfer…"),
   ).toBeTruthy();
   act(() => report("proving"));
   expect(
-    screen.getByText("Generating your private transfer proof…")
+    screen.getByText("Generating your private transfer proof…"),
   ).toBeTruthy();
   act(() => report("signing"));
   expect(
-    screen.getByText("Approve the transaction in your wallet.")
+    screen.getByText("Approve the transaction in your wallet."),
   ).toBeTruthy();
   act(() => report("sending"));
   expect(screen.getByText("Waiting for Solana confirmation…")).toBeTruthy();
@@ -376,7 +415,7 @@ it("shows real transfer stages, holds confirmation through sync, and blocks dupl
   expect(screen.getByText("Updating private balance…")).toBeTruthy();
   expect(
     (screen.getByRole("button", { name: "Transferring…" }) as HTMLButtonElement)
-      .disabled
+      .disabled,
   ).toBe(true);
   await act(async () => {
     report("done", "real-confirmation");
@@ -401,10 +440,11 @@ it.each([false, true])(
           throw new BalanceSyncError("confirmed-receipt");
         }
         throw new Error("Proof service unavailable");
-      }
+      },
     );
     await renderReady();
-    fireEvent.click(screen.getByRole("radio", { name: "Transfer" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Private balance" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Private Transfer" }));
     fireEvent.change(screen.getByLabelText("Recipient"), {
       target: { value: state.owner },
     });
@@ -414,15 +454,15 @@ it.each([false, true])(
         screen.getByText(
           confirmed
             ? "Balance refresh failed. Your transfer is confirmed."
-            : "Proving failed. Try again."
-        )
-      ).toBeTruthy()
+            : "Proving failed. Try again.",
+        ),
+      ).toBeTruthy(),
     );
     expect(
-      Boolean(screen.queryByRole("link", { name: /View transaction/ }))
+      Boolean(screen.queryByRole("link", { name: /View transaction/ })),
     ).toBe(confirmed);
     expect(screen.queryByText("Transfer complete.")).toBeNull();
-  }
+  },
 );
 
 it("discards transfer stage callbacks after an account change", async () => {
@@ -434,10 +474,11 @@ it("discards transfer stage callbacks after an account change", async () => {
       return new Promise((resolve) => {
         finish = resolve;
       });
-    }
+    },
   );
   const view = await renderReady();
-  fireEvent.click(screen.getByRole("radio", { name: "Transfer" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Private balance" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Private Transfer" }));
   fireEvent.change(screen.getByLabelText("Recipient"), {
     target: { value: state.owner },
   });
@@ -455,6 +496,296 @@ it("discards transfer stage callbacks after an account change", async () => {
 it("uses the canonical Helius demo URL", async () => {
   await renderReady();
   expect(
-    screen.getByRole("link", { name: "Launch Demo" }).getAttribute("href")
+    screen.getByRole("link", { name: "Launch Demo" }).getAttribute("href"),
   ).toBe("https://helius.dev/privacy/demo");
+});
+
+async function choosePublicTransfer() {
+  await waitFor(() =>
+    expect(screen.getByLabelText("Public SOL balance").textContent).toContain(
+      "1 SOL",
+    ),
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Public balance" }));
+  fireEvent.change(screen.getByLabelText("Recipient"), {
+    target: { value: ` ${adapter.owner} ` },
+  });
+  return screen.getByRole("button", { name: "Transfer 0.003 SOL" });
+}
+it("sends public SOL without activating a private wallet", async () => {
+  state = {
+    ...state,
+    ready: false,
+    ctx: null,
+    status: "error",
+    error: "TVC boot-proof failed (HTTP 403).",
+  };
+  render(<App />);
+  const button = await choosePublicTransfer();
+  fireEvent.click(button);
+  await waitFor(() =>
+    expect(screen.getByRole("link", { name: /View transaction/ })).toBeTruthy(),
+  );
+  expect(transferPublicSol).toHaveBeenCalledWith(
+    expect.objectContaining({ owner: adapter.owner }),
+    adapter.owner,
+    3_000_000n,
+    expect.any(Function),
+  );
+  expect(state.initialize).not.toHaveBeenCalled();
+  expect(transferSol).not.toHaveBeenCalled();
+  expect(getPrivateSolBalance).not.toHaveBeenCalled();
+  expect(screen.queryByText("Proving")).toBeNull();
+  expect(screen.getByText("Confirmed")).toBeTruthy();
+});
+it("allows public sending after a private balance read fails", async () => {
+  vi.mocked(getPrivateSolBalance).mockRejectedValue(
+    new Error("indexer offline"),
+  );
+  render(<App />);
+  const button = await choosePublicTransfer();
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toContain("private SOL"),
+  );
+  expect((button as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(button);
+  await waitFor(() => expect(transferPublicSol).toHaveBeenCalledTimes(1));
+});
+it("keeps public and private transfer amounts separate and clears recipients on source changes", async () => {
+  await renderReady();
+  fireEvent.click(screen.getByRole("radio", { name: "Private balance" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Private Transfer" }));
+  fireEvent.change(screen.getByLabelText("Amount"), {
+    target: { value: "0.002" },
+  });
+  fireEvent.change(screen.getByLabelText("Recipient"), {
+    target: { value: adapter.owner },
+  });
+  fireEvent.click(screen.getByRole("radio", { name: "Public balance" }));
+  expect((screen.getByLabelText("Recipient") as HTMLInputElement).value).toBe(
+    "",
+  );
+  expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe(
+    "0.003",
+  );
+  fireEvent.change(screen.getByLabelText("Amount"), {
+    target: { value: "0.2" },
+  });
+  fireEvent.click(screen.getByRole("radio", { name: "Private balance" }));
+  expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe(
+    "0.002",
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Public balance" }));
+  expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe(
+    "0.2",
+  );
+});
+it("rejects an invalid public recipient before connecting or building", async () => {
+  render(<App />);
+  const button = await choosePublicTransfer();
+  fireEvent.change(screen.getByLabelText("Recipient"), {
+    target: { value: "bad address" },
+  });
+  fireEvent.click(button);
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toContain("valid Solana"),
+  );
+  expect(createPublicWalletContext).not.toHaveBeenCalled();
+  expect(transferPublicSol).not.toHaveBeenCalled();
+});
+it("locks source selection and prevents duplicate public sends", async () => {
+  let finish!: (value: Awaited<ReturnType<typeof transferPublicSol>>) => void;
+  vi.mocked(transferPublicSol).mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  render(<App />);
+  const button = await choosePublicTransfer();
+  fireEvent.click(button);
+  fireEvent.click(button);
+  await waitFor(() => expect(transferPublicSol).toHaveBeenCalledTimes(1));
+  expect(
+    screen.getByRole("radio", { name: "Private balance" }).closest("fieldset")!
+      .disabled,
+  ).toBe(true);
+  await act(async () =>
+    finish({ signature: "public-once" as Signature, slot: 100n }),
+  );
+});
+it("keeps the public receipt when balance refresh fails, and permits retry after refresh", async () => {
+  render(<App />);
+  const button = await choosePublicTransfer();
+  vi.mocked(getPublicSolBalance).mockRejectedValueOnce(
+    new Error("RPC offline"),
+  );
+  fireEvent.click(button);
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Transfer confirmed",
+    ),
+  );
+  expect(
+    screen.getByRole("link", { name: /View transaction/ }).getAttribute("href"),
+  ).toContain("public-signature");
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "Transfer 0.003 SOL",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh balances" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "Transfer 0.003 SOL",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(false);
+});
+it("cancels public setup and discards stale results when the account changes", async () => {
+  let finish!: (value: Awaited<ReturnType<typeof transferPublicSol>>) => void;
+  vi.mocked(transferPublicSol).mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = render(<App />);
+  fireEvent.click(await choosePublicTransfer());
+  await waitFor(() => expect(transferPublicSol).toHaveBeenCalledTimes(1));
+  const signal = vi.mocked(createPublicWalletContext).mock.calls[0][2];
+  adapter = { ...adapter, sessionKey: "new-account" };
+  view.rerender(<App />);
+  expect(signal.aborted).toBe(true);
+  await act(async () =>
+    finish({ signature: "old-public" as Signature, slot: 100n }),
+  );
+  expect(screen.queryByRole("link", { name: /View transaction/ })).toBeNull();
+});
+
+it("shows a non-selectable total only when both balances are known", async () => {
+  await renderReady();
+  expect(screen.getByLabelText("Total SOL balance").textContent).toBe(
+    "1.01 SOL",
+  );
+  expect(screen.queryByRole("radio", { name: /Total/ })).toBeNull();
+  privateLamports = 123_456_789n;
+  fireEvent.click(screen.getByRole("button", { name: "Refresh balances" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Total SOL balance").textContent).toBe(
+      "1.123456789 SOL",
+    ),
+  );
+});
+it("does not present a partial balance as the total", async () => {
+  state = { ...state, ready: false, ctx: null, status: "connected" };
+  render(<App />);
+  await waitFor(() =>
+    expect(screen.getByLabelText("Public SOL balance").textContent).toBe(
+      "1 SOL",
+    ),
+  );
+  expect(screen.getByLabelText("Total SOL balance").textContent).toBe("— SOL");
+});
+it("shows all three actions for each balance and validates the actual funding balance", async () => {
+  await renderReady();
+  fireEvent.click(screen.getByRole("radio", { name: "Private balance" }));
+  expect(screen.getByRole("radio", { name: "Deposit" })).toBeTruthy();
+  expect(screen.getByRole("radio", { name: "Private Transfer" })).toBeTruthy();
+  expect(screen.getByRole("radio", { name: "Withdraw" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: "Deposit" }));
+  fireEvent.change(screen.getByLabelText("Amount"), {
+    target: { value: "0.1" },
+  });
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "Deposit 0.1 SOL",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(false);
+  fireEvent.click(screen.getByRole("radio", { name: "Public balance" }));
+  expect(screen.getByRole("radio", { name: "Public Transfer" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: "Withdraw" }));
+  fireEvent.change(screen.getByLabelText("Amount"), {
+    target: { value: "0.1" },
+  });
+  expect(
+    screen.getByText("Amount exceeds your private SOL balance."),
+  ).toBeTruthy();
+});
+it.each(["Deposit", "Withdraw"])(
+  "defaults %s to self and supports another recipient",
+  async (action) => {
+    await renderReady();
+    fireEvent.click(screen.getByRole("radio", { name: action }));
+    expect(
+      (screen.getByRole("radio", { name: "My wallet" }) as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    expect(screen.queryByLabelText("Recipient address")).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "Another wallet" }));
+    const value = action === "Deposit" ? "0.01" : "0.003";
+    expect(
+      (
+        screen.getByRole("button", {
+          name: `${action} ${value} SOL`,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    fireEvent.change(screen.getByLabelText("Recipient address"), {
+      target: { value: " So11111111111111111111111111111111111111112 " },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: `${action} ${value} SOL` }),
+    );
+    await waitFor(() =>
+      expect(
+        action === "Deposit" ? depositSol : withdrawSol,
+      ).toHaveBeenCalledWith(
+        state.ctx,
+        action === "Deposit" ? 10_000_000n : 3_000_000n,
+        "So11111111111111111111111111111111111111112",
+      ),
+    );
+  },
+);
+it.each(["Deposit", "Withdraw"])(
+  "rejects an invalid custom %s recipient before calling the operation",
+  async (action) => {
+    await renderReady();
+    fireEvent.click(screen.getByRole("radio", { name: action }));
+    fireEvent.click(screen.getByRole("radio", { name: "Another wallet" }));
+    fireEvent.change(screen.getByLabelText("Recipient address"), {
+      target: { value: "invalid" },
+    });
+    fireEvent.submit(screen.getByLabelText("Amount").closest("form")!);
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("valid Solana"),
+    );
+    expect(depositSol).not.toHaveBeenCalled();
+    expect(withdrawSol).not.toHaveBeenCalled();
+  },
+);
+it("clears custom recipients and restores self when changing actions", async () => {
+  await renderReady();
+  fireEvent.click(screen.getByRole("radio", { name: "Another wallet" }));
+  fireEvent.change(screen.getByLabelText("Recipient address"), {
+    target: { value: adapter.owner },
+  });
+  fireEvent.click(screen.getByRole("radio", { name: "Withdraw" }));
+  expect(
+    (screen.getByRole("radio", { name: "My wallet" }) as HTMLInputElement)
+      .checked,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Withdraw 0.003 SOL" }));
+  await waitFor(() =>
+    expect(withdrawSol).toHaveBeenCalledWith(
+      state.ctx,
+      3_000_000n,
+      state.owner,
+    ),
+  );
 });

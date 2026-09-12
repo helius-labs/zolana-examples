@@ -1,5 +1,5 @@
-import { expect, it } from "vitest";
-import { validateProxyRequest } from "./devProxy";
+import { expect, it, vi } from "vitest";
+import { backendProxy, validateProxyRequest } from "./devProxy";
 const base = {
   method: "POST",
   url: "/api/tvc/provision-descriptor",
@@ -29,4 +29,22 @@ it("rejects remote origins, absent POST origins, and spoofed hosts", () => {
       headers: { ...base.headers, host: "attacker.example:5173" },
     }),
   ).toBe(403);
+});
+it("forwards the validated local host without rewriting the browser origin", () => {
+  const on = vi.fn();
+  backendProxy()["/api/tvc/"].configure!({ on } as never, {});
+  const forward = on.mock.calls.find(([event]) => event === "proxyReq")![1];
+  const headers = new Map([
+    ["origin", base.headers.origin],
+    ["x-forwarded-host", "spoofed.example"],
+    ["cookie", "browser-session"],
+  ]);
+  forward({
+    setHeader: (name: string, value: string) => headers.set(name, value),
+    removeHeader: (name: string) => headers.delete(name),
+  }, base);
+  expect(headers.get("origin")).toBe(base.headers.origin);
+  expect(headers.get("x-forwarded-host")).toBe(base.headers.host);
+  expect(headers.get("x-forwarded-proto")).toBe("http");
+  expect(headers.has("cookie")).toBe(false);
 });

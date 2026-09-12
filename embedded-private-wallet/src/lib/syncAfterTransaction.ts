@@ -1,10 +1,10 @@
 import type { PrivateWalletContext } from "./walletContext";
-import { syncPrivateWallet } from "../operations/syncWallet";
+import { getPrivateSolBalance } from "../operations/read/getBalance";
 
 export class BalanceSyncError extends Error {
   constructor(readonly signature: string) {
     super(
-      "Transaction confirmed, but balances could not refresh. Refresh balances before making another transaction."
+      "Transaction confirmed, but balances could not refresh. Refresh balances before making another transaction.",
     );
     this.name = "BalanceSyncError";
   }
@@ -13,12 +13,13 @@ export class BalanceSyncError extends Error {
 export async function syncAfterTransaction(
   ctx: PrivateWalletContext,
   signature: string,
-  slot: bigint
+  slot: bigint,
 ) {
   try {
     ctx.assertActive();
-    await syncPrivateWallet(ctx, { requireSlot: slot });
+    const balance = await getPrivateSolBalance(ctx, { requireSlot: slot });
     ctx.assertActive();
+    return balance;
   } catch {
     throw new BalanceSyncError(signature);
   }

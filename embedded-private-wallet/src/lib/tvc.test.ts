@@ -183,6 +183,31 @@ describe("TVC enrollment and recovery", () => {
     );
     expect(mocks.bootstrap).not.toHaveBeenCalled();
   });
+  it("identifies a backend boot-proof origin denial before authorizing or enrolling", async () => {
+    mocks.verify.mockImplementationOnce(async () => {
+      const config = mocks.configs[0] as TvcClientConfig;
+      await config.resolveBootProof!({
+        bootProofLookupKey: "public-key",
+      } as Parameters<NonNullable<TvcClientConfig["resolveBootProof"]>>[0]);
+    });
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ error: "CrossOriginRequestDenied" }, { status: 403 }),
+    );
+    await expect(openTvcWallet(input)).rejects.toThrow(
+      "The TVC backend rejected this site's origin (CrossOriginRequestDenied)",
+    );
+    expect(input.authorize).not.toHaveBeenCalled();
+    expect(input.signEnrollment).not.toHaveBeenCalled();
+    expect(mocks.bootstrap).not.toHaveBeenCalled();
+  });
+  it("does not expose arbitrary upstream error details", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ error: "internal service detail" }, { status: 500 }),
+    );
+    await expect(openTvcWallet(input)).rejects.toThrow(
+      /^TVC enrollment-challenge failed \(HTTP 500\)\.$/,
+    );
+  });
   it("uses a fixed transport with session cancellation and independent trust", async () => {
     await openTvcWallet(input);
     const config = vi.mocked(createTvcClient).mock
