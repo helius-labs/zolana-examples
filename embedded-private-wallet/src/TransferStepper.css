@@ -1,0 +1,96 @@
+.transfer-progress {
+  margin-top: 24px;
+}
+.transfer-steps {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.transfer-step {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.transfer-dot {
+  width: 14px;
+  height: 14px;
+  border: 1.5px dashed #a1a1a6;
+  border-radius: 50%;
+  background: #fff;
+}
+.transfer-connector {
+  position: absolute;
+  top: 7px;
+  left: calc(-50% + 14px);
+  width: calc(100% - 28px);
+  border-top: 1.5px dashed var(--separator);
+}
+.transfer-connector::after {
+  content: "";
+  position: absolute;
+  top: -1.5px;
+  left: 0;
+  width: 100%;
+  height: 1.5px;
+  background: #1d1d1f;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 350ms ease;
+}
+.transfer-connector.complete::after {
+  transform: scaleX(1);
+}
+.transfer-step.complete .transfer-dot {
+  background: #1d1d1f;
+  border-color: #1d1d1f;
+}
+.transfer-step.current .transfer-dot {
+  border: 2px solid var(--accent);
+  animation: transfer-pulse 1.4s ease-in-out infinite;
+}
+.transfer-step.failed .transfer-dot {
+  border: 2px solid #b3261e;
+}
+.transfer-label {
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+.transfer-step.current .transfer-label {
+  font-weight: 600;
+}
+.transfer-step.upcoming .transfer-label {
+  color: var(--secondary);
+}
+.transfer-step.failed .transfer-label {
+  color: #b3261e;
+}
+.transfer-duration {
+  font-size: 0.6875rem;
+  color: var(--secondary);
+  font-variant-numeric: tabular-nums;
+}
+.transfer-detail {
+  margin-top: 12px;
+  color: var(--secondary);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  text-align: center;
+}
+@keyframes transfer-pulse {
+  50% {
+    box-shadow: 0 0 0 4px #e8412515;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .transfer-progress *,
+  .transfer-progress *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -4,6 +4,8 @@ TypeScript client examples for `@heliuslabs/zolana`.
 
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw
 
+For the React + Vite browser app, see the separate [embedded private wallet](../embedded-private-wallet/README.md).
+
 ## Setup
 
 Install Node.js 24+ and pnpm.
