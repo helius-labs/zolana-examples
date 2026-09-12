@@ -4,12 +4,17 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useEmbeddedWallet } from "../useEmbeddedWallet";
 import { buildRegistrationTransaction, syncWallet } from "@heliuslabs/zolana";
-import { isWalletRegistered } from "@heliuslabs/zolana/wallet";
+import { checkRegistration } from "../../lib/registration";
 import { connectClient } from "../../lib/client";
+import { openTvcWallet } from "../../lib/tvc";
 import { usePrivateWallet } from "../usePrivateWallet";
-
 vi.mock("../useEmbeddedWallet", () => ({ useEmbeddedWallet: vi.fn() }));
+vi.mock("../useBootstrapApproval", () => ({
+  useBootstrapApproval: () => vi.fn(),
+}));
 vi.mock("../../lib/client", () => ({ connectClient: vi.fn() }));
+vi.mock("../../lib/tvc", () => ({ openTvcWallet: vi.fn() }));
+vi.mock("../../lib/registration", () => ({ checkRegistration: vi.fn() }));
 vi.mock("@heliuslabs/zolana", () => ({
   buildRegistrationTransaction: vi.fn(),
   syncWallet: vi.fn(),
@@ -19,35 +24,26 @@ vi.mock("@heliuslabs/zolana", () => ({
     }
   },
 }));
-vi.mock("@heliuslabs/zolana/wallet", () => ({ isWalletRegistered: vi.fn() }));
-vi.mock("../../lib/deriveAuthority", () => ({
-  deriveAdapterAuthority: async ({
-    signMessage,
-  }: {
-    signMessage: (message: Uint8Array) => Promise<Uint8Array>;
-  }) => {
-    await signMessage(new Uint8Array([255, 1]));
-    return { shieldedAddress: async () => ({}) };
-  },
-}));
-vi.mock("../../lib/walletAdapterSigner", () => ({
-  walletAdapterSigner: (input: unknown) => input,
+vi.mock("../../lib/turnkey-signer", () => ({
+  turnkeyTransactionSigner: (
+    _owner: string,
+    sign: (bytes: Uint8Array) => Promise<Uint8Array>,
+  ) => ({ sign }),
 }));
 vi.mock("../../lib/send", () => ({
   submitFactory:
     (
       _client: unknown,
-      signer: { signTransaction: (tx: unknown) => Promise<unknown> },
+      signer: { sign: (tx: Uint8Array) => Promise<Uint8Array> },
       assertActive: () => void,
     ) =>
-    async (tx: unknown) => {
+    async (tx: Uint8Array) => {
       assertActive();
-      await signer.signTransaction(tx);
+      await signer.sign(tx);
       assertActive();
       return { signature: "registration", slot: 1n };
     },
 }));
-
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -58,186 +54,166 @@ function deferred<T>() {
 const wrapper = ({ children }: PropsWithChildren) => (
   <StrictMode>{children}</StrictMode>
 );
-let wallet: ReturnType<typeof useEmbeddedWallet>;
-
+let embedded: ReturnType<typeof useEmbeddedWallet>;
+const tvc = {
+  keys: { address: () => ({}) },
+  markRegistered: vi.fn(),
+} as unknown as Awaited<ReturnType<typeof openTvcWallet>>;
 beforeEach(() => {
-  vi.clearAllMocks();
-  wallet = {
+  vi.resetAllMocks();
+  embedded = {
     connected: true,
     owner: "11111111111111111111111111111111",
-    sessionKey: "user-1:wallet-1",
-    signMessage: vi.fn().mockResolvedValue(new Uint8Array(64)),
+    sessionKey: "session-1",
+    wallet: {},
+    parentOrganizationId: "app",
     signTransaction: vi.fn().mockImplementation(async (tx) => tx),
-  } as unknown as ReturnType<typeof useEmbeddedWallet>;
-  vi.mocked(useEmbeddedWallet).mockImplementation(() => wallet);
-  vi.mocked(connectClient).mockResolvedValue(
-    {} as Awaited<ReturnType<typeof connectClient>>,
-  );
-  vi.mocked(isWalletRegistered).mockResolvedValue(true);
+  } as unknown as typeof embedded;
+  vi.mocked(useEmbeddedWallet).mockImplementation(() => embedded);
+  vi.mocked(connectClient).mockResolvedValue({} as never);
+  vi.mocked(openTvcWallet).mockResolvedValue(tvc);
+  vi.mocked(checkRegistration).mockResolvedValue(true);
   vi.mocked(buildRegistrationTransaction).mockResolvedValue({} as never);
   vi.mocked(syncWallet).mockResolvedValue(undefined as never);
 });
 afterEach(cleanup);
-
-describe("explicit private wallet initialization", () => {
-  it("never initializes or signs on connect, rerender, or Strict Mode effects", () => {
+describe("explicit TVC activation", () => {
+  it("does not enroll, bootstrap or sign on connect and Strict Mode", () => {
     const { result, rerender } = renderHook(usePrivateWallet, { wrapper });
     rerender();
     expect(result.current.status).toBe("connected");
-    expect(connectClient).not.toHaveBeenCalled();
-    expect(wallet.signMessage).not.toHaveBeenCalled();
+    expect(openTvcWallet).not.toHaveBeenCalled();
+    expect(embedded.signTransaction).not.toHaveBeenCalled();
   });
-
-  it("guards double clicks and skips registration for an existing wallet", async () => {
-    const signing = deferred<Uint8Array>();
-    vi.mocked(wallet.signMessage!).mockReturnValue(signing.promise);
+  it("guards duplicate activation and skips verified registration", async () => {
+    const pending = deferred<typeof tvc>();
+    vi.mocked(openTvcWallet).mockReturnValue(pending.promise);
     const { result } = renderHook(usePrivateWallet, { wrapper });
-    let initialization!: Promise<void>;
+    let work!: Promise<void>;
     await act(async () => {
-      initialization = result.current.initialize();
+      work = result.current.initialize();
       void result.current.initialize();
     });
-    expect(result.current.status).toBe("signing");
-    expect(wallet.signMessage).toHaveBeenCalledTimes(1);
+    expect(openTvcWallet).toHaveBeenCalledTimes(1);
     await act(async () => {
-      signing.resolve(new Uint8Array(64));
-      await initialization;
+      pending.resolve(tvc);
+      await work;
     });
     expect(result.current.ready).toBe(true);
-    expect(wallet.signTransaction).not.toHaveBeenCalled();
     expect(buildRegistrationTransaction).not.toHaveBeenCalled();
     expect(syncWallet).toHaveBeenCalledTimes(1);
   });
-
-  it("registers a new wallet and syncs after signing the transaction", async () => {
-    vi.mocked(isWalletRegistered).mockResolvedValue(false);
+  it("registers a new wallet, verifies its record and syncs", async () => {
+    vi.mocked(checkRegistration)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
     const { result } = renderHook(usePrivateWallet);
     await act(async () => {
       await result.current.initialize();
     });
-    expect(wallet.signTransaction).toHaveBeenCalledTimes(1);
-    expect(result.current.status).toBe("ready");
-    expect(syncWallet).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows rejection and allows an explicit retry", async () => {
-    vi.mocked(wallet.signMessage!).mockRejectedValueOnce(
-      new Error("User rejected the request"),
-    );
-    const { result } = renderHook(usePrivateWallet);
-    await act(async () => {
-      await result.current.initialize();
-    });
-    expect(result.current.status).toBe("error");
-    expect(result.current.error).toContain("User rejected");
-    await act(async () => {
-      await result.current.initialize();
-    });
-    expect(result.current.ready).toBe(true);
-    expect(result.current.error).toBeNull();
-  });
-
-  it("reports unsupported wallets before contacting the client", async () => {
-    wallet.signMessage = undefined as never;
-    const { result } = renderHook(usePrivateWallet);
-    await act(async () => {
-      await result.current.initialize();
-    });
-    expect(result.current.error).toContain(
-      "Privy message and transaction signing are unavailable",
-    );
-    expect(connectClient).not.toHaveBeenCalled();
-  });
-
-  it("shows service failures and retries", async () => {
-    vi.mocked(connectClient).mockRejectedValueOnce(
-      new Error("Service unavailable"),
-    );
-    const { result } = renderHook(usePrivateWallet);
-    await act(async () => {
-      await result.current.initialize();
-    });
-    expect(result.current.error).toBe("Service unavailable");
-    expect(wallet.signMessage).not.toHaveBeenCalled();
-    await act(async () => {
-      await result.current.initialize();
-    });
+    expect(embedded.signTransaction).toHaveBeenCalledTimes(1);
+    expect(checkRegistration).toHaveBeenCalledTimes(2);
     expect(result.current.ready).toBe(true);
   });
-
-  it("stops after a pending message when the account changes", async () => {
-    const signing = deferred<Uint8Array>();
-    vi.mocked(wallet.signMessage!).mockReturnValue(signing.promise);
-    const { result, rerender } = renderHook(usePrivateWallet);
-    let initialization!: Promise<void>;
+  it.each([
+    "AttestationRejected",
+    "User rejected approval",
+    "StorageCorrupted",
+    "Service unavailable",
+  ])("allows explicit retry after %s", async (message) => {
+    vi.mocked(openTvcWallet).mockRejectedValueOnce(new Error(message));
+    const { result } = renderHook(usePrivateWallet);
     await act(async () => {
-      initialization = result.current.initialize();
+      await result.current.initialize();
     });
-    wallet = {
-      ...wallet,
-      owner: "So11111111111111111111111111111111111111112",
-    };
-    rerender();
-    const staleSignature = new Uint8Array(64).fill(9);
-    await act(async () => {
-      signing.resolve(staleSignature);
-      await initialization;
-    });
-    expect(staleSignature.every((byte) => byte === 0)).toBe(true);
+    expect(result.current.error).toContain(message);
     expect(result.current.ctx).toBeNull();
-    expect(result.current.status).toBe("connected");
-    expect(isWalletRegistered).not.toHaveBeenCalled();
-  });
-
-  it("stops before signing if disconnected during client setup", async () => {
-    const client = deferred<Awaited<ReturnType<typeof connectClient>>>();
-    vi.mocked(connectClient).mockReturnValue(client.promise);
-    const { result, rerender } = renderHook(usePrivateWallet);
-    let initialization!: Promise<void>;
     await act(async () => {
-      initialization = result.current.initialize();
+      await result.current.initialize();
     });
-    wallet = { ...wallet, connected: false, owner: "" };
+    expect(result.current.ready).toBe(true);
+  });
+  it("does not overwrite a conflicting registered identity", async () => {
+    vi.mocked(checkRegistration).mockRejectedValue(
+      new Error("Registry identity mismatch"),
+    );
+    const { result } = renderHook(usePrivateWallet);
+    await act(async () => {
+      await result.current.initialize();
+    });
+    expect(result.current.error).toContain("mismatch");
+    expect(embedded.signTransaction).not.toHaveBeenCalled();
+  });
+  it("reports an unavailable session before starting TVC", async () => {
+    embedded.wallet = null;
+    const { result } = renderHook(usePrivateWallet);
+    await act(async () => {
+      await result.current.initialize();
+    });
+    expect(result.current.error).toContain("Turnkey wallet is unavailable");
+    expect(openTvcWallet).not.toHaveBeenCalled();
+  });
+  it("aborts stale bootstrap and discards its context on account change", async () => {
+    const pending = deferred<typeof tvc>();
+    vi.mocked(openTvcWallet).mockReturnValue(pending.promise);
+    const { result, rerender } = renderHook(usePrivateWallet);
+    let work!: Promise<void>;
+    await act(async () => {
+      work = result.current.initialize();
+    });
+    const signal = vi.mocked(openTvcWallet).mock.calls[0][0].signal;
+    embedded = { ...embedded, sessionKey: "session-2" };
+    rerender();
+    expect(signal.aborted).toBe(true);
+    await act(async () => {
+      pending.resolve(tvc);
+      await work;
+    });
+    expect(result.current.ctx).toBeNull();
+    expect(checkRegistration).not.toHaveBeenCalled();
+  });
+  it("stops if disconnected during client setup", async () => {
+    const pending = deferred<Awaited<ReturnType<typeof connectClient>>>();
+    vi.mocked(connectClient).mockReturnValue(pending.promise);
+    const { result, rerender } = renderHook(usePrivateWallet);
+    let work!: Promise<void>;
+    await act(async () => {
+      work = result.current.initialize();
+    });
+    embedded = { ...embedded, connected: false, owner: "" };
     rerender();
     await act(async () => {
-      client.resolve({} as Awaited<ReturnType<typeof connectClient>>);
-      await initialization;
+      pending.resolve({} as never);
+      await work;
     });
-    expect(wallet.signMessage).not.toHaveBeenCalled();
+    expect(openTvcWallet).not.toHaveBeenCalled();
     expect(result.current.status).toBe("disconnected");
   });
-
-  it("does not continue after a registration prompt if the wallet changes", async () => {
-    vi.mocked(isWalletRegistered).mockResolvedValue(false);
-    const signing = deferred<never>();
-    vi.mocked(wallet.signTransaction!).mockReturnValue(signing.promise);
+  it("rejects signing and sync continuation after session expiry", async () => {
+    vi.mocked(checkRegistration).mockResolvedValueOnce(false);
+    const pending = deferred<never>();
+    vi.mocked(embedded.signTransaction).mockReturnValue(pending.promise);
     const { result, rerender } = renderHook(usePrivateWallet);
-    let initialization!: Promise<void>;
+    let work!: Promise<void>;
     await act(async () => {
-      initialization = result.current.initialize();
+      work = result.current.initialize();
     });
-    expect(result.current.status).toBe("registering");
-    wallet = {
-      ...wallet,
-      sessionKey: "user-2:wallet-1",
-    };
+    embedded = { ...embedded, sessionKey: "expired" };
     rerender();
     await act(async () => {
-      signing.resolve({} as never);
-      await initialization;
+      pending.resolve({} as never);
+      await work;
     });
     expect(syncWallet).not.toHaveBeenCalled();
     expect(result.current.ready).toBe(false);
   });
-
-  it("invalidates an existing context's submit function after unmount", async () => {
+  it("invalidates a context after unmount", async () => {
     const { result, unmount } = renderHook(usePrivateWallet);
     await act(async () => {
       await result.current.initialize();
     });
     const ctx = result.current.ctx!;
     unmount();
-    await expect(ctx.submit({} as never)).rejects.toThrow("Wallet changed");
-    expect(wallet.signTransaction).not.toHaveBeenCalled();
+    await expect(ctx.submit({} as never)).rejects.toThrow("session changed");
   });
 });

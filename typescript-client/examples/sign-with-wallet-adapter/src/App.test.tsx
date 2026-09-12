@@ -50,7 +50,7 @@ beforeEach(() => {
     sessionKey: "user-1:wallet-1",
     login: vi.fn(),
     logout: vi.fn(),
-    createWallet: vi.fn(),
+    clear: vi.fn(),
   } as unknown as ReturnType<typeof useEmbeddedWallet>;
   state = {
     ready: true,
@@ -58,11 +58,14 @@ beforeEach(() => {
     error: null,
     owner: adapter.owner,
     initialize: vi.fn(),
-    ctx: { wallet: { balance: () => ({ amount: privateLamports }) } } as never,
+    ctx: {
+      signal: new AbortController().signal,
+      wallet: { balance: () => ({ amount: privateLamports }) },
+    } as never,
   };
   vi.mocked(useEmbeddedWallet).mockImplementation(() => adapter);
   vi.mocked(useRpcConnection).mockReturnValue(
-    connection as unknown as ReturnType<typeof useRpcConnection>,
+    connection as unknown as ReturnType<typeof useRpcConnection>
   );
   vi.mocked(usePrivateWallet).mockImplementation(() => state);
   connection.getBalance.mockResolvedValue(1_000_000_000);
@@ -89,8 +92,8 @@ async function renderReady() {
         screen.getByRole("button", {
           name: "Deposit 0.01 SOL",
         }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(false),
+      ).disabled
+    ).toBe(false)
   );
   return view;
 }
@@ -101,10 +104,10 @@ describe("wallet interface", () => {
     adapter.authenticated = false;
     render(<App />);
     expect(
-      screen.getByRole("button", { name: "Sign in with Privy" }),
+      screen.getByRole("button", { name: "Sign in with Turnkey" })
     ).toBeTruthy();
     expect(
-      screen.queryByRole("button", { name: "Deposit 0.01 SOL" }),
+      screen.queryByRole("button", { name: "Deposit 0.01 SOL" })
     ).toBeNull();
     expect(state.initialize).not.toHaveBeenCalled();
   });
@@ -114,27 +117,27 @@ describe("wallet interface", () => {
     render(<App />);
     expect(state.initialize).not.toHaveBeenCalled();
     fireEvent.click(
-      screen.getByRole("button", { name: "Activate private wallet" }),
+      screen.getByRole("button", { name: "Activate private wallet" })
     );
     expect(state.initialize).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByText("Refreshing…")).toBeNull());
     expect(screen.getByLabelText("Private SOL balance").textContent).toContain(
-      "—",
+      "—"
     );
   });
 
   it("formats balances and refreshes without requesting a signature", async () => {
     await renderReady();
     expect(screen.getByLabelText("Private SOL balance").textContent).toBe(
-      "0.01 SOL",
+      "0.01 SOL"
     );
     expect(screen.getByText("1 SOL")).toBeTruthy();
     privateLamports = 123_456_789n;
     fireEvent.click(screen.getByRole("button", { name: "Refresh balances" }));
     await waitFor(() =>
       expect(screen.getByLabelText("Private SOL balance").textContent).toBe(
-        "0.123456789 SOL",
-      ),
+        "0.123456789 SOL"
+      )
     );
     expect(syncWallet).toHaveBeenCalledTimes(1);
     expect(state.initialize).not.toHaveBeenCalled();
@@ -148,7 +151,7 @@ describe("wallet interface", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Transfer 0.003 SOL" }));
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain("valid Solana"),
+      expect(screen.getByRole("alert").textContent).toContain("valid Solana")
     );
     expect(transferSol).not.toHaveBeenCalled();
   });
@@ -161,13 +164,20 @@ describe("wallet interface", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Transfer 0.003 SOL" }));
     await waitFor(() =>
-      expect(screen.getByText("Transaction confirmed")).toBeTruthy(),
+      expect(
+        screen.getByRole("link", { name: /View transaction/ })
+      ).toBeTruthy()
     );
-    expect(transferSol).toHaveBeenCalledWith(state.ctx, state.owner);
+    expect(transferSol).toHaveBeenCalledWith(
+      state.ctx,
+      state.owner,
+      3_000_000n,
+      expect.any(Function)
+    );
     expect(
       screen
         .getByRole("link", { name: /View transaction/ })
-        .getAttribute("href"),
+        .getAttribute("href")
     ).toBe("https://explorer.solana.com/tx/transfer-signature?cluster=devnet");
   });
 
@@ -176,7 +186,7 @@ describe("wallet interface", () => {
     vi.mocked(depositSol).mockReturnValue(
       new Promise((resolve) => {
         complete = resolve;
-      }),
+      })
     );
     await renderReady();
     const button = screen.getByRole("button", { name: "Deposit 0.01 SOL" });
@@ -185,7 +195,7 @@ describe("wallet interface", () => {
     expect(depositSol).toHaveBeenCalledTimes(1);
     expect(
       (screen.getByRole("button", { name: "Depositing…" }) as HTMLButtonElement)
-        .disabled,
+        .disabled
     ).toBe(true);
     await act(async () => {
       complete({
@@ -200,7 +210,7 @@ describe("wallet interface", () => {
     vi.mocked(depositSol).mockReturnValue(
       new Promise((resolve) => {
         complete = resolve;
-      }),
+      })
     );
     const view = await renderReady();
     fireEvent.click(screen.getByRole("button", { name: "Deposit 0.01 SOL" }));
@@ -226,7 +236,7 @@ describe("wallet interface", () => {
     expect(screen.queryByText("Transaction confirmed")).toBeNull();
     expect(screen.queryByRole("link", { name: /View transaction/ })).toBeNull();
     expect(screen.getByLabelText("Private SOL balance").textContent).toContain(
-      "—",
+      "—"
     );
   });
 
@@ -235,8 +245,8 @@ describe("wallet interface", () => {
     render(<App />);
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toContain(
-        "Couldn’t refresh",
-      ),
+        "Couldn’t refresh"
+      )
     );
     expect(screen.queryByText("0 SOL")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Refresh balances" }));
@@ -246,24 +256,26 @@ describe("wallet interface", () => {
 
   it("preserves a confirmed receipt on sync failure and requires a refresh", async () => {
     vi.mocked(depositSol).mockRejectedValueOnce(
-      new BalanceSyncError("confirmed-before-sync"),
+      new BalanceSyncError("confirmed-before-sync")
     );
     await renderReady();
     fireEvent.click(screen.getByRole("button", { name: "Deposit 0.01 SOL" }));
     await waitFor(() =>
-      expect(screen.getByText("Transaction confirmed")).toBeTruthy(),
+      expect(
+        screen.getByRole("link", { name: /View transaction/ })
+      ).toBeTruthy()
     );
     expect(
       screen
         .getByRole("link", { name: /View transaction/ })
-        .getAttribute("href"),
+        .getAttribute("href")
     ).toContain("confirmed-before-sync");
     expect(
       (
         screen.getByRole("button", {
           name: "Deposit 0.01 SOL",
         }) as HTMLButtonElement
-      ).disabled,
+      ).disabled
     ).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Refresh balances" }));
     await waitFor(() =>
@@ -272,8 +284,8 @@ describe("wallet interface", () => {
           screen.getByRole("button", {
             name: "Deposit 0.01 SOL",
           }) as HTMLButtonElement
-        ).disabled,
-      ).toBe(false),
+        ).disabled
+      ).toBe(false)
     );
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -282,7 +294,7 @@ describe("wallet interface", () => {
     vi.mocked(syncWallet).mockReturnValue(
       new Promise((resolve) => {
         finishSync = () => resolve(undefined as never);
-      }),
+      })
     );
     await renderReady();
     connection.getBalance.mockResolvedValue(2_000_000_000);
@@ -293,7 +305,163 @@ describe("wallet interface", () => {
       finishSync();
     });
     expect(
-      screen.getByRole("button", { name: "Refresh balances" }),
+      screen.getByRole("button", { name: "Refresh balances" })
     ).toBeTruthy();
   });
+});
+
+it("submits the chosen amount and remembers separate amounts per action", async () => {
+  await renderReady();
+  fireEvent.change(screen.getByLabelText("Amount"), {
+    target: { value: "0.001234567" },
+  });
+  fireEvent.click(screen.getByRole("radio", { name: "Transfer" }));
+  expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe(
+    "0.003"
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Deposit" }));
+  expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe(
+    "0.001234567"
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Deposit 0.001234567 SOL" })
+  );
+  await waitFor(() =>
+    expect(depositSol).toHaveBeenCalledWith(state.ctx, 1_234_567n)
+  );
+});
+it.each(["0", "0.0000000001", "-1", "2"])(
+  "blocks invalid or unaffordable amount %s before signing",
+  async (value) => {
+    await renderReady();
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value } });
+    expect(
+      (screen.getByRole("button", { name: "Deposit" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
+    fireEvent.submit(screen.getByLabelText("Amount").closest("form")!);
+    expect(depositSol).not.toHaveBeenCalled();
+  }
+);
+
+it("shows real transfer stages, holds confirmation through sync, and blocks duplicate clicks", async () => {
+  let report!: NonNullable<Parameters<typeof transferSol>[3]>;
+  let finish!: (value: Awaited<ReturnType<typeof transferSol>>) => void;
+  vi.mocked(transferSol).mockImplementation(
+    (_ctx, _recipient, _amount, onProgress) => {
+      report = onProgress!;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    }
+  );
+  await renderReady();
+  fireEvent.click(screen.getByRole("radio", { name: "Transfer" }));
+  fireEvent.change(screen.getByLabelText("Recipient"), {
+    target: { value: state.owner },
+  });
+  const button = screen.getByRole("button", { name: "Transfer 0.003 SOL" });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(transferSol).toHaveBeenCalledTimes(1);
+  expect(
+    screen.getByText("Looking up the recipient and preparing the transfer…")
+  ).toBeTruthy();
+  act(() => report("proving"));
+  expect(
+    screen.getByText("Generating your private transfer proof…")
+  ).toBeTruthy();
+  act(() => report("signing"));
+  expect(
+    screen.getByText("Approve the transaction in your wallet.")
+  ).toBeTruthy();
+  act(() => report("sending"));
+  expect(screen.getByText("Waiting for Solana confirmation…")).toBeTruthy();
+  expect(screen.queryByText("Transaction confirmed")).toBeNull();
+  act(() => report("confirmed", "real-confirmation"));
+  expect(screen.getByRole("link", { name: /View transaction/ })).toBeTruthy();
+  expect(screen.getByText("Updating private balance…")).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Transferring…" }) as HTMLButtonElement)
+      .disabled
+  ).toBe(true);
+  await act(async () => {
+    report("done", "real-confirmation");
+    finish({
+      signature: "real-confirmation" as Signature,
+      privateBalance: 7_000_000n,
+    });
+  });
+  expect(screen.getByRole("link", { name: /View transaction/ })).toBeTruthy();
+  expect(screen.queryByText("Transfer complete.")).toBeNull();
+  expect(screen.queryByText("Transaction confirmed")).toBeNull();
+});
+
+it.each([false, true])(
+  "keeps transfer failure honest after confirmation=%s",
+  async (confirmed) => {
+    vi.mocked(transferSol).mockImplementation(
+      async (_ctx, _recipient, _amount, report) => {
+        report!("proving");
+        if (confirmed) {
+          report!("confirmed", "confirmed-receipt");
+          throw new BalanceSyncError("confirmed-receipt");
+        }
+        throw new Error("Proof service unavailable");
+      }
+    );
+    await renderReady();
+    fireEvent.click(screen.getByRole("radio", { name: "Transfer" }));
+    fireEvent.change(screen.getByLabelText("Recipient"), {
+      target: { value: state.owner },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Transfer 0.003 SOL" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          confirmed
+            ? "Balance refresh failed. Your transfer is confirmed."
+            : "Proving failed. Try again."
+        )
+      ).toBeTruthy()
+    );
+    expect(
+      Boolean(screen.queryByRole("link", { name: /View transaction/ }))
+    ).toBe(confirmed);
+    expect(screen.queryByText("Transfer complete.")).toBeNull();
+  }
+);
+
+it("discards transfer stage callbacks after an account change", async () => {
+  let report!: NonNullable<Parameters<typeof transferSol>[3]>;
+  let finish!: (value: Awaited<ReturnType<typeof transferSol>>) => void;
+  vi.mocked(transferSol).mockImplementation(
+    (_ctx, _recipient, _amount, onProgress) => {
+      report = onProgress!;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    }
+  );
+  const view = await renderReady();
+  fireEvent.click(screen.getByRole("radio", { name: "Transfer" }));
+  fireEvent.change(screen.getByLabelText("Recipient"), {
+    target: { value: state.owner },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Transfer 0.003 SOL" }));
+  adapter = { ...adapter, sessionKey: "different-wallet" };
+  view.rerender(<App />);
+  await act(async () => {
+    report("confirmed", "obsolete-receipt");
+    finish({ signature: "obsolete-receipt" as Signature, privateBalance: 0n });
+  });
+  expect(screen.queryByLabelText("Transfer progress")).toBeNull();
+  expect(screen.queryByRole("link", { name: /View transaction/ })).toBeNull();
+});
+
+it("uses the canonical Helius demo URL", async () => {
+  await renderReady();
+  expect(
+    screen.getByRole("link", { name: "Launch Demo" }).getAttribute("href")
+  ).toBe("https://helius.dev/privacy/demo");
 });

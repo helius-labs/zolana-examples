@@ -7,7 +7,8 @@
   -webkit-font-smoothing: antialiased;
   --secondary: #6e6e73;
   --separator: #e8e8ed;
-  --accent: #0066cc;
+  --accent: #e84125;
+  --motion-ease: cubic-bezier(0.32, 0.72, 0, 1);
 }
 * {
   box-sizing: border-box;
@@ -37,7 +38,7 @@ button:active:not(:disabled) {
   filter: brightness(0.9);
 }
 :focus-visible {
-  outline: 3px solid #0066cc;
+  outline: 3px solid var(--accent);
   outline-offset: 4px;
 }
 a {
@@ -208,7 +209,7 @@ h2 {
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
-.balance > span {
+.balance > .balance-unit {
   font-size: 1.25rem;
   font-weight: 400;
   color: var(--secondary);
@@ -264,9 +265,10 @@ h2 {
   line-height: 1.5;
 }
 .primary-button:hover:not(:disabled) {
-  background: #005bb5;
+  background: #cf351c;
 }
 .action-picker {
+  position: relative;
   border: 0;
   padding: 3px;
   margin: 0;
@@ -276,6 +278,7 @@ h2 {
   border-radius: 10px;
 }
 .action-picker label {
+  z-index: 1;
   flex: 1;
   position: relative;
   min-width: 0;
@@ -297,9 +300,26 @@ h2 {
   border-radius: 7px;
 }
 .action-picker input:checked + span {
-  background: white;
-  box-shadow: 0 1px 3px #00000014;
   font-weight: 500;
+}
+.action-picker::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 3);
+  background: #fff;
+  border-radius: 7px;
+  box-shadow: 0 1px 3px #00000014;
+  transition: transform 480ms var(--motion-ease);
+  pointer-events: none;
+}
+.action-picker[data-action="Transfer"]::before {
+  transform: translateX(100%);
+}
+.action-picker[data-action="Withdraw"]::before {
+  transform: translateX(200%);
 }
 .action-picker input:focus-visible + span {
   outline: 3px solid var(--accent);
@@ -311,6 +331,31 @@ h2 {
 .amount-row {
   margin-block: 24px 12px;
   font-size: 0.9375rem;
+}
+.amount-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 190px;
+  max-width: 65%;
+}
+.amount-input input {
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  color: inherit;
+  background: #fff;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.amount-input input:hover {
+  border-color: #b8b8bd;
+}
+.amount-input input[aria-invalid="true"] {
+  border-color: #c93434;
 }
 .destination {
   margin-bottom: 24px;
@@ -359,6 +404,9 @@ h2 {
   display: inline-block;
   padding-block: 12px;
   min-height: 44px;
+}
+.transaction-result {
+  text-align: center;
 }
 .signature {
   margin-left: 8px;
@@ -412,5 +460,74 @@ h2 {
   }
   .account-row {
     flex-wrap: wrap;
+  }
+}
+
+/* Demo motion: 340ms height changes, 480ms sliding selection, short fades. */
+.motion-region {
+  min-width: 0;
+  overflow: clip;
+  overflow-clip-margin: 6px;
+}
+.motion-region-content {
+  display: flow-root;
+  min-width: 0;
+}
+.wallet-panel-frame {
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: inset 0 0 0 1px var(--separator), 0 2px 6px #00000003;
+}
+.wallet-panel-frame .wallet-panel {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.wallet-panel,
+.action-content {
+  animation: wallet-content-in 340ms var(--motion-ease) both;
+}
+.error-message,
+.copy-feedback,
+.transaction-result:not(:empty),
+.transfer-progress {
+  animation: wallet-content-in 250ms var(--motion-ease) both;
+}
+.balance-value {
+  animation: wallet-value-in 200ms ease both;
+}
+.primary-button,
+.text-button,
+.action-picker,
+.action-picker span,
+input,
+a {
+  transition: background-color 160ms ease, color 160ms ease,
+    border-color 160ms ease, opacity 160ms ease, box-shadow 160ms ease;
+}
+@keyframes wallet-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes wallet-value-in {
+  from {
+    opacity: 0.4;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wallet-page *,
+  .wallet-page *::before,
+  .wallet-page *::after {
+    animation: none !important;
+    transition: none !important;
   }
 }

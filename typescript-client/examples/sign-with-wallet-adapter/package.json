@@ -1,5 +1,5 @@
 {
-  "name": "sign-with-privy",
+  "name": "turnkey-tvc-private-wallet",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,17 +13,19 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
-    "@heliuslabs/zolana": "0.1.1-alpha",
+    "@heliuslabs/zolana": "0.1.6-alpha",
     "@lightprotocol/hasher.rs": "^0.2.1",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
-    "@privy-io/react-auth": "3.9.1",
     "@solana-program/memo": "^0.10.0",
     "@solana-program/system": "^0.10.0",
     "@solana-program/token": "^0.9.0",
     "@solana/kit": "^7.0.0",
     "@solana/web3.js": "1.98.4",
+    "@turnkey/react-wallet-kit": "2.4.1",
+    "@zolana/tvc-wallet": "file:vendor/zolana-tvc-wallet-0.0.0.tgz",
     "buffer": "^6.0.3",
+    "helius-wallet-kit": "file:vendor/helius-wallet-kit-1.1.0.tgz",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
@@ -33,6 +35,7 @@
     "@types/react-dom": "^19.1.1",
     "@vitejs/plugin-react": "^4.3.4",
     "dotenv": "latest",
+    "fake-indexeddb": "6.2.4",
     "jsdom": "^30.0.1",
     "typescript": "^5.8.3",
     "vite": "^6.0.11",

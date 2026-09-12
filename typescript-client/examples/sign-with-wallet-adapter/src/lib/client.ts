@@ -1,11 +1,6 @@
 import { createZolanaClient } from "@heliuslabs/zolana";
 import { getRpcEndpoint } from "./config";
 
-const INDEXER_URL =
-  "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com";
-const PROVER_URL =
-  "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com:3001";
-
 export async function connectClient() {
   const nodeEnv = typeof process === "undefined" ? {} : process.env;
   const solanaRpcUrl = getRpcEndpoint();
@@ -18,12 +13,16 @@ export async function connectClient() {
       import.meta.env.VITE_ZOLANA_INDEXER_URL ||
       nodeEnv.VITE_ZOLANA_INDEXER_URL ||
       nodeEnv.ZOLANA_INDEXER_URL ||
-      INDEXER_URL,
+      (typeof window === "undefined"
+        ? "http://127.0.0.1:5173/api/zolana/indexer"
+        : new URL("/api/zolana/indexer", window.location.origin).href),
     proverUrl:
       import.meta.env.VITE_ZOLANA_PROVER_URL ||
       nodeEnv.VITE_ZOLANA_PROVER_URL ||
       nodeEnv.ZOLANA_PROVER_URL ||
-      PROVER_URL,
+      (typeof window === "undefined"
+        ? "http://127.0.0.1:5173/api/zolana/prover"
+        : new URL("/api/zolana/prover", window.location.origin).href),
     allowInsecureHttp: true,
   });
 }

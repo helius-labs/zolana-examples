@@ -11,7 +11,7 @@
 |  |  |
 |---------|-------------|
 | [`deposit_transfer_withdraw`](typescript-client/examples/deposit_transfer_withdraw.ts) | Deposit, private transfer, and withdraw. |
-| [`sign-with-wallet-adapter`](typescript-client/examples/sign-with-wallet-adapter/) | Sign deposit, private transfer, and withdraw with Wallet Adapter. |
+| [`sign-with-wallet-adapter`](typescript-client/examples/sign-with-wallet-adapter/) | React wallet with Turnkey signing and TVC private keys for deposit, private transfer, and withdrawal. |
 
 ### Program examples
 

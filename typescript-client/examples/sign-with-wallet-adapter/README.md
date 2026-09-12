@@ -1,76 +1,86 @@
-# Sign with Privy
+# Turnkey + TVC private wallet
 
-Privy provides email login and an embedded Solana wallet. This example derives viewing and nullifier keys from one `signMessage` of `ed25519DerivationMessage(pubkey)`, then deposit, privately transfer, and withdraw on Helius devnet.
-
-## User flow
-
-```mermaid
-sequenceDiagram
-  participant User
-  participant Wallet
-  participant Application
-  participant Sdk
-  participant Devnet
-
-  User->>Wallet: Connect
-  Wallet-->>Application: pubkey
-  User->>Application: Activate private wallet
-  Application->>Wallet: signMessage ed25519DerivationMessage(pubkey)
-  Wallet-->>Application: 64-byte signature
-  Application->>Application: HKDF viewing and nullifier
-  Application->>Sdk: buildRegistrationTransaction
-  Application->>Wallet: signTransaction
-  Wallet-->>Application: signed tx
-  Application->>Devnet: sendAndConfirm
-  Application->>Sdk: syncWallet
-  User->>Application: Deposit or transfer or withdraw
-  Application->>Sdk: buildDepositTransaction or buildTransferTransaction or buildWithdrawalTransaction
-  Application->>Wallet: signTransaction
-  Application->>Devnet: sendAndConfirm
-  Application->>Sdk: syncWallet
-```
+A minimal React + Vite wallet using Turnkey for login and Solana transaction signing, and Turnkey Verifiable Compute (TVC) for the Zolana SDK’s `WalletKeys`. The layout and transaction receipts are preserved from the Privy example.
 
 ## Run
 
-Install Node.js 24+ and pnpm.
+Use Node 24+ and pnpm 11.18.0.
 
 ```bash
 pnpm install
 cp .env.example .env
-# set VITE_API_KEY and VITE_PRIVY_APP_ID (public app ID only)
+# Set VITE_API_KEY to a Helius project with embedded wallets enabled.
 pnpm dev
 ```
 
-Open the local Vite URL, sign in with Privy, and fund the embedded wallet on devnet. Connecting does not request a signature.
+Open `http://127.0.0.1:5173/`. The example’s `.env` is ignored by Git. The Helius browser key is public configuration; never add Turnkey operator credentials or app secrets to `VITE_` variables. A previous Privy app ID in `.env` is unused.
 
-1. Connect the wallet, then choose **Activate private wallet**.
-2. Approve the message. If the wallet is not registered, approve the registration transaction too.
-3. After sync, inspect the public and private SOL balances.
-4. Choose **Deposit**, **Transfer**, or **Withdraw**. Amounts remain fixed at 0.01, 0.003, and 0.003 SOL respectively. A transfer recipient must have an enabled private wallet; withdrawals return to the connected wallet.
-5. Approve the transaction and follow the devnet explorer link. **Refresh balances** syncs without another message signature.
+The local Vite proxy (also enabled for `pnpm preview`) connects only to the selected devnet backend, `https://i6npwfd4mh.eu-west-1.awsapprunner.com`. TVC and private indexer/prover requests use this proxy. Normal Solana RPC uses the configured devnet connection. This is a local example: deploying the static output requires an equivalent server proxy; `dist` alone does not supply one.
 
-The first prompt is `signMessage` of `ed25519DerivationMessage(pubkey)` (its payload is `TSPP/derive/v1`). A wallet that refuses a leading `0xff` cannot complete this example; do not sign the payload bytes alone. Later prompts are `signTransaction`.
+## Wallet flow
 
-## Tests
+1. **Sign in with Turnkey.** Login alone does not enroll a TVC wallet, bootstrap keys, or submit registration.
+2. **Fund the displayed devnet address.** Fund the amount you want to deposit, plus registration rent and transaction fees. This is a separate wallet from the previous Privy account; its funds and registration are not migrated.
+3. **Activate private wallet.** The app verifies the pinned release policy, PCRs and Boot Proof, enrolls the browser authorizer, reconciles Turnkey grants, restores or bootstraps the private identity, checks the onchain registry, registers when needed, and syncs balances.
+4. **Test the actions.** Enter an amount in SOL for deposit, transfer to a registered recipient, or withdrawal to the connected wallet. Each action remembers its amount while switching tabs; defaults are 0.01 / 0.003 / 0.003 SOL. Amounts support up to 9 decimal places and are converted exactly to lamports. Turnkey signs the SDK-built Solana transaction. The returned message and signature are verified before submission.
+5. **Refresh balances.** Refresh reuses the active TVC context; it does not repeat enrollment or bootstrap. A confirmed transaction retains its explorer receipt if the following sync fails. Refresh before another action.
+6. **Reload and activate again.** The same Turnkey account restores its saved identity and sealed seed without another bootstrap. Registration is checked onchain rather than trusted from the local flag.
+
+Account changes and logout cancel the active session and clear balances, receipts and errors. Already broadcast transactions cannot be cancelled.
+
+## Progress and motion
+
+Transfer follows the demo’s **Preparing → Proving → Sending → Confirmed** milestones. Preparing includes recipient lookup and transaction preparation. Proving begins at `WalletKeys.prove`; Sending includes wallet approval and broadcast. Confirmation is reported only after submission confirms. Balance sync keeps controls disabled afterward, and a sync failure retains the confirmed explorer receipt. Timings measure actual stage boundaries, not simulated progress.
+
+The centered **View transaction** link is the final receipt. There is no additional “Transaction confirmed” or “Transfer complete” line. The canonical Launch Demo link is https://helius.dev/privacy/demo.
+
+| Transition | Behavior |
+|---|---|
+| Sign in / sign out, activation / action form | Panel height eases over 340ms; new content fades in. |
+| Deposit / Transfer / Withdraw | Selection slides over 480ms; recipient and destination content resize smoothly. |
+| Progress, errors, retry, receipt appearance / removal | Measured height expands and collapses; content fades in. |
+| Balance refresh, address expansion, copy feedback | Values fade; height changes flow into the surrounding layout. |
+| Hover, focus, disabled controls | Short color, border, and opacity transitions. |
+| Reduced motion | Height changes apply immediately; decorative transitions and animations are disabled. |
+
+Height changes use the demo’s `cubic-bezier(0.32, 0.72, 0, 1)` easing and retarget from the visible height if interrupted. Motion never delays signing guards, validation, or session cleanup. Turnkey’s login modal keeps its existing SDK behavior.
+
+The isolated motion preview was checked at 390px and 1440px, including action tabs, activation, progress and the centered receipt. Recorded frames showed intermediate panel/button positions without horizontal overflow. These previews use simulated operations and do not establish transaction success.
+
+## Storage and security boundary
+
+TVC keeps the long-lived viewing and nullifier keys out of the app’s normal wallet context. The browser’s IndexedDB stores the public identity, signed wallet descriptor, enclave-sealed seed, and nonexportable P-256/AES CryptoKeys for the browser authorizer. Records are separated by app, Turnkey organization, wallet and account. The known public identity is saved separately so recovery cannot silently adopt another identity. No derivation signature is persisted or logged.
+
+This integration uses TVC as currently implemented. Its external prover receives plaintext proof witness material, including the nullifier secret. Turnkey’s bootstrap approval API can return signature material; the copied approval helper discards that response. This example does **not** claim that all secrets remain exclusively inside the enclave.
+
+Corrupted state, changed client bindings, and conflicting identities fail explicitly. The app does not silently erase state or overwrite an existing registry entry. Preserve the known public identity when diagnosing recovery errors; deleting browser data is not an identity migration.
+
+## Dependencies and references
+
+Zolana is pinned to `0.1.6-alpha`. TVC is unpublished, and the published wallet-kit 1.1.0 lacks the TVC session APIs used here. The local `vendor/` archives contain builds from these inspected revisions:
+
+- [zolana-tvc](https://github.com/helius-labs/zolana-tvc/tree/35dafa8ad8afcbdb6099517f8b4f9db899a112a2)
+- [wallet-kit browser integration](https://github.com/helius-labs/wallet-kit/tree/c00f7a5e5ee7a2e2013c8301c762f870a99f8ee7)
+
+`vendor/README.md`, `vendor/SHA256SUMS`, and `scripts/rebuild-vendor.sh` record provenance and rebuild commands. Only the React provider and signing/enrollment helpers are reused; the app does not adopt Next.js or the full demo UI.
+
+The interface retains the existing system font, balance hierarchy, 44px controls, keyboard focus styles, and status feedback, informed by Apple’s [Typography](https://developer.apple.com/design/human-interface-guidelines/typography), [Layout](https://developer.apple.com/design/human-interface-guidelines/layout), and [Buttons](https://developer.apple.com/design/human-interface-guidelines/buttons) guidance.
+
+## Tests and validation
 
 ```bash
+pnpm check
 pnpm test
-# live devnet; needs API_KEY and a funded ~/.config/solana/id.json
-pnpm test:integration
+pnpm build
 ```
 
-## Interface
+Tests cover explicit activation and duplicate guards, canceled sessions, registry conflicts, Turnkey transaction integrity, bootstrap activity selection, enrollment errors, IndexedDB persistence, recipient validation, balances and retained receipts. The derivation compatibility test remains isolated from the browser wallet flow. The optional `pnpm test:integration` uses a local CLI keypair and is **not** evidence of Turnkey/TVC browser success.
 
-One responsive wallet panel uses a system font, a clear balance hierarchy, grouped action controls, and one prominent action at a time. Controls have at least 44px hit areas, visible focus states, readable labels, and text status feedback. The address expands for inspection and can be copied. Account changes clear the current session and stop unfinished work before further signing or submission; an already broadcast transaction cannot be cancelled.
+Validation recorded during migration:
 
-The design adapts Apple’s [Typography](https://developer.apple.com/design/human-interface-guidelines/typography), [Layout](https://developer.apple.com/design/human-interface-guidelines/layout), and [Buttons](https://developer.apple.com/design/human-interface-guidelines/buttons) guidance to a browser interface. The local Light Token wallet-adapter example informed the connection, address, balance, and receipt patterns.
-
-## Validation and limitations
-
-- `pnpm check`, `pnpm test`, and `pnpm build` run with Node 24+. Unit tests cover explicit signing, duplicate actions, rejection/retry, account changes, recipient validation, SOL formatting, and retaining confirmed receipts when balance sync fails.
-- The connected layouts were visually inspected with test fixtures at 390px and 1440px widths. Fixtures are not part of the app. The live app's disconnected screen and wallet modal were also inspected.
-- Real Privy message signing and registration succeeded. The registry account was checked on devnet against the connected address. Private balance sync then failed with `WALLET_SYNC: CLIENT_REQUEST: API_REQUEST`; deposit, private transfer, and withdrawal remain unverified. The CLI integration test does not establish browser-wallet success.
-- Vite excludes the WASM hasher from dependency optimization and prebundles its CommonJS `bn.js` dependency. The hasher is a direct dependency so pnpm can resolve it from optimized SDK imports. Browser WASM initialization was verified. The build still reports the upstream fallback WASM URL warnings and the large embedded WASM bundle.
-- Set the example's own `.env` before live use; Vite does not read the parent TypeScript client's `.env`. RPC, indexer, and prover endpoints are unchanged. Service availability and browser CORS restrictions can still prevent live use.
-
-If a transaction confirms but the following sync fails, the app preserves its explorer link and requires a balance refresh before another transaction. If a wallet rejects the SDK derivation message, use a compatible wallet; the app never substitutes a different signing payload.
+- The Privy checkpoint is commit `0207237`. Its message signing and onchain registration worked, but private sync failed with `WALLET_SYNC: CLIENT_REQUEST: API_REQUEST`; private actions were not verified.
+- The migrated app type-checks, all 105 tests across 16 files pass, and its production build passes. Upstream WASM URL warnings and large bundle warnings remain.
+- Live TVC attestation passed through the local proxy against the independently pinned policy, PCRs and Boot Proof.
+- The real Turnkey email login dialog opens successfully with the configured Helius project. Wallet and login layouts were inspected at 390px and 1440px without horizontal overflow or page errors. Connected and activated layouts were inspected at both widths using isolated visual fixtures, not real transaction results.
+- The production preview proxy returns the pinned release and rejects an untrusted Origin with HTTP 403.
+- **Live transaction acceptance is partial.** The signed-in Turnkey wallet restored after reload, activation completed, and a user-submitted 0.001 SOL deposit appeared with a confirmed receipt and refreshed public/private balances. The live UI also showed a user-submitted self-transfer completing with stage timings, an explorer receipt, and refreshed balances. Withdrawal and transfer to a different registered recipient remain unverified. Automatic approval review requires the user to perform wallet activation and transaction clicks; the agent can inspect the resulting receipts and balances.

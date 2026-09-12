@@ -1,55 +1,38 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { PrivyProvider } from "@privy-io/react-auth";
-import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
+import { HeliusWalletProvider } from "helius-wallet-kit";
 import App from "./App";
 import { getRpcEndpoint } from "./lib/config";
+import "@turnkey/react-wallet-kit/styles.css";
 import "./index.css";
 
 function Root() {
-  const endpoint = getRpcEndpoint();
-  const appId = import.meta.env.VITE_PRIVY_APP_ID?.trim();
-  if (!endpoint || !appId || appId === "YOUR_PRIVY_APP_ID") {
+  const apiKey = import.meta.env.VITE_API_KEY?.trim();
+  if (!getRpcEndpoint() || !apiKey || apiKey === "YOUR_KEY") {
     return (
       <main className="wallet-page">
         <section className="wallet-panel wallet-shell" role="alert">
-          <h1>{!endpoint ? "RPC not configured" : "Privy not configured"}</h1>
+          <h1>Wallet not configured</h1>
           <p className="help-text">
-            {!endpoint
-              ? "Set VITE_API_KEY or VITE_ZOLANA_ENDPOINT in this example’s .env, then restart the dev server."
-              : "Set VITE_PRIVY_APP_ID in this example’s .env, then restart the dev server. Enable email login and Solana embedded wallets in your Privy app."}
+            Set VITE_API_KEY in this example’s .env to a Helius project with
+            embedded wallets enabled, then restart the dev server.
           </p>
         </section>
       </main>
     );
   }
-  const wsEndpoint = new URL(endpoint);
-  wsEndpoint.protocol = wsEndpoint.protocol === "https:" ? "wss:" : "ws:";
   return (
-    <PrivyProvider
-      appId={appId}
+    <HeliusWalletProvider
       config={{
-        loginMethods: ["email"],
-        appearance: {
-          theme: "light",
-          accentColor: "#0071e3",
-          walletChainType: "solana-only",
-        },
-        embeddedWallets: { solana: { createOnLogin: "all-users" } },
-        solana: {
-          rpcs: {
-            "solana:devnet": {
-              rpc: createSolanaRpc(endpoint),
-              rpcSubscriptions: createSolanaRpcSubscriptions(
-                wsEndpoint.toString(),
-              ),
-            },
-          },
-        },
+        apiKey,
+        cluster: "devnet",
+        theme: { darkMode: false, primaryColor: "#e84125", borderRadius: "20px", logoLight: "/wallet-mark.svg", logoDark: "/wallet-mark.svg" },
+        secureRpcUrl: {},
+        authMethods: { email: true, wallet: false, passkey: false },
       }}
     >
       <App />
-    </PrivyProvider>
+    </HeliusWalletProvider>
   );
 }
 

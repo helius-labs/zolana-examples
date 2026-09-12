@@ -12,6 +12,7 @@ import {
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { address, getAddressEncoder } from "@solana/kit";
 import {
+  LocalKeys,
   buildRegistrationTransaction,
   SOL_MINT,
   syncWallet,
@@ -55,9 +56,7 @@ function rpcUrl(): string {
   );
 }
 
-async function contextFor(
-  keypair: Keypair,
-): Promise<PrivateWalletContext> {
+async function contextFor(keypair: Keypair): Promise<PrivateWalletContext> {
   const client = await connectClient();
   const owner = address(keypair.publicKey.toBase58());
   const ed25519Pk = Uint8Array.from(
@@ -88,8 +87,24 @@ async function contextFor(
     });
     if (registration) await submit(registration);
   }
-  await syncWallet({ client, wallet, authority });
-  return { authority, wallet, submit, client };
+  const keys = LocalKeys.fromKeys(
+    {
+      address: await authority.shieldedAddress(),
+      viewingKeys: await authority.viewingKeys(),
+      nullifierKey: await authority.spendNullifierKey(),
+    },
+    client.proofService,
+  );
+  await syncWallet({ client, wallet, keys });
+  return {
+    owner,
+    keys,
+    wallet,
+    submit,
+    client,
+    assertActive: () => {},
+    signal: new AbortController().signal,
+  };
 }
 
 const ENABLED = Boolean(
@@ -104,7 +119,7 @@ describe.runIf(ENABLED)("e2e signing (devnet)", () => {
     const payer = loadKeypair();
     const ctx = await contextFor(payer);
     const startPrivate = ctx.wallet.balance(SOL_MINT).amount;
-    const sol = await ctx.client.getBalance(ctx.authority.solanaPublicKey());
+    const sol = await ctx.client.getBalance(ctx.owner);
     expect(sol).toBeGreaterThan(50_000_000n);
 
     const recipientKey = Keypair.generate();

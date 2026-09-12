@@ -5,7 +5,6 @@ import {
   encodeConfidentialSlots,
   type AssetRegistry,
   type ProofOutputUtxo,
-  type WalletAuthority,
 } from "@heliuslabs/zolana/transaction";
 import {
   ed25519DerivationMessage,
@@ -60,7 +59,7 @@ export function expandRoles(signature: Uint8Array): {
   }
 }
 
-export class AdapterWalletAuthority implements WalletAuthority {
+export class AdapterWalletAuthority {
   readonly #solanaPublicKey: ReturnType<typeof address>;
   readonly #viewing: ViewingKey;
   readonly #nullifier: NullifierKey;

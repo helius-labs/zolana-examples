@@ -3,7 +3,7 @@
 TypeScript client examples for `@heliuslabs/zolana`.
 
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw
-- **[sign-with-wallet-adapter](examples/sign-with-wallet-adapter/)** - Sign deposit, private transfer, and withdraw with Wallet Adapter
+- **[sign-with-wallet-adapter](examples/sign-with-wallet-adapter/)** - React wallet with Turnkey signing and TVC private keys for deposit, private transfer, and withdrawal
 
 ## Setup
 

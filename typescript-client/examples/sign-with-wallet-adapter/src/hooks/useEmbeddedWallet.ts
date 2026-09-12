@@ -1,71 +1,37 @@
-import { useCallback } from "react";
-import { usePrivy } from "@privy-io/react-auth";
-import {
-  useCreateWallet,
-  useSignMessage,
-  useSignTransaction,
-  useWallets,
-} from "@privy-io/react-auth/solana";
-import { VersionedTransaction } from "@solana/web3.js";
-import { verifyDerivationSignature } from "../lib/privySigning";
+import { useRef } from "react";
+import { useHeliusWallet, useHeliusWalletSession } from "helius-wallet-kit";
+import { useTurnkey } from "@turnkey/react-wallet-kit";
 
-/** Only Privy embedded wallets can supply the private-wallet derivation seed. */
+/** One Turnkey session supplies both TVC enrollment and Solana signing. */
 export function useEmbeddedWallet() {
-  const { ready: authReady, authenticated, user, login, logout } = usePrivy();
-  const { ready: walletsReady, wallets } = useWallets();
-  const { createWallet } = useCreateWallet();
-  const { signMessage: privySignMessage } = useSignMessage();
-  const { signTransaction: privySignTransaction } = useSignTransaction();
-  const ready = authReady && walletsReady;
-  const wallet =
-    authenticated && ready
-      ? wallets.find((candidate) => candidate.standardWallet.name === "Privy")
-      : undefined;
-  const owner = wallet?.address ?? "";
-  const sessionKey = `${user?.id ?? ""}:${owner}`;
-
-  const signMessage = useCallback(
-    async (message: Uint8Array) => {
-      if (!wallet)
-        throw new Error("Sign in to your Privy embedded wallet first.");
-      const { signature } = await privySignMessage({
-        wallet,
-        message,
-        options: {
-          uiOptions: { title: "Activate private wallet", showWalletUIs: true },
-        },
-      });
-      // Reject altered/prefixed signing before deriving a different private identity.
-      return verifyDerivationSignature(wallet.address, message, signature);
-    },
-    [wallet, privySignMessage],
-  );
-
-  const signTransaction = useCallback(
-    async (transaction: VersionedTransaction) => {
-      if (!wallet)
-        throw new Error("Sign in to your Privy embedded wallet first.");
-      const { signedTransaction } = await privySignTransaction({
-        wallet,
-        transaction: transaction.serialize(),
-        chain: "solana:devnet",
-        options: { uiOptions: { showWalletUIs: true } },
-      });
-      return VersionedTransaction.deserialize(signedTransaction);
-    },
-    [wallet, privySignTransaction],
-  );
-
+  const session = useHeliusWalletSession();
+  const { signTransaction } = useHeliusWallet();
+  const { session: turnkeySession } = useTurnkey();
+  const binding = JSON.stringify([
+    session.userId,
+    session.activeWallet,
+    turnkeySession?.token,
+    session.status,
+  ]);
+  const bindingRef = useRef({ value: binding, id: 0 });
+  if (bindingRef.current.value !== binding)
+    bindingRef.current = { value: binding, id: bindingRef.current.id + 1 };
+  const authenticated = session.status === "authenticated";
+  const wallet = authenticated ? session.activeWallet : null;
   return {
-    ready,
+    ready: session.status !== "loading",
     authenticated,
     connected: Boolean(wallet),
-    owner,
-    sessionKey,
-    login,
-    logout,
-    createWallet,
-    signMessage,
+    owner: wallet?.address ?? "",
+    // Token changes invalidate in-flight work even when the address stays the same.
+    sessionKey: String(bindingRef.current.id),
+    wallet,
+    parentOrganizationId: session.parentOrganizationId,
+    login: session.login,
+    logout: session.logout,
+    clear: session.clear,
     signTransaction,
+    authorizeTvcWallet: session.authorizeTvcWallet,
+    signTvcEnrollmentChallenge: session.signTvcEnrollmentChallenge,
   };
 }
