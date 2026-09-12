@@ -35,8 +35,8 @@ import {
 import type { AdapterWalletAuthority } from "../../../lib/deriveAuthority";
 import type { PrivateWalletContext } from "../../usePrivateWallet";
 
-config({ path: resolve(process.cwd(), "../../.env") });
-config({ path: resolve(process.cwd(), "../../../rust-client/.env") });
+config({ path: resolve(process.cwd(), "../typescript-client/.env") });
+config({ path: resolve(process.cwd(), "../rust-client/.env") });
 config({ path: resolve(process.cwd(), ".env") });
 
 function loadKeypair(): Keypair {

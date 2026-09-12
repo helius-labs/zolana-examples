@@ -11,7 +11,10 @@
 |  |  |
 |---------|-------------|
 | [`deposit_transfer_withdraw`](typescript-client/examples/deposit_transfer_withdraw.ts) | Deposit, private transfer, and withdraw. |
-| [`sign-with-wallet-adapter`](typescript-client/examples/sign-with-wallet-adapter/) | React wallet with Turnkey signing and TVC private keys for deposit, private transfer, and withdrawal. |
+
+### [Embedded private wallet](embedded-private-wallet/README.md)
+
+React + Vite app with Turnkey signing and TVC private keys for deposit, private transfer, and withdrawal.
 
 ### Program examples
 
@@ -21,6 +24,6 @@
 | [`escrow-program/`](escrow-program/) | A timelock escrow on SPP: lock a private balance until a deadline, then release or reclaim. |
 
 ## Documentation
-- [Demo](https://helius-privacy-demo.fly.dev/)
+- [Demo](https://helius.dev/privacy/demo)
 - [Documentation](https://helius.dev/docs/privacy)
 - [Source Code](https://github.com/helius-labs/zolana)

@@ -1,4 +1,4 @@
-# Turnkey + TVC private wallet
+# Embedded private wallet
 
 A minimal React + Vite wallet using Turnkey for login and Solana transaction signing, and Turnkey Verifiable Compute (TVC) for the Zolana SDK’s `WalletKeys`. The layout and transaction receipts are preserved from the Privy example.
 
@@ -6,7 +6,10 @@ A minimal React + Vite wallet using Turnkey for login and Solana transaction sig
 
 Use Node 24+ and pnpm 11.18.0.
 
+From the repository root:
+
 ```bash
+cd embedded-private-wallet
 pnpm install
 cp .env.example .env
 # Set VITE_API_KEY to a Helius project with embedded wallets enabled.

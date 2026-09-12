@@ -3,7 +3,8 @@
 TypeScript client examples for `@heliuslabs/zolana`.
 
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw
-- **[sign-with-wallet-adapter](examples/sign-with-wallet-adapter/)** - React wallet with Turnkey signing and TVC private keys for deposit, private transfer, and withdrawal
+
+For the React + Vite browser app, see the separate [embedded private wallet](../embedded-private-wallet/README.md).
 
 ## Setup
 
@@ -43,9 +44,6 @@ const PROVER_URL = "http://127.0.0.1:3001";
 
 ```bash
 pnpm example examples/deposit_transfer_withdraw.ts
-pnpm --dir examples/sign-with-wallet-adapter install
-pnpm --dir examples/sign-with-wallet-adapter dev
-pnpm --dir examples/sign-with-wallet-adapter test:integration
 ```
 
 ## Documentation

@@ -1,4 +1,3 @@
 {
-  "printWidth": 80,
-  "ignorePatterns": ["examples/sign-with-wallet-adapter/**"]
+  "printWidth": 80
 }
