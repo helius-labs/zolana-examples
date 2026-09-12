@@ -8,18 +8,21 @@ import {
 import { useEmbeddedWallet } from "./hooks/useEmbeddedWallet";
 import { useRpcConnection } from "./hooks/useRpcConnection";
 import { address } from "@solana/kit";
-import { PublicKey } from "@solana/web3.js";
-import { SOL_MINT, syncWallet } from "@heliuslabs/zolana";
 import { usePrivateWallet } from "./hooks/usePrivateWallet";
+import { BalanceSyncError } from "./lib/syncAfterTransaction";
 import {
-  BalanceSyncError,
   DEPOSIT_AMOUNT,
   TRANSFER_AMOUNT,
   WITHDRAW_AMOUNT,
-  depositSol,
-  transferSol,
-  withdrawSol,
-} from "./hooks/useDeposit";
+} from "./lib/amounts";
+import { depositSol } from "./operations/deposit";
+import { transferSol } from "./operations/transfer";
+import { withdrawSol } from "./operations/withdraw";
+import {
+  getPublicSolBalance,
+  getPrivateSolBalance,
+} from "./operations/getBalance";
+import { syncPrivateWallet } from "./operations/syncWallet";
 import { parseSol } from "./lib/parseSol";
 import { walletError } from "./lib/walletError";
 import { formatSol } from "./lib/formatSol";
@@ -246,16 +249,7 @@ function ConnectedWallet() {
       setRefreshing(true);
       setBalanceError(null);
       const results = await Promise.allSettled([
-        withTimeout(
-          Promise.resolve().then(() =>
-            connection.getBalance(new PublicKey(owner), "confirmed")
-          )
-        ).then((value) => {
-          if (!Number.isSafeInteger(value))
-            throw new Error(
-              "Public balance is too large to display precisely."
-            );
-          const balance = BigInt(value);
+        withTimeout(getPublicSolBalance(connection, owner)).then((balance) => {
           if (active()) setPublicBalance(balance);
           return balance;
         }),
@@ -263,13 +257,12 @@ function ConnectedWallet() {
           (async () => {
             if (!ctx) return null;
             if (syncPrivate)
-              await syncWallet(ctx, {
-                signal: AbortSignal.any([
-                  ctx.signal,
-                  AbortSignal.timeout(15_000),
-                ]),
-              });
-            return ctx.wallet.balance(SOL_MINT).amount;
+              await syncPrivateWallet(
+                ctx,
+                undefined,
+                AbortSignal.timeout(15_000)
+              );
+            return getPrivateSolBalance(ctx);
           })()
         ).then((balance) => {
           if (active()) setPrivateBalance(balance);

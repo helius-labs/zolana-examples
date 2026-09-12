@@ -13,27 +13,19 @@ import { useEmbeddedWallet } from "./hooks/useEmbeddedWallet";
 import { useRpcConnection } from "./hooks/useRpcConnection";
 import { syncWallet } from "@heliuslabs/zolana";
 import { usePrivateWallet } from "./hooks/usePrivateWallet";
-import {
-  BalanceSyncError,
-  depositSol,
-  transferSol,
-  withdrawSol,
-} from "./hooks/useDeposit";
+import { BalanceSyncError } from "./lib/syncAfterTransaction";
+import { depositSol } from "./operations/deposit";
+import { transferSol } from "./operations/transfer";
+import { withdrawSol } from "./operations/withdraw";
 import App from "./App";
 
 vi.mock("./hooks/useEmbeddedWallet", () => ({ useEmbeddedWallet: vi.fn() }));
 vi.mock("./hooks/useRpcConnection", () => ({ useRpcConnection: vi.fn() }));
 vi.mock("@heliuslabs/zolana", () => ({ SOL_MINT: "sol", syncWallet: vi.fn() }));
 vi.mock("./hooks/usePrivateWallet", () => ({ usePrivateWallet: vi.fn() }));
-vi.mock("./hooks/useDeposit", async (importOriginal) => {
-  const original = await importOriginal<typeof import("./hooks/useDeposit")>();
-  return {
-    ...original,
-    depositSol: vi.fn(),
-    transferSol: vi.fn(),
-    withdrawSol: vi.fn(),
-  };
-});
+vi.mock("./operations/deposit", () => ({ depositSol: vi.fn() }));
+vi.mock("./operations/transfer", () => ({ transferSol: vi.fn() }));
+vi.mock("./operations/withdraw", () => ({ withdrawSol: vi.fn() }));
 let adapter: ReturnType<typeof useEmbeddedWallet>;
 let state: ReturnType<typeof usePrivateWallet>;
 const connection = { getBalance: vi.fn() };
@@ -59,6 +51,7 @@ beforeEach(() => {
     owner: adapter.owner,
     initialize: vi.fn(),
     ctx: {
+      assertActive: () => {},
       signal: new AbortController().signal,
       wallet: { balance: () => ({ amount: privateLamports }) },
     } as never,

@@ -6,13 +6,11 @@ import {
   buildWithdrawalTransaction,
   syncWallet,
 } from "@heliuslabs/zolana";
-import type { PrivateWalletContext } from "../usePrivateWallet";
-import {
-  BalanceSyncError,
-  depositSol,
-  transferSol,
-  withdrawSol,
-} from "../useDeposit";
+import type { PrivateWalletContext } from "../lib/walletContext";
+import { BalanceSyncError } from "../lib/syncAfterTransaction";
+import { depositSol } from "./deposit";
+import { transferSol } from "./transfer";
+import { withdrawSol } from "./withdraw";
 vi.mock("@heliuslabs/zolana", () => ({
   SOL_MINT: "sol",
   syncWallet: vi.fn(),

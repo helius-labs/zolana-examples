@@ -1,10 +1,66 @@
-# Embedded private wallet
+# Embedded private wallet (React)
 
-A minimal React + Vite wallet using Turnkey for login and Solana transaction signing, and Turnkey Verifiable Compute (TVC) for the Zolana SDK’s `WalletKeys`. The layout and transaction receipts are preserved from the Privy example.
+Deposit, privately transfer, withdraw, and query SOL using a Turnkey embedded wallet and the Zolana SDK. This example uses React + Vite.
 
-## Run
+Turnkey handles authentication and Solana transaction signing. TVC (Turnkey Verifiable Compute) supplies the SDK’s private-wallet keys:
 
-Use Node 24+ and pnpm 11.18.0.
+1. Sign in with Turnkey
+2. Activate the private wallet and verify its onchain registration
+3. Build an unsigned transaction with the Zolana SDK
+4. Sign with the Turnkey wallet and submit to Solana
+5. Sync private balances and transaction history
+
+## What you will implement
+
+| Operation | SDK / RPC | Source file |
+| --- | --- | --- |
+| **Register wallet** | `buildRegistrationTransaction()` | [registerWallet.ts](src/operations/registerWallet.ts) |
+| **Check registration** | `fetchUserRecord()` | [registration.ts](src/lib/registration.ts) |
+| **Deposit** | `buildDepositTransaction()` | [deposit.ts](src/operations/deposit.ts) |
+| **Private transfer** | `buildTransferTransaction()` | [transfer.ts](src/operations/transfer.ts) |
+| **Withdraw** | `buildWithdrawalTransaction()` | [withdraw.ts](src/operations/withdraw.ts) |
+| **Get balance** | `connection.getBalance()`, `wallet.balance()` | [getBalance.ts](src/operations/getBalance.ts) |
+| **Sync wallet** | `syncWallet()` | [syncWallet.ts](src/operations/syncWallet.ts) |
+| **Get history** | `getPrivateTransactions()` | [getHistory.ts](src/operations/getHistory.ts) |
+| **Sync history** | `syncWallet()` → `getPrivateTransactions()` | [syncHistory.ts](src/operations/syncHistory.ts) |
+
+### Source files
+
+#### Operations
+
+Each file in [`src/operations/`](src/operations/) exposes a function that can be called from a React event handler. They share the verified [`PrivateWalletContext`](src/lib/walletContext.ts) returned by `usePrivateWallet()`.
+
+- **[deposit.ts](src/operations/deposit.ts)** — Move public SOL into the connected wallet’s private balance.
+- **[transfer.ts](src/operations/transfer.ts)** — Send private SOL to a registered recipient, reporting actual proof and transaction progress.
+- **[withdraw.ts](src/operations/withdraw.ts)** — Move private SOL back to the connected wallet’s public balance.
+- **[getBalance.ts](src/operations/getBalance.ts)** — Fetch public SOL or read private SOL from the last sync. Public SOL is available before activation.
+- **[syncWallet.ts](src/operations/syncWallet.ts)** — Fetch indexed activity and update private balances and history using the active TVC keys.
+- **[getHistory.ts](src/operations/getHistory.ts)** — Read the last synced private transaction history without a network request.
+- **[syncHistory.ts](src/operations/syncHistory.ts)** — Sync first, then return private transaction history. Available as a helper; not displayed in the current UI.
+- **[registerWallet.ts](src/operations/registerWallet.ts)** — Reuse a matching registration or submit and verify a new one. Conflicting identities are rejected.
+
+Private balance and history reads use local wallet state. Sync updates both; there is no separate history-only network sync. History rows include signature, slot, kind, direction, asset, and amount. They describe indexed private-wallet activity, not every public transaction for the Solana address. A transaction can produce multiple rows.
+
+Deposit, transfer, and withdrawal sync automatically after confirmation. If that sync fails, the confirmed explorer receipt is retained. Refresh reuses the active wallet context without repeating activation.
+
+#### React hooks and components
+
+- **[useEmbeddedWallet.ts](src/hooks/useEmbeddedWallet.ts)** — Turnkey login, logout, account selection, and signing.
+- **[usePrivateWallet.ts](src/hooks/usePrivateWallet.ts)** — Explicit activation, TVC recovery, registration, initial sync, and session cleanup.
+- **[useBootstrapApproval.ts](src/hooks/useBootstrapApproval.ts)** — Verify and approve the expected Turnkey bootstrap activity.
+- **[App.tsx](src/App.tsx)** — Wallet address, public/private balances, editable amounts, and transaction controls.
+- **[TransferStepper.tsx](src/TransferStepper.tsx)** — Preparing → Proving → Sending → Confirmed, driven by actual operation events.
+- **[MotionRegion.tsx](src/MotionRegion.tsx)** — Smooth height changes with reduced-motion support.
+
+## Before you start
+
+Use **Node.js 24+**, **pnpm 11.18.0**, and a Helius project with embedded wallets enabled. This example uses **Solana devnet**.
+
+Fund the connected Turnkey address with enough devnet SOL for the amount you want to deposit, registration rent if needed, and transaction fees. A private transfer requires sufficient **private** SOL and a recipient with a registered private wallet.
+
+Login alone does not activate or register a private wallet. **Activate private wallet** verifies TVC, restores or creates the private identity, checks the onchain registry, and registers only when needed. Reloading with the same account restores the saved identity; registration is checked again onchain.
+
+## Setup
 
 From the repository root:
 
@@ -12,78 +68,56 @@ From the repository root:
 cd embedded-private-wallet
 pnpm install
 cp .env.example .env
-# Set VITE_API_KEY to a Helius project with embedded wallets enabled.
+# Fill in your Helius browser key
+```
+
+### Environment variables
+
+| Variable | Description |
+| --- | --- |
+| `VITE_API_KEY` | Helius browser key for a project with embedded wallets enabled. Also supplies the default devnet RPC endpoint. |
+| `VITE_ZOLANA_ENDPOINT` | Optional devnet Solana RPC override. Does not replace the Helius key required for wallet login. |
+
+Keep `.env` local; it is ignored by Git. `VITE_` values are public browser configuration. Do not put app secrets or Turnkey operator keys in them.
+
+The Vite dev and preview proxies route TVC and private indexer/prover requests to `https://i6npwfd4mh.eu-west-1.awsapprunner.com`. The app verifies an independently pinned trust policy. Normal Solana RPC uses the configured devnet endpoint. The static build requires an equivalent proxy when hosted; it cannot provide those routes by itself.
+
+## Quick start
+
+```bash
 pnpm dev
 ```
 
-Open `http://127.0.0.1:5173/`. The example’s `.env` is ignored by Git. The Helius browser key is public configuration; never add Turnkey operator credentials or app secrets to `VITE_` variables. A previous Privy app ID in `.env` is unused.
+Open [localhost:5173](http://127.0.0.1:5173/), then:
 
-The local Vite proxy (also enabled for `pnpm preview`) connects only to the selected devnet backend, `https://i6npwfd4mh.eu-west-1.awsapprunner.com`. TVC and private indexer/prover requests use this proxy. Normal Solana RPC uses the configured devnet connection. This is a local example: deploying the static output requires an equivalent server proxy; `dist` alone does not supply one.
+1. Sign in with Turnkey and fund the displayed devnet address.
+2. Click **Activate private wallet** and approve setup when requested.
+3. Choose **Deposit**, enter a SOL amount, and submit.
+4. Choose **Transfer** with a registered recipient, or **Withdraw** to your connected wallet.
+5. Follow the progress and open the centered **View transaction** receipt.
+6. Click **Refresh balances** to sync without activating again.
 
-## Wallet flow
+Amounts support up to nine decimal places. Defaults are 0.01 SOL for deposit and 0.003 SOL for transfer and withdrawal.
 
-1. **Sign in with Turnkey.** Login alone does not enroll a TVC wallet, bootstrap keys, or submit registration.
-2. **Fund the displayed devnet address.** Fund the amount you want to deposit, plus registration rent and transaction fees. This is a separate wallet from the previous Privy account; its funds and registration are not migrated.
-3. **Activate private wallet.** The app verifies the pinned release policy, PCRs and Boot Proof, enrolls the browser authorizer, reconciles Turnkey grants, restores or bootstraps the private identity, checks the onchain registry, registers when needed, and syncs balances.
-4. **Test the actions.** Enter an amount in SOL for deposit, transfer to a registered recipient, or withdrawal to the connected wallet. Each action remembers its amount while switching tabs; defaults are 0.01 / 0.003 / 0.003 SOL. Amounts support up to 9 decimal places and are converted exactly to lamports. Turnkey signs the SDK-built Solana transaction. The returned message and signature are verified before submission.
-5. **Refresh balances.** Refresh reuses the active TVC context; it does not repeat enrollment or bootstrap. A confirmed transaction retains its explorer receipt if the following sync fails. Refresh before another action.
-6. **Reload and activate again.** The same Turnkey account restores its saved identity and sealed seed without another bootstrap. Registration is checked onchain rather than trusted from the local flag.
+To use history from a React handler after activation:
 
-Account changes and logout cancel the active session and clear balances, receipts and errors. Already broadcast transactions cannot be cancelled.
+```ts
+import { getPrivateHistory } from "./operations/getHistory";
+import { syncPrivateHistory } from "./operations/syncHistory";
 
-## Progress and motion
-
-Transfer follows the demo’s **Preparing → Proving → Sending → Confirmed** milestones. Preparing includes recipient lookup and transaction preparation. Proving begins at `WalletKeys.prove`; Sending includes wallet approval and broadcast. Confirmation is reported only after submission confirms. Balance sync keeps controls disabled afterward, and a sync failure retains the confirmed explorer receipt. Timings measure actual stage boundaries, not simulated progress.
-
-The centered **View transaction** link is the final receipt. There is no additional “Transaction confirmed” or “Transfer complete” line. The canonical Launch Demo link is https://helius.dev/privacy/demo.
-
-| Transition | Behavior |
-|---|---|
-| Sign in / sign out, activation / action form | Panel height eases over 340ms; new content fades in. |
-| Deposit / Transfer / Withdraw | Selection slides over 480ms; recipient and destination content resize smoothly. |
-| Progress, errors, retry, receipt appearance / removal | Measured height expands and collapses; content fades in. |
-| Balance refresh, address expansion, copy feedback | Values fade; height changes flow into the surrounding layout. |
-| Hover, focus, disabled controls | Short color, border, and opacity transitions. |
-| Reduced motion | Height changes apply immediately; decorative transitions and animations are disabled. |
-
-Height changes use the demo’s `cubic-bezier(0.32, 0.72, 0, 1)` easing and retarget from the visible height if interrupted. Motion never delays signing guards, validation, or session cleanup. Turnkey’s login modal keeps its existing SDK behavior.
-
-The isolated motion preview was checked at 390px and 1440px, including action tabs, activation, progress and the centered receipt. Recorded frames showed intermediate panel/button positions without horizontal overflow. These previews use simulated operations and do not establish transaction success.
-
-## Storage and security boundary
-
-TVC keeps the long-lived viewing and nullifier keys out of the app’s normal wallet context. The browser’s IndexedDB stores the public identity, signed wallet descriptor, enclave-sealed seed, and nonexportable P-256/AES CryptoKeys for the browser authorizer. Records are separated by app, Turnkey organization, wallet and account. The known public identity is saved separately so recovery cannot silently adopt another identity. No derivation signature is persisted or logged.
-
-This integration uses TVC as currently implemented. Its external prover receives plaintext proof witness material, including the nullifier secret. Turnkey’s bootstrap approval API can return signature material; the copied approval helper discards that response. This example does **not** claim that all secrets remain exclusively inside the enclave.
-
-Corrupted state, changed client bindings, and conflicting identities fail explicitly. The app does not silently erase state or overwrite an existing registry entry. Preserve the known public identity when diagnosing recovery errors; deleting browser data is not an identity migration.
-
-## Dependencies and references
-
-Zolana is pinned to `0.1.6-alpha`. TVC is unpublished, and the published wallet-kit 1.1.0 lacks the TVC session APIs used here. The local `vendor/` archives contain builds from these inspected revisions:
-
-- [zolana-tvc](https://github.com/helius-labs/zolana-tvc/tree/35dafa8ad8afcbdb6099517f8b4f9db899a112a2)
-- [wallet-kit browser integration](https://github.com/helius-labs/wallet-kit/tree/c00f7a5e5ee7a2e2013c8301c762f870a99f8ee7)
-
-`vendor/README.md`, `vendor/SHA256SUMS`, and `scripts/rebuild-vendor.sh` record provenance and rebuild commands. Only the React provider and signing/enrollment helpers are reused; the app does not adopt Next.js or the full demo UI.
-
-The interface retains the existing system font, balance hierarchy, 44px controls, keyboard focus styles, and status feedback, informed by Apple’s [Typography](https://developer.apple.com/design/human-interface-guidelines/typography), [Layout](https://developer.apple.com/design/human-interface-guidelines/layout), and [Buttons](https://developer.apple.com/design/human-interface-guidelines/buttons) guidance.
-
-## Tests and validation
-
-```bash
-pnpm check
-pnpm test
-pnpm build
+// ctx is the active context returned by usePrivateWallet().
+const cachedHistory = getPrivateHistory(ctx);
+const refreshedHistory = await syncPrivateHistory(ctx);
 ```
 
-Tests cover explicit activation and duplicate guards, canceled sessions, registry conflicts, Turnkey transaction integrity, bootstrap activity selection, enrollment errors, IndexedDB persistence, recipient validation, balances and retained receipts. The derivation compatibility test remains isolated from the browser wallet flow. The optional `pnpm test:integration` uses a local CLI keypair and is **not** evidence of Turnkey/TVC browser success.
+Guard handlers against concurrent operations and discard results when the account changes, as in `App.tsx`. Operations check the active session before returning. A sync failure throws instead of presenting cached history as a fresh result.
 
-Validation recorded during migration:
+## Documentation
 
-- The Privy checkpoint is commit `0207237`. Its message signing and onchain registration worked, but private sync failed with `WALLET_SYNC: CLIENT_REQUEST: API_REQUEST`; private actions were not verified.
-- The migrated app type-checks, all 105 tests across 16 files pass, and its production build passes. Upstream WASM URL warnings and large bundle warnings remain.
-- Live TVC attestation passed through the local proxy against the independently pinned policy, PCRs and Boot Proof.
-- The real Turnkey email login dialog opens successfully with the configured Helius project. Wallet and login layouts were inspected at 390px and 1440px without horizontal overflow or page errors. Connected and activated layouts were inspected at both widths using isolated visual fixtures, not real transaction results.
-- The production preview proxy returns the pinned release and rejects an untrusted Origin with HTTP 403.
-- **Live transaction acceptance is partial.** The signed-in Turnkey wallet restored after reload, activation completed, and a user-submitted 0.001 SOL deposit appeared with a confirmed receipt and refreshed public/private balances. The live UI also showed a user-submitted self-transfer completing with stage timings, an explorer receipt, and refreshed balances. Withdrawal and transfer to a different registered recipient remain unverified. Automatic approval review requires the user to perform wallet activation and transaction clicks; the agent can inspect the resulting receipts and balances.
+- [Privacy documentation](https://helius.dev/docs/privacy)
+- [Launch demo](https://helius.dev/privacy/demo)
+- [Storage and security boundary](docs/security.md) — TVC storage and the current external-prover limitation.
+- [Development, tests, and validation](docs/development.md) — Build commands, motion behavior, and recorded live acceptance.
+- [Pinned dependencies and rebuild instructions](vendor/README.md)
+
+TVC keeps long-lived private keys out of the app’s normal wallet context. The current external prover receives plaintext witness material, including the nullifier secret; do not assume every secret remains exclusively inside the enclave. See the security document for details.

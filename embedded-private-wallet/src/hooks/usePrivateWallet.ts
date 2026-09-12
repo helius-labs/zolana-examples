@@ -1,15 +1,11 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { address, type Address } from "@solana/kit";
-import {
-  buildRegistrationTransaction,
-  createZolanaClient,
-  syncWallet,
-  Wallet,
-  type WalletKeys,
-} from "@heliuslabs/zolana";
+import { address } from "@solana/kit";
+import { Wallet } from "@heliuslabs/zolana";
+import type { PrivateWalletContext } from "../lib/walletContext";
+import { registerPrivateWallet } from "../operations/registerWallet";
+import { syncPrivateWallet } from "../operations/syncWallet";
 import { useEmbeddedWallet } from "./useEmbeddedWallet";
 import { useBootstrapApproval } from "./useBootstrapApproval";
-import { checkRegistration } from "../lib/registration";
 import { connectClient } from "../lib/client";
 import { walletError } from "../lib/walletError";
 import { submitFactory } from "../lib/send";
@@ -17,16 +13,6 @@ import { turnkeyTransactionSigner } from "../lib/turnkey-signer";
 import { openTvcWallet } from "../lib/tvc";
 import { privacyWalletTrustMaterial } from "../lib/tvc-policy";
 
-type Client = Awaited<ReturnType<typeof createZolanaClient>>;
-export type PrivateWalletContext = {
-  owner: Address;
-  keys: WalletKeys;
-  wallet: Wallet;
-  submit: ReturnType<typeof submitFactory>;
-  client: Client;
-  assertActive: () => void;
-  signal: AbortSignal;
-};
 export type PrivateWalletStatus =
   | "disconnected"
   | "connected"
@@ -43,7 +29,7 @@ export function usePrivateWallet() {
   const embedded = useEmbeddedWallet();
   const { owner, connected, sessionKey } = embedded;
   const withApproval = useBootstrapApproval(
-    privacyWalletTrustMaterial().turnkeyServicePublicKey,
+    privacyWalletTrustMaterial().turnkeyServicePublicKey
   );
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<PrivateWalletStatus>("disconnected");
@@ -60,7 +46,7 @@ export function usePrivateWallet() {
     setStatus(connected && owner ? "connected" : "disconnected");
     return () => {
       controller.abort(
-        new Error("Wallet session changed. Activate your current wallet."),
+        new Error("Wallet session changed. Activate your current wallet.")
       );
     };
   }, [connected, owner, sessionKey]);
@@ -127,41 +113,7 @@ export function usePrivateWallet() {
         return signed;
       });
       const submit = submitFactory(client, signer, assertActive);
-      setStatus("registering");
-      const request = { signal: controller.signal };
-      const registered = await checkRegistration(
-        { rpc: client, owner: ownerAddress },
-        identity,
-        request,
-      );
-      assertActive();
-      if (!registered) {
-        const registration = await buildRegistrationTransaction(
-          { client, owner: ownerAddress, address: identity },
-          request,
-        );
-        assertActive();
-        if (registration) await submit(registration);
-        assertActive();
-        if (
-          !(await checkRegistration(
-            { rpc: client, owner: ownerAddress },
-            identity,
-            request,
-          ))
-        )
-          throw new Error("Registration is not confirmed. Try again.");
-        assertActive();
-      }
-      await tvc.markRegistered();
-      assertActive();
-      setStatus("syncing");
-      await syncWallet(
-        { client, wallet, keys: tvc.keys },
-        { signal: controller.signal },
-      );
-      assertActive();
-      setCtx({
+      const context: PrivateWalletContext = {
         owner: ownerAddress,
         keys: tvc.keys,
         wallet,
@@ -169,7 +121,15 @@ export function usePrivateWallet() {
         client,
         assertActive,
         signal: controller.signal,
-      });
+      };
+      setStatus("registering");
+      await registerPrivateWallet(context);
+      await tvc.markRegistered();
+      assertActive();
+      setStatus("syncing");
+      await syncPrivateWallet(context);
+      assertActive();
+      setCtx(context);
       setStatus("ready");
     } catch (e) {
       if (active()) {
