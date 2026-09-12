@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useEmbeddedWallet } from "./useEmbeddedWallet";
 import { address, getAddressEncoder } from "@solana/kit";
 import {
   buildRegistrationTransaction,
@@ -9,6 +9,7 @@ import {
 } from "@heliuslabs/zolana";
 import { isWalletRegistered } from "@heliuslabs/zolana/wallet";
 import { connectClient } from "../lib/client";
+import { walletError } from "../lib/walletError";
 import {
   deriveAdapterAuthority,
   type AdapterWalletAuthority,
@@ -27,61 +28,130 @@ export type PrivateWalletContext = {
   client: Client;
 };
 
-export function usePrivateWallet() {
-  const { publicKey, signMessage, signTransaction, connected } = useWallet();
-  const [error, setError] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
-  const [ctx, setCtx] = useState<PrivateWalletContext | null>(null);
+export type PrivateWalletStatus =
+  | "disconnected"
+  | "connected"
+  | "initializing"
+  | "signing"
+  | "registering"
+  | "syncing"
+  | "ready"
+  | "error";
 
-  useEffect(() => {
-    if (!connected || !publicKey || !signMessage || !signTransaction) {
-      setCtx(null);
-      setReady(false);
+export function usePrivateWallet() {
+  const { owner, signMessage, signTransaction, connected, sessionKey } =
+    useEmbeddedWallet();
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<PrivateWalletStatus>("disconnected");
+  const [ctx, setCtx] = useState<PrivateWalletContext | null>(null);
+  const session = useRef(0);
+  const inFlight = useRef<number | null>(null);
+
+  // Only an explicit initialize() call can sign. Cleanup also covers Strict Mode.
+  useLayoutEffect(() => {
+    session.current += 1;
+    inFlight.current = null;
+    setCtx(null);
+    setError(null);
+    setStatus(connected && owner ? "connected" : "disconnected");
+    return () => {
+      session.current += 1;
+    };
+  }, [connected, owner, sessionKey]);
+
+  const initialize = useCallback(async () => {
+    if (!connected || !owner || inFlight.current !== null || ctx) return;
+    if (!signMessage || !signTransaction) {
+      setError(
+        "Privy message and transaction signing are unavailable. Sign in again.",
+      );
+      setStatus("error");
       return;
     }
-    let cancelled = false;
-    (async () => {
+
+    const currentSession = session.current;
+    const active = () => session.current === currentSession;
+    const assertActive = () => {
+      if (!active())
+        throw new Error(
+          "Wallet changed. Connect and enable your current wallet.",
+        );
+    };
+    inFlight.current = currentSession;
+    setError(null);
+    setStatus("initializing");
+    try {
       const client = await connectClient();
-      const owner = address(publicKey.toBase58());
+      assertActive();
+      const ownerAddress = address(owner);
       const ed25519 = Uint8Array.from(
-        getAddressEncoder().encode(owner),
+        getAddressEncoder().encode(ownerAddress),
       ) as Bytes32;
+      setStatus("signing");
       const authority = await deriveAdapterAuthority({
-        solanaPublicKey: owner,
+        solanaPublicKey: ownerAddress,
         ed25519PublicKey: ed25519,
-        signMessage: (message) => signMessage(message),
+        signMessage: async (message) => {
+          assertActive();
+          const signature = await signMessage(message);
+          if (!active()) {
+            signature.fill(0);
+            assertActive();
+          }
+          return signature;
+        },
       });
-      const wallet = new Wallet({
-        identity: await authority.shieldedAddress(),
-      });
+      assertActive();
+      const identity = await authority.shieldedAddress();
+      assertActive();
+      const wallet = new Wallet({ identity });
       const signer = walletAdapterSigner({
-        address: owner,
+        address: ownerAddress,
         signTransaction: async (tx) => {
+          assertActive();
           const signed = await signTransaction(tx);
+          assertActive();
           return signed as VersionedTransaction;
         },
       });
-      const submit = submitFactory(client, signer);
-      if (!(await isWalletRegistered({ rpc: client, owner }))) {
+      const submit = submitFactory(client, signer, assertActive);
+      setStatus("registering");
+      const registered = await isWalletRegistered({
+        rpc: client,
+        owner: ownerAddress,
+      });
+      assertActive();
+      if (!registered) {
         const registration = await buildRegistrationTransaction({
           client,
-          owner,
-          address: await authority.shieldedAddress(),
+          owner: ownerAddress,
+          address: identity,
         });
+        assertActive();
         if (registration) await submit(registration);
+        assertActive();
       }
+      setStatus("syncing");
       await syncWallet({ client, wallet, authority });
-      if (!cancelled) {
-        setCtx({ authority, wallet, submit, client });
-        setReady(true);
+      assertActive();
+      setCtx({ authority, wallet, submit, client });
+      setStatus("ready");
+    } catch (e: unknown) {
+      if (active()) {
+        setError(walletError(e));
+        setStatus("error");
       }
-    })().catch((e: unknown) => {
-      if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [connected, publicKey, signMessage, signTransaction]);
+    } finally {
+      if (inFlight.current === currentSession) inFlight.current = null;
+    }
+  }, [connected, owner, sessionKey, signMessage, signTransaction, ctx]);
 
-  return { ready, error, ctx, owner: publicKey?.toBase58() ?? "" };
+  return {
+    ready: status === "ready" && ctx !== null,
+    status,
+    error,
+    ctx,
+    owner,
+    initialize,
+  };
 }

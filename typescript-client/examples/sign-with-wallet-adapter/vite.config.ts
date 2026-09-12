@@ -6,10 +6,11 @@ export default defineConfig({
   plugins: [react(), nodePolyfills({ include: ["buffer"] })],
   optimizeDeps: {
     exclude: ["@lightprotocol/hasher.rs"],
+    include: ["@lightprotocol/hasher.rs > bn.js"],
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
     exclude: ["src/**/integration/**"],
   },
 });

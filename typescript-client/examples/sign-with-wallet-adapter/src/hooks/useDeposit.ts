@@ -8,9 +8,30 @@ import {
 } from "@heliuslabs/zolana";
 import type { PrivateWalletContext } from "./usePrivateWallet";
 
-export const DEPOSIT_AMOUNT = 1_000_000_000n;
-export const TRANSFER_AMOUNT = 300_000_000n;
-export const WITHDRAW_AMOUNT = 300_000_000n;
+export const DEPOSIT_AMOUNT = 10_000_000n;
+export const TRANSFER_AMOUNT = 3_000_000n;
+export const WITHDRAW_AMOUNT = 3_000_000n;
+
+export class BalanceSyncError extends Error {
+  constructor(readonly signature: string) {
+    super(
+      "Transaction confirmed, but balances could not refresh. Refresh balances before making another transaction.",
+    );
+    this.name = "BalanceSyncError";
+  }
+}
+
+async function syncAfterTransaction(
+  ctx: PrivateWalletContext,
+  signature: string,
+  slot: bigint,
+) {
+  try {
+    await syncWallet({ ...ctx, config: { requireSlot: slot } });
+  } catch {
+    throw new BalanceSyncError(signature);
+  }
+}
 
 export async function depositSol(ctx: PrivateWalletContext) {
   const { client, wallet, authority, submit } = ctx;
@@ -21,12 +42,7 @@ export async function depositSol(ctx: PrivateWalletContext) {
     amount: DEPOSIT_AMOUNT,
   });
   const { signature, slot } = await submit(tx);
-  await syncWallet({
-    client,
-    wallet,
-    authority,
-    config: { requireSlot: slot },
-  });
+  await syncAfterTransaction(ctx, signature, slot);
   return { signature, privateBalance: wallet.balance(SOL_MINT).amount };
 }
 
@@ -44,12 +60,7 @@ export async function transferSol(
     amount: TRANSFER_AMOUNT,
   });
   const { signature, slot } = await submit(tx);
-  await syncWallet({
-    client,
-    wallet,
-    authority,
-    config: { requireSlot: slot },
-  });
+  await syncAfterTransaction(ctx, signature, slot);
   return { signature, privateBalance: wallet.balance(SOL_MINT).amount };
 }
 
@@ -64,11 +75,6 @@ export async function withdrawSol(ctx: PrivateWalletContext) {
     amount: WITHDRAW_AMOUNT,
   });
   const { signature, slot } = await submit(tx);
-  await syncWallet({
-    client,
-    wallet,
-    authority,
-    config: { requireSlot: slot },
-  });
+  await syncAfterTransaction(ctx, signature, slot);
   return { signature, privateBalance: wallet.balance(SOL_MINT).amount };
 }

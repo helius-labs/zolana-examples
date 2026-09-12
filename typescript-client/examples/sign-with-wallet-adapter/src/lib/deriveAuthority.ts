@@ -142,12 +142,16 @@ export async function deriveAdapterAuthority(input: {
   signMessage: SignMessageFn;
 }): Promise<AdapterWalletAuthority> {
   const message = ed25519DerivationMessage(input.ed25519PublicKey);
-  const signature = await input.signMessage(message);
-  const roles = expandRoles(signature);
-  return new AdapterWalletAuthority({
-    solanaPublicKey: input.solanaPublicKey,
-    ed25519PublicKey: input.ed25519PublicKey,
-    viewing: roles.viewing,
-    nullifier: roles.nullifier,
-  });
+  const seed = await input.signMessage(message);
+  try {
+    const roles = expandRoles(seed);
+    return new AdapterWalletAuthority({
+      solanaPublicKey: input.solanaPublicKey,
+      ed25519PublicKey: input.ed25519PublicKey,
+      viewing: roles.viewing,
+      nullifier: roles.nullifier,
+    });
+  } finally {
+    seed.fill(0);
+  }
 }

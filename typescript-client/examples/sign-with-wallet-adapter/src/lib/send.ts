@@ -13,13 +13,16 @@ type Client = Awaited<ReturnType<typeof createZolanaClient>>;
 export function submitFactory(
   client: Client,
   signer: TransactionPartialSigner,
+  assertActive: () => void = () => {},
 ) {
   const sendAndConfirm = sendAndConfirmTransactionFactory({
     rpc: client.solanaRpc,
     rpcSubscriptions: client.solanaRpcSubscriptions,
   });
   return async function submit(transaction: Transaction) {
+    assertActive();
     const signed = await signTransactionWithSigners([signer], transaction);
+    assertActive();
     assertIsTransactionWithBlockhashLifetime(signed);
     await sendAndConfirm(signed, { commitment: "confirmed" });
     const signature = getSignatureFromTransaction(signed);

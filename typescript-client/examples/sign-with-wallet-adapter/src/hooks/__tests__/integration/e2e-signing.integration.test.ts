@@ -13,6 +13,7 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { address, getAddressEncoder } from "@solana/kit";
 import {
   buildRegistrationTransaction,
+  SOL_MINT,
   syncWallet,
   Wallet,
 } from "@heliuslabs/zolana";
@@ -102,8 +103,9 @@ describe.runIf(ENABLED)("e2e signing (devnet)", () => {
   it("deposits, transfers, and withdraws with a keypair stand-in", async () => {
     const payer = loadKeypair();
     const ctx = await contextFor(payer);
+    const startPrivate = ctx.wallet.balance(SOL_MINT).amount;
     const sol = await ctx.client.getBalance(ctx.authority.solanaPublicKey());
-    expect(sol).toBeGreaterThan(1_500_000_000n);
+    expect(sol).toBeGreaterThan(50_000_000n);
 
     const recipientKey = Keypair.generate();
     const connection = new Connection(rpcUrl(), "confirmed");
@@ -122,19 +124,19 @@ describe.runIf(ENABLED)("e2e signing (devnet)", () => {
     await contextFor(recipientKey);
 
     const afterDeposit = await depositSol(ctx);
-    expect(afterDeposit.privateBalance).toBe(DEPOSIT_AMOUNT);
+    expect(afterDeposit.privateBalance).toBe(startPrivate + DEPOSIT_AMOUNT);
 
     const afterTransfer = await transferSol(
       ctx,
       address(recipientKey.publicKey.toBase58()),
     );
     expect(afterTransfer.privateBalance).toBe(
-      DEPOSIT_AMOUNT - TRANSFER_AMOUNT,
+      startPrivate + DEPOSIT_AMOUNT - TRANSFER_AMOUNT,
     );
 
     const afterWithdraw = await withdrawSol(ctx);
     expect(afterWithdraw.privateBalance).toBe(
-      DEPOSIT_AMOUNT - TRANSFER_AMOUNT - WITHDRAW_AMOUNT,
+      startPrivate + DEPOSIT_AMOUNT - TRANSFER_AMOUNT - WITHDRAW_AMOUNT,
     );
   });
 });
