@@ -4,18 +4,16 @@ use light_program_profiler::{
     mollusk::{register_profiling_syscalls, take_profiling_entries},
     report::{CuBenchmark, ReadmeConfig, SectionTable},
 };
-use mollusk_solana_account::Account as MolluskAccount;
-use mollusk_solana_instruction::{
-    AccountMeta as MolluskAccountMeta, Instruction as MolluskInstruction,
-};
-use mollusk_solana_pubkey::Pubkey as MolluskPubkey;
-use mollusk_svm::{program::loader_keys::LOADER_V3, result::Check, Mollusk};
+use mollusk_svm::{result::Check, Mollusk};
 use num_bigint::BigUint;
+use solana_account::Account as MolluskAccount;
 use solana_address::Address;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_instruction::Instruction;
+use solana_instruction::{AccountMeta as MolluskAccountMeta, Instruction as MolluskInstruction};
 use solana_keypair::Keypair;
 use solana_message::{v0, AddressLookupTableAccount, Message, VersionedMessage};
+use solana_pubkey::Pubkey as MolluskPubkey;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::{versioned::VersionedTransaction, Transaction};
@@ -56,12 +54,11 @@ use zolana_transaction::{
 };
 use zolana_tree::TreeAccount;
 
-const PROFILING_SBF_DIR: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../../target/escrow-bench");
+const PROFILING_SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/escrow-bench");
 const OUTPUT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../BENCHMARK.md");
 const PROVER_KEYS_DIR: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../prover/server/proving-keys"
+    "/../target/zolana/prover/server/proving-keys"
 );
 
 fn to_mollusk_pubkey(key: &Pubkey) -> MolluskPubkey {
@@ -110,13 +107,12 @@ fn build_tree_fixture(
             &mut tree_account_bytes,
             TREE_ACCOUNT_DISCRIMINATOR,
             STATE_HEIGHT as u8,
-            [1u8; 32],
             tree.to_bytes(),
             address_tree_params(),
         )
         .expect("init tree account");
         for leaf in leaves {
-            account.utxo_tree().append(*leaf);
+            account.utxo_tree().append(*leaf).expect("append leaf");
         }
         (
             account.get_utxo_tree_root(root_index).expect("utxo root"),
@@ -239,15 +235,47 @@ fn keypair_from_payer(payer: &Keypair) -> ShieldedKeypair {
 fn prove_transact_timed(
     proof_inputs: SppProofInputs,
     spend_proofs: &[SpendProof],
+    nf_tree: &IndexedMerkleTree<Poseidon, usize>,
     prover: &ProverClient,
+    escrow: bool,
 ) -> (TransactIxData, Duration) {
-    prover
-        .prove_transact(proof_inputs.clone(), spend_proofs)
-        .expect("warm prove transact");
+    let dummy_proofs: Vec<_> = proof_inputs
+        .input_utxos
+        .iter()
+        .filter(|input| input.is_dummy())
+        .map(|input| {
+            let leaf = input.nullifier().expect("dummy nullifier");
+            let nf = nf_tree
+                .get_non_inclusion_proof(&BigUint::from_bytes_be(&leaf))
+                .expect("dummy non inclusion");
+            NonInclusionProof {
+                leaf,
+                merkle_context: spend_proofs[0].nullifier.merkle_context.clone(),
+                path: nf.merkle_proof.to_vec(),
+                low_element: nf.leaf_lower_range_value,
+                low_element_index: nf.leaf_index as u64,
+                high_element: nf.leaf_higher_range_value,
+                high_element_index: 0,
+                root: nf_tree.root(),
+                root_seq: 0,
+                root_index: 0,
+            }
+        })
+        .collect();
+    let prove = || {
+        if escrow {
+            EscrowProverClient::new()
+                .prove_spp_escrow(prover, proof_inputs.clone(), spend_proofs, &dummy_proofs)
+                .expect("prove escrow transact")
+        } else {
+            prover
+                .prove_transact(proof_inputs.clone(), spend_proofs, &dummy_proofs)
+                .expect("prove transact")
+        }
+    };
+    prove();
     let start = Instant::now();
-    let transact = prover
-        .prove_transact(proof_inputs, spend_proofs)
-        .expect("prove transact");
+    let transact = prove();
     (transact, start.elapsed())
 }
 
@@ -337,8 +365,8 @@ fn bench_cu_escrow() {
 
     let mut mollusk = Mollusk::default();
     register_profiling_syscalls(&mut mollusk);
-    mollusk.add_program(&escrow_id, "timelock_escrow_program", &LOADER_V3);
-    mollusk.add_program(&spp_id, "shielded_pool_program", &LOADER_V3);
+    mollusk.add_program(&escrow_id, "timelock_escrow_program");
+    mollusk.add_program(&spp_id, "shielded_pool_program");
 
     let mut bench = CuBenchmark::new(ReadmeConfig {
         title: "Timelock Escrow -- CU Benchmark".into(),
@@ -386,7 +414,7 @@ fn bench_escrow(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBen
         asset: SOL_MINT,
         amount: INPUT_AMOUNT,
         blinding: input_blinding,
-        zone_program_id: None,
+        ring_program_id: None,
         data: Data::default(),
     };
     let spend = SppProofInputUtxo::new(input_utxo, &creator);
@@ -464,7 +492,8 @@ fn bench_escrow(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBen
 
     let prover = ProverClient::local();
     let escrow_prover = EscrowProverClient::new();
-    let (transact, spp_dur) = prove_transact_timed(spp_proof_inputs, &spend_proofs, &prover);
+    let (transact, spp_dur) =
+        prove_transact_timed(spp_proof_inputs, &spend_proofs, &nf_tree, &prover, true);
     let escrow_prove_start = Instant::now();
     let escrow_proof = escrow_prover
         .prove_escrow(
@@ -477,7 +506,8 @@ fn bench_escrow(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBen
 
     let ix = Escrow {
         payer: payer.pubkey(),
-        tree,
+        input_tree: tree,
+        output_tree: tree,
         escrow_proof: escrow_proof.into(),
         spp_proof: transact,
     }
@@ -579,7 +609,8 @@ fn bench_withdraw(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuB
 
     let prover = ProverClient::local();
     let escrow_prover = EscrowProverClient::new();
-    let (transact, spp_dur) = prove_transact_timed(spp_proof_inputs, &spend_proofs, &prover);
+    let (transact, spp_dur) =
+        prove_transact_timed(spp_proof_inputs, &spend_proofs, &nf_tree, &prover, false);
     let withdraw_prove_start = Instant::now();
     let withdraw_proof = escrow_prover
         .prove_withdraw(
@@ -595,7 +626,8 @@ fn bench_withdraw(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuB
             .solana_address()
             .expect("creator solana address"),
         payer: payer.pubkey(),
-        tree,
+        input_tree: tree,
+        output_tree: tree,
         withdraw_proof: withdraw_proof.into(),
         unlock_timestamp: UNLOCK_TIMESTAMP,
         spp_proof: transact,

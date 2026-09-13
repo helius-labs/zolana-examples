@@ -51,6 +51,7 @@ fn escrow_then_withdraw() -> Result<()> {
         client,
         tree,
         mut creator,
+        _services,
     } = setup()?;
 
     let terms = EscrowTerms {
@@ -114,27 +115,60 @@ fn escrow_then_withdraw() -> Result<()> {
     );
 
     let spp_tx_hashes = SppTxHashes::new(&spp_proof_inputs)?;
-    let spp_proof = client
-        .indexer()
-        .prove_transact(tree, spp_proof_inputs)
-        .map_err(|e| anyhow!("escrow transact proof: {e:?}"))?;
+    let (spend_proofs, dummy_proofs) =
+        shared::fetch_escrow_witnesses(client.indexer(), tree, &spp_proof_inputs)?;
+    let prover = zolana_client::ProverClient::new(_services.prover_url.clone());
+    // The convenience builder only includes input owners. The data-bearing
+    // escrow output additionally needs its PDA owner in the proven signer set.
+    let missing_authority = prover
+        .prove_transact(spp_proof_inputs.clone(), &spend_proofs, &dummy_proofs)
+        .expect_err("SPP must reject the data-bearing output without PDA authorization");
+    assert!(
+        missing_authority.to_string().contains("constraint"),
+        "expected a circuit constraint failure, got {missing_authority}"
+    );
+    let spp_proof = EscrowProverClient::new().prove_spp_escrow(
+        &prover,
+        spp_proof_inputs,
+        &spend_proofs,
+        &dummy_proofs,
+    )?;
 
     let escrow_proof_inputs = EscrowProofInputParams {
         escrow_utxo: escrow_utxo.clone(),
         change,
         spp_tx_hashes,
     };
+    let escrow_proof_inputs = escrow_proof_inputs.to_proof_inputs()?;
+    assert_eq!(
+        escrow_proof_inputs.private_tx_hash,
+        spp_proof.private_tx_hash
+    );
     let escrow_proof = EscrowProverClient::new()
-        .prove_escrow(&escrow_proof_inputs.to_proof_inputs()?)
+        .prove_escrow(&escrow_proof_inputs)
         .map_err(|e| anyhow!("escrow proof: {e:?}"))?;
 
     let escrow_ix = Escrow {
         payer: creator_address.solana_address()?,
-        tree,
+        input_tree: tree,
+        output_tree: tree,
         escrow_proof: escrow_proof.into(),
         spp_proof,
     }
     .instruction()?;
+
+    let mut missing_authority_ix = escrow_ix.clone();
+    missing_authority_ix.accounts.pop();
+    let missing_authority = send_v0_with_lookup_table(
+        client.rpc(),
+        &creator.keypair.to_solana_keypair()?,
+        missing_authority_ix,
+    )
+    .expect_err("escrow CPI must reject a missing authority account");
+    assert!(
+        missing_authority.to_string().contains("0x232b"),
+        "expected MissingEscrowAuthority (9003), got {missing_authority}"
+    );
 
     let signature = send_v0_with_lookup_table(
         client.rpc(),
@@ -160,7 +194,7 @@ fn escrow_then_withdraw() -> Result<()> {
         asset: SOL_MINT,
         amount: change_amount,
         blinding: change_blinding,
-        zone_program_id: None,
+        ring_program_id: None,
         data: Data::default(),
     };
     assert_eq!(
@@ -220,17 +254,22 @@ fn escrow_then_withdraw() -> Result<()> {
     };
 
     let spp_proof = client
-        .indexer()
-        .prove_transact(tree, withdraw_spp_proof_inputs)
+        .prove_transact(tree, withdraw_spp_proof_inputs, None)
         .map_err(|e| anyhow!("withdraw transact proof: {e:?}"))?;
+    let withdraw_proof_inputs = withdraw_proof_inputs.to_proof_inputs()?;
+    assert_eq!(
+        withdraw_proof_inputs.private_tx_hash,
+        spp_proof.private_tx_hash
+    );
     let withdraw_proof = EscrowProverClient::new()
-        .prove_withdraw(&withdraw_proof_inputs.to_proof_inputs()?)
+        .prove_withdraw(&withdraw_proof_inputs)
         .map_err(|e| anyhow!("withdraw proof: {e:?}"))?;
 
     let withdraw_ix = Withdraw {
         creator: creator_address.solana_address()?,
         payer: creator_address.solana_address()?,
-        tree,
+        input_tree: tree,
+        output_tree: tree,
         withdraw_proof: withdraw_proof.into(),
         unlock_timestamp: UNLOCK_TIMESTAMP,
         spp_proof,
@@ -261,7 +300,7 @@ fn escrow_then_withdraw() -> Result<()> {
         asset: SOL_MINT,
         amount: LOCK_AMOUNT,
         blinding: source_output_blinding,
-        zone_program_id: None,
+        ring_program_id: None,
         data: Data::default(),
     };
     assert_eq!(

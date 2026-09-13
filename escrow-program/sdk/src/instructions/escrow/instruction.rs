@@ -5,11 +5,14 @@ use zolana_interface::{
     instruction::instruction_data::transact::TransactIxData, SHIELDED_POOL_PROGRAM_ID,
 };
 
-use crate::{err, tag, EscrowIxData, EscrowProof};
+use crate::{err, escrow_authority_pda, tag, EscrowIxData, EscrowProof};
 
 pub struct Escrow {
     pub payer: Pubkey,
-    pub tree: Pubkey,
+    /// Tree used to fetch the SPP inclusion and nullifier witnesses.
+    pub input_tree: Pubkey,
+    /// Tree that receives the SPP output UTXOs.
+    pub output_tree: Pubkey,
     pub escrow_proof: EscrowProof,
     pub spp_proof: TransactIxData,
 }
@@ -18,7 +21,8 @@ impl Escrow {
     pub fn instruction(self) -> Result<Instruction> {
         let Self {
             payer,
-            tree,
+            input_tree,
+            output_tree,
             escrow_proof,
             spp_proof,
         } = self;
@@ -32,8 +36,11 @@ impl Escrow {
         let accounts = vec![
             AccountMeta::new(payer, true),
             AccountMeta::new(payer, true),
-            AccountMeta::new(tree, false),
+            AccountMeta::new(input_tree, false),
+            AccountMeta::new(output_tree, false),
             AccountMeta::new_readonly(Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID), false),
+            AccountMeta::new_readonly(Pubkey::default(), false),
+            AccountMeta::new_readonly(escrow_authority_pda(), false),
         ];
         let mut instruction_data = vec![tag::ESCROW];
         instruction_data.extend_from_slice(&serialized_ix);

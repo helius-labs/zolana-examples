@@ -11,7 +11,7 @@ use timelock_escrow_program::{
     },
     verifying_keys::withdraw::VERIFYINGKEY,
 };
-use timelock_escrow_prover::{CircuitId, EscrowTermsProofInput, WithdrawProofInputs};
+use timelock_escrow_prover::{EscrowTermsProofInput, WithdrawProofInputs};
 use timelock_escrow_sdk::state::DataHash;
 use zolana_keypair::hash::poseidon;
 use zolana_transaction::{instructions::transact::PrivateTxHash, utxo::Blinding, ProofInputUtxo};
@@ -25,9 +25,10 @@ fn build_dir() -> std::path::PathBuf {
 
 fn ensure_keys() {
     let dir = build_dir();
-    if !dir.join("pk.bin").exists() || !dir.join("vk.bin").exists() {
-        timelock_escrow_prover::setup(CircuitId::Withdraw, &dir).expect("setup failed");
-    }
+    assert!(
+        dir.join("pk.bin").exists() && dir.join("vk.bin").exists(),
+        "run scripts/prepare-zolana.sh to fetch the pinned keys"
+    );
 }
 
 fn generated_vk() -> Groth16VerifyingkeyOwned {
@@ -42,8 +43,8 @@ fn fe(byte: u8) -> [u8; 32] {
 }
 
 fn blinding(byte: u8) -> Blinding {
-    let mut out = [0u8; 31];
-    out[30] = byte;
+    let mut out = [0u8; 32];
+    out[31] = byte;
     out
 }
 
@@ -129,8 +130,11 @@ fn verify_with_generated_vk(
 
 fn keys_in_sync(vk: &Groth16VerifyingkeyOwned) -> bool {
     let borrowed = vk.as_borrowed();
-    borrowed.vk_ic.len() == VERIFYINGKEY.vk_ic.len()
+    borrowed.vk_ic == VERIFYINGKEY.vk_ic
         && borrowed.vk_alpha_g1 == VERIFYINGKEY.vk_alpha_g1
+        && borrowed.vk_beta_g2 == VERIFYINGKEY.vk_beta_g2
+        && borrowed.vk_gamma_g2 == VERIFYINGKEY.vk_gamma_g2
+        && borrowed.vk_delta_g2 == VERIFYINGKEY.vk_delta_g2
 }
 
 #[test]
@@ -169,7 +173,11 @@ fn withdraw_prove_verify() {
         "groth16 proof must verify against the withdraw verifying key"
     );
 
-    if keys_in_sync(&vk) {
+    assert!(
+        keys_in_sync(&vk),
+        "published keys must match the program verifying key"
+    );
+    {
         let public_input_hash = WithdrawPublicInput {
             private_tx_hash: &inputs.private_tx_hash,
             unlock: inputs.terms.unlock,
@@ -189,13 +197,6 @@ fn withdraw_prove_verify() {
             &VERIFYINGKEY,
         )
         .expect("program withdraw verify must accept a valid proof");
-    } else {
-        eprintln!(
-            "SKIP: committed withdraw VERIFYINGKEY does not match the locally generated \
-             build/gnark/withdraw/vk.bin (keys are gitignored and groth16 setup is randomized), \
-             so the on-chain verify_groth16 path was not exercised. Regenerate the keys with \
-             timelock-escrow-prover-setup to run it."
-        );
     }
 }
 

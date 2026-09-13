@@ -7,7 +7,6 @@ use pinocchio::{
     instruction::{InstructionAccount, InstructionView},
     AccountView, Address, ProgramResult,
 };
-use zolana_hasher::{Hasher, Poseidon};
 use zolana_interface::{instruction::tag::TRANSACT, SHIELDED_POOL_PROGRAM_ID};
 
 use crate::error::TimelockEscrowError;
@@ -16,19 +15,6 @@ pub fn u64_right_align(value: u64) -> [u8; 32] {
     let mut bytes = [0u8; 32];
     bytes[24..32].copy_from_slice(&value.to_be_bytes());
     bytes
-}
-
-/// `owner_pk_field` for an ed25519 owner: `Poseidon(value[16..32], value[0..16])`
-/// with each half right-aligned into a field element. Matches
-/// `zolana_keypair::hash::hash_field` so the creator's Solana signer pubkey maps
-/// to the `owner_pk_field` committed in the escrow's `owner_hash`.
-pub fn hash_field(value: &[u8; 32]) -> Result<[u8; 32], ProgramError> {
-    let mut low = [0u8; 32];
-    low[16..].copy_from_slice(&value[16..32]);
-    let mut high = [0u8; 32];
-    high[16..].copy_from_slice(&value[0..16]);
-    Poseidon::hashv(&[low.as_slice(), high.as_slice()])
-        .map_err(|_| TimelockEscrowError::HashingFailed.into())
 }
 
 #[inline(always)]
@@ -44,7 +30,7 @@ pub fn check_after_window(now: i64, unlock_unix_ts: u64) -> ProgramResult {
 #[profile]
 pub fn cpi_spp_transact(spp_accounts: &[AccountView], transact_bytes: &[u8]) -> ProgramResult {
     let spp_program_account = spp_accounts
-        .last()
+        .get(3)
         .ok_or(ProgramError::NotEnoughAccountKeys)?;
     let spp_id = Address::from(SHIELDED_POOL_PROGRAM_ID);
     if spp_program_account.address() != &spp_id {
@@ -85,7 +71,7 @@ pub fn cpi_spp_transact_signed(
         Address::find_program_address(&[crate::ESCROW_AUTHORITY_PDA_SEED], &crate::ID);
 
     let spp_program_account = spp_accounts
-        .last()
+        .get(3)
         .ok_or(ProgramError::NotEnoughAccountKeys)?;
     let spp_id = Address::from(SHIELDED_POOL_PROGRAM_ID);
     if spp_program_account.address() != &spp_id {
