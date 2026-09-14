@@ -2,11 +2,11 @@ import {
   ShieldedKeypair,
   Wallet,
   createZolanaClient,
+  syncWallet,
 } from "@heliuslabs/zolana";
 import {
   AssetRegistry,
   LocalShieldedKeys,
-  decryptTransactions,
 } from "@heliuslabs/zolana/transaction";
 
 import { cliKeypair, setup } from "../src/lib.js";
@@ -26,25 +26,16 @@ async function main(): Promise<void> {
   );
   const assets = new AssetRegistry();
 
-  // Fetch transaction outputs from the indexer.
-  const response =
-    await client.getShieldedTransactionsByTags({
-      tags: [
-        sender
-          .shieldedAddress()
-          .confidentialViewTag(),
-      ],
-    });
-
-  // Decrypt locally to read the private history.
+  // Sync all transaction pages and resolve SPL asset registrations.
   const wallet = new Wallet({
     identity: sender.shieldedAddress(),
     registry: assets,
   });
-  await decryptTransactions({
+  await syncWallet({
     wallet,
     keys: LocalShieldedKeys.fromKeypair(sender),
-    transactions: response.transactions,
+    client,
+    config: { pageLimit: 50 },
   });
 
   for (const tx of wallet.privateTransactions()) {

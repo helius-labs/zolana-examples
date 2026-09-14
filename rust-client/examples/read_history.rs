@@ -1,8 +1,9 @@
 use anyhow::{anyhow, Result};
 use rust_client_example::{cli_keypair, setup, SetupContext};
-use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::{SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
-use zolana_transaction::{AssetRegistry, Wallet, DEFAULT_TAG_WINDOW};
+use zolana_transaction::{AssetRegistry, Wallet};
+use zolana_wallet::{sync_wallet_with_config, SyncWalletConfig};
 
 fn main() -> Result<()> {
     let SetupContext {
@@ -26,20 +27,22 @@ fn main() -> Result<()> {
     let sender = ShieldedKeypair::from_keypair(&cli_keypair()?)?;
     let assets = AssetRegistry::default();
 
-    // Fetch transaction outputs from the indexer.
-    let response = client.get_shielded_transactions_by_tags(
-        vec![sender.shielded_address()?.confidential_view_tag()?],
-        None,
-        Some(50),
-        None,
-    )?;
-
-    // Decrypt locally to read the private history.
+    // Sync all transaction pages and resolve SPL asset registrations.
     let mut wallet = Wallet::new(sender.shielded_address()?, assets)
         .map_err(|e| anyhow!("create wallet: {e:?}"))?;
-    wallet
-        .sync(&sender, &response.transactions, 0, DEFAULT_TAG_WINDOW)
-        .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?;
+    let report = sync_wallet_with_config(
+        &mut wallet,
+        &sender,
+        &client,
+        SyncWalletConfig {
+            page_limit: 50,
+            ..SyncWalletConfig::default()
+        },
+    )?;
+    anyhow::ensure!(
+        report.unknown_asset_ids.is_empty(),
+        "could not resolve SPL asset registrations"
+    );
 
     for tx in wallet.private_transactions() {
         println!(

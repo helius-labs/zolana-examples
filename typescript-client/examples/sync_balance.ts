@@ -1,10 +1,12 @@
 import {
   ShieldedKeypair,
+  Wallet,
   createZolanaClient,
+  syncWallet,
 } from "@heliuslabs/zolana";
 import {
   AssetRegistry,
-  decryptToBalances,
+  LocalShieldedKeys,
 } from "@heliuslabs/zolana/transaction";
 
 import { cliKeypair, setup } from "../src/lib.js";
@@ -24,27 +26,22 @@ async function main(): Promise<void> {
   );
   const assets = new AssetRegistry();
 
-  // Fetch transaction outputs from the indexer.
-  const response =
-    await client.getShieldedTransactionsByTags({
-      tags: [
-        sender
-          .shieldedAddress()
-          .confidentialViewTag(),
-      ],
-    });
-
-  // Decrypt locally to read the private balances.
-  const balances = await decryptToBalances({
-    keypair: sender,
+  // Sync all transaction pages and resolve SPL asset registrations.
+  const wallet = new Wallet({
+    identity: sender.shieldedAddress(),
     registry: assets,
-    transactions: response.transactions,
+  });
+  await syncWallet({
+    wallet,
+    keys: LocalShieldedKeys.fromKeypair(sender),
+    client,
+    config: { pageLimit: 50 },
   });
 
   const solanaAddress = sender
     .shieldedAddress()
     .solanaAddress();
-  for (const b of balances.balances()) {
+  for (const b of wallet.balances()) {
     console.log(
       `ok solana_address=${solanaAddress} mint=${b.mint} amount=${b.amount} utxos=${b.utxos.length}`,
     );

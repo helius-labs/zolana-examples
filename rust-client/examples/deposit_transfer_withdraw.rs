@@ -18,9 +18,9 @@ use zolana_transaction::{
     AssetRegistry, SOL_MINT,
 };
 
-const DEPOSIT_AMOUNT: u64 = 1_000_000_000;
-const TRANSFER_AMOUNT: u64 = 300_000_000;
-const WITHDRAW_AMOUNT: u64 = 300_000_000;
+const DEPOSIT_AMOUNT: u64 = 10_000_000;
+const TRANSFER_AMOUNT: u64 = 3_000_000;
+const WITHDRAW_AMOUNT: u64 = 3_000_000;
 
 fn main() -> Result<()> {
     let SetupContext {
@@ -83,18 +83,19 @@ fn main() -> Result<()> {
             client.create_and_send_transaction(&[deposit_ix], sender.pubkey(), &[&sender])?;
         let slot = landed_slot(&client, signature)?;
 
-        // 3. Fetch transaction outputs from the indexer, gated on the deposit's slot.
-        // The indexer returns encrypted outputs by view tag, the sender's public key in Confidential Rings.
-        let sender_tag = sender_shielded_address.confidential_view_tag()?;
-        let response = client.get_shielded_transactions_by_tags(
-            vec![sender_tag],
-            None,
-            Some(50),
+        // 3. Fetch this transaction's outputs, gated on its confirmed slot.
+        let response = client.get_shielded_transactions_by_signature(
+            signature,
             Some(IndexerRpcConfig::at_slot(slot)),
         )?;
+        let transactions = response
+            .transactions
+            .into_iter()
+            .map(|indexed| indexed.transaction)
+            .collect::<Vec<_>>();
 
-        // 4. The sender decrypts the transaction outputs locally to update the private balance.
-        let balances = decrypt_transactions(&sender, &response.transactions, &assets)
+        // 4. The sender decrypts the transaction outputs locally to read the funds deposited in this run.
+        let balances = decrypt_transactions(&sender, &transactions, &assets)
             .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?;
 
         let sender_balance = balances
@@ -152,16 +153,17 @@ fn main() -> Result<()> {
             client.create_and_send_transaction(&[transfer_ix], sender.pubkey(), &[&sender])?;
         let slot = landed_slot(&client, signature)?;
 
-        // 7. Sync the sender's wallet, gated on the transfer's slot, and read
-        // the remaining private balance.
-        let sender_tag = sender_shielded_address.confidential_view_tag()?;
-        let response = client.get_shielded_transactions_by_tags(
-            vec![sender_tag],
-            None,
-            Some(50),
+        // 7. Fetch this transaction's outputs, gated on its confirmed slot.
+        let response = client.get_shielded_transactions_by_signature(
+            signature,
             Some(IndexerRpcConfig::at_slot(slot)),
         )?;
-        let sender_balances = decrypt_transactions(&sender, &response.transactions, &assets)
+        let transactions = response
+            .transactions
+            .into_iter()
+            .map(|indexed| indexed.transaction)
+            .collect::<Vec<_>>();
+        let sender_balances = decrypt_transactions(&sender, &transactions, &assets)
             .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?;
         let sender_balance = sender_balances
             .get_balance(SOL_MINT)
@@ -245,16 +247,17 @@ fn main() -> Result<()> {
             client.create_and_send_transaction(&[withdraw_ix], sender.pubkey(), &[&sender])?;
         let slot = landed_slot(&client, signature)?;
 
-        // 7. Sync the sender's wallet, gated on the withdrawal's slot, and read
-        // the remaining private balance.
-        let sender_tag = sender_shielded_address.confidential_view_tag()?;
-        let response = client.get_shielded_transactions_by_tags(
-            vec![sender_tag],
-            None,
-            Some(50),
+        // 7. Fetch this transaction's outputs, gated on its confirmed slot.
+        let response = client.get_shielded_transactions_by_signature(
+            signature,
             Some(IndexerRpcConfig::at_slot(slot)),
         )?;
-        let sender_balances = decrypt_transactions(&sender, &response.transactions, &assets)
+        let transactions = response
+            .transactions
+            .into_iter()
+            .map(|indexed| indexed.transaction)
+            .collect::<Vec<_>>();
+        let sender_balances = decrypt_transactions(&sender, &transactions, &assets)
             .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?;
         let sender_balance = sender_balances
             .get_balance(SOL_MINT)
@@ -266,7 +269,7 @@ fn main() -> Result<()> {
         );
         assert_eq!(sender_balance.utxos.len(), 1);
 
-        // 8. Read remaining private balance and the public SOL balance.
+        // 8. Read the funds remaining from this run and the public SOL balance.
         let solana_balance = client.get_balance(sender.pubkey())?;
         println!("withdraw solana_balance={solana_balance} tx={signature}");
         // SPL: println!(
