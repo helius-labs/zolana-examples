@@ -2,7 +2,7 @@
 set -euo pipefail
 
 base="$(cd "$(dirname "$0")/.." && pwd)"
-revision=5330a112cb10e7622585f61cde2397d26721fdb6
+revision=af11be0e8d27702f8e6553320bd5dab52ab79fed
 checkout="$base/target/zolana"
 
 if [[ ! -d "$checkout/.git" ]]; then
@@ -29,8 +29,8 @@ for circuit in escrow withdraw; do
         if [[ ! -f "$dir/$kind.bin" ]]; then
             temporary="$(mktemp "$dir/download.XXXXXX")"
             trap 'rm -f "$temporary"' EXIT
-            gh release download escrow-keys-v2 --repo helius-labs/zolana \
-                --pattern "$asset" --output "$temporary" --clobber
+            curl --fail --location --output "$temporary" \
+                "https://github.com/helius-labs/zolana/releases/download/escrow-keys-v6/$asset"
             [[ "$(shasum -a 256 "$temporary" | awk '{print $1}')" == "$want" ]] || {
                 echo "Downloaded key checksum mismatch: $asset" >&2
                 exit 1
@@ -44,4 +44,4 @@ for circuit in escrow withdraw; do
         }
     done
 done
-echo "Prepared Zolana $revision and verified escrow-keys-v2"
+echo "Prepared Zolana $revision and verified escrow-keys-v6"

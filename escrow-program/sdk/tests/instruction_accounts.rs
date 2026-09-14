@@ -24,16 +24,17 @@ fn payload() -> TransactIxData {
         ring_data_hash: None,
         outputs: vec![],
         messages: vec![],
+        tree_contexts: vec![],
     }
 }
 
 fn spp_accounts(payer: Pubkey, input: Pubkey, output: Pubkey) -> Vec<AccountMeta> {
     vec![
         AccountMeta::new(payer, true),
-        AccountMeta::new(input, false),
         AccountMeta::new(output, false),
         AccountMeta::new_readonly(Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID), false),
         AccountMeta::new_readonly(Pubkey::default(), false),
+        AccountMeta::new(input, false),
         AccountMeta::new_readonly(escrow_authority_pda(), false),
     ]
 }

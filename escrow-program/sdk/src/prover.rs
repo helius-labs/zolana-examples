@@ -3,7 +3,7 @@ use timelock_escrow_prover::{EscrowProofInputs, TimelockProof, WithdrawProofInpu
 use zolana_client::{
     into_prover, NonInclusionProof, ProofCompressed, ProverClient, ProverVariant, SpendProof,
 };
-use zolana_hasher::primitives::hash_bytes;
+use zolana_hasher::primitives::solana_owner_identity;
 use zolana_interface::{
     instruction::instruction_data::transact::{CircuitId, InputUtxo, TransactIxData},
     N_PUBLIC_SLOTS,
@@ -39,20 +39,17 @@ impl EscrowProverClient {
             .map_err(err)?
             .to_transact_proof();
         ensure!(
-            result.nullifiers.len() == 2 && result.input_root_indices.len() == 2,
+            result.nullifiers.len() == 2 && result.input_tree_indexes.len() == 2,
             "escrow prover returned an incompatible input shape"
         );
         let inputs = result
             .nullifiers
             .into_iter()
-            .zip(result.input_root_indices)
-            .map(
-                |(nullifier_hash, (utxo_tree_root_index, nullifier_tree_root_index))| InputUtxo {
-                    nullifier_hash,
-                    utxo_tree_root_index,
-                    nullifier_tree_root_index,
-                },
-            )
+            .zip(result.input_tree_indexes)
+            .map(|(nullifier_hash, tree_index)| InputUtxo {
+                nullifier_hash,
+                tree_index,
+            })
             .collect();
         Ok(TransactIxData {
             proof,
@@ -60,6 +57,7 @@ impl EscrowProverClient {
             private_tx_hash: result.private_tx_hash,
             circuit: CircuitId::ConfidentialEddsa(2, 2, N_PUBLIC_SLOTS as u8),
             inputs,
+            tree_contexts: result.tree_contexts,
             interface_transfers: vec![],
             data_hash: external.data_hash,
             ring_data_hash: external.ring_data_hash,
@@ -96,8 +94,9 @@ impl EscrowProverClient {
             spend_proofs.len() == 1 && dummy_nullifier_proofs.len() == 1,
             "escrow requires one real-input proof and one dummy nullifier proof"
         );
-        let payer_hash = hash_bytes(proof_inputs.payer.as_array()).map_err(err)?;
-        let authority_hash = hash_bytes(escrow_authority_pda().as_array()).map_err(err)?;
+        let payer_hash = solana_owner_identity(proof_inputs.payer.as_array()).map_err(err)?;
+        let authority_hash =
+            solana_owner_identity(escrow_authority_pda().as_array()).map_err(err)?;
         let built = into_prover(proof_inputs, spend_proofs, dummy_nullifier_proofs).map_err(err)?;
         let ProverVariant::Eddsa(mut circuit) = built.circuit;
         // This exact payer/PDA order is also reconstructed by SPP from the CPI

@@ -1,12 +1,15 @@
+#[cfg(any(target_os = "solana", target_arch = "bpf"))]
 use light_program_profiler::profile;
 #[cfg(any(target_os = "solana", target_arch = "bpf"))]
 use pinocchio::cpi::{invoke_signed_with_bounds, Seed, Signer};
+#[cfg(any(target_os = "solana", target_arch = "bpf"))]
 use pinocchio::{
-    cpi::invoke_with_bounds,
     error::ProgramError,
     instruction::{InstructionAccount, InstructionView},
-    AccountView, Address, ProgramResult,
+    Address,
 };
+use pinocchio::{AccountView, ProgramResult};
+#[cfg(any(target_os = "solana", target_arch = "bpf"))]
 use zolana_interface::{instruction::tag::TRANSACT, SHIELDED_POOL_PROGRAM_ID};
 
 use crate::error::TimelockEscrowError;
@@ -26,40 +29,6 @@ pub fn check_after_window(now: i64, unlock_unix_ts: u64) -> ProgramResult {
     }
 }
 
-#[inline(never)]
-#[profile]
-pub fn cpi_spp_transact(spp_accounts: &[AccountView], transact_bytes: &[u8]) -> ProgramResult {
-    let spp_program_account = spp_accounts
-        .get(3)
-        .ok_or(ProgramError::NotEnoughAccountKeys)?;
-    let spp_id = Address::from(SHIELDED_POOL_PROGRAM_ID);
-    if spp_program_account.address() != &spp_id {
-        return Err(TimelockEscrowError::InvalidShieldedPoolProgram.into());
-    }
-
-    let metas: Vec<InstructionAccount> = spp_accounts
-        .iter()
-        .map(|account| {
-            InstructionAccount::new(
-                account.address(),
-                account.is_writable(),
-                account.is_signer(),
-            )
-        })
-        .collect();
-
-    let mut instruction_data = Vec::with_capacity(1 + transact_bytes.len());
-    instruction_data.push(TRANSACT);
-    instruction_data.extend_from_slice(transact_bytes);
-
-    let instruction = InstructionView {
-        program_id: &spp_id,
-        accounts: &metas,
-        data: &instruction_data,
-    };
-    invoke_with_bounds::<16, _>(&instruction, spp_accounts)
-}
-
 #[cfg(any(target_os = "solana", target_arch = "bpf"))]
 #[inline(never)]
 #[profile]
@@ -71,7 +40,7 @@ pub fn cpi_spp_transact_signed(
         Address::find_program_address(&[crate::ESCROW_AUTHORITY_PDA_SEED], &crate::ID);
 
     let spp_program_account = spp_accounts
-        .get(3)
+        .get(2)
         .ok_or(ProgramError::NotEnoughAccountKeys)?;
     let spp_id = Address::from(SHIELDED_POOL_PROGRAM_ID);
     if spp_program_account.address() != &spp_id {

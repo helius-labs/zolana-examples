@@ -18,7 +18,7 @@ mod entrypoint {
     pinocchio::entrypoint!(crate::process_instruction);
 }
 
-pinocchio::address::declare_id!("2ehy1rrRKT3KEVNN6pLmHeiUedwazPZezXXhwaLjCt5G");
+pinocchio::address::declare_id!("AVGRBtZKG6ipoQCzvRoADRFu3NG871zPtKaVd7EcQT6n");
 
 pub fn process_instruction(
     program_id: &Address,
