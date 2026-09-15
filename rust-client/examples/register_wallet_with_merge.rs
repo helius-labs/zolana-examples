@@ -148,12 +148,19 @@ fn main() -> Result<()> {
     shared_inputs.sort();
     shared_inputs.truncate(2);
     assert_eq!(shared_inputs.len(), 2);
+
+    let mut device_b_inputs = Vec::new();
+    for entry in &device_b.utxos {
+        if !entry.spent {
+            device_b_inputs.push(entry.output_context.hash);
+        }
+    }
+
     for hash in &shared_inputs {
-        let available = device_b
-            .utxos
-            .iter()
-            .any(|entry| entry.output_context.hash == *hash && !entry.spent);
-        assert!(available, "shared input missing from device B");
+        assert!(
+            device_b_inputs.contains(hash),
+            "shared input missing from device B"
+        );
     }
 
     // 2. Build both devices' merges from the same inputs before either is submitted.
