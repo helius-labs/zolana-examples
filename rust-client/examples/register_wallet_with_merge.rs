@@ -141,10 +141,9 @@ fn main() -> Result<()> {
     // 1. Select private token accounts (UTXOs) that make up the private balance for the merge.
     let mut shared_inputs = Vec::new();
     for entry in &device_a.utxos {
-        if entry.spent || entry.utxo.asset != SOL_MINT || !is_plain_utxo(entry) {
-            continue;
+        if !entry.spent && entry.utxo.asset == SOL_MINT && is_plain_utxo(entry) {
+            shared_inputs.push(entry.output_context.hash);
         }
-        shared_inputs.push(entry.output_context.hash);
     }
     shared_inputs.sort();
     shared_inputs.truncate(2);
@@ -236,10 +235,9 @@ fn main() -> Result<()> {
     // 2. Select the remaining unspent UTXOs from the refreshed wallet.
     let mut refreshed_inputs = Vec::new();
     for entry in &device_b.utxos {
-        if entry.spent || entry.utxo.asset != SOL_MINT || !is_plain_utxo(entry) {
-            continue;
+        if !entry.spent && entry.utxo.asset == SOL_MINT && is_plain_utxo(entry) {
+            refreshed_inputs.push(entry.output_context.hash);
         }
-        refreshed_inputs.push(entry.output_context.hash);
     }
     refreshed_inputs.sort();
 
