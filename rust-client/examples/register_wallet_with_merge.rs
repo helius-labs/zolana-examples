@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use rust_client_example::{setup, SetupContext};
 use solana_signature::Signature;
 use solana_signer::Signer;
-use zolana_client::{IndexerPollConfig, Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::instruction::{AssetDeposit, Deposit, DepositAsset};
 use zolana_keypair::random_blinding;
 use zolana_transaction::{Address, AssetRegistry, Wallet, SOL_MINT};
@@ -194,7 +194,7 @@ fn main() -> Result<()> {
     let device_a_submitted = submit_merge_transaction(request)?;
 
     // Wait until the indexer can return a Merkle proof for the merged output.
-    wait_for_indexed_output(&client, tree, device_a_submitted.output_hash)?;
+    client.wait_for_indexed_output(tree, device_a_submitted.output_hash)?;
 
     let device_a_slot = landed_slot(&client, device_a_submitted.signature)?;
     println!("device A merge tx={}", device_a_submitted.signature);
@@ -270,7 +270,7 @@ fn main() -> Result<()> {
         prepared: retry_merge.prepared,
     };
     let retry_submitted = submit_merge_transaction(request)?;
-    wait_for_indexed_output(&client, tree, retry_submitted.output_hash)?;
+    client.wait_for_indexed_output(tree, retry_submitted.output_hash)?;
 
     // 5. Fetch the sender's outputs again, gated on the retry's slot,
     // and check that one UTXO holds the original 0.3 SOL balance.
@@ -286,26 +286,6 @@ fn main() -> Result<()> {
     assert_eq!(final_balance.utxos.len(), 1);
     println!("device B retry merge tx={}", retry_submitted.signature);
 
-    Ok(())
-}
-
-fn wait_for_indexed_output(
-    client: &ZolanaClient<SolanaRpc>,
-    tree: Address,
-    output_hash: [u8; 32],
-) -> Result<()> {
-    let tree = Address::new_from_array(tree.to_bytes());
-    IndexerPollConfig::default().poll_until(
-        || client.get_merkle_proofs(tree, vec![output_hash], None),
-        |response| {
-            for proof in &response.proofs {
-                if proof.leaf == output_hash {
-                    return true;
-                }
-            }
-            false
-        },
-    )?;
     Ok(())
 }
 
