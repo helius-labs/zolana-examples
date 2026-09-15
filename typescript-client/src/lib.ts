@@ -17,10 +17,13 @@ import {
   sendTransactionWithoutConfirmingFactory,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
+  signTransactionWithSigners,
   signTransactionMessageWithSigners,
   type Address,
   type Instruction,
   type Signature,
+  type Transaction,
+  type TransactionPartialSigner,
   type TransactionSigner,
 } from "@solana/kit";
 import {
@@ -217,4 +220,19 @@ export function sendAndConfirmFactory(
     const slot = await client.confirmTransaction(signature);
     return { signature, slot };
   };
+}
+
+export async function signAndConfirmTransaction(
+  client: Client,
+  transaction: Transaction,
+  signer: TransactionPartialSigner,
+): Promise<ConfirmedTransaction> {
+  const signed = await signTransactionWithSigners([signer], transaction);
+  await sendTransactionWithoutConfirmingFactory({ rpc: client.solanaRpc })(
+    signed,
+    { commitment: "confirmed" },
+  );
+  const signature = getSignatureFromTransaction(signed);
+  const slot = await client.confirmTransaction(signature);
+  return { signature, slot };
 }

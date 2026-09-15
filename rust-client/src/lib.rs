@@ -26,6 +26,7 @@ pub struct SetupContext {
     pub indexer_url: String,
     pub prover_url: String,
     pub tree: Address,
+    pub sender_solana: Keypair,
     pub sender: ShieldedKeypair,
     pub recipient_address: ShieldedAddress,
 }
@@ -58,15 +59,15 @@ pub fn setup() -> Result<SetupContext> {
     );
     rpc.create_and_send_transaction(&[ix], payer.pubkey(), &[&payer])?;
 
-    let sender = ShieldedKeypair::from_solana_keypair(&sender_solana)?;
-    let recipient_address =
-        ShieldedKeypair::from_solana_keypair(&Keypair::new())?.shielded_address()?;
+    let sender = ShieldedKeypair::from_keypair(&sender_solana)?;
+    let recipient_address = ShieldedKeypair::from_keypair(&Keypair::new())?.shielded_address()?;
 
     Ok(SetupContext {
         rpc_url,
         indexer_url: INDEXER_URL.to_string(),
         prover_url: PROVER_URL.to_string(),
         tree,
+        sender_solana,
         sender,
         recipient_address,
     })

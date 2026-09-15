@@ -3,15 +3,17 @@
 TypeScript client examples for `@heliuslabs/zolana`.
 
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw
+- **[register_wallet_with_merge](examples/register_wallet_with_merge.ts)** - Register a wallet, merge notes, and recover from a stale two-device merge
 
 ## Setup
 
 Install Node.js 24+ and pnpm.
 
 ```bash
-npm install @heliuslabs/zolana@alpha @solana/kit
-pnpm install
+pnpm install --frozen-lockfile
 ```
+
+The SDK is pinned to a packaged build of [PR #317](https://github.com/helius-labs/zolana/pull/317), rebased onto `0.1.6-alpha`. It includes the public registry instruction builders used by `register_wallet_with_merge`. See [package provenance](vendor/README.md).
 
 **Devnet:**
 
@@ -42,7 +44,19 @@ const PROVER_URL = "http://127.0.0.1:3001";
 
 ```bash
 pnpm example examples/deposit_transfer_withdraw.ts
+pnpm example examples/register_wallet_with_merge.ts
 ```
+
+### What `register_wallet_with_merge` shows
+
+1. Registers the wallet and enables merging in one transaction.
+2. Deposits three `0.1 SOL` notes and syncs two devices to the same wallet state.
+3. Device A merges two notes, leaving the wallet with two notes and the same `0.3 SOL` balance.
+4. Device B submits a merge built from its stale state. The request is rejected because Device A already spent the shared input nullifiers.
+5. Device B syncs from Device A's confirmed slot, rebuilds the merge, and submits it with fresh Merkle proofs and current `rootIndex` values.
+6. The retry succeeds, leaving the original `0.3 SOL` balance consolidated into one note.
+
+The example runs against devnet and checks each balance and note-count transition.
 
 ## Documentation
 
