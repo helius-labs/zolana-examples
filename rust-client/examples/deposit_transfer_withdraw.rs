@@ -27,6 +27,7 @@ fn main() -> Result<()> {
         indexer_url,
         prover_url,
         tree,
+        sender_solana: sender_solana_keypair,
         sender,
         recipient_address,
     } = setup()?;
@@ -47,7 +48,6 @@ fn main() -> Result<()> {
     // Initialize the sender's private wallet and local authority
     // to decrypt transactions and sync balances.
     // The Solana signer and private wallet are derived from the same Ed25519 seed.
-    let sender_solana_keypair = sender.to_solana_keypair()?;
     let sender_shielded_address = sender.shielded_address()?;
 
     // Deposit SOL into the sender's private balance.

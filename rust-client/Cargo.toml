@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 # The zolana SDK crates are pulled from the zolana repo by git, pinned to a rev
-# on main; the solana-* crates are pinned to the versions the SDK builds against.
+# with indexed-output waiting; Solana versions match the SDK.
 [dependencies]
 anyhow = "1.0"
 dotenvy = "0.15"
@@ -16,11 +16,17 @@ solana-signature = "3.4"
 solana-signer = "3.0"
 solana-system-interface = "3.2.0"
 shellexpand = "3"
-zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606", features = ["indexer-api", "solana-rpc"] }
-zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606", features = ["solana"] }
-zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606" }
-zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "5705c78ee4283d82ed445474f285b0daf4865606" }
+zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "167d1e6e9181074405f660dffb545a9cfb762d05", features = ["indexer-api", "solana-rpc"] }
+zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "167d1e6e9181074405f660dffb545a9cfb762d05", features = ["solana"] }
+zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "167d1e6e9181074405f660dffb545a9cfb762d05" }
+zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "167d1e6e9181074405f660dffb545a9cfb762d05" }
+zolana-user-registry-interface = { git = "https://github.com/helius-labs/zolana", rev = "167d1e6e9181074405f660dffb545a9cfb762d05", features = ["solana"] }
+zolana-wallet = { git = "https://github.com/helius-labs/zolana", rev = "167d1e6e9181074405f660dffb545a9cfb762d05" }
 
 [[example]]
 name = "deposit_transfer_withdraw"
 path = "examples/deposit_transfer_withdraw.rs"
+
+[[example]]
+name = "register_wallet_with_merge"
+path = "examples/register_wallet_with_merge.rs"

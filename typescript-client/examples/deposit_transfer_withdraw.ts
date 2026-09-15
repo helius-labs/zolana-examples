@@ -1,4 +1,5 @@
 import {
+  LocalKeys,
   SOL_MINT,
   createZolanaClient,
 } from "@heliuslabs/zolana";
@@ -37,8 +38,12 @@ async function main(): Promise<void> {
   // Connect to Helius devnet RPC plus the Photon indexer and prover.
   const client =
     await createZolanaClient(clientConfig);
+  const keys = LocalKeys.fromKeypair(
+    senderKeypair,
+    client.proofService,
+  );
 
-  // Initialize the sender's private wallet and local authority
+  // Initialize the sender's private wallet and local keys
   // to decrypt transactions and sync balances.
   // The Solana signer and private wallet are derived from the same Ed25519 seed.
   const senderSigner =
@@ -149,6 +154,7 @@ async function main(): Promise<void> {
   // 4. Fetch the ZK proof to prove the sender can spend the balance without revealing asset and amount.
   const transferData = await client.proveTransact(
     transferProofInputs,
+    keys,
   );
 
   // 5. Build the instruction with the state Merkle tree and Solana accounts required for the transfer.
@@ -234,6 +240,7 @@ async function main(): Promise<void> {
   const withdrawalData =
     await client.proveTransact(
       withdrawalProofInputs,
+      keys,
     );
 
   // 5. Build the instruction with the state Merkle tree and Solana accounts required for the withdrawal.
