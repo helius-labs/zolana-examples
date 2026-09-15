@@ -174,34 +174,21 @@ fn main() -> Result<()> {
     let material = MergeMaterial::from_keypair(&sender);
 
     // 3. Send and confirm like any Solana transaction.
-    let device_a_tree = device_a_merge.tree;
     let device_a_submitted = submit_merge_transaction(SubmitMergeTransaction {
         rpc: &client,
         indexer: &client,
         owner,
         payer: &sender_solana,
         material: &material,
-        input_tree: device_a_tree,
+        input_tree: device_a_merge.tree,
         output_tree: tree,
         prover_url: &prover_url,
         prepared: device_a_merge.prepared,
     })?;
+
     // Wait until the indexer can return a Merkle proof for the merged output.
-    IndexerPollConfig::default().poll_until(
-        || {
-            client.get_merkle_proofs(
-                Address::new_from_array(tree.to_bytes()),
-                vec![device_a_submitted.output_hash],
-                None,
-            )
-        },
-        |response| {
-            response
-                .proofs
-                .iter()
-                .any(|proof| proof.leaf == device_a_submitted.output_hash)
-        },
-    )?;
+    wait_for_indexed_output(&client, tree, device_a_submitted.output_hash)?;
+
     let device_a_slot = landed_slot(&client, device_a_submitted.signature)?;
     println!("device A merge tx={}", device_a_submitted.signature);
 
@@ -262,33 +249,19 @@ fn main() -> Result<()> {
     })?;
     // 4. Send and confirm like any Solana transaction.
     // Submission fetches fresh Merkle proofs and current root_index values.
-    let retry_tree = retry_merge.tree;
     let retry_submitted = submit_merge_transaction(SubmitMergeTransaction {
         rpc: &client,
         indexer: &client,
         owner,
         payer: &sender_solana,
         material: &material,
-        input_tree: retry_tree,
+        input_tree: retry_merge.tree,
         output_tree: tree,
         prover_url: &prover_url,
         prepared: retry_merge.prepared,
     })?;
-    IndexerPollConfig::default().poll_until(
-        || {
-            client.get_merkle_proofs(
-                Address::new_from_array(tree.to_bytes()),
-                vec![retry_submitted.output_hash],
-                None,
-            )
-        },
-        |response| {
-            response
-                .proofs
-                .iter()
-                .any(|proof| proof.leaf == retry_submitted.output_hash)
-        },
-    )?;
+    wait_for_indexed_output(&client, tree, retry_submitted.output_hash)?;
+
     // 5. Fetch the sender's outputs again, gated on the retry's slot,
     // and check that one UTXO holds the original 0.3 SOL balance.
     let retry_slot = landed_slot(&client, retry_submitted.signature)?;
@@ -303,6 +276,29 @@ fn main() -> Result<()> {
     assert_eq!(final_balance.utxos.len(), 1);
     println!("device B retry merge tx={}", retry_submitted.signature);
 
+    Ok(())
+}
+
+fn wait_for_indexed_output(
+    client: &ZolanaClient<SolanaRpc>,
+    tree: Address,
+    output_hash: [u8; 32],
+) -> Result<()> {
+    IndexerPollConfig::default().poll_until(
+        || {
+            client.get_merkle_proofs(
+                Address::new_from_array(tree.to_bytes()),
+                vec![output_hash],
+                None,
+            )
+        },
+        |response| {
+            response
+                .proofs
+                .iter()
+                .any(|proof| proof.leaf == output_hash)
+        },
+    )?;
     Ok(())
 }
 
