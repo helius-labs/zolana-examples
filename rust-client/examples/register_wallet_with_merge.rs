@@ -16,9 +16,10 @@ use zolana_wallet::{
     SubmitMergeTransaction, SyncWalletConfig,
 };
 
+// Three deposits of 0.1 SOL each.
 const NOTE_AMOUNT: u64 = 100_000_000;
 const NOTE_COUNT: usize = 3;
-const TOTAL_AMOUNT: u64 = NOTE_AMOUNT * NOTE_COUNT as u64;
+const TOTAL_AMOUNT: u64 = NOTE_AMOUNT * 3;
 
 fn main() -> Result<()> {
     let SetupContext {
@@ -30,15 +31,21 @@ fn main() -> Result<()> {
         sender,
         ..
     } = setup()?;
+
+    // Connect to Helius devnet RPC plus the Photon indexer and prover.
     let client = ZolanaClient::from_urls_allowing_insecure_http(
         SolanaRpc::new(rpc_url),
         &indexer_url,
         &prover_url,
         tree,
     );
+    // The Solana signer and private wallet are derived from the same Ed25519 seed.
     let owner = sender_solana.pubkey();
     let sender_address = sender.shielded_address()?;
 
+    // Register the wallet and enable UTXO merge in one transaction.
+
+    // 1. Build the registration instruction with the wallet's public keys.
     let user_record = user_record_pda(&owner).0;
     let register_ix = register(
         user_record,
@@ -49,7 +56,11 @@ fn main() -> Result<()> {
             viewing_pubkey: *sender_address.viewing_pubkey.as_bytes(),
         },
     );
+
+    // 2. Enable merging for the same wallet.
     let merge_enabled_ix = set_merging_enabled(user_record, owner, true);
+
+    // 3. Send and confirm like any Solana transaction.
     let setup_signature = client.create_and_send_transaction(
         &[register_ix, merge_enabled_ix],
         Address::new_from_array(owner.to_bytes()),
@@ -57,25 +68,42 @@ fn main() -> Result<()> {
     )?;
     println!("register wallet and enable merge tx={setup_signature}");
 
-    let deposits = (0..NOTE_COUNT)
-        .map(|_| {
-            Ok(AssetDeposit {
-                asset: DepositAsset::Sol,
-                view_tag: sender_address.confidential_view_tag()?,
-                owner: sender_address.owner_hash()?,
-                blinding: random_blinding(),
-                amount: NOTE_AMOUNT,
-                utxo_data: None,
-                memo: None,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    // Deposit SOL into the sender's private balance.
+    // A deposit from a public balance reveals sender, recipient, asset and amount.
+
+    // 1. Move public SOL into three private token accounts (UTXOs).
+    // The view tag is the sender's Solana public key in confidential rings.
+    // Used by the indexer to fetch the sender's outputs.
+    let deposit = AssetDeposit {
+        asset: DepositAsset::Sol,
+        view_tag: sender_address.confidential_view_tag()?,
+        owner: sender_address.owner_hash()?,
+        blinding: random_blinding(),
+        amount: NOTE_AMOUNT,
+        utxo_data: None,
+        memo: None,
+    };
+
+    // Each deposit uses fresh blinding to create a distinct note commitment.
+    let deposits = vec![
+        deposit.clone(),
+        AssetDeposit {
+            blinding: random_blinding(),
+            ..deposit.clone()
+        },
+        AssetDeposit {
+            blinding: random_blinding(),
+            ..deposit
+        },
+    ];
     let deposit_ix = Deposit {
         tree,
         depositor: owner,
         deposits,
     }
     .instruction()?;
+
+    // 2. Send and confirm like any Solana transaction.
     let deposit_signature = client.create_and_send_transaction(
         &[deposit_ix],
         Address::new_from_array(owner.to_bytes()),
@@ -84,6 +112,8 @@ fn main() -> Result<()> {
     let deposit_slot = landed_slot(&client, deposit_signature)?;
     println!("deposit tx={deposit_signature}");
 
+    // 3. Sync two devices to the same private wallet, gated on the deposit's slot.
+    // Each device decrypts the transaction outputs locally to read the private balance.
     let assets = AssetRegistry::default();
     let mut device_a = Wallet::new(sender_address, assets.clone())?;
     let mut device_b = Wallet::new(sender_address, assets)?;
@@ -106,6 +136,11 @@ fn main() -> Result<()> {
     assert_eq!(device_a_balance.utxos.len(), NOTE_COUNT);
     assert_eq!(device_b_balance, device_a_balance);
 
+    // Merge two private token accounts into one without changing the private balance.
+    // Merge requires the nullifier key and decrypted UTXOs.
+    // Merge cannot change the owner or spend the balance.
+
+    // 1. Select private token accounts (UTXOs) that make up the private balance for the merge.
     let mut shared_inputs = device_a
         .utxos
         .iter()
@@ -122,6 +157,8 @@ fn main() -> Result<()> {
             .any(|entry| entry.output_context.hash == *hash && !entry.spent)
     }));
 
+    // 2. Build both devices' merges from the same inputs before either is submitted.
+    // This creates the two-device conflict demonstrated below.
     let device_a_merge = create_merge(MergeParams {
         wallet: &device_a,
         keypair: &sender,
@@ -136,6 +173,7 @@ fn main() -> Result<()> {
     })?;
     let material = MergeMaterial::from_keypair(&sender);
 
+    // 3. Send and confirm like any Solana transaction.
     let device_a_tree = device_a_merge.tree;
     let device_a_submitted = submit_merge_transaction(SubmitMergeTransaction {
         rpc: &client,
@@ -148,6 +186,7 @@ fn main() -> Result<()> {
         prover_url: &prover_url,
         prepared: device_a_merge.prepared,
     })?;
+    // Wait until the indexer can return a Merkle proof for the merged output.
     IndexerPollConfig::default().poll_until(
         || {
             client.get_merkle_proofs(
@@ -166,6 +205,8 @@ fn main() -> Result<()> {
     let device_a_slot = landed_slot(&client, device_a_submitted.signature)?;
     println!("device A merge tx={}", device_a_submitted.signature);
 
+    // 4. Submit Device B's stale merge and expect rejection.
+    // Device A has already spent the shared input nullifiers.
     let device_b_tree = device_b_stale_merge.tree;
     let stale_error = match submit_merge_transaction(SubmitMergeTransaction {
         rpc: &client,
@@ -188,6 +229,10 @@ fn main() -> Result<()> {
     };
     println!("device B stale merge rejected: {stale_error}");
 
+    // Recover Device B's stale wallet state and retry the merge.
+
+    // 1. Fetch the sender's outputs again, gated on Device A's merge slot,
+    // and read the remaining private balance.
     sync_wallet_with_config(
         &mut device_b,
         &sender,
@@ -198,6 +243,7 @@ fn main() -> Result<()> {
     assert_eq!(refreshed_balance.amount, TOTAL_AMOUNT);
     assert_eq!(refreshed_balance.utxos.len(), 2);
 
+    // 2. Select the remaining unspent UTXOs from the refreshed wallet.
     let mut refreshed_inputs = device_b
         .utxos
         .iter()
@@ -206,13 +252,16 @@ fn main() -> Result<()> {
         .collect::<Vec<_>>();
     refreshed_inputs.sort();
 
-    // Resubmitting fetches fresh proofs and their current root_index values.
+    // 3. Rebuild the merge from the refreshed wallet.
+    // Do not reuse the merge prepared from stale wallet state.
     let retry_merge = create_merge(MergeParams {
         wallet: &device_b,
         keypair: &sender,
         asset: SOL_MINT,
         inputs: Some(refreshed_inputs),
     })?;
+    // 4. Send and confirm like any Solana transaction.
+    // Submission fetches fresh Merkle proofs and current root_index values.
     let retry_tree = retry_merge.tree;
     let retry_submitted = submit_merge_transaction(SubmitMergeTransaction {
         rpc: &client,
@@ -240,6 +289,8 @@ fn main() -> Result<()> {
                 .any(|proof| proof.leaf == retry_submitted.output_hash)
         },
     )?;
+    // 5. Fetch the sender's outputs again, gated on the retry's slot,
+    // and check that one UTXO holds the original 0.3 SOL balance.
     let retry_slot = landed_slot(&client, retry_submitted.signature)?;
     sync_wallet_with_config(
         &mut device_b,
