@@ -27,13 +27,23 @@ const NOTE_COUNT = 3;
 const TOTAL_AMOUNT = NOTE_AMOUNT * 3n;
 
 const { sender, clientConfig } = await setup();
+
+// Connect to Helius devnet RPC plus the Photon indexer and prover.
 const client = await createZolanaClient(clientConfig);
+
+// Initialize the sender's local keys to decrypt transactions and sync balances.
+// The Solana signer and private wallet are derived from the same Ed25519 seed.
 const signer = sender.toSolanaSigner();
 const owner = signer.address;
 const shieldedAddress = sender.shieldedAddress();
 const keys = LocalKeys.fromKeypair(sender, client.proofService);
+
+// The SDK hands back instructions; the app owns signing and sending.
 const sendAndConfirm = sendAndConfirmFactory(client, signer);
 
+// Register the wallet and enable UTXO merge in one transaction.
+
+// 1. Build the registration instruction with the wallet's public keys.
 const userRecord = await getUserRecordAddress(owner);
 const registerIx = getRegisterInstruction({
   userRecord,
@@ -43,19 +53,31 @@ const registerIx = getRegisterInstruction({
     viewingPublicKey: shieldedAddress.viewingPublicKey.toBytes(),
   },
 });
+
+// 2. Enable merging for the same wallet.
 const enableMergingIx = getSetMergingEnabledInstruction({
   userRecord,
   owner: signer,
   enabled: true,
 });
+
+// 3. Send and confirm like any Solana transaction.
 const setupTx = await sendAndConfirm([registerIx, enableMergingIx]);
 console.log(`register and enable merge tx=${setupTx.signature}`);
 
+// Deposit SOL into the sender's private balance.
+// A deposit from a public balance reveals sender, recipient, asset and amount.
+
+// 1. Move public SOL into three private token accounts (UTXOs).
+// The view tag is the sender's Solana public key in confidential rings.
+// Used by the indexer to fetch the sender's outputs.
 const recipient = {
   asset: DepositAsset.sol(),
   viewTag: shieldedAddress.confidentialViewTag(),
   recipientOwnerHash: shieldedAddress.ownerHash(),
 };
+
+// Each deposit uses fresh blinding to create a distinct note commitment.
 const deposits = [
   { ...recipient, amount: NOTE_AMOUNT, blinding: randomBlinding() },
   { ...recipient, amount: NOTE_AMOUNT, blinding: randomBlinding() },
@@ -66,9 +88,13 @@ const depositIx = await getDepositInstructionAsync({
   depositor: signer,
   deposits,
 });
+
+// 2. Send and confirm like any Solana transaction.
 const depositTx = await sendAndConfirm([depositIx]);
 console.log(`deposit tx=${depositTx.signature}`);
 
+// 3. Sync two devices to the same private wallet, gated on the deposit's slot.
+// Each device decrypts the transaction outputs locally to read the private balance.
 const deviceA = new Wallet({
   identity: shieldedAddress,
 });
@@ -101,6 +127,11 @@ if (
   throw new Error("expected both devices to hold three notes totaling 0.3 SOL");
 }
 
+// Merge two private token accounts into one without changing the private balance.
+// Merge requires the nullifier key and decrypted UTXOs.
+// Merge cannot change the owner or spend the balance.
+
+// 1. Select private token accounts (UTXOs) that make up the private balance for the merge.
 const sharedInputs = deviceA
   .utxos()
   .filter((entry) => !entry.spent && entry.utxo.asset === SOL_MINT)
@@ -110,6 +141,8 @@ if (sharedInputs.length !== 2) {
   throw new Error(`expected 2 merge inputs, got ${sharedInputs.length}`);
 }
 
+// 2. Build both devices' merges from the same inputs before either is submitted.
+// This creates the two-device conflict demonstrated below.
 const [deviceAMerge, deviceBStaleMerge] = await Promise.all([
   buildMergeTransaction({
     client,
@@ -126,9 +159,13 @@ const [deviceAMerge, deviceBStaleMerge] = await Promise.all([
     inputs: sharedInputs,
   }),
 ]);
+
+// 3. Send and confirm like any Solana transaction.
 const deviceATx = await signAndConfirmTransaction(client, deviceAMerge, signer);
 console.log(`device A merge tx=${deviceATx.signature}`);
 
+// 4. Submit Device B's stale merge and expect rejection.
+// Device A has already spent the shared input nullifiers.
 const staleSubmission = await signAndConfirmTransaction(
   client,
   deviceBStaleMerge,
@@ -144,6 +181,10 @@ if ("transaction" in staleSubmission) {
 }
 console.log(`device B stale merge rejected: ${String(staleSubmission.error)}`);
 
+// Recover Device B's stale wallet state and retry the merge.
+
+// 1. Fetch the sender's outputs again, gated on Device A's merge slot,
+// and read the remaining private balance.
 await syncWallet({
   wallet: deviceB,
   keys,
@@ -160,10 +201,14 @@ if (
   );
 }
 
+// 2. Select the remaining unspent UTXOs from the refreshed wallet.
 const refreshedInputs = deviceB
   .utxos()
   .filter((entry) => !entry.spent && entry.utxo.asset === SOL_MINT)
   .map((entry) => entry.outputContext.hash);
+
+// 3. Rebuild the merge with fresh Merkle proofs and current rootIndex values.
+// Do not resend the transaction built from stale wallet state.
 const retryMerge = await buildMergeTransaction({
   client,
   wallet: deviceB,
@@ -171,8 +216,12 @@ const retryMerge = await buildMergeTransaction({
   feePayer: owner,
   inputs: refreshedInputs,
 });
+
+// 4. Send and confirm like any Solana transaction.
 const retryTx = await signAndConfirmTransaction(client, retryMerge, signer);
 
+// 5. Fetch the sender's outputs again, gated on the retry's slot,
+// and check that one UTXO holds the original 0.3 SOL balance.
 await syncWallet({
   wallet: deviceB,
   keys,
