@@ -3,16 +3,14 @@ import "dotenv/config";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 
+import { getTransferSolInstruction } from "@solana-program/system";
 import {
-  AccountRole,
-  address,
   appendTransactionMessageInstructions,
   assertIsTransactionWithBlockhashLifetime,
   createSolanaRpc,
   createSolanaRpcSubscriptions,
   createTransactionMessage,
   getSignatureFromTransaction,
-  pipe,
   sendAndConfirmTransactionFactory,
   sendTransactionWithoutConfirmingFactory,
   setTransactionMessageFeePayerSigner,
@@ -58,15 +56,16 @@ const PROVER_URL =
 // localnet: const RPC_URL = "http://127.0.0.1:8899";
 // localnet: const INDEXER_URL = "http://127.0.0.1:8784";
 // localnet: const PROVER_URL = "http://127.0.0.1:3001";
-const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
 const SENDER_LAMPORTS = 2_000_000_000n;
 
 function expandedPath(value: string): string {
-  return value === "~"
-    ? homedir()
-    : value.startsWith("~/")
-      ? `${homedir()}/${value.slice(2)}`
-      : value;
+  if (value === "~") {
+    return homedir();
+  }
+  if (value.startsWith("~/")) {
+    return `${homedir()}/${value.slice(2)}`;
+  }
+  return value;
 }
 
 async function funderKeypair(): Promise<ShieldedKeypair> {
@@ -116,25 +115,6 @@ function subscriptionsUrl(rpcUrl: string): string {
   return url.href;
 }
 
-function transferSolIx(
-  from: Address,
-  to: Address,
-  lamports: bigint,
-): Instruction {
-  const data = new Uint8Array(12);
-  const view = new DataView(data.buffer);
-  view.setUint32(0, 2, true);
-  view.setBigUint64(4, lamports, true);
-  return {
-    programAddress: SYSTEM_PROGRAM,
-    accounts: [
-      { address: from, role: AccountRole.WRITABLE_SIGNER },
-      { address: to, role: AccountRole.WRITABLE },
-    ],
-    data,
-  };
-}
-
 async function fundSender(
   rpcUrl: string,
   funder: TransactionSigner,
@@ -146,19 +126,22 @@ async function fundSender(
     rpcSubscriptions: createSolanaRpcSubscriptions(subscriptionsUrl(rpcUrl)),
   });
   const { value: lifetime } = await rpc.getLatestBlockhash().send();
-  const signed = await signTransactionMessageWithSigners(
-    pipe(
-      createTransactionMessage({ version: 0 }),
-      (message) => setTransactionMessageFeePayerSigner(funder, message),
-      (message) =>
-        setTransactionMessageLifetimeUsingBlockhash(lifetime, message),
-      (message) =>
-        appendTransactionMessageInstructions(
-          [transferSolIx(funder.address, recipient, SENDER_LAMPORTS)],
-          message,
-        ),
-    ),
+  const fundingIx = getTransferSolInstruction({
+    source: funder,
+    destination: recipient,
+    amount: SENDER_LAMPORTS,
+  });
+  const message = createTransactionMessage({ version: 0 });
+  const withPayer = setTransactionMessageFeePayerSigner(funder, message);
+  const withLifetime = setTransactionMessageLifetimeUsingBlockhash(
+    lifetime,
+    withPayer,
   );
+  const withInstructions = appendTransactionMessageInstructions(
+    [fundingIx],
+    withLifetime,
+  );
+  const signed = await signTransactionMessageWithSigners(withInstructions);
   assertIsTransactionWithBlockhashLifetime(signed);
   await sendAndConfirm(signed, { commitment: "confirmed" });
 }
@@ -193,7 +176,7 @@ export async function setup(): Promise<ExampleSetup> {
 export function sendAndConfirmFactory(
   client: Client,
   feePayer: TransactionSigner,
-): (instructions: readonly Instruction[]) => Promise<ConfirmedTransaction> {
+) {
   const sendTransaction = sendTransactionWithoutConfirmingFactory({
     rpc: client.solanaRpc,
   });
@@ -204,16 +187,17 @@ export function sendAndConfirmFactory(
     const { value: lifetime } = await client.solanaRpc
       .getLatestBlockhash()
       .send();
-    const signed = await signTransactionMessageWithSigners(
-      pipe(
-        createTransactionMessage({ version: 0 }),
-        (message) => setTransactionMessageFeePayerSigner(feePayer, message),
-        (message) =>
-          setTransactionMessageLifetimeUsingBlockhash(lifetime, message),
-        (message) =>
-          appendTransactionMessageInstructions(instructions, message),
-      ),
+    const message = createTransactionMessage({ version: 0 });
+    const withPayer = setTransactionMessageFeePayerSigner(feePayer, message);
+    const withLifetime = setTransactionMessageLifetimeUsingBlockhash(
+      lifetime,
+      withPayer,
     );
+    const withInstructions = appendTransactionMessageInstructions(
+      instructions,
+      withLifetime,
+    );
+    const signed = await signTransactionMessageWithSigners(withInstructions);
     assertIsTransactionWithBlockhashLifetime(signed);
     await sendTransaction(signed, { commitment: "confirmed" });
     const signature = getSignatureFromTransaction(signed);

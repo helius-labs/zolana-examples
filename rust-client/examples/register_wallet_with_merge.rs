@@ -41,6 +41,7 @@ fn main() -> Result<()> {
     );
     // The Solana signer and private wallet are derived from the same Ed25519 seed.
     let owner = sender_solana.pubkey();
+    let payer_address = Address::new_from_array(owner.to_bytes());
     let sender_address = sender.shielded_address()?;
 
     // Register the wallet and enable UTXO merge in one transaction.
@@ -63,7 +64,7 @@ fn main() -> Result<()> {
     // 3. Send and confirm like any Solana transaction.
     let setup_signature = client.create_and_send_transaction(
         &[register_ix, merge_enabled_ix],
-        Address::new_from_array(owner.to_bytes()),
+        payer_address,
         &[&sender_solana],
     )?;
     println!("register wallet and enable merge tx={setup_signature}");
@@ -104,11 +105,8 @@ fn main() -> Result<()> {
     .instruction()?;
 
     // 2. Send and confirm like any Solana transaction.
-    let deposit_signature = client.create_and_send_transaction(
-        &[deposit_ix],
-        Address::new_from_array(owner.to_bytes()),
-        &[&sender_solana],
-    )?;
+    let deposit_signature =
+        client.create_and_send_transaction(&[deposit_ix], payer_address, &[&sender_solana])?;
     let deposit_slot = landed_slot(&client, deposit_signature)?;
     println!("deposit tx={deposit_signature}");
 
@@ -141,21 +139,23 @@ fn main() -> Result<()> {
     // Merge cannot change the owner or spend the balance.
 
     // 1. Select private token accounts (UTXOs) that make up the private balance for the merge.
-    let mut shared_inputs = device_a
-        .utxos
-        .iter()
-        .filter(|entry| !entry.spent && entry.utxo.asset == SOL_MINT && is_plain_utxo(entry))
-        .map(|entry| entry.output_context.hash)
-        .collect::<Vec<_>>();
+    let mut shared_inputs = Vec::new();
+    for entry in &device_a.utxos {
+        if entry.spent || entry.utxo.asset != SOL_MINT || !is_plain_utxo(entry) {
+            continue;
+        }
+        shared_inputs.push(entry.output_context.hash);
+    }
     shared_inputs.sort();
     shared_inputs.truncate(2);
     assert_eq!(shared_inputs.len(), 2);
-    assert!(shared_inputs.iter().all(|hash| {
-        device_b
+    for hash in &shared_inputs {
+        let available = device_b
             .utxos
             .iter()
-            .any(|entry| entry.output_context.hash == *hash && !entry.spent)
-    }));
+            .any(|entry| entry.output_context.hash == *hash && !entry.spent);
+        assert!(available, "shared input missing from device B");
+    }
 
     // 2. Build both devices' merges from the same inputs before either is submitted.
     // This creates the two-device conflict demonstrated below.
@@ -174,7 +174,7 @@ fn main() -> Result<()> {
     let material = MergeMaterial::from_keypair(&sender);
 
     // 3. Send and confirm like any Solana transaction.
-    let device_a_submitted = submit_merge_transaction(SubmitMergeTransaction {
+    let request = SubmitMergeTransaction {
         rpc: &client,
         indexer: &client,
         owner,
@@ -184,7 +184,8 @@ fn main() -> Result<()> {
         output_tree: tree,
         prover_url: &prover_url,
         prepared: device_a_merge.prepared,
-    })?;
+    };
+    let device_a_submitted = submit_merge_transaction(request)?;
 
     // Wait until the indexer can return a Merkle proof for the merged output.
     wait_for_indexed_output(&client, tree, device_a_submitted.output_hash)?;
@@ -195,7 +196,7 @@ fn main() -> Result<()> {
     // 4. Submit Device B's stale merge and expect rejection.
     // Device A has already spent the shared input nullifiers.
     let device_b_tree = device_b_stale_merge.tree;
-    let stale_error = match submit_merge_transaction(SubmitMergeTransaction {
+    let request = SubmitMergeTransaction {
         rpc: &client,
         indexer: &client,
         owner,
@@ -205,7 +206,9 @@ fn main() -> Result<()> {
         output_tree: tree,
         prover_url: &prover_url,
         prepared: device_b_stale_merge.prepared,
-    }) {
+    };
+    let result = submit_merge_transaction(request);
+    let stale_error = match result {
         Ok(submitted) => {
             return Err(anyhow!(
                 "stale device B merge unexpectedly succeeded: {}",
@@ -231,12 +234,13 @@ fn main() -> Result<()> {
     assert_eq!(refreshed_balance.utxos.len(), 2);
 
     // 2. Select the remaining unspent UTXOs from the refreshed wallet.
-    let mut refreshed_inputs = device_b
-        .utxos
-        .iter()
-        .filter(|entry| !entry.spent && entry.utxo.asset == SOL_MINT && is_plain_utxo(entry))
-        .map(|entry| entry.output_context.hash)
-        .collect::<Vec<_>>();
+    let mut refreshed_inputs = Vec::new();
+    for entry in &device_b.utxos {
+        if entry.spent || entry.utxo.asset != SOL_MINT || !is_plain_utxo(entry) {
+            continue;
+        }
+        refreshed_inputs.push(entry.output_context.hash);
+    }
     refreshed_inputs.sort();
 
     // 3. Rebuild the merge from the refreshed wallet.
@@ -249,7 +253,7 @@ fn main() -> Result<()> {
     })?;
     // 4. Send and confirm like any Solana transaction.
     // Submission fetches fresh Merkle proofs and current root_index values.
-    let retry_submitted = submit_merge_transaction(SubmitMergeTransaction {
+    let request = SubmitMergeTransaction {
         rpc: &client,
         indexer: &client,
         owner,
@@ -259,7 +263,8 @@ fn main() -> Result<()> {
         output_tree: tree,
         prover_url: &prover_url,
         prepared: retry_merge.prepared,
-    })?;
+    };
+    let retry_submitted = submit_merge_transaction(request)?;
     wait_for_indexed_output(&client, tree, retry_submitted.output_hash)?;
 
     // 5. Fetch the sender's outputs again, gated on the retry's slot,
@@ -284,29 +289,25 @@ fn wait_for_indexed_output(
     tree: Address,
     output_hash: [u8; 32],
 ) -> Result<()> {
+    let tree = Address::new_from_array(tree.to_bytes());
     IndexerPollConfig::default().poll_until(
-        || {
-            client.get_merkle_proofs(
-                Address::new_from_array(tree.to_bytes()),
-                vec![output_hash],
-                None,
-            )
-        },
+        || client.get_merkle_proofs(tree, vec![output_hash], None),
         |response| {
-            response
-                .proofs
-                .iter()
-                .any(|proof| proof.leaf == output_hash)
+            for proof in &response.proofs {
+                if proof.leaf == output_hash {
+                    return true;
+                }
+            }
+            false
         },
     )?;
     Ok(())
 }
 
 fn landed_slot(client: &ZolanaClient<SolanaRpc>, signature: Signature) -> Result<u64> {
-    client
-        .get_signature_statuses(vec![signature])?
-        .first()
-        .and_then(|status| status.as_ref())
-        .map(|status| status.slot)
-        .ok_or_else(|| anyhow!("transaction status missing after confirmation"))
+    let statuses = client.get_signature_statuses(vec![signature])?;
+    match statuses.first() {
+        Some(Some(status)) => Ok(status.slot),
+        _ => Err(anyhow!("transaction status missing after confirmation")),
+    }
 }

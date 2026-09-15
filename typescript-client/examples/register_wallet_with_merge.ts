@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+
 import {
   LocalKeys,
   SOL_MINT,
@@ -101,19 +103,14 @@ const deviceA = new Wallet({
 const deviceB = new Wallet({
   identity: shieldedAddress,
 });
+const depositSync = {
+  keys,
+  client,
+  config: { requireSlot: depositTx.slot },
+};
 await Promise.all([
-  syncWallet({
-    wallet: deviceA,
-    keys,
-    client,
-    config: { requireSlot: depositTx.slot },
-  }),
-  syncWallet({
-    wallet: deviceB,
-    keys,
-    client,
-    config: { requireSlot: depositTx.slot },
-  }),
+  syncWallet({ ...depositSync, wallet: deviceA }),
+  syncWallet({ ...depositSync, wallet: deviceB }),
 ]);
 
 const deviceABalance = deviceA.balance(SOL_MINT);
@@ -132,32 +129,31 @@ if (
 // Merge cannot change the owner or spend the balance.
 
 // 1. Select private token accounts (UTXOs) that make up the private balance for the merge.
-const sharedInputs = deviceA
-  .utxos()
-  .filter((entry) => !entry.spent && entry.utxo.asset === SOL_MINT)
-  .slice(0, 2)
-  .map((entry) => entry.outputContext.hash);
+const sharedInputs = [];
+for (const entry of deviceA.utxos()) {
+  if (entry.spent || entry.utxo.asset !== SOL_MINT) {
+    continue;
+  }
+  sharedInputs.push(entry.outputContext.hash);
+  if (sharedInputs.length === 2) {
+    break;
+  }
+}
 if (sharedInputs.length !== 2) {
   throw new Error(`expected 2 merge inputs, got ${sharedInputs.length}`);
 }
 
 // 2. Build both devices' merges from the same inputs before either is submitted.
 // This creates the two-device conflict demonstrated below.
+const mergeParams = {
+  client,
+  keys,
+  feePayer: owner,
+  inputs: sharedInputs,
+};
 const [deviceAMerge, deviceBStaleMerge] = await Promise.all([
-  buildMergeTransaction({
-    client,
-    wallet: deviceA,
-    keys,
-    feePayer: owner,
-    inputs: sharedInputs,
-  }),
-  buildMergeTransaction({
-    client,
-    wallet: deviceB,
-    keys,
-    feePayer: owner,
-    inputs: sharedInputs,
-  }),
+  buildMergeTransaction({ ...mergeParams, wallet: deviceA }),
+  buildMergeTransaction({ ...mergeParams, wallet: deviceB }),
 ]);
 
 // 3. Send and confirm like any Solana transaction.
@@ -166,20 +162,11 @@ console.log(`device A merge tx=${deviceATx.signature}`);
 
 // 4. Submit Device B's stale merge and expect rejection.
 // Device A has already spent the shared input nullifiers.
-const staleSubmission = await signAndConfirmTransaction(
-  client,
-  deviceBStaleMerge,
-  signer,
-).then(
-  (transaction) => ({ transaction }),
-  (error) => ({ error }),
+await assert.rejects(
+  () => signAndConfirmTransaction(client, deviceBStaleMerge, signer),
+  "stale device B merge unexpectedly succeeded",
 );
-if ("transaction" in staleSubmission) {
-  throw new Error(
-    `stale device B merge unexpectedly succeeded: ${staleSubmission.transaction.signature}`,
-  );
-}
-console.log(`device B stale merge rejected: ${String(staleSubmission.error)}`);
+console.log("device B stale merge rejected");
 
 // Recover Device B's stale wallet state and retry the merge.
 
@@ -202,10 +189,13 @@ if (
 }
 
 // 2. Select the remaining unspent UTXOs from the refreshed wallet.
-const refreshedInputs = deviceB
-  .utxos()
-  .filter((entry) => !entry.spent && entry.utxo.asset === SOL_MINT)
-  .map((entry) => entry.outputContext.hash);
+const refreshedInputs = [];
+for (const entry of deviceB.utxos()) {
+  if (entry.spent || entry.utxo.asset !== SOL_MINT) {
+    continue;
+  }
+  refreshedInputs.push(entry.outputContext.hash);
+}
 
 // 3. Rebuild the merge with fresh Merkle proofs and current rootIndex values.
 // Do not resend the transaction built from stale wallet state.
