@@ -1,3 +1,9 @@
 {
-  "printWidth": 50
+  "printWidth": 50,
+  "overrides": [
+    {
+      "files": ["register_wallet_with_merge.ts"],
+      "options": { "printWidth": 80 }
+    }
+  ]
 }
