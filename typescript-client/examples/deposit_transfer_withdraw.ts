@@ -1,8 +1,12 @@
 import {
   SOL_MINT,
+  ShieldedKeypair,
   createZolanaClient,
 } from "@heliuslabs/zolana";
-import { atSlot } from "@heliuslabs/zolana/client";
+import {
+  LocalKeys,
+  atSlot,
+} from "@heliuslabs/zolana/client";
 import {
   depositInstruction,
   transactInstruction,
@@ -19,20 +23,17 @@ import {
 } from "@heliuslabs/zolana/transaction";
 
 import {
+  cliKeypair,
   sendAndConfirmFactory,
   setup,
 } from "../src/lib.js";
 
-const DEPOSIT_AMOUNT = 1_000_000_000n;
-const TRANSFER_AMOUNT = 300_000_000n;
-const WITHDRAW_AMOUNT = 300_000_000n;
+const DEPOSIT_AMOUNT = 10_000_000n;
+const TRANSFER_AMOUNT = 3_000_000n;
+const WITHDRAW_AMOUNT = 3_000_000n;
 
 async function main(): Promise<void> {
-  const {
-    sender: senderKeypair,
-    recipient: recipientKeypair,
-    clientConfig,
-  } = await setup();
+  const { clientConfig } = await setup();
 
   // Connect to Helius devnet RPC plus the Photon indexer and prover.
   const client =
@@ -41,12 +42,16 @@ async function main(): Promise<void> {
   // Initialize the sender's private wallet and local authority
   // to decrypt transactions and sync balances.
   // The Solana signer and private wallet are derived from the same Ed25519 seed.
-  const senderSigner =
-    senderKeypair.toSolanaSigner();
-  const senderAddress =
-    senderKeypair.shieldedAddress();
-  const recipient =
-    recipientKeypair.shieldedAddress();
+  const sender = ShieldedKeypair.fromKeypair(
+    await cliKeypair(),
+  );
+  const recipient = ShieldedKeypair.generate();
+  const senderSigner = sender.toSolanaSigner();
+  const senderAddress = sender.shieldedAddress();
+  const senderKeys = LocalKeys.fromKeypair(
+    sender,
+    client.proofService,
+  );
 
   // The SDK hands back instructions; the app owns signing and sending.
   const sendAndConfirm = sendAndConfirmFactory(
@@ -87,20 +92,22 @@ async function main(): Promise<void> {
     depositIx,
   ]);
 
-  // 3. Fetch transaction outputs from the indexer, gated on the deposit's slot.
-  // The indexer returns encrypted outputs by view tag.
+  // 3. Fetch this transaction's outputs, gated on its confirmed slot.
   const depositResponse =
-    await client.getShieldedTransactionsByTags(
-      { tags: [senderViewTag] },
+    await client.getShieldedTransactionsBySignature(
+      depositTx.signature,
       atSlot(depositTx.slot),
     );
 
-  // 4. The sender decrypts the transaction outputs locally to read the private balance.
+  // 4. The sender decrypts the transaction outputs locally to read the funds deposited in this run.
   const balancesAfterDeposit =
     await decryptToBalances({
-      keypair: senderKeypair,
+      keypair: sender,
       registry: assets,
-      transactions: depositResponse.transactions,
+      transactions:
+        depositResponse.transactions.map(
+          ({ transaction }) => transaction,
+        ),
     });
   const depositBalance =
     balancesAfterDeposit.balance(SOL_MINT);
@@ -126,7 +133,7 @@ async function main(): Promise<void> {
   const transferInput =
     ProofInputUtxo.fromKeypair(
       transferUtxo,
-      senderKeypair,
+      sender,
     );
 
   // 3. Build and sign the confidential transfer.
@@ -137,18 +144,19 @@ async function main(): Promise<void> {
     senderSigner.address,
   );
   transfer.send(
-    recipient,
+    recipient.shieldedAddress(),
     SOL_MINT,
     TRANSFER_AMOUNT,
   );
   const transferProofInputs = transfer.sign(
-    senderKeypair,
+    sender,
     assets,
   );
 
   // 4. Fetch the ZK proof to prove the sender can spend the balance without revealing asset and amount.
   const transferData = await client.proveTransact(
     transferProofInputs,
+    senderKeys,
   );
 
   // 5. Build the instruction with the state Merkle tree and Solana accounts required for the transfer.
@@ -167,18 +175,20 @@ async function main(): Promise<void> {
     transferInstruction,
   ]);
 
-  // 7. Fetch the sender's outputs again, gated on the transfer's slot,
-  // and read the remaining private balance.
+  // 7. Fetch this transaction's outputs, gated on its confirmed slot.
   const transferResponse =
-    await client.getShieldedTransactionsByTags(
-      { tags: [senderViewTag] },
+    await client.getShieldedTransactionsBySignature(
+      transferTx.signature,
       atSlot(transferTx.slot),
     );
   const balancesAfterTransfer =
     await decryptToBalances({
-      keypair: senderKeypair,
+      keypair: sender,
       registry: assets,
-      transactions: transferResponse.transactions,
+      transactions:
+        transferResponse.transactions.map(
+          ({ transaction }) => transaction,
+        ),
     });
   const transferBalance =
     balancesAfterTransfer.balance(SOL_MINT);
@@ -187,7 +197,7 @@ async function main(): Promise<void> {
     DEPOSIT_AMOUNT - TRANSFER_AMOUNT
   ) {
     throw new Error(
-      `expected remaining amount ${DEPOSIT_AMOUNT - TRANSFER_AMOUNT}, got ${transferBalance.amount}`,
+      `expected remaining amount from this run ${DEPOSIT_AMOUNT - TRANSFER_AMOUNT}, got ${transferBalance.amount}`,
     );
   }
   if (transferBalance.utxos.length !== 1) {
@@ -207,7 +217,7 @@ async function main(): Promise<void> {
   const withdrawalInput =
     ProofInputUtxo.fromKeypair(
       withdrawalUtxo,
-      senderKeypair,
+      sender,
     );
 
   // 3. Build and sign the private-to-public withdrawal.
@@ -226,7 +236,7 @@ async function main(): Promise<void> {
     }),
   );
   const withdrawalProofInputs = withdrawal.sign(
-    senderKeypair,
+    sender,
     assets,
   );
 
@@ -234,6 +244,7 @@ async function main(): Promise<void> {
   const withdrawalData =
     await client.proveTransact(
       withdrawalProofInputs,
+      senderKeys,
     );
 
   // 5. Build the instruction with the state Merkle tree and Solana accounts required for the withdrawal.
@@ -253,19 +264,20 @@ async function main(): Promise<void> {
     withdrawalInstruction,
   ]);
 
-  // 7. Fetch the sender's outputs again, gated on the withdrawal's slot,
-  // and read the remaining private balance.
+  // 7. Fetch this transaction's outputs, gated on its confirmed slot.
   const withdrawalResponse =
-    await client.getShieldedTransactionsByTags(
-      { tags: [senderViewTag] },
+    await client.getShieldedTransactionsBySignature(
+      withdrawalTx.signature,
       atSlot(withdrawalTx.slot),
     );
   const balancesAfterWithdrawal =
     await decryptToBalances({
-      keypair: senderKeypair,
+      keypair: sender,
       registry: assets,
       transactions:
-        withdrawalResponse.transactions,
+        withdrawalResponse.transactions.map(
+          ({ transaction }) => transaction,
+        ),
     });
   const withdrawalBalance =
     balancesAfterWithdrawal.balance(SOL_MINT);
@@ -276,7 +288,7 @@ async function main(): Promise<void> {
       WITHDRAW_AMOUNT
   ) {
     throw new Error(
-      `expected remaining amount ${DEPOSIT_AMOUNT - TRANSFER_AMOUNT - WITHDRAW_AMOUNT}, got ${withdrawalBalance.amount}`,
+      `expected remaining amount from this run ${DEPOSIT_AMOUNT - TRANSFER_AMOUNT - WITHDRAW_AMOUNT}, got ${withdrawalBalance.amount}`,
     );
   }
   if (withdrawalBalance.utxos.length !== 1) {
