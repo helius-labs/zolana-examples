@@ -18,6 +18,10 @@
 | [`sync_balance`](typescript-client/examples/sync_balance.ts) | Read the private SOL and SPL balances. |
 | [`read_history`](typescript-client/examples/read_history.ts) | Read the private transaction history. |
 
+### [Embedded private wallet](embedded-private-wallet/README.md)
+
+React + Vite app with Turnkey signing and TVC private keys for deposit, private transfer, and withdrawal.
+
 ### Program examples
 
 |  |  |
@@ -26,6 +30,6 @@
 | [`escrow-program/`](escrow-program/) | A timelock escrow on SPP: lock a private balance until a deadline, then release or reclaim. |
 
 ## Documentation
-- [Demo](https://helius-privacy-demo.fly.dev/)
+- [Demo](https://helius.dev/privacy/demo)
 - [Documentation](https://helius.dev/docs/privacy)
 - [Source Code](https://github.com/helius-labs/zolana)
