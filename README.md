@@ -24,6 +24,9 @@
 |---------|-------------|
 | [`swap-program/`](swap-program/) | A confidential swap between a maker and a taker. |
 | [`escrow-program/`](escrow-program/) | A timelock escrow on SPP: lock a private balance until a deadline, then release or reclaim. |
+| [`compression-program/`](compression-program/) | Create and update plaintext compressed accounts. |
+| [`dynamic-swap-program/`](dynamic-swap-program/) | Create a pair, update its price, and settle or refund an escrow. |
+| [`rfq/`](rfq/) | Co-sign a private swap without escrow or a custom program. |
 
 ## Documentation
 - [Demo](https://helius-privacy-demo.fly.dev/)
