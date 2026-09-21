@@ -12,6 +12,7 @@ import {
   getSignatureFromTransaction,
   pipe,
   sendTransactionWithoutConfirmingFactory,
+  setTransactionMessageConfig,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
@@ -45,10 +46,8 @@ export interface ConfirmedTransaction {
 
 // Will be exposed through a single devnet URL. Currently exposed as they are.
 const RPC_URL = "https://devnet.helius-rpc.com";
-const INDEXER_URL =
-  "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com";
-const PROVER_URL =
-  "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com:3001";
+const INDEXER_URL = "https://d2xah7tnhdhcom.cloudfront.net";
+const PROVER_URL = "https://d21ni15goiip6l.cloudfront.net";
 // localnet: const RPC_URL = "http://127.0.0.1:8899";
 // localnet: const INDEXER_URL = "http://127.0.0.1:8784";
 // localnet: const PROVER_URL = "http://127.0.0.1:3001";
@@ -101,8 +100,6 @@ function clientConfigFromEnv(): ZolanaClientConfig {
     solanaRpcUrl,
     indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || INDEXER_URL,
     proverUrl: process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL,
-    // The Photon/prover ALB is HTTP. Loopback HTTP is already allowed.
-    allowInsecureHttp: true,
   });
 }
 
@@ -160,10 +157,18 @@ export function sendAndConfirmFactory(
       .send();
     const signed = await signTransactionMessageWithSigners(
       pipe(
-        createTransactionMessage({ version: 0 }),
+        createTransactionMessage({ version: 1 }),
         (message) => setTransactionMessageFeePayerSigner(feePayer, message),
         (message) =>
           setTransactionMessageLifetimeUsingBlockhash(lifetime, message),
+        (message) =>
+          setTransactionMessageConfig(
+            {
+              computeUnitLimit: 450_000,
+              loadedAccountsDataSizeLimit: 64 * 1024 * 1024,
+            },
+            message,
+          ),
         (message) =>
           appendTransactionMessageInstructions(instructions, message),
       ),

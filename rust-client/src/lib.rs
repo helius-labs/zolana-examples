@@ -4,12 +4,12 @@
 use anyhow::{anyhow, Result};
 use solana_address::Address;
 use solana_keypair::{read_keypair_file, Keypair};
-use zolana_interface::DEFAULT_TREE_ADDRESS;
+use zolana_interface::pda;
 
 /// The RPC, Photon indexer, and prover the examples talk to.
 pub const RPC_URL: &str = "https://devnet.helius-rpc.com";
-pub const INDEXER_URL: &str = "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com";
-pub const PROVER_URL: &str = "http://zolnet-devnet-1779374825.eu-north-1.elb.amazonaws.com:3001";
+pub const INDEXER_URL: &str = "https://d2xah7tnhdhcom.cloudfront.net";
+pub const PROVER_URL: &str = "https://d21ni15goiip6l.cloudfront.net";
 // localnet: pub const RPC_URL: &str = "http://127.0.0.1:8899";
 // localnet: pub const INDEXER_URL: &str = "http://127.0.0.1:8784";
 // localnet: pub const PROVER_URL: &str = "http://127.0.0.1:3001";
@@ -23,13 +23,11 @@ pub struct SetupContext {
 }
 
 /// Read the environment settings and the `API_KEY` for the Helius devnet RPC.
-/// Defaults are Helius plus the Photon/prover ALB. Toggle the `localnet:`
+/// Defaults are Helius plus the Photon/prover HTTPS endpoints. Toggle the `localnet:`
 /// lines to run against a local stack instead.
 pub fn setup() -> Result<SetupContext> {
     dotenvy::dotenv().ok();
-    let tree = DEFAULT_TREE_ADDRESS
-        .parse()
-        .map_err(|e| anyhow!("parse tree address: {e}"))?;
+    let tree = pda::tree(0);
     let api_key = std::env::var("API_KEY").map_err(|_| anyhow!("set API_KEY"))?;
     let rpc_url = format!("{RPC_URL}/?api-key={api_key}");
     // localnet: let rpc_url = RPC_URL.to_string();

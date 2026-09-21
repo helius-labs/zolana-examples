@@ -8,7 +8,7 @@ use zolana_interface::instruction::{
     AssetDeposit, Deposit, DepositAsset, Transact, TransactInterfaceTransferAccounts,
     TransactSolTransferAccounts,
 };
-use zolana_keypair::{random_blinding, ShieldedKeypair};
+use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::{
     decrypt_transactions,
     instructions::{
@@ -31,13 +31,7 @@ fn main() -> Result<()> {
     } = setup()?;
 
     // Connect to the RPC, indexer, and prover.
-    // Photon and the prover are HTTP on this ALB, so the constructor permits that.
-    let client = ZolanaClient::from_urls_allowing_insecure_http(
-        SolanaRpc::new(rpc_url),
-        &indexer_url,
-        prover_url,
-        tree,
-    );
+    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url, tree)?;
 
     // Mints that are registered with Solana Rings for privacy.
     let assets = AssetRegistry::default();
@@ -69,7 +63,6 @@ fn main() -> Result<()> {
                 // SPL: }),
                 view_tag: sender_shielded_address.confidential_view_tag()?,
                 owner: sender_shielded_address.owner_hash()?,
-                blinding: random_blinding(),
                 amount: DEPOSIT_AMOUNT,
                 utxo_data: None,
                 memo: None,
@@ -79,8 +72,12 @@ fn main() -> Result<()> {
 
         // 2. Send and confirm like any Solana transaction; the landed slot gates
         // the indexer fetch below.
-        let signature =
-            client.create_and_send_transaction(&[deposit_ix], sender.pubkey(), &[&sender])?;
+        let signature = client.create_and_send_transaction(
+            &[deposit_ix],
+            sender.pubkey(),
+            &[&sender],
+            client.compute_budget(),
+        )?;
         let slot = landed_slot(&client, signature)?;
 
         // 3. Fetch this transaction's outputs, gated on its confirmed slot.
@@ -140,7 +137,7 @@ fn main() -> Result<()> {
         // 5. Construct the instruction.
         let transfer_ix = Transact {
             payer: sender.pubkey(),
-            input_tree: tree,
+            input_trees: vec![tree],
             output_tree: tree,
             owner_signers: Vec::new(),
             interface_transfer_accounts: Vec::new(),
@@ -149,8 +146,12 @@ fn main() -> Result<()> {
         .instruction();
 
         // 6. Send and confirm like any Solana transaction; confirmation yields the landed slot.
-        let signature =
-            client.create_and_send_transaction(&[transfer_ix], sender.pubkey(), &[&sender])?;
+        let signature = client.create_and_send_transaction(
+            &[transfer_ix],
+            sender.pubkey(),
+            &[&sender],
+            client.compute_budget(),
+        )?;
         let slot = landed_slot(&client, signature)?;
 
         // 7. Fetch this transaction's outputs, gated on its confirmed slot.
@@ -220,7 +221,7 @@ fn main() -> Result<()> {
         // 5. Combine the proof and withdrawal accounts in a single instruction.
         let withdraw_ix = Transact {
             payer: sender.pubkey(),
-            input_tree: tree,
+            input_trees: vec![tree],
             output_tree: tree,
             owner_signers: Vec::new(),
             interface_transfer_accounts: vec![TransactInterfaceTransferAccounts::Sol(
@@ -243,8 +244,12 @@ fn main() -> Result<()> {
         .instruction();
 
         // 6. Send and confirm like any Solana transaction.
-        let signature =
-            client.create_and_send_transaction(&[withdraw_ix], sender.pubkey(), &[&sender])?;
+        let signature = client.create_and_send_transaction(
+            &[withdraw_ix],
+            sender.pubkey(),
+            &[&sender],
+            client.compute_budget(),
+        )?;
         let slot = landed_slot(&client, signature)?;
 
         // 7. Fetch this transaction's outputs, gated on its confirmed slot.

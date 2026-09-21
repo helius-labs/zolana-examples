@@ -13,7 +13,6 @@ import {
   DepositAsset,
   TransactWithdrawal,
 } from "@heliuslabs/zolana/interface";
-import { randomBlinding } from "@heliuslabs/zolana/keypair";
 import {
   AssetRegistry,
   ConfidentialTransfer,
@@ -81,7 +80,6 @@ async function main(): Promise<void> {
         viewTag: senderViewTag,
         recipientOwnerHash:
           senderAddress.ownerHash(),
-        blinding: randomBlinding(),
         amount: DEPOSIT_AMOUNT,
       },
     ],
@@ -161,14 +159,13 @@ async function main(): Promise<void> {
 
   // 5. Build the instruction with the state Merkle tree and Solana accounts required for the transfer.
   // Private transfers move balances only between private token accounts, not public token accounts.
-  const transferInstruction = transactInstruction(
-    {
+  const transferInstruction =
+    await transactInstruction({
       payer: senderSigner,
       inputTree: client.tree,
       outputTree: client.tree,
       data: transferData,
-    },
-  );
+    });
 
   // 6. Send and confirm like any Solana transaction; confirmation yields the landed slot.
   const transferTx = await sendAndConfirm([
@@ -249,7 +246,7 @@ async function main(): Promise<void> {
 
   // 5. Build the instruction with the state Merkle tree and Solana accounts required for the withdrawal.
   const withdrawalInstruction =
-    transactInstruction({
+    await transactInstruction({
       payer: senderSigner,
       inputTree: client.tree,
       outputTree: client.tree,

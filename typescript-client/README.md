@@ -12,8 +12,7 @@ TypeScript client examples for `@heliuslabs/zolana`.
 Install Node.js 24+ and pnpm.
 
 ```bash
-npm install @heliuslabs/zolana@alpha @solana/kit
-pnpm install
+pnpm install --frozen-lockfile
 ```
 
 **Devnet:**
@@ -28,12 +27,10 @@ cp .env.example .env # ...and set API_KEY
 
 **Localnet**:
 
-To run on localnet, configure in [`src/lib.ts`](src/lib.ts) and install:
-
-```bash
-cargo install --git https://github.com/helius-labs/zolana --tag v0.1.0-alpha zolana-cli
-zolana dev start
-```
+To run on localnet, build the programs, Photon, and prover from Zolana revision
+`ebca3ad1bd2f27b1f1f04e33fbfa3cc4c7bbf856` using the
+[source checkout workflow](https://github.com/helius-labs/zolana/blob/ebca3ad1bd2f27b1f1f04e33fbfa3cc4c7bbf856/cli/README.md#local-dev-environment)
+with `zolana dev start --local`. Configure [`src/lib.ts`](src/lib.ts):
 
 ```typescript
 const RPC_URL = "http://127.0.0.1:8899";
