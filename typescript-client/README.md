@@ -12,7 +12,6 @@ TypeScript client examples for `@heliuslabs/zolana`.
 Install Node.js 24+ and pnpm.
 
 ```bash
-npm install @heliuslabs/zolana@alpha @solana/kit
 pnpm install
 ```
 

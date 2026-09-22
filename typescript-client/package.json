@@ -8,8 +8,8 @@
     "example": "tsx"
   },
   "dependencies": {
-    "@heliuslabs/zolana": "0.1.6-alpha",
-    "@solana/kit": "^7.0.0",
+    "@heliuslabs/zolana": "0.2.0-alpha",
+    "@solana/kit": "^8.3.0",
     "dotenv": "latest"
   },
   "devDependencies": {
