@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-# The zolana SDK crates are pulled from the zolana repo by git, pinned to a rev
-# on main; the solana-* crates are pinned to the versions the SDK builds against.
+# The zolana SDK crates are pinned to a release tag; the solana-* crates
+# are pinned to the versions the SDK builds against.
 [dependencies]
 anyhow = "1.0"
 dotenvy = "0.15"
@@ -15,11 +15,11 @@ solana-signature = "3.4"
 solana-signer = "3.0"
 solana-system-interface = { version = "3.2", features = ["bincode"] }
 shellexpand = "3"
-zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "ebca3ad1bd2f27b1f1f04e33fbfa3cc4c7bbf856", features = ["indexer-api", "solana-rpc"] }
-zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "ebca3ad1bd2f27b1f1f04e33fbfa3cc4c7bbf856", features = ["solana"] }
-zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "ebca3ad1bd2f27b1f1f04e33fbfa3cc4c7bbf856" }
-zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "ebca3ad1bd2f27b1f1f04e33fbfa3cc4c7bbf856" }
-zolana-wallet = { git = "https://github.com/helius-labs/zolana", rev = "ebca3ad1bd2f27b1f1f04e33fbfa3cc4c7bbf856" }
+zolana-client = { git = "https://github.com/helius-labs/zolana", tag = "v0.2.0-alpha", features = ["indexer-api", "solana-rpc"] }
+zolana-interface = { git = "https://github.com/helius-labs/zolana", tag = "v0.2.0-alpha", features = ["solana"] }
+zolana-keypair = { git = "https://github.com/helius-labs/zolana", tag = "v0.2.0-alpha" }
+zolana-transaction = { git = "https://github.com/helius-labs/zolana", tag = "v0.2.0-alpha" }
+zolana-wallet = { git = "https://github.com/helius-labs/zolana", tag = "v0.2.0-alpha" }
 
 [[example]]
 name = "register_private_wallet"
