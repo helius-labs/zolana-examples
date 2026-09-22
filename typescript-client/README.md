@@ -12,7 +12,7 @@ TypeScript client examples for `@heliuslabs/zolana`.
 Install Node.js 24+ and pnpm.
 
 ```bash
-pnpm install --frozen-lockfile
+pnpm install
 ```
 
 **Devnet:**
