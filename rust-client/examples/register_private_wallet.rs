@@ -38,6 +38,7 @@ fn main() -> Result<()> {
         sender.pubkey(),
         &sender.shielded_address()?,
         None,
+        None,
     )? {
         let registration = sign_transaction(registration, &[&sender])?;
         client.process_transaction(registration)?;
