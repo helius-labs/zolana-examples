@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "@heliuslabs/zolana": "0.2.0-alpha",
+    "@solana-program/system": "0.14.1",
+    "@solana-program/token": "0.16.1",
     "@solana/kit": "^8.3.0",
     "dotenv": "latest"
   },

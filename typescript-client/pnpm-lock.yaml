@@ -11,6 +11,12 @@ importers:
       '@heliuslabs/zolana':
         specifier: 0.2.0-alpha
         version: 0.2.0-alpha(@solana/kit@8.3.0(typescript@7.0.2))
+      '@solana-program/system':
+        specifier: 0.14.1
+        version: 0.14.1(@solana/kit@8.3.0(typescript@7.0.2))
+      '@solana-program/token':
+        specifier: 0.16.1
+        version: 0.16.1(@solana/kit@8.3.0(typescript@7.0.2))
       '@solana/kit':
         specifier: ^8.3.0
         version: 8.3.0(typescript@7.0.2)

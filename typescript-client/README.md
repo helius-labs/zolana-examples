@@ -4,6 +4,7 @@ TypeScript client examples for `@heliuslabs/zolana`.
 
 - **[register_private_wallet](examples/register_private_wallet.ts)** - Register a private wallet
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw
+- **[deposit_with_interface_setup](examples/deposit_with_interface_setup.ts)** - Create a token interface and deposit in one transaction
 - **[sync_balance](examples/sync_balance.ts)** - Read the private SOL and SPL balances
 - **[read_history](examples/read_history.ts)** - Read the private transaction history
 
@@ -45,9 +46,12 @@ const PROVER_URL = "http://127.0.0.1:3001";
 ```bash
 pnpm example examples/register_private_wallet.ts
 pnpm example examples/deposit_transfer_withdraw.ts
+pnpm example examples/deposit_with_interface_setup.ts
 pnpm example examples/sync_balance.ts
 pnpm example examples/read_history.ts
 ```
+
+`deposit_with_interface_setup` prepares a fresh test token, then checks that its interface PDA is absent. One transaction creates the mint registry PDA and token vault, then deposits into the sender's private balance. The sender pays transaction fees and account rent. The network must allow permissionless interface creation.
 
 ## Documentation
 
