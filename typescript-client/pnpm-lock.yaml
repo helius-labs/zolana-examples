@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@heliuslabs/zolana':
-        specifier: 0.2.0-alpha
-        version: 0.2.0-alpha(@solana/kit@8.3.0(typescript@7.0.2))
+        specifier: git+ssh://git@github.com/helius-labs/zolana.git#4745bbb3bc60edd08ca0f348ea6cfc6a4ab168f8&path:/sdk-libs/ts
+        version: https://codeload.github.com/helius-labs/zolana/tar.gz/4745bbb3bc60edd08ca0f348ea6cfc6a4ab168f8#path:/sdk-libs/ts(@solana/kit@8.3.0(typescript@7.0.2))
       '@solana-program/system':
         specifier: 0.14.1
         version: 0.14.1(@solana/kit@8.3.0(typescript@7.0.2))
@@ -195,8 +195,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@heliuslabs/zolana@0.2.0-alpha':
-    resolution: {integrity: sha512-r+a3Fhx9pO28WEvoJJ9TdJ6lazSgG+1lf2/vj/jxvfuN+p5oMCaXtaSui9176QfN1jOlxXq2nKx0pr1lbc9F8w==}
+  '@heliuslabs/zolana@https://codeload.github.com/helius-labs/zolana/tar.gz/4745bbb3bc60edd08ca0f348ea6cfc6a4ab168f8#path:/sdk-libs/ts':
+    resolution: {gitHosted: true, integrity: sha512-rOLxWOWPpMvsrQMcowSycUAdg/Z3brjg5cLdswZzcct9o7V1lZF9UUzzOpuP4iUKQj6JxQyfrCP2t5+8zBOHIg==, path: /sdk-libs/ts, tarball: https://codeload.github.com/helius-labs/zolana/tar.gz/4745bbb3bc60edd08ca0f348ea6cfc6a4ab168f8}
+    version: 0.1.6-alpha
     engines: {node: '>=24'}
     peerDependencies:
       '@solana/kit': ^8.3.0
@@ -1012,7 +1013,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@heliuslabs/zolana@0.2.0-alpha(@solana/kit@8.3.0(typescript@7.0.2))':
+  '@heliuslabs/zolana@https://codeload.github.com/helius-labs/zolana/tar.gz/4745bbb3bc60edd08ca0f348ea6cfc6a4ab168f8#path:/sdk-libs/ts(@solana/kit@8.3.0(typescript@7.0.2))':
     dependencies:
       '@lightprotocol/hasher.rs': 0.2.1
       '@noble/ciphers': 2.2.0

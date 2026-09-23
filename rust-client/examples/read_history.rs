@@ -2,19 +2,19 @@ use anyhow::{anyhow, Result};
 use rust_client_example::{cli_keypair, setup, SetupContext};
 use zolana_client::{SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
-use zolana_transaction::{AssetRegistry, Wallet};
-use zolana_wallet::{sync_wallet_with_config, SyncWalletConfig};
+use zolana_transaction::AssetRegistry;
+use zolana_wallet::{sync_wallet_with_config, SyncWalletConfig, Wallet};
 
 fn main() -> Result<()> {
     let SetupContext {
         rpc_url,
         indexer_url,
         prover_url,
-        tree,
+        ..
     } = setup()?;
 
     // Connect to the RPC, indexer, and prover.
-    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url, tree)?;
+    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
 
     // Initialize the sender's private wallet and local authority
     // to decrypt transactions and sync balances.

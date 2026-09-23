@@ -14,11 +14,11 @@ fn main() -> Result<()> {
         rpc_url,
         indexer_url,
         prover_url,
-        tree,
+        ..
     } = setup()?;
 
     // Connect to the RPC, indexer, and prover.
-    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url, tree)?;
+    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
 
     // Initialize the sender's private wallet and local authority
     // to decrypt transactions and sync balances.

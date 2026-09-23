@@ -10,7 +10,7 @@ use zolana_interface::{
     state::SplAssetRegistry,
 };
 use zolana_keypair::ShieldedKeypair;
-use zolana_transaction::{decrypt_transactions, AssetRegistry};
+use zolana_transaction::{decrypt_spendable, AssetRegistry};
 
 const DEPOSIT_AMOUNT: u64 = 1_000_000_000;
 
@@ -21,7 +21,7 @@ fn main() -> Result<()> {
         prover_url,
         tree,
     } = setup()?;
-    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url, tree)?;
+    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
     let sender_solana_keypair = cli_keypair()?;
     let sender = ShieldedKeypair::from_keypair(&sender_solana_keypair)?;
     let sender_pubkey = sender_solana_keypair.pubkey();
@@ -98,8 +98,9 @@ fn main() -> Result<()> {
         .collect::<Vec<_>>();
 
     // 7. The sender decrypts the transaction outputs locally to read the private balance.
-    let balances = decrypt_transactions(&sender, &transactions, &assets)
-        .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?;
+    let balances = decrypt_spendable(&sender, &transactions, &assets)
+        .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?
+        .balances;
     let deposit_balance = balances
         .get_balance(mint)
         .ok_or_else(|| anyhow!("failed to fetch sender's utxo"))?;
