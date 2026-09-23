@@ -39,7 +39,7 @@ fn main() -> Result<()> {
         "expected the test mint's interface PDA to be absent"
     );
 
-    // 2. Create the mint registry PDA and token vault. The sender pays their rent.
+    // 2. Create the mint registry PDA and token vault. The sender, or gas sponsor pays their rent.
     let create_interface_ix = CreateSplInterface {
         authority: sender_pubkey,
         mint,

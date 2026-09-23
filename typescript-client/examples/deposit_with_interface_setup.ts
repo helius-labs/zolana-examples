@@ -49,7 +49,7 @@ async function main(): Promise<void> {
     throw new Error("expected the test mint's interface PDA to be absent");
   }
 
-  // 2. Create the mint registry PDA and token vault. The sender pays their rent.
+  // 2. Create the mint registry PDA and token vault. The sender, or gas sponsor pays their rent.
   const createInterfaceIx = await getCreateSplInterfaceInstructionAsync({
     authority: senderSigner,
     mint,
