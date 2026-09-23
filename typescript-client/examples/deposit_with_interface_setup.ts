@@ -75,7 +75,7 @@ async function main(): Promise<void> {
     ],
   });
 
-  // 4. Send both instructions in one transaction; confirmation yields the landed slot.
+  // 4. Send both instructions in one transaction.
   const depositTx = await sendAndConfirm([createInterfaceIx, depositIx]);
 
   // 5. Register the assigned asset ID for the SDK's balance lookup.

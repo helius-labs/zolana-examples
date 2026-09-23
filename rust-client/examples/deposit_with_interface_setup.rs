@@ -67,7 +67,7 @@ fn main() -> Result<()> {
     }
     .instruction()?;
 
-    // 4. Send both instructions in one transaction; confirmation yields the landed slot.
+    // 4. Send both instructions in one transaction.
     let signature = client.create_and_send_transaction(
         &[create_interface_ix, deposit_ix],
         sender_pubkey,
