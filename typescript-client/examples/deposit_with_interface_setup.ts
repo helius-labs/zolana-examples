@@ -17,21 +17,13 @@ import {
   AssetRegistry,
   decryptToBalances,
 } from "@heliuslabs/zolana/transaction";
-import { getCreateAccountInstruction } from "@solana-program/system";
-import {
-  getInitializeAccount3Instruction,
-  getInitializeMint2Instruction,
-  getMintSize,
-  getMintToInstruction,
-  getTokenSize,
-  TOKEN_PROGRAM_ADDRESS,
-} from "@solana-program/token";
-import { generateKeyPairSigner } from "@solana/kit";
+import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 
 import {
   cliKeypair,
   sendAndConfirmFactory,
   setup,
+  setupTestToken,
 } from "../src/lib.js";
 
 const DEPOSIT_AMOUNT = 1_000_000_000n;
@@ -53,58 +45,16 @@ async function main(): Promise<void> {
     senderSigner,
   );
 
-  // Prepare a test mint and public tokens before the interface setup and deposit.
-  const mint = await generateKeyPairSigner();
-  const sourceToken =
-    await generateKeyPairSigner();
-  const mintRent = await client.solanaRpc
-    .getMinimumBalanceForRentExemption(
-      BigInt(getMintSize()),
-    )
-    .send();
-  const tokenRent = await client.solanaRpc
-    .getMinimumBalanceForRentExemption(
-      BigInt(getTokenSize()),
-    )
-    .send();
-  await sendAndConfirm([
-    getCreateAccountInstruction({
-      payer: senderSigner,
-      newAccount: mint,
-      lamports: mintRent,
-      space: getMintSize(),
-      programAddress: TOKEN_PROGRAM_ADDRESS,
-    }),
-    getInitializeMint2Instruction({
-      mint: mint.address,
-      decimals: 9,
-      mintAuthority: senderSigner.address,
-      freezeAuthority: null,
-    }),
-    getCreateAccountInstruction({
-      payer: senderSigner,
-      newAccount: sourceToken,
-      lamports: tokenRent,
-      space: getTokenSize(),
-      programAddress: TOKEN_PROGRAM_ADDRESS,
-    }),
-    getInitializeAccount3Instruction({
-      account: sourceToken.address,
-      mint: mint.address,
-      owner: senderSigner.address,
-    }),
-    getMintToInstruction({
-      mint: mint.address,
-      token: sourceToken.address,
-      mintAuthority: senderSigner,
-      amount: DEPOSIT_AMOUNT,
-    }),
-  ]);
+  const { mint, sourceToken } =
+    await setupTestToken(
+      client,
+      senderSigner,
+      DEPOSIT_AMOUNT,
+    );
 
   // 1. Fetch the interface PDA. A fresh mint has no interface yet.
-  const vault = await getSplAssetVaultAddress(
-    mint.address,
-  );
+  const vault =
+    await getSplAssetVaultAddress(mint);
   if (await client.getAccount(vault)) {
     throw new Error(
       "expected the test mint's interface PDA to be absent",
@@ -115,7 +65,7 @@ async function main(): Promise<void> {
   const createInterfaceIx =
     await getCreateSplInterfaceInstructionAsync({
       authority: senderSigner,
-      mint: mint.address,
+      mint,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
     });
 
@@ -129,8 +79,8 @@ async function main(): Promise<void> {
     deposits: [
       {
         asset: DepositAsset.spl({
-          mint: mint.address,
-          sourceTokenAccount: sourceToken.address,
+          mint,
+          sourceTokenAccount: sourceToken,
           tokenProgram: TOKEN_PROGRAM_ADDRESS,
         }),
         viewTag: senderViewTag,
@@ -149,9 +99,7 @@ async function main(): Promise<void> {
 
   // 5. Register the assigned asset ID for the SDK's balance lookup.
   const registryAddress =
-    await getSplAssetRegistryAddress(
-      mint.address,
-    );
+    await getSplAssetRegistryAddress(mint);
   const registryAccount = await client.getAccount(
     registryAddress,
   );
@@ -184,7 +132,7 @@ async function main(): Promise<void> {
         ),
     });
   const depositBalance =
-    balancesAfterDeposit.balance(mint.address);
+    balancesAfterDeposit.balance(mint);
   if (depositBalance.amount !== DEPOSIT_AMOUNT) {
     throw new Error(
       `expected deposit amount ${DEPOSIT_AMOUNT}, got ${depositBalance.amount}`,
@@ -196,7 +144,7 @@ async function main(): Promise<void> {
     );
   }
   console.log(
-    `deposit mint=${mint.address} private_balance=${depositBalance.amount} ` +
+    `deposit mint=${mint} private_balance=${depositBalance.amount} ` +
       `tx=${depositTx.signature}`,
   );
 }

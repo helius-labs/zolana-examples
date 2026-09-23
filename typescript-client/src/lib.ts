@@ -10,6 +10,7 @@ import {
   assertIsTransactionWithBlockhashLifetime,
   createTransactionMessage,
   getSignatureFromTransaction,
+  generateKeyPairSigner,
   pipe,
   sendTransactionWithoutConfirmingFactory,
   setTransactionMessageConfig,
@@ -32,6 +33,15 @@ import {
   type Bytes32,
   type ZolanaClientConfig,
 } from "@heliuslabs/zolana";
+import { getCreateAccountInstruction } from "@solana-program/system";
+import {
+  getInitializeAccount3Instruction,
+  getInitializeMint2Instruction,
+  getMintSize,
+  getMintToInstruction,
+  getTokenSize,
+  TOKEN_PROGRAM_ADDRESS,
+} from "@solana-program/token";
 export type Client = Awaited<ReturnType<typeof createZolanaClient>>;
 
 export interface ExampleSetup {
@@ -207,4 +217,56 @@ export function sendTransactionFactory(
     const slot = await client.confirmTransaction(signature);
     return { signature, slot };
   };
+}
+
+/** Create a test mint and fund the payer's token account. */
+export async function setupTestToken(
+  client: Client,
+  payer: TransactionSigner,
+  amount: bigint,
+) {
+  const sendAndConfirm = sendAndConfirmFactory(client, payer);
+  const mint = await generateKeyPairSigner();
+  const sourceToken = await generateKeyPairSigner();
+  const mintRent = await client.solanaRpc
+    .getMinimumBalanceForRentExemption(BigInt(getMintSize()))
+    .send();
+  const tokenRent = await client.solanaRpc
+    .getMinimumBalanceForRentExemption(BigInt(getTokenSize()))
+    .send();
+  await sendAndConfirm([
+    getCreateAccountInstruction({
+      payer,
+      newAccount: mint,
+      lamports: mintRent,
+      space: getMintSize(),
+      programAddress: TOKEN_PROGRAM_ADDRESS,
+    }),
+    getInitializeMint2Instruction({
+      mint: mint.address,
+      decimals: 9,
+      mintAuthority: payer.address,
+      freezeAuthority: null,
+    }),
+    getCreateAccountInstruction({
+      payer,
+      newAccount: sourceToken,
+      lamports: tokenRent,
+      space: getTokenSize(),
+      programAddress: TOKEN_PROGRAM_ADDRESS,
+    }),
+    getInitializeAccount3Instruction({
+      account: sourceToken.address,
+      mint: mint.address,
+      owner: payer.address,
+    }),
+    getMintToInstruction({
+      mint: mint.address,
+      token: sourceToken.address,
+      mintAuthority: payer,
+      amount,
+    }),
+  ]);
+
+  return { mint: mint.address, sourceToken: sourceToken.address };
 }
