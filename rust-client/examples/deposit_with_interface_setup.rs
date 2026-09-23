@@ -1,4 +1,4 @@
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, Result};
 use rust_client_example::{cli_keypair, setup, setup_test_token, SetupContext};
 use solana_address::Address;
 use solana_signer::Signer;
@@ -33,19 +33,20 @@ fn main() -> Result<()> {
     // 1. Fetch the interface PDA to detect interoperability between publicly and privately held tokens.
     // It is an escrow per mint, which can be created permissionlessly and must be created once per mint.
     // If this call returns an interface PDA, proceed directly to deposit public-to-private balance.
-    let vault = pda::spl_interface(&mint);
-    ensure!(
-        client.get_account(vault)?.is_none(),
-        "expected the test mint's interface PDA to be absent"
-    );
+    let interface_address = pda::spl_interface(&mint);
+    let interface_account = client.get_account(interface_address)?;
+    let mut instructions = Vec::new();
 
-    // 2. Create the mint registry PDA and token vault. The sender, or gas sponsor pays their rent.
-    let create_interface_ix = CreateSplInterface {
-        authority: sender_pubkey,
-        mint,
-        token_program,
+    // 2. Create the mint registry PDA and interface token account. The sender, or gas sponsor pays their rent.
+    if interface_account.is_none() {
+        let create_interface_ix = CreateSplInterface {
+            authority: sender_pubkey,
+            mint,
+            token_program,
+        }
+        .instruction();
+        instructions.push(create_interface_ix);
     }
-    .instruction();
 
     // 3. Move public tokens into the sender's private balance.
     // A deposit from a public balance reveals sender, recipient, asset and amount.
@@ -67,9 +68,10 @@ fn main() -> Result<()> {
     }
     .instruction()?;
 
-    // 4. Send both instructions in one transaction.
+    // 4. Send the instructions in one transaction.
+    instructions.push(deposit_ix);
     let signature = client.create_and_send_transaction(
-        &[create_interface_ix, deposit_ix],
+        &instructions,
         sender_pubkey,
         &[&sender_solana_keypair],
         client.compute_budget(),

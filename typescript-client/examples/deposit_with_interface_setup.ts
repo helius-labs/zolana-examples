@@ -17,6 +17,7 @@ import {
   decryptToBalances,
 } from "@heliuslabs/zolana/transaction";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import type { Instruction } from "@solana/kit";
 
 import {
   cliKeypair,
@@ -44,17 +45,19 @@ async function main(): Promise<void> {
   // 1. Fetch the interface PDA to detect interoperability between publicly and privately held tokens.
   // It is an escrow per mint, which can be created permissionlessly and must be created once per mint.
   // If this call returns an interface PDA, proceed directly to deposit public-to-private balance.
-  const vault = await getSplAssetVaultAddress(mint);
-  if (await client.getAccount(vault)) {
-    throw new Error("expected the test mint's interface PDA to be absent");
-  }
+  const interfaceAddress = await getSplAssetVaultAddress(mint);
+  const interfaceAccount = await client.getAccount(interfaceAddress);
+  const instructions: Instruction[] = [];
 
-  // 2. Create the mint registry PDA and token vault. The sender, or gas sponsor pays their rent.
-  const createInterfaceIx = await getCreateSplInterfaceInstructionAsync({
-    authority: senderSigner,
-    mint,
-    tokenProgram: TOKEN_PROGRAM_ADDRESS,
-  });
+  // 2. Create the mint registry PDA and interface token account. The sender, or gas sponsor pays their rent.
+  if (!interfaceAccount) {
+    const createInterfaceIx = await getCreateSplInterfaceInstructionAsync({
+      authority: senderSigner,
+      mint,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+    instructions.push(createInterfaceIx);
+  }
 
   // 3. Move public tokens into the sender's private balance.
   // A deposit from a public balance reveals sender, recipient, asset and amount.
@@ -75,8 +78,9 @@ async function main(): Promise<void> {
     ],
   });
 
-  // 4. Send both instructions in one transaction.
-  const depositTx = await sendAndConfirm([createInterfaceIx, depositIx]);
+  // 4. Send the instructions in one transaction.
+  instructions.push(depositIx);
+  const depositTx = await sendAndConfirm(instructions);
 
   // 5. Register the assigned asset ID for the SDK's balance lookup.
   const registryAddress = await getSplAssetRegistryAddress(mint);
