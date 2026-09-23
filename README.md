@@ -6,6 +6,7 @@
 |---------|-------------|
 | [`register_private_wallet`](rust-client/examples/register_private_wallet.rs) | Register a private wallet. |
 | [`deposit_transfer_withdraw`](rust-client/examples/deposit_transfer_withdraw.rs) | Deposit, private transfer, and withdraw. |
+| [`deposit_with_interface_setup`](rust-client/examples/deposit_with_interface_setup.rs) | Create a token interface and deposit in one transaction. |
 | [`sync_balance`](rust-client/examples/sync_balance.rs) | Read the private SOL and SPL balances. |
 | [`read_history`](rust-client/examples/read_history.rs) | Read the private transaction history. |
 
@@ -15,6 +16,7 @@
 |---------|-------------|
 | [`register_private_wallet`](typescript-client/examples/register_private_wallet.ts) | Register a private wallet. |
 | [`deposit_transfer_withdraw`](typescript-client/examples/deposit_transfer_withdraw.ts) | Deposit, private transfer, and withdraw. |
+| [`deposit_with_interface_setup`](typescript-client/examples/deposit_with_interface_setup.ts) | Create a token interface and deposit in one transaction. |
 | [`sync_balance`](typescript-client/examples/sync_balance.ts) | Read the private SOL and SPL balances. |
 | [`read_history`](typescript-client/examples/read_history.ts) | Read the private transaction history. |
 

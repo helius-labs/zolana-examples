@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{cli_keypair, setup, SetupContext};
+use rust_client_example::{cli_keypair, landed_slot, setup, SetupContext};
 use solana_keypair::Keypair;
-use solana_signature::Signature;
 use solana_signer::Signer;
 use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::instruction::{
@@ -10,12 +9,7 @@ use zolana_interface::instruction::{
 };
 use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::{
-    decrypt_transactions,
-    instructions::{
-        transact::{ConfidentialTransfer, SettlementTarget},
-        types::SppProofInputUtxo,
-    },
-    AssetRegistry, SOL_MINT,
+    decrypt_spendable, instructions::transact::ConfidentialTransaction, AssetRegistry, SOL_MINT,
 };
 
 const DEPOSIT_AMOUNT: u64 = 10_000_000;
@@ -31,7 +25,7 @@ fn main() -> Result<()> {
     } = setup()?;
 
     // Connect to the RPC, indexer, and prover.
-    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url, tree)?;
+    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
 
     // Mints that are registered with Solana Rings for privacy.
     let assets = AssetRegistry::default();
@@ -92,8 +86,9 @@ fn main() -> Result<()> {
             .collect::<Vec<_>>();
 
         // 4. The sender decrypts the transaction outputs locally to read the funds deposited in this run.
-        let balances = decrypt_transactions(&sender, &transactions, &assets)
-            .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?;
+        let balances = decrypt_spendable(&sender, &transactions, &assets)
+            .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?
+            .balances;
 
         let sender_balance = balances
             .get_balance(SOL_MINT)
@@ -118,21 +113,16 @@ fn main() -> Result<()> {
             .clone();
 
         // 2. Prepare the selected UTXOs as inputs for the zero-knowledge proof.
-        let transfer_input_utxo = SppProofInputUtxo::new(transfer_utxo, &sender);
+        let mut transfer = ConfidentialTransaction::new(vec![transfer_utxo], sender.pubkey())?;
 
-        // 3. Build and sign the confidential transfer.
-        // Signing encrypts the asset and amount and produces the proof inputs for the ZK prover.
-        let mut transfer = ConfidentialTransfer::new(
-            sender_shielded_address,
-            vec![transfer_input_utxo],
-            sender.pubkey(),
-        );
-        transfer.send(&recipient.shielded_address()?, SOL_MINT, TRANSFER_AMOUNT)?;
-        // SPL: transfer.send(&recipient.shielded_address()?, spl.mint, TRANSFER_AMOUNT)?;
-        let proof_inputs = transfer.sign(&sender, &assets)?;
+        // 3. Build and encrypt the confidential transfer.
+        // Encryption hides the asset and amount and produces the proof inputs for the ZK prover.
+        transfer.transfer_sol(&recipient.shielded_address()?, TRANSFER_AMOUNT)?;
+        // SPL: transfer.transfer(&recipient.shielded_address()?, spl.mint, TRANSFER_AMOUNT)?;
+        let proof_inputs = transfer.encrypt(&sender)?;
 
         // 4. Fetch the zk proof to prove the sender can spend the balance without revealing asset and amount.
-        let transfer_data = client.prove_transact(tree, proof_inputs, None)?;
+        let transfer_data = client.prove_transact(proof_inputs, None, &sender)?;
 
         // 5. Construct the instruction.
         let transfer_ix = Transact {
@@ -164,8 +154,9 @@ fn main() -> Result<()> {
             .into_iter()
             .map(|indexed| indexed.transaction)
             .collect::<Vec<_>>();
-        let sender_balances = decrypt_transactions(&sender, &transactions, &assets)
-            .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?;
+        let sender_balances = decrypt_spendable(&sender, &transactions, &assets)
+            .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?
+            .balances;
         let sender_balance = sender_balances
             .get_balance(SOL_MINT)
             // SPL: .get_balance(spl.mint)
@@ -189,34 +180,16 @@ fn main() -> Result<()> {
             .clone();
 
         // 2. Prepare the selected UTXOs as inputs for the zero-knowledge proof.
-        let withdrawal_input_utxo = SppProofInputUtxo::new(withdrawal_utxo, &sender);
+        let mut withdrawal = ConfidentialTransaction::new(vec![withdrawal_utxo], sender.pubkey())?;
 
-        // 3. Build and sign the confidential withdrawal.
-        // Signing encrypts the private change and produces the ZK prover inputs.
-        let mut withdrawal = ConfidentialTransfer::new(
-            sender_shielded_address,
-            vec![withdrawal_input_utxo],
-            sender.pubkey(),
-        );
-        withdrawal.withdraw(
-            SOL_MINT,
-            WITHDRAW_AMOUNT,
-            SettlementTarget::Sol {
-                user_sol_account: sender.pubkey(),
-            },
-        )?;
-        // SPL: withdrawal.withdraw(
-        // SPL:     spl.mint,
-        // SPL:     WITHDRAW_AMOUNT,
-        // SPL:     SettlementTarget::Spl {
-        // SPL:         user_spl_token: spl.user_token_account,
-        // SPL:         spl_token_interface: spl.vault,
-        // SPL:     },
-        // SPL: )?;
-        let proof_inputs = withdrawal.sign(&sender, &assets)?;
+        // 3. Build and encrypt the confidential withdrawal.
+        // Encryption hides the private change and produces the ZK prover inputs.
+        withdrawal.withdraw_sol(WITHDRAW_AMOUNT, sender.pubkey())?;
+        // SPL: withdrawal.withdraw(spl.mint, WITHDRAW_AMOUNT, spl.user_token_account)?;
+        let proof_inputs = withdrawal.encrypt(&sender)?;
 
         // 4. Fetch the ZK proof to prove the sender can spend the balance.
-        let withdrawal_data = client.prove_transact(tree, proof_inputs, None)?;
+        let withdrawal_data = client.prove_transact(proof_inputs, None, &sender)?;
 
         // 5. Combine the proof and withdrawal accounts in a single instruction.
         let withdraw_ix = Transact {
@@ -262,8 +235,9 @@ fn main() -> Result<()> {
             .into_iter()
             .map(|indexed| indexed.transaction)
             .collect::<Vec<_>>();
-        let sender_balances = decrypt_transactions(&sender, &transactions, &assets)
-            .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?;
+        let sender_balances = decrypt_spendable(&sender, &transactions, &assets)
+            .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?
+            .balances;
         let sender_balance = sender_balances
             .get_balance(SOL_MINT)
             // SPL: .get_balance(spl.mint)
@@ -283,15 +257,4 @@ fn main() -> Result<()> {
         // SPL: );
     }
     Ok(())
-}
-
-/// Slot the confirmed transaction landed in, which drives the indexer
-/// freshness gate on the fetches that read the transaction back.
-fn landed_slot(client: &ZolanaClient<SolanaRpc>, signature: Signature) -> Result<u64> {
-    client
-        .get_signature_statuses(vec![signature])?
-        .first()
-        .and_then(|status| status.as_ref())
-        .map(|status| status.slot)
-        .ok_or_else(|| anyhow!("transaction status missing after confirmation"))
 }
