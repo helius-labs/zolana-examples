@@ -47,7 +47,6 @@ fn main() -> Result<()> {
 
     // 3. Move public tokens into the sender's private balance.
     // A deposit from a public balance reveals sender, recipient, asset and amount.
-    let sender_view_tag = sender_shielded_address.confidential_view_tag()?;
     let deposit_ix = Deposit {
         tree,
         depositor: sender_pubkey,
@@ -57,7 +56,7 @@ fn main() -> Result<()> {
                 user_token: source_token,
                 token_program,
             }),
-            view_tag: sender_view_tag,
+            view_tag: sender_shielded_address.confidential_view_tag()?,
             owner: sender_shielded_address.owner_hash()?,
             amount: DEPOSIT_AMOUNT,
             utxo_data: None,
@@ -99,9 +98,9 @@ fn main() -> Result<()> {
         .collect::<Vec<_>>();
 
     // 7. The sender decrypts the transaction outputs locally to read the private balance.
-    let balances_after_deposit = decrypt_transactions(&sender, &transactions, &assets)
+    let balances = decrypt_transactions(&sender, &transactions, &assets)
         .map_err(|e| anyhow!("decrypt sender transactions: {e:?}"))?;
-    let deposit_balance = balances_after_deposit
+    let deposit_balance = balances
         .get_balance(mint)
         .ok_or_else(|| anyhow!("failed to fetch sender's utxo"))?;
     assert_eq!(deposit_balance.amount, DEPOSIT_AMOUNT);
