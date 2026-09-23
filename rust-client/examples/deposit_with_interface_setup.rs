@@ -30,7 +30,9 @@ fn main() -> Result<()> {
     let (mint, source_token) = setup_test_token(&client, &sender_solana_keypair, DEPOSIT_AMOUNT)?;
     let token_program = Address::new_from_array(SPL_TOKEN_PROGRAM_ID);
 
-    // 1. Fetch the interface PDA. A fresh mint has no interface yet.
+    // 1. Fetch the interface PDA to detect interoperability between publicly and privately held tokens.
+    // It is an escrow per mint, which can be created permissionlessly and must be created once per mint.
+    // If this call returns an interface PDA, proceed directly to deposit public-to-private balance.
     let vault = pda::spl_interface(&mint);
     ensure!(
         client.get_account(vault)?.is_none(),

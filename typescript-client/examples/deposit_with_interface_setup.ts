@@ -41,7 +41,9 @@ async function main(): Promise<void> {
     DEPOSIT_AMOUNT,
   );
 
-  // 1. Fetch the interface PDA. A fresh mint has no interface yet.
+  // 1. Fetch the interface PDA to detect interoperability between publicly and privately held tokens.
+  // It is an escrow per mint, which can be created permissionlessly and must be created once per mint.
+  // If this call returns an interface PDA, proceed directly to deposit public-to-private balance.
   const vault = await getSplAssetVaultAddress(mint);
   if (await client.getAccount(vault)) {
     throw new Error("expected the test mint's interface PDA to be absent");
