@@ -1,6 +1,7 @@
-import assert from "node:assert/strict";
-
-import { ShieldedKeypair, createZolanaClient } from "@heliuslabs/zolana";
+import {
+  ShieldedKeypair,
+  createZolanaClient,
+} from "@heliuslabs/zolana";
 import {
   getSplAssetRegistryAddress,
   getSplAssetVaultAddress,
@@ -30,32 +31,47 @@ const DEPOSIT_AMOUNT = 1_000_000_000n;
 
 async function main(): Promise<void> {
   const { clientConfig } = await setup();
-  const senderKeypair = ShieldedKeypair.fromKeypair(await cliKeypair());
-  const client = await createZolanaClient(clientConfig);
-  const senderSigner = senderKeypair.toSolanaSigner();
-  const senderAddress = senderKeypair.shieldedAddress();
-  const sendAndConfirm = sendAndConfirmFactory(client, senderSigner);
-
-  const { mint, sourceToken } = await setupTestToken(
+  const senderKeypair =
+    ShieldedKeypair.fromKeypair(
+      await cliKeypair(),
+    );
+  const client =
+    await createZolanaClient(clientConfig);
+  const senderSigner =
+    senderKeypair.toSolanaSigner();
+  const senderAddress =
+    senderKeypair.shieldedAddress();
+  const sendAndConfirm = sendAndConfirmFactory(
     client,
     senderSigner,
-    DEPOSIT_AMOUNT,
   );
 
-  // 1. Fetch the interface PDA to detect interoperability between publicly and privately held tokens.
-  // It is an escrow per mint, which can be created permissionlessly and must be created once per mint.
-  // If this call returns an interface PDA, proceed directly to deposit public-to-private balance.
-  const interfaceAddress = await getSplAssetVaultAddress(mint);
-  const interfaceAccount = await client.getAccount(interfaceAddress);
+  const { mint, sourceToken } =
+    await setupTestToken(
+      client,
+      senderSigner,
+      DEPOSIT_AMOUNT,
+    );
+
+  // 1. Check whether the mint already has an interface PDA, the escrow that holds deposited tokens.
+  // A second create fails the transaction, so skip step 2 when the account exists.
+  const interfaceAddress =
+    await getSplAssetVaultAddress(mint);
+  const interfaceAccount =
+    await client.getAccount(interfaceAddress);
   const instructions: Instruction[] = [];
 
-  // 2. Create the mint registry PDA and interface token account. The sender, or gas sponsor pays their rent.
+  // 2. Create the mint registry PDA and interface token account.
+  // The authority signer pays their rent.
   if (!interfaceAccount) {
-    const createInterfaceIx = await getCreateSplInterfaceInstructionAsync({
-      authority: senderSigner,
-      mint,
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
-    });
+    const createInterfaceIx =
+      await getCreateSplInterfaceInstructionAsync(
+        {
+          authority: senderSigner,
+          mint,
+          tokenProgram: TOKEN_PROGRAM_ADDRESS,
+        },
+      );
     instructions.push(createInterfaceIx);
   }
 
@@ -71,8 +87,10 @@ async function main(): Promise<void> {
           sourceTokenAccount: sourceToken,
           tokenProgram: TOKEN_PROGRAM_ADDRESS,
         }),
-        viewTag: senderAddress.confidentialViewTag(),
-        recipientOwnerHash: senderAddress.ownerHash(),
+        viewTag:
+          senderAddress.confidentialViewTag(),
+        recipientOwnerHash:
+          senderAddress.ownerHash(),
         amount: DEPOSIT_AMOUNT,
       },
     ],
@@ -80,36 +98,54 @@ async function main(): Promise<void> {
 
   // 4. Send the instructions in one transaction.
   instructions.push(depositIx);
-  const depositTx = await sendAndConfirm(instructions);
+  const depositTx =
+    await sendAndConfirm(instructions);
 
   // 5. Register the assigned asset ID for the SDK's balance lookup.
-  const registryAddress = await getSplAssetRegistryAddress(mint);
-  const registryAccount = await client.getAccount(registryAddress);
+  const registryAddress =
+    await getSplAssetRegistryAddress(mint);
+  const registryAccount = await client.getAccount(
+    registryAddress,
+  );
   if (!registryAccount) {
-    throw new Error("mint registry missing after interface setup");
+    throw new Error(
+      "mint registry missing after interface setup",
+    );
   }
-  const registry = decodeSplAssetRegistry(registryAccount.data);
+  const registry = decodeSplAssetRegistry(
+    registryAccount.data,
+  );
   const assets = new AssetRegistry();
   assets.insert(registry.assetId, registry.mint);
 
   // 6. Fetch this transaction's outputs, gated on its confirmed slot.
-  const depositResponse = await client.getShieldedTransactionsBySignature(
-    depositTx.signature,
-    atSlot(depositTx.slot),
-  );
+  const depositResponse =
+    await client.getShieldedTransactionsBySignature(
+      depositTx.signature,
+      atSlot(depositTx.slot),
+    );
 
   // 7. The sender decrypts the transaction outputs locally to read the private balance.
-  const transactions = depositResponse.transactions.map(
-    ({ transaction }) => transaction,
-  );
+  const transactions =
+    depositResponse.transactions.map(
+      ({ transaction }) => transaction,
+    );
   const balances = await decryptToBalances({
     keypair: senderKeypair,
     registry: assets,
     transactions,
   });
   const depositBalance = balances.balance(mint);
-  assert.equal(depositBalance.amount, DEPOSIT_AMOUNT);
-  assert.equal(depositBalance.utxos.length, 1);
+  if (depositBalance.amount !== DEPOSIT_AMOUNT) {
+    throw new Error(
+      `expected deposit amount ${DEPOSIT_AMOUNT}, got ${depositBalance.amount}`,
+    );
+  }
+  if (depositBalance.utxos.length !== 1) {
+    throw new Error(
+      `expected 1 deposit utxo, got ${depositBalance.utxos.length}`,
+    );
+  }
   console.log(
     `deposit mint=${mint} private_balance=${depositBalance.amount} ` +
       `tx=${depositTx.signature}`,

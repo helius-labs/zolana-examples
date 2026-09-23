@@ -1,13 +1,13 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{cli_keypair, setup, setup_test_token, SetupContext};
-use solana_address::Address;
+use rust_client_example::{
+    cli_keypair, landed_slot, setup, setup_test_token, SetupContext, TestToken,
+};
 use solana_signer::Signer;
 use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::{
     instruction::{AssetDeposit, CreateSplInterface, Deposit, DepositAsset, DepositSplAccounts},
     pda,
     state::SplAssetRegistry,
-    SPL_TOKEN_PROGRAM_ID,
 };
 use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::{decrypt_transactions, AssetRegistry};
@@ -27,17 +27,18 @@ fn main() -> Result<()> {
     let sender_pubkey = sender_solana_keypair.pubkey();
     let sender_shielded_address = sender.shielded_address()?;
 
-    let (mint, source_token) = setup_test_token(&client, &sender_solana_keypair, DEPOSIT_AMOUNT)?;
-    let token_program = Address::new_from_array(SPL_TOKEN_PROGRAM_ID);
+    let TestToken { mint, source_token } =
+        setup_test_token(&client, &sender_solana_keypair, DEPOSIT_AMOUNT)?;
+    let token_program = pda::spl_token_program_id();
 
-    // 1. Fetch the interface PDA to detect interoperability between publicly and privately held tokens.
-    // It is an escrow per mint, which can be created permissionlessly and must be created once per mint.
-    // If this call returns an interface PDA, proceed directly to deposit public-to-private balance.
+    // 1. Check whether the mint already has an interface PDA, the escrow that holds deposited tokens.
+    // A second create fails the transaction, so skip step 2 when the account exists.
     let interface_address = pda::spl_interface(&mint);
     let interface_account = client.get_account(interface_address)?;
     let mut instructions = Vec::new();
 
-    // 2. Create the mint registry PDA and interface token account. The sender, or gas sponsor pays their rent.
+    // 2. Create the mint registry PDA and interface token account.
+    // The authority signer pays their rent.
     if interface_account.is_none() {
         let create_interface_ix = CreateSplInterface {
             authority: sender_pubkey,
@@ -76,12 +77,7 @@ fn main() -> Result<()> {
         &[&sender_solana_keypair],
         client.compute_budget(),
     )?;
-    let slot = client
-        .get_signature_statuses(vec![signature])?
-        .first()
-        .and_then(|status| status.as_ref())
-        .map(|status| status.slot)
-        .ok_or_else(|| anyhow!("transaction status missing after confirmation"))?;
+    let slot = landed_slot(&client, signature)?;
 
     // 5. Register the assigned asset ID for the SDK's balance lookup.
     let registry_account = client

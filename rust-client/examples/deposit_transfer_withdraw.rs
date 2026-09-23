@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{cli_keypair, setup, SetupContext};
+use rust_client_example::{cli_keypair, landed_slot, setup, SetupContext};
 use solana_keypair::Keypair;
-use solana_signature::Signature;
 use solana_signer::Signer;
 use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::instruction::{
@@ -283,15 +282,4 @@ fn main() -> Result<()> {
         // SPL: );
     }
     Ok(())
-}
-
-/// Slot the confirmed transaction landed in, which drives the indexer
-/// freshness gate on the fetches that read the transaction back.
-fn landed_slot(client: &ZolanaClient<SolanaRpc>, signature: Signature) -> Result<u64> {
-    client
-        .get_signature_statuses(vec![signature])?
-        .first()
-        .and_then(|status| status.as_ref())
-        .map(|status| status.slot)
-        .ok_or_else(|| anyhow!("transaction status missing after confirmation"))
 }

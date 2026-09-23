@@ -224,7 +224,7 @@ export async function setupTestToken(
   client: Client,
   payer: TransactionSigner,
   amount: bigint,
-) {
+): Promise<{ mint: Address; sourceToken: Address }> {
   const sendAndConfirm = sendAndConfirmFactory(client, payer);
   const mint = await generateKeyPairSigner();
   const sourceToken = await generateKeyPairSigner();
