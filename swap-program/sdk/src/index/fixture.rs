@@ -3,22 +3,17 @@ use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use swap_prover::TAKE_MODE_DERIVED;
-use zolana_keypair::{constants::BLINDING_LEN, P256Pubkey, ShieldedAddress, ShieldedKeypair};
+use zolana_keypair::{P256Pubkey, ShieldedAddress, ShieldedKeypair};
 use zolana_transaction::{
-    instructions::{
-        transact::{
-            encrypt_transaction_data, get_transaction_viewing_key, ExternalData, OutputContext,
-            OutputSlot, SppProofInputs, SppProofOutputUtxo,
-        },
-        types::SppProofInputUtxo,
-    },
-    utxo::Utxo,
-    AssetRegistry, Data, ShieldedTransaction, Wallet, SOL_ASSET_ID, SOL_MINT,
+    instructions::transact::{OutputContext, OutputSlot, SppProofInputs, SppProofOutputUtxo},
+    utxo::{SppProofInputUtxo, Utxo},
+    AssetRegistry, Data, ShieldedTransaction, SOL_ASSET_ID, SOL_MINT,
 };
+use zolana_wallet::Wallet;
 
 use crate::{
     instructions::make::OrderMarker,
-    shared::input_sum,
+    shared::{input_sum, test_blinding, INDEXED_TREE_ID},
     state::{OrderTerms, OrderUtxo},
 };
 
@@ -44,7 +39,7 @@ fn shielded_transaction(proof_inputs: &SppProofInputs) -> ShieldedTransaction {
             view_tag: *view_tag,
             output_context: OutputContext {
                 hash: output.utxo_hash,
-                tree: Address::default(),
+                tree_id: INDEXED_TREE_ID,
                 leaf_index: index as u64,
             },
             payload: output.data.clone().unwrap_or_default(),
@@ -59,20 +54,23 @@ fn shielded_transaction(proof_inputs: &SppProofInputs) -> ShieldedTransaction {
     ShieldedTransaction {
         slot: 0,
         tx_signature: Signature::default(),
+        event_index: Some(0),
         tx_viewing_pk: P256Pubkey::from_bytes(external.tx_viewing_pk).ok(),
         salt: Some(external.salt),
         output_slots,
         messages: external.messages.clone(),
         nullifiers,
         proofless: false,
+        ring_config: None,
+        ring_program_id: None,
     }
 }
 
 pub(crate) fn order_fixture() -> OrderFixture {
-    let maker_keypair = ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([7u8; 32]))
-        .expect("maker keypair");
-    let taker_keypair = ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([13u8; 32]))
-        .expect("taker keypair");
+    let maker_keypair =
+        ShieldedKeypair::from_keypair(&Keypair::new_from_array([7u8; 32])).expect("maker keypair");
+    let taker_keypair =
+        ShieldedKeypair::from_keypair(&Keypair::new_from_array([13u8; 32])).expect("taker keypair");
     let maker_address = maker_keypair.shielded_address().expect("maker address");
     let taker_address = taker_keypair.shielded_address().expect("taker address");
     let source_mint = Address::new_from_array([9u8; 32]);
@@ -89,10 +87,10 @@ pub(crate) fn order_fixture() -> OrderFixture {
         expiry: 2_000_000_000,
         take_mode: TAKE_MODE_DERIVED,
     };
-    let order_utxo = OrderUtxo {
+    let mut order_utxo = OrderUtxo {
         terms,
-        blinding: [11u8; BLINDING_LEN],
-        source_mint,
+        blinding: test_blinding(11),
+        source_mint: registry.mint(&source_mint).unwrap(),
         source_amount: 400_000,
         destination_asset_id: SOL_ASSET_ID,
     };
@@ -108,21 +106,50 @@ pub(crate) fn order_fixture() -> OrderFixture {
 
     let input_utxo = Utxo {
         owner: maker_keypair.signing_pubkey(),
-        asset: source_mint,
+        asset: registry.mint(&source_mint).unwrap(),
         amount: 1_000_000,
-        blinding: [5u8; BLINDING_LEN],
-        zone_program_id: None,
+        blinding: test_blinding(5),
+        ring_program_id: None,
         data: Data::default(),
     };
-    let spend = SppProofInputUtxo::new(input_utxo, &maker_keypair);
-    let input_utxos = vec![spend, SppProofInputUtxo::new_dummy()];
+    let input_utxo = zolana_test_utils::utxo::wallet(
+        input_utxo,
+        &maker_keypair.nullifier_key,
+        INDEXED_TREE_ID,
+        0,
+        None,
+        None,
+    )
+    .unwrap()
+    .into();
+    let input_utxos = vec![
+        input_utxo,
+        SppProofInputUtxo::dummy(INDEXED_TREE_ID).unwrap(),
+    ];
 
-    let order_utxo_hash = order_output_utxo.hash().expect("order output hash");
     let change_amount =
         u64::try_from(input_sum(&input_utxos, &source_mint) - i128::from(order_output_utxo.amount))
             .expect("change amount");
-    let change =
-        SppProofOutputUtxo::new(source_mint, change_amount, maker_address).expect("change output");
+    let change = SppProofOutputUtxo::new(
+        registry.mint(&source_mint).unwrap(),
+        change_amount,
+        maker_address,
+    )
+    .expect("change output");
+    let mut spp_proof_inputs = zolana_test_utils::utxo::finalized_transaction(
+        input_utxos,
+        vec![change, order_output_utxo],
+        &maker_keypair,
+        Address::default(),
+        INDEXED_TREE_ID,
+        zolana_keypair::random_blinding(),
+        zolana_keypair::random_salt(),
+    );
+    let order_output_utxo = &spp_proof_inputs.output_utxos[1];
+    order_utxo.blinding = order_output_utxo.blinding;
+    let order_utxo_hash = order_output_utxo
+        .hash(INDEXED_TREE_ID)
+        .expect("order output hash");
     let marker_message = OrderMarker {
         order_utxo_hash,
         maker_pubkey,
@@ -130,29 +157,7 @@ pub(crate) fn order_fixture() -> OrderFixture {
     }
     .message()
     .expect("marker message");
-    let transaction_viewing_key =
-        get_transaction_viewing_key(&maker_keypair, &input_utxos).expect("transaction viewing key");
-
-    let encoded = encrypt_transaction_data(
-        &[change, order_output_utxo],
-        &registry,
-        &transaction_viewing_key,
-    )
-    .expect("encode slots");
-
-    let external_data = ExternalData::new(
-        *transaction_viewing_key.pubkey().as_bytes(),
-        encoded.salt,
-        encoded.outputs,
-        encoded.resolved_owner_tags,
-        vec![marker_message],
-    );
-    let spp_proof_inputs = SppProofInputs::new(
-        input_utxos,
-        encoded.output_utxos,
-        external_data,
-        Address::default(),
-    );
+    spp_proof_inputs.external_data.messages.push(marker_message);
 
     OrderFixture {
         tx: shielded_transaction(&spp_proof_inputs),

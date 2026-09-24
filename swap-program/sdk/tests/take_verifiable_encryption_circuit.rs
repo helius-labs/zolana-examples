@@ -14,34 +14,34 @@ use swap_program::{
     verifying_keys::take_verifiable_encryption::VERIFYINGKEY,
 };
 use swap_prover::{
-    CircuitId, OrderProof, OrderTermsProofInput, TakeVerifiableEncryptionProofInputs,
+    CircuitId, OrderProof, OrderTermsProofInput, TakeVerifiableEncryptionProofInputs, PROVER,
     TAKE_MODE_VERIFIABLE,
 };
 use swap_sdk::{
     instructions::take_verifiable_encryption::{
-        decrypt_destination, destination_ciphertext_with_hash,
+        decrypt_destination, destination_ciphertext_with_hash, DESTINATION_CIPHERTEXT_LEN,
     },
     state::DataHash,
 };
+use zolana_client::ProofInputUtxo;
+use zolana_hasher::primitives::hash_bytes;
 use zolana_interface::merge_utils::ciphertext_hash;
-use zolana_keypair::{
-    hash::{hash_field, poseidon},
-    ViewingKey,
-};
-use zolana_transaction::{instructions::transact::PrivateTxHash, utxo::Blinding, ProofInputUtxo};
+use zolana_keypair::{hash::poseidon, ViewingKey};
+use zolana_transaction::{instructions::transact::PrivateTxHash, utxo::Blinding};
 
 mod shared;
 use shared::order_utxo_owner_hash;
 
 fn build_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../build/gnark/take_verifiable_encryption")
+    PROVER.keys_dir(CircuitId::TakeVerifiableEncryption)
 }
 
 fn ensure_keys() {
     let dir = build_dir();
     if !dir.join("pk.bin").exists() || !dir.join("vk.bin").exists() {
-        swap_prover::setup(CircuitId::TakeVerifiableEncryption, &dir).expect("setup failed");
+        PROVER
+            .setup_insecure_test_keys(CircuitId::TakeVerifiableEncryption, &dir)
+            .expect("setup failed");
     }
 }
 
@@ -57,15 +57,22 @@ fn fe(byte: u8) -> [u8; 32] {
 }
 
 fn blinding(byte: u8) -> Blinding {
-    let mut out = [0u8; 31];
-    out[30] = byte;
+    let mut out = [0u8; 32];
+    out[31] = byte;
+    out
+}
+
+fn full_width_blinding() -> Blinding {
+    let mut out = [0u8; 32];
+    out[0] = 0x10;
+    out[31] = 21;
     out
 }
 
 fn sample_order() -> OrderTermsProofInput {
     let maker_viewing_pk = *ViewingKey::new().pubkey().as_bytes();
     OrderTermsProofInput {
-        destination_asset: hash_field(&[2u8; 32]).expect("destination asset"),
+        destination_asset: hash_bytes(&[2u8; 32]).expect("destination asset"),
         destination_amount: 250,
         maker_owner_hash: fe(99),
         maker_viewing_pk,
@@ -86,6 +93,11 @@ struct SampleOverrides {
     destination_amount: Option<u64>,
 }
 
+/// Non-zero, and different from the output tree, so a swapped or dropped tree id
+/// changes the commitments the proof binds.
+const INPUT_TREE_ID: u16 = 3;
+const OUTPUT_TREE_ID: u16 = 7;
+
 fn build_inputs(overrides: SampleOverrides) -> TakeVerifiableEncryptionProofInputs {
     let order = sample_order();
     let source_mint = Address::new_from_array([1u8; 32]);
@@ -104,6 +116,7 @@ fn build_inputs(overrides: SampleOverrides) -> TakeVerifiableEncryptionProofInpu
         &source_mint,
         1_000,
         &blinding(7),
+        INPUT_TREE_ID,
     )
     .expect("order utxo")
     .with_data_hash(order.data_hash().expect("order data hash"));
@@ -112,18 +125,27 @@ fn build_inputs(overrides: SampleOverrides) -> TakeVerifiableEncryptionProofInpu
         &destination_mint,
         order.destination_amount,
         &blinding(13),
+        INPUT_TREE_ID,
     )
     .expect("taker input utxo");
-    let source_output = ProofInputUtxo::new(taker_owner, &source_mint, 1_000, &blinding(31))
-        .expect("source output utxo");
+    let source_output = ProofInputUtxo::new(
+        taker_owner,
+        &source_mint,
+        1_000,
+        &blinding(31),
+        OUTPUT_TREE_ID,
+    )
+    .expect("source output utxo");
     let destination_output = ProofInputUtxo::new(
         destination_owner,
         &destination_mint,
         destination_amount,
-        &blinding(21),
+        &full_width_blinding(),
+        OUTPUT_TREE_ID,
     )
     .expect("destination output utxo");
     let external_data_hash = fe(8);
+    let private_tx_blinding = fe(21);
     let private_tx_hash = PrivateTxHash::new(
         &[
             order_utxo.hash().expect("order utxo hash"),
@@ -134,6 +156,7 @@ fn build_inputs(overrides: SampleOverrides) -> TakeVerifiableEncryptionProofInpu
             destination_output.hash().expect("destination output hash"),
         ],
         &external_data_hash,
+        &private_tx_blinding,
     )
     .hash()
     .expect("private tx hash");
@@ -155,15 +178,16 @@ fn build_inputs(overrides: SampleOverrides) -> TakeVerifiableEncryptionProofInpu
         source_output,
         destination_output,
         external_data_hash,
+        private_tx_blinding,
     }
 }
 
-fn sample_ciphertext(order: &OrderTermsProofInput) -> (Vec<u8>, [u8; 32]) {
+fn sample_ciphertext(order: &OrderTermsProofInput) -> ([u8; DESTINATION_CIPHERTEXT_LEN], [u8; 32]) {
     destination_ciphertext_with_hash(
         &blinding(7),
         &Address::new_from_array([2u8; 32]),
         order.destination_amount,
-        &blinding(21),
+        &full_width_blinding(),
     )
     .expect("destination ciphertext")
 }
@@ -218,12 +242,6 @@ fn verify_with_generated_vk(
     verifier.verify().is_ok()
 }
 
-fn keys_in_sync(vk: &Groth16VerifyingkeyOwned) -> bool {
-    let borrowed = vk.as_borrowed();
-    borrowed.vk_ic.len() == VERIFYINGKEY.vk_ic.len()
-        && borrowed.vk_alpha_g1 == VERIFYINGKEY.vk_alpha_g1
-}
-
 #[test]
 fn program_vk_has_bsb22_commitment() {
     assert_eq!(VERIFYINGKEY.nr_pubinputs, 1);
@@ -265,47 +283,42 @@ fn take_prove_verify_and_round_trip() {
         "program-side ctHash must match the sdk's destination ciphertext hash"
     );
 
-    if keys_in_sync(&vk) {
-        let public_input_hash = TakeVerifiableEncryptionPublicInput {
-            private_tx_hash: &inputs.private_tx_hash,
-            expiry: inputs.order.expiry,
-            destination_ciphertext: &ciphertext,
-        }
-        .hash()
-        .expect("program take public input hash");
-        let proof: TakeVerifiableEncryptionProof = proof
-            .try_into()
-            .expect("tve proof carries a BSB22 commitment");
-        verify_groth16(
-            CompressedGroth16Proof {
-                a: &proof.proof_a,
-                b: &proof.proof_b,
-                c: &proof.proof_c,
-                commitment: Some((&proof.commitment, &proof.commitment_pok)),
-            },
-            public_input_hash,
-            &VERIFYINGKEY,
-        )
-        .expect("program take verify must accept a valid proof");
-    } else {
-        eprintln!(
-            "SKIP: committed take_verifiable_encryption VERIFYINGKEY does not match the locally \
-             generated build/gnark/take_verifiable_encryption/vk.bin (keys are gitignored and \
-             groth16 setup is randomized), so the on-chain verify_groth16 path was not exercised. \
-             Download the pinned keys matching swap-keys.CHECKSUM to run it."
-        );
+    let public_input_hash = TakeVerifiableEncryptionPublicInput {
+        private_tx_hash: &inputs.private_tx_hash,
+        expiry: inputs.order.expiry,
+        destination_ciphertext: &ciphertext,
     }
+    .hash()
+    .expect("program take public input hash");
+    let proof: TakeVerifiableEncryptionProof = proof
+        .try_into()
+        .expect("tve proof carries a BSB22 commitment");
+    verify_groth16(
+        CompressedGroth16Proof {
+            a: &proof.proof_a,
+            b: &proof.proof_b,
+            c: &proof.proof_c,
+            commitment: Some((&proof.commitment, &proof.commitment_pok)),
+        },
+        public_input_hash,
+        &VERIFYINGKEY,
+    )
+    .expect(
+        "the committed take_verifiable_encryption VERIFYINGKEY must accept the proof; \
+         run `just ensure-swap-keys`",
+    );
 
-    let (asset, amount) =
+    let (asset, amount, recovered_blinding) =
         decrypt_destination(&blinding(7), &ciphertext).expect("decrypt destination ciphertext");
     assert_eq!(
         (asset, amount),
         (
-            hash_field(&[2u8; 32]).expect("destination asset"),
+            hash_bytes(&[2u8; 32]).expect("destination asset"),
             inputs.order.destination_amount
         ),
         "the maker recovers (destination_asset, destination_amount) by decrypting with the order utxo blinding"
     );
+    assert_eq!(recovered_blinding, inputs.destination_output.blinding);
 }
 
 #[test]

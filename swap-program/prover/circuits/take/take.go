@@ -5,13 +5,10 @@ import (
 
 	"github.com/consensys/gnark/frontend"
 
-	"zolana/prover/circuits/gadget"
-	spp "zolana/prover/circuits/spp_transaction"
+	"zolana/gnarksdk"
 )
 
-const DestinationBlindingDomain uint64 = 0x46494C4C44455256
-
-const destinationBlindingBits = 248
+const blindingSeedDomain = 0x53575458 // SWTX; matches the SDK's take_blinding_seed.
 
 type Circuit struct {
 	Public PublicInputs
@@ -21,7 +18,17 @@ type Circuit struct {
 
 func (c *Circuit) Define(api frontend.API) error {
 	api.AssertIsEqual(c.Core.Order.TakeMode, orderterms.TakeModeDerived)
-	api.AssertIsEqual(c.Core.DestinationOutput.Blinding, DeriveDestinationBlinding(api, c.Core.OrderUtxo.Blinding))
+	// Both parties hold the order opening. Binding the root seed and the published
+	// first nullifier makes every payout recoverable without the taker's ciphertext.
+	blindingSeed := gnarksdk.Poseidon(api, blindingSeedDomain, c.Core.OrderUtxo.Blinding)
+	gnarksdk.AssertTransactionBlindings(
+		api,
+		c.Public.FirstNullifier,
+		blindingSeed,
+		c.Core.PrivateTxBlinding,
+		c.Core.SourceOutput.Blinding,
+		c.Core.DestinationOutput.Blinding,
+	)
 
 	c.Core.Check(api, c.Public.PrivateTxHash)
 
@@ -32,23 +39,25 @@ func (c *Circuit) Define(api frontend.API) error {
 type PublicInputs struct {
 	PublicInputHash frontend.Variable `gnark:",public"`
 
-	PrivateTxHash frontend.Variable
+	PrivateTxHash  frontend.Variable
+	FirstNullifier frontend.Variable
 }
 
 func (p PublicInputs) Check(api frontend.API, expiry frontend.Variable) {
-	publicInputHash := gadget.PoseidonHash(api, []frontend.Variable{p.PrivateTxHash, expiry})
+	publicInputHash := gnarksdk.Poseidon(api, p.PrivateTxHash, expiry, p.FirstNullifier)
 	api.AssertIsEqual(p.PublicInputHash, publicInputHash)
 }
 
 type Core struct {
 	Order orderterms.OrderTerms
 
-	OrderUtxo         spp.UtxoCircuitFields
-	TakerIn           spp.UtxoCircuitFields
-	SourceOutput      spp.UtxoCircuitFields
-	DestinationOutput spp.UtxoCircuitFields
+	OrderUtxo         gnarksdk.Utxo
+	TakerIn           gnarksdk.Utxo
+	SourceOutput      gnarksdk.Utxo
+	DestinationOutput gnarksdk.Utxo
 
-	ExternalDataHash frontend.Variable
+	ExternalDataHash  frontend.Variable
+	PrivateTxBlinding frontend.Variable
 }
 
 func (f Core) Check(api frontend.API, privateTxHash frontend.Variable) {
@@ -60,80 +69,45 @@ func (f Core) Check(api frontend.API, privateTxHash frontend.Variable) {
 	sourceOutputUtxoHash := f.checkSourceOutputUtxo(api)
 	destinationOutputUtxoHash := f.checkDestinationOutputUtxo(api)
 
-	privateTxHashInputs{
-		OrderInputUtxoHash:        orderInputUtxoHash,
-		TakerInputUtxoHash:        takerInputUtxoHash,
-		SourceOutputUtxoHash:      sourceOutputUtxoHash,
-		DestinationOutputUtxoHash: destinationOutputUtxoHash,
-		ExternalDataHash:          f.ExternalDataHash,
-		PrivateTxHash:             privateTxHash,
-	}.Check(api)
-}
-
-type privateTxHashInputs struct {
-	OrderInputUtxoHash        frontend.Variable
-	TakerInputUtxoHash        frontend.Variable
-	SourceOutputUtxoHash      frontend.Variable
-	DestinationOutputUtxoHash frontend.Variable
-	ExternalDataHash          frontend.Variable
-	PrivateTxHash             frontend.Variable
-}
-
-func (t privateTxHashInputs) Check(api frontend.API) {
-	inputHashes := []frontend.Variable{t.OrderInputUtxoHash, t.TakerInputUtxoHash}
-	outputHashes := []frontend.Variable{t.SourceOutputUtxoHash, t.DestinationOutputUtxoHash}
-	addressHashes := []frontend.Variable{frontend.Variable(0), frontend.Variable(0)}
-
-	privateTxHash := spp.PrivateTxHashCircuit(api, inputHashes, outputHashes, addressHashes, t.ExternalDataHash)
-	api.AssertIsEqual(privateTxHash, t.PrivateTxHash)
+	recomputedPrivateTxHash := gnarksdk.PrivateTxHash(
+		api,
+		[]frontend.Variable{orderInputUtxoHash, takerInputUtxoHash},
+		[]frontend.Variable{sourceOutputUtxoHash, destinationOutputUtxoHash},
+		f.ExternalDataHash,
+		f.PrivateTxBlinding,
+	)
+	api.AssertIsEqual(recomputedPrivateTxHash, privateTxHash)
 }
 
 func (f Core) checkOrderInputUtxo(api frontend.API, makerAddressFe frontend.Variable) frontend.Variable {
-	api.AssertIsEqual(f.OrderUtxo.Domain, spp.UtxoDomain)
-	api.AssertIsEqual(f.OrderUtxo.ZoneDataHash, 0)
-	api.AssertIsEqual(f.OrderUtxo.ZoneProgramID, 0)
+	f.OrderUtxo.AssertDefaultRing(api)
 	api.AssertIsEqual(f.OrderUtxo.DataHash, f.Order.DataHash(api, makerAddressFe))
 	api.AssertIsDifferent(f.OrderUtxo.Amount, 0)
-	return spp.UtxoHashCircuit(api, f.OrderUtxo)
+	return f.OrderUtxo.Hash(api)
 }
 
 func (f Core) checkTakerInputUtxo(api frontend.API) frontend.Variable {
-	api.AssertIsEqual(f.TakerIn.Domain, spp.UtxoDomain)
-	api.AssertIsEqual(f.TakerIn.ZoneDataHash, 0)
-	api.AssertIsEqual(f.TakerIn.ZoneProgramID, 0)
+	f.TakerIn.AssertDefaultRing(api)
 	api.AssertIsEqual(f.TakerIn.DataHash, 0)
 	api.AssertIsEqual(f.TakerIn.Asset, f.Order.DestinationAsset)
 	api.AssertIsEqual(f.TakerIn.Amount, f.Order.DestinationAmount)
-	return spp.UtxoHashCircuit(api, f.TakerIn)
+	return f.TakerIn.Hash(api)
 }
 
 func (f Core) checkSourceOutputUtxo(api frontend.API) frontend.Variable {
-	api.AssertIsEqual(f.SourceOutput.Domain, spp.UtxoDomain)
-	api.AssertIsEqual(f.SourceOutput.ZoneDataHash, 0)
-	api.AssertIsEqual(f.SourceOutput.ZoneProgramID, 0)
+	f.SourceOutput.AssertDefaultRing(api)
 	api.AssertIsEqual(f.SourceOutput.DataHash, 0)
 	api.AssertIsEqual(f.SourceOutput.Asset, f.OrderUtxo.Asset)
 	api.AssertIsEqual(f.SourceOutput.Amount, f.OrderUtxo.Amount)
 	api.AssertIsEqual(f.SourceOutput.Owner, f.TakerIn.Owner)
-	return spp.UtxoHashCircuit(api, f.SourceOutput)
+	return f.SourceOutput.Hash(api)
 }
 
 func (f Core) checkDestinationOutputUtxo(api frontend.API) frontend.Variable {
-	api.AssertIsEqual(f.DestinationOutput.Domain, spp.UtxoDomain)
-	api.AssertIsEqual(f.DestinationOutput.ZoneDataHash, 0)
-	api.AssertIsEqual(f.DestinationOutput.ZoneProgramID, 0)
+	f.DestinationOutput.AssertDefaultRing(api)
 	api.AssertIsEqual(f.DestinationOutput.DataHash, 0)
 	api.AssertIsEqual(f.DestinationOutput.Asset, f.Order.DestinationAsset)
 	api.AssertIsEqual(f.DestinationOutput.Amount, f.Order.DestinationAmount)
 	api.AssertIsEqual(f.DestinationOutput.Owner, f.Order.MakerOwnerHash)
-	return spp.UtxoHashCircuit(api, f.DestinationOutput)
-}
-
-func DeriveDestinationBlinding(api frontend.API, orderUtxoBlinding frontend.Variable) frontend.Variable {
-	full := gadget.PoseidonHash(api, []frontend.Variable{
-		orderUtxoBlinding,
-		frontend.Variable(DestinationBlindingDomain),
-	})
-	bits := api.ToBinary(full, 254)
-	return api.FromBinary(bits[:destinationBlindingBits]...)
+	return f.DestinationOutput.Hash(api)
 }

@@ -3,8 +3,7 @@ package orderterms
 import (
 	"github.com/consensys/gnark/frontend"
 
-	"zolana/prover/circuits/gadget"
-	ve "zolana/prover/circuits/verifiable-encryption"
+	"zolana/gnarksdk"
 )
 
 const TakeModeDerived uint64 = 0
@@ -29,17 +28,18 @@ func (o OrderTerms) Check(api frontend.API) {
 }
 
 func (o OrderTerms) MakerAddressFE(api frontend.API) frontend.Variable {
-	lo, hi := ve.Pack33To2FECircuit(api, o.MakerViewingPk)
-	return gadget.PoseidonHash(api, []frontend.Variable{o.MakerOwnerHash, lo, hi})
+	viewingKeyHash := gnarksdk.HashBytes(api, o.MakerViewingPk[:])
+	return gnarksdk.Poseidon(api, o.MakerOwnerHash, viewingKeyHash)
 }
 
 func (o OrderTerms) DataHash(api frontend.API, makerAddressFe frontend.Variable) frontend.Variable {
-	return gadget.PoseidonHash(api, []frontend.Variable{
+	return gnarksdk.Poseidon(
+		api,
 		o.DestinationAsset,
 		o.DestinationAmount,
 		makerAddressFe,
 		o.Expiry,
 		o.TakerPkFe,
 		o.TakeMode,
-	})
+	)
 }

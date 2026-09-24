@@ -5,6 +5,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+zolana-client = { workspace = true }
 anyhow = { workspace = true }
 timelock-escrow-program = { path = "../program" }
 timelock-escrow-prover = { path = "../prover" }
@@ -13,6 +14,8 @@ solana-instruction = { workspace = true }
 solana-pubkey = { workspace = true }
 wincode = { workspace = true }
 zolana-interface = { workspace = true }
+zolana-program = { workspace = true }
+zolana-hasher = { workspace = true }
 zolana-keypair = { workspace = true }
 zolana-transaction = { workspace = true }
 

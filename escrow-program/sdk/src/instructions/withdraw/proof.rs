@@ -1,10 +1,8 @@
 use anyhow::{bail, Result};
 use timelock_escrow_program::instructions::withdraw::WithdrawPublicInput;
 use timelock_escrow_prover::{EscrowTermsProofInput, WithdrawProofInputs};
-use zolana_transaction::{
-    instructions::transact::{PrivateTxHash, SppProofOutputUtxo},
-    ProofInputUtxo,
-};
+use zolana_client::ProofInputUtxo;
+use zolana_transaction::instructions::transact::{PrivateTxHash, SppProofOutputUtxo};
 
 use crate::{err, shared::check_output_utxo, state::EscrowUtxo};
 
@@ -12,6 +10,13 @@ pub struct WithdrawProofInputParams {
     pub escrow_utxo: EscrowUtxo,
     pub source_output: SppProofOutputUtxo,
     pub external_data_hash: [u8; 32],
+    /// `SppProofInputs::private_tx_blinding()`, the fifth `private_tx_hash`
+    /// preimage element.
+    pub private_tx_blinding: [u8; 32],
+    /// Raw id of the tree the escrow UTXO is spent from.
+    pub input_tree_id: u16,
+    /// Raw id of the tree the source output is appended to.
+    pub output_tree_id: u16,
 }
 
 impl WithdrawProofInputParams {
@@ -20,21 +25,27 @@ impl WithdrawProofInputParams {
         let creator = check_output_utxo(
             "source_output",
             &self.source_output,
-            &self.escrow_utxo.asset,
+            &self.escrow_utxo.asset.asset,
             self.escrow_utxo.amount,
         )?;
         if creator != terms.creator {
             bail!("source output owner does not match the escrow creator");
         }
         let terms_input = EscrowTermsProofInput::try_from(terms)?;
-        let owner_pk_field = creator.signing_pubkey.owner_pk_field().map_err(err)?;
+        let owner_pk_field = creator
+            .signing_pubkey
+            .owner_proof_input_hash()
+            .map_err(err)?;
         let escrow_utxo =
-            ProofInputUtxo::try_from(&self.escrow_utxo.to_input_utxo()?).map_err(err)?;
-        let source_output = ProofInputUtxo::try_from(&self.source_output).map_err(err)?;
+            ProofInputUtxo::try_from((&self.escrow_utxo.output_utxo()?, self.input_tree_id))
+                .map_err(err)?;
+        let source_output =
+            ProofInputUtxo::try_from((&self.source_output, self.output_tree_id)).map_err(err)?;
         let private_tx_hash = PrivateTxHash::new(
             &[escrow_utxo.hash().map_err(err)?],
             &[source_output.hash().map_err(err)?],
             &self.external_data_hash,
+            &self.private_tx_blinding,
         )
         .hash()
         .map_err(err)?;
@@ -54,6 +65,7 @@ impl WithdrawProofInputParams {
             escrow_utxo,
             source_output,
             external_data_hash: self.external_data_hash,
+            private_tx_blinding: self.private_tx_blinding,
         })
     }
 }

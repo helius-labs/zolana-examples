@@ -1,5 +1,6 @@
 use solana_program_error::ProgramError;
 use thiserror::Error;
+use zolana_hasher::HasherError;
 
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 #[repr(u32)]
@@ -12,7 +13,7 @@ pub enum SwapError {
     ProofVerificationFailed = 8007,
     #[error("instruction data is invalid")]
     InvalidInstructionData = 8011,
-    #[error("trailing account is not the shielded-pool program")]
+    #[error("shielded-pool program account is invalid")]
     InvalidShieldedPoolProgram = 8012,
     #[error("order-authority account is missing from the transact account list")]
     MissingOrderAuthority = 8013,
@@ -27,5 +28,11 @@ pub enum SwapError {
 impl From<SwapError> for ProgramError {
     fn from(error: SwapError) -> Self {
         ProgramError::Custom(error as u32)
+    }
+}
+
+impl From<HasherError> for SwapError {
+    fn from(_: HasherError) -> Self {
+        Self::HashingFailed
     }
 }

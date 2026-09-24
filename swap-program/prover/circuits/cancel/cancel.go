@@ -5,8 +5,7 @@ import (
 
 	"github.com/consensys/gnark/frontend"
 
-	"zolana/prover/circuits/gadget"
-	spp "zolana/prover/circuits/spp_transaction"
+	"zolana/gnarksdk"
 )
 
 type Circuit struct {
@@ -14,13 +13,14 @@ type Circuit struct {
 
 	Order orderterms.OrderTerms
 
-	OrderUtxo    spp.UtxoCircuitFields
-	SourceOutput spp.UtxoCircuitFields
+	OrderUtxo    gnarksdk.Utxo
+	SourceOutput gnarksdk.Utxo
 
 	MakerOwnerPkField frontend.Variable
 	MakerNullifierPk  frontend.Variable
 
-	ExternalDataHash frontend.Variable
+	ExternalDataHash  frontend.Variable
+	PrivateTxBlinding frontend.Variable
 }
 
 func (c *Circuit) Define(api frontend.API) error {
@@ -30,12 +30,14 @@ func (c *Circuit) Define(api frontend.API) error {
 	sourceOutputUtxoHash := c.checkSourceOutputUtxo(api)
 	c.checkMakerAuthorization(api)
 
-	privateTxHashInputs{
-		OrderInputUtxoHash:   orderInputUtxoHash,
-		SourceOutputUtxoHash: sourceOutputUtxoHash,
-		ExternalDataHash:     c.ExternalDataHash,
-		PrivateTxHash:        c.Public.PrivateTxHash,
-	}.Check(api)
+	privateTxHash := gnarksdk.PrivateTxHash(
+		api,
+		[]frontend.Variable{orderInputUtxoHash},
+		[]frontend.Variable{sourceOutputUtxoHash},
+		c.ExternalDataHash,
+		c.PrivateTxBlinding,
+	)
+	api.AssertIsEqual(privateTxHash, c.Public.PrivateTxHash)
 
 	c.Public.Check(api, c.Order.Expiry, c.MakerOwnerPkField)
 	return nil
@@ -48,47 +50,27 @@ type PublicInputs struct {
 }
 
 func (p PublicInputs) Check(api frontend.API, expiry frontend.Variable, makerOwnerPkField frontend.Variable) {
-	publicInputHash := gadget.PoseidonHash(api, []frontend.Variable{p.PrivateTxHash, expiry, makerOwnerPkField})
+	publicInputHash := gnarksdk.Poseidon(api, p.PrivateTxHash, expiry, makerOwnerPkField)
 	api.AssertIsEqual(p.PublicInputHash, publicInputHash)
 }
 
-type privateTxHashInputs struct {
-	OrderInputUtxoHash   frontend.Variable
-	SourceOutputUtxoHash frontend.Variable
-	ExternalDataHash     frontend.Variable
-	PrivateTxHash        frontend.Variable
-}
-
-func (t privateTxHashInputs) Check(api frontend.API) {
-	inputHashes := []frontend.Variable{t.OrderInputUtxoHash}
-	outputHashes := []frontend.Variable{t.SourceOutputUtxoHash}
-	addressHashes := []frontend.Variable{frontend.Variable(0)}
-
-	privateTxHash := spp.PrivateTxHashCircuit(api, inputHashes, outputHashes, addressHashes, t.ExternalDataHash)
-	api.AssertIsEqual(privateTxHash, t.PrivateTxHash)
-}
-
 func (c *Circuit) checkOrderInputUtxo(api frontend.API, makerAddressFe frontend.Variable) frontend.Variable {
-	api.AssertIsEqual(c.OrderUtxo.Domain, spp.UtxoDomain)
-	api.AssertIsEqual(c.OrderUtxo.ZoneDataHash, 0)
-	api.AssertIsEqual(c.OrderUtxo.ZoneProgramID, 0)
+	c.OrderUtxo.AssertDefaultRing(api)
 	api.AssertIsEqual(c.OrderUtxo.DataHash, c.Order.DataHash(api, makerAddressFe))
 	api.AssertIsDifferent(c.OrderUtxo.Amount, 0)
-	return spp.UtxoHashCircuit(api, c.OrderUtxo)
+	return c.OrderUtxo.Hash(api)
 }
 
 func (c *Circuit) checkSourceOutputUtxo(api frontend.API) frontend.Variable {
-	api.AssertIsEqual(c.SourceOutput.Domain, spp.UtxoDomain)
-	api.AssertIsEqual(c.SourceOutput.ZoneDataHash, 0)
-	api.AssertIsEqual(c.SourceOutput.ZoneProgramID, 0)
+	c.SourceOutput.AssertDefaultRing(api)
 	api.AssertIsEqual(c.SourceOutput.DataHash, 0)
 	api.AssertIsEqual(c.SourceOutput.Asset, c.OrderUtxo.Asset)
 	api.AssertIsEqual(c.SourceOutput.Amount, c.OrderUtxo.Amount)
 	api.AssertIsEqual(c.SourceOutput.Owner, c.Order.MakerOwnerHash)
-	return spp.UtxoHashCircuit(api, c.SourceOutput)
+	return c.SourceOutput.Hash(api)
 }
 
 func (c *Circuit) checkMakerAuthorization(api frontend.API) {
-	recomputedOwnerHash := gadget.PoseidonHash(api, []frontend.Variable{c.MakerOwnerPkField, c.MakerNullifierPk})
+	recomputedOwnerHash := gnarksdk.Poseidon(api, c.MakerOwnerPkField, c.MakerNullifierPk)
 	api.AssertIsEqual(recomputedOwnerHash, c.Order.MakerOwnerHash)
 }

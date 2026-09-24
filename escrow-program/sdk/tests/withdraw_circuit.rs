@@ -11,22 +11,25 @@ use timelock_escrow_program::{
     },
     verifying_keys::withdraw::VERIFYINGKEY,
 };
-use timelock_escrow_prover::{CircuitId, EscrowTermsProofInput, WithdrawProofInputs};
+use timelock_escrow_prover::{CircuitId, EscrowTermsProofInput, WithdrawProofInputs, PROVER};
 use timelock_escrow_sdk::state::DataHash;
+use zolana_client::ProofInputUtxo;
 use zolana_keypair::hash::poseidon;
-use zolana_transaction::{instructions::transact::PrivateTxHash, utxo::Blinding, ProofInputUtxo};
+use zolana_transaction::{instructions::transact::PrivateTxHash, utxo::Blinding};
 
 mod shared;
 use shared::escrow_utxo_owner_hash;
 
 fn build_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../build/gnark/withdraw")
+    PROVER.keys_dir(CircuitId::Withdraw)
 }
 
 fn ensure_keys() {
     let dir = build_dir();
     if !dir.join("pk.bin").exists() || !dir.join("vk.bin").exists() {
-        timelock_escrow_prover::setup(CircuitId::Withdraw, &dir).expect("setup failed");
+        PROVER
+            .setup_insecure_test_keys(CircuitId::Withdraw, &dir)
+            .expect("setup failed");
     }
 }
 
@@ -42,10 +45,15 @@ fn fe(byte: u8) -> [u8; 32] {
 }
 
 fn blinding(byte: u8) -> Blinding {
-    let mut out = [0u8; 31];
-    out[30] = byte;
+    let mut out = [0u8; 32];
+    out[31] = byte;
     out
 }
+
+/// Non-zero, and different from the output tree, so a swapped or dropped tree id
+/// changes the commitments the proof binds.
+const INPUT_TREE_ID: u16 = 3;
+const OUTPUT_TREE_ID: u16 = 7;
 
 fn build_inputs(source_output_owner: [u8; 32]) -> WithdrawProofInputs {
     let owner_pk_field = fe(71);
@@ -61,17 +69,25 @@ fn build_inputs(source_output_owner: [u8; 32]) -> WithdrawProofInputs {
         &source_mint,
         1_000,
         &blinding(7),
+        INPUT_TREE_ID,
     )
     .expect("escrow utxo")
     .with_data_hash(terms.data_hash().expect("terms data hash"));
-    let source_output =
-        ProofInputUtxo::new(source_output_owner, &source_mint, 1_000, &blinding(11))
-            .expect("source output utxo");
+    let source_output = ProofInputUtxo::new(
+        source_output_owner,
+        &source_mint,
+        1_000,
+        &blinding(11),
+        OUTPUT_TREE_ID,
+    )
+    .expect("source output utxo");
     let external_data_hash = fe(8);
+    let private_tx_blinding = fe(21);
     let private_tx_hash = PrivateTxHash::new(
         &[escrow_utxo.hash().expect("escrow utxo hash")],
         &[source_output.hash().expect("source output hash")],
         &external_data_hash,
+        &private_tx_blinding,
     )
     .hash()
     .expect("private tx hash");
@@ -91,6 +107,7 @@ fn build_inputs(source_output_owner: [u8; 32]) -> WithdrawProofInputs {
         escrow_utxo,
         source_output,
         external_data_hash,
+        private_tx_blinding,
     }
 }
 
@@ -125,12 +142,6 @@ fn verify_with_generated_vk(
         Err(_) => return false,
     };
     verifier.verify().is_ok()
-}
-
-fn keys_in_sync(vk: &Groth16VerifyingkeyOwned) -> bool {
-    let borrowed = vk.as_borrowed();
-    borrowed.vk_ic.len() == VERIFYINGKEY.vk_ic.len()
-        && borrowed.vk_alpha_g1 == VERIFYINGKEY.vk_alpha_g1
 }
 
 #[test]
@@ -169,34 +180,27 @@ fn withdraw_prove_verify() {
         "groth16 proof must verify against the withdraw verifying key"
     );
 
-    if keys_in_sync(&vk) {
-        let public_input_hash = WithdrawPublicInput {
-            private_tx_hash: &inputs.private_tx_hash,
-            unlock: inputs.terms.unlock,
-            owner_pk_field: &inputs.owner_pk_field,
-        }
-        .hash()
-        .expect("program withdraw public input hash");
-        let proof: WithdrawProof = proof.into();
-        verify_groth16(
-            CompressedGroth16Proof {
-                a: &proof.proof_a,
-                b: &proof.proof_b,
-                c: &proof.proof_c,
-                commitment: None,
-            },
-            public_input_hash,
-            &VERIFYINGKEY,
-        )
-        .expect("program withdraw verify must accept a valid proof");
-    } else {
-        eprintln!(
-            "SKIP: committed withdraw VERIFYINGKEY does not match the locally generated \
-             build/gnark/withdraw/vk.bin (keys are gitignored and groth16 setup is randomized), \
-             so the on-chain verify_groth16 path was not exercised. Regenerate the keys with \
-             timelock-escrow-prover-setup to run it."
-        );
+    let public_input_hash = WithdrawPublicInput {
+        private_tx_hash: &inputs.private_tx_hash,
+        unlock: inputs.terms.unlock,
+        owner_pk_field: &inputs.owner_pk_field,
     }
+    .hash()
+    .expect("program withdraw public input hash");
+    let proof: WithdrawProof = proof.into();
+    verify_groth16(
+        CompressedGroth16Proof {
+            a: &proof.proof_a,
+            b: &proof.proof_b,
+            c: &proof.proof_c,
+            commitment: None,
+        },
+        public_input_hash,
+        &VERIFYINGKEY,
+    )
+    .expect(
+        "the committed withdraw VERIFYINGKEY must accept the proof; run `just ensure-escrow-keys`",
+    );
 }
 
 #[test]
