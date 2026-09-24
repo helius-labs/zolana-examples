@@ -3,6 +3,8 @@ node_modules/
 .DS_Store
 rust-client/.env
 typescript-client/.env
+embedded-private-wallet/.env
+embedded-private-wallet/dist
 rust-client/BUGS.md
 rust-client/test-ledger/
 rust-client/.surfpool/

@@ -8,6 +8,8 @@ TypeScript client examples for `@heliuslabs/zolana`.
 - **[sync_balance](examples/sync_balance.ts)** - Read the private SOL and SPL balances
 - **[read_history](examples/read_history.ts)** - Read the private transaction history
 
+For the React + Vite browser app, see the separate [embedded private wallet](../embedded-private-wallet/README.md).
+
 ## Setup
 
 Install Node.js 24+ and pnpm.
