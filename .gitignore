@@ -6,3 +6,7 @@ typescript-client/.env
 rust-client/BUGS.md
 rust-client/test-ledger/
 rust-client/.surfpool/
+swap-program/build/
+escrow-program/build/
+swap-program/test/test-ledger/
+escrow-program/test/test-ledger/

@@ -14,7 +14,7 @@ use swap_sdk::{
     shared::input_sum,
     state::{OrderTerms, OrderUtxo},
 };
-use zolana_client::{ensure_registered, Rpc};
+use zolana_client::Rpc;
 use zolana_keypair::random_blinding;
 use zolana_transaction::{
     instructions::{
@@ -26,6 +26,7 @@ use zolana_transaction::{
     },
     Filter, SOL_ASSET_ID, SOL_MINT,
 };
+use zolana_wallet::ensure_registered;
 
 const EXPIRY: u64 = 2_000_000_000;
 
@@ -277,7 +278,11 @@ fn make_and_take_swap_inline() -> Result<()> {
         send_v0_with_lookup_table(&rpc, &taker.keypair.to_solana_keypair()?, take_ix)?;
 
         indexer
-            .get_merkle_proofs(tree, vec![source_output_hash, destination_output_hash])
+            .get_merkle_proofs(
+                tree,
+                vec![source_output_hash, destination_output_hash],
+                None,
+            )
             .map_err(|e| anyhow!("take outputs index: {e}"))?;
     }
     Ok(())

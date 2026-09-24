@@ -1,7 +1,7 @@
 [package]
 name = "swap-program"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 publish = false
 
 [lib]
@@ -17,16 +17,16 @@ test-sbf = []
 profile-program = ["light-program-profiler/profile-program"]
 
 [dependencies]
-borsh = { version = "1.5", default-features = false, features = ["derive"] }
-groth16-solana = { git = "https://github.com/Lightprotocol/groth16-solana", rev = "43fee1a67e91c0df7bb4edad5ba87ae4602aa208", features = ["bsb22"] }
-light-program-profiler = { git = "https://github.com/Lightprotocol/light-program-profiler", rev = "862df52dd8c6099c11f795553514c654f3c2c459" }
-pinocchio = { version = "0.11", features = ["cpi"] }
-solana-program-error = "3.0"
-thiserror = "2.0"
-wincode = { version = "0.5", features = ["derive"] }
-zolana-account-checks = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540" }
-zolana-hasher = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["poseidon"] }
-zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "8d4b81c4ffdde97fa6497f07feb6caeb92c42540", features = ["solana"] }
+borsh = { workspace = true }
+groth16-solana = { workspace = true, features = ["bsb22"] }
+light-program-profiler = { workspace = true }
+pinocchio = { workspace = true, features = ["cpi"] }
+solana-program-error = { workspace = true }
+thiserror = { workspace = true }
+wincode = { workspace = true }
+zolana-account-checks = { workspace = true }
+zolana-hasher = { workspace = true, features = ["poseidon"] }
+zolana-interface = { workspace = true, features = ["solana"] }
 
 [lints.rust.unexpected_cfgs]
 level = "allow"

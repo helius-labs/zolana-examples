@@ -27,12 +27,35 @@ model, order terms, instructions, and circuits.
 ## Build
 
 The prover compiles Go gnark circuits, so building needs a Go toolchain
-alongside Rust.
+alongside Rust. The circuits import shared gadgets from the
+[zolana](https://github.com/helius-labs/zolana) monorepo through a local
+`replace` that resolves to `prover/server` four directories above
+`prover/circuits`. Check out the monorepo at the rev pinned in the Cargo
+manifests and place this repository inside its root, or symlink the checkout's
+`prover` directory next to this repository.
 
 ```bash
 cargo build
 ```
 
-The circuit tests need the pinned proving and verifying keys, whose hashes are
-in [`swap-keys.CHECKSUM`](swap-keys.CHECKSUM). Generate them with the
-`swap-prover-setup` binary.
+The circuit tests and the localnet tests need the pinned proving and verifying
+keys, whose hashes are in [`swap-keys.CHECKSUM`](swap-keys.CHECKSUM). Download
+them from the `swap-keys-v3` release:
+
+```bash
+for c in make take cancel take_verifiable_encryption; do
+  for k in pk vk; do
+    gh release download swap-keys-v3 --repo helius-labs/zolana \
+      --pattern "${c}_${k}.bin" --output "build/gnark/$c/$k.bin"
+  done
+done
+```
+
+Groth16 setup is randomized, so keys generated with `swap-prover-setup` do not
+match the committed verifying keys. Use that binary only to rotate the keys
+together with the committed verifying keys and the checksum manifest.
+
+The localnet tests in [`test/`](test/) start the validator, Photon, and the
+prover through the monorepo `zolana` CLI. They locate the binaries through
+`ZOLANA_CLI_BIN`, `ZOLANA_PHOTON_BIN`, and `ZOLANA_PROVER_BIN`, and the program
+binary through `SWAP_PROGRAM_SO`.
