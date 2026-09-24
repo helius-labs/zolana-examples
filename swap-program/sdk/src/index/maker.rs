@@ -5,8 +5,9 @@ use zolana_client::Rpc;
 use zolana_keypair::{P256Pubkey, ShieldedAddress, ShieldedKeypair};
 use zolana_transaction::{
     serialization::confidential::{Confidential, ConfidentialOutputPlaintext},
-    AssetRegistry, ShieldedTransaction, Wallet,
+    AssetRegistry, ShieldedTransaction,
 };
+use zolana_wallet::Wallet;
 
 use super::{
     poll::{collect_tagged, index_until},
@@ -14,6 +15,7 @@ use super::{
 };
 use crate::{
     err,
+    shared::INDEXED_TREE_ID,
     state::{OrderTerms, OrderUtxo},
 };
 
@@ -67,7 +69,7 @@ pub fn scan_maker(
         let Ok(order_utxo_hash) = order
             .order_utxo
             .output_utxo(taker_viewing_pubkey)
-            .and_then(|output| output.hash().map_err(err))
+            .and_then(|output| output.hash(INDEXED_TREE_ID).map_err(err))
         else {
             continue;
         };
@@ -91,7 +93,7 @@ fn maker_order_candidate(
     Some(MakerOrder {
         order_utxo: OrderUtxo {
             terms: OrderTerms {
-                destination_mint,
+                destination_mint: destination_mint.asset,
                 destination_amount: order_data.destination_amount,
                 destination: maker_address,
                 taker: order_data.taker,
@@ -107,7 +109,7 @@ fn maker_order_candidate(
     })
 }
 
-pub fn index_maker<I: Rpc>(
+pub fn index_maker<I: Rpc + Sync>(
     wallet: &mut Wallet,
     keypair: &ShieldedKeypair,
     indexer: &I,

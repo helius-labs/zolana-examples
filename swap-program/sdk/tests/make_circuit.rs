@@ -11,22 +11,26 @@ use swap_program::{
     },
     verifying_keys::make::VERIFYINGKEY,
 };
-use swap_prover::{CircuitId, MakeProofInputs, OrderTermsProofInput, TAKE_MODE_DERIVED};
+use swap_prover::{CircuitId, MakeProofInputs, OrderTermsProofInput, PROVER, TAKE_MODE_DERIVED};
 use swap_sdk::state::DataHash;
-use zolana_keypair::{hash::hash_field, ViewingKey};
-use zolana_transaction::{instructions::transact::PrivateTxHash, utxo::Blinding, ProofInputUtxo};
+use zolana_client::ProofInputUtxo;
+use zolana_hasher::primitives::hash_bytes;
+use zolana_keypair::ViewingKey;
+use zolana_transaction::{instructions::transact::PrivateTxHash, utxo::Blinding};
 
 mod shared;
 use shared::order_utxo_owner_hash;
 
 fn build_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../build/gnark/make")
+    PROVER.keys_dir(CircuitId::Make)
 }
 
 fn ensure_keys() {
     let dir = build_dir();
     if !dir.join("pk.bin").exists() || !dir.join("vk.bin").exists() {
-        swap_prover::setup(CircuitId::Make, &dir).expect("setup failed");
+        PROVER
+            .setup_insecure_test_keys(CircuitId::Make, &dir)
+            .expect("setup failed");
     }
 }
 
@@ -42,15 +46,15 @@ fn fe(byte: u8) -> [u8; 32] {
 }
 
 fn blinding(byte: u8) -> Blinding {
-    let mut out = [0u8; 31];
-    out[30] = byte;
+    let mut out = [0u8; 32];
+    out[31] = byte;
     out
 }
 
 fn sample_order() -> OrderTermsProofInput {
     let maker_viewing_pk = *ViewingKey::new().pubkey().as_bytes();
     OrderTermsProofInput {
-        destination_asset: hash_field(&[2u8; 32]).expect("destination asset"),
+        destination_asset: hash_bytes(&[2u8; 32]).expect("destination asset"),
         destination_amount: 250,
         maker_owner_hash: fe(99),
         maker_viewing_pk,
@@ -59,6 +63,10 @@ fn sample_order() -> OrderTermsProofInput {
         take_mode: TAKE_MODE_DERIVED,
     }
 }
+
+/// Both outputs of a make land in the same tree. A non-zero id keeps the test
+/// honest: a dropped tree id would change every commitment.
+const OUTPUT_TREE_ID: u16 = 3;
 
 fn build_inputs(destination_amount: u64, change_amount: u64) -> MakeProofInputs {
     let mut order = sample_order();
@@ -69,6 +77,7 @@ fn build_inputs(destination_amount: u64, change_amount: u64) -> MakeProofInputs 
         &source_mint,
         1_000,
         &blinding(7),
+        OUTPUT_TREE_ID,
     )
     .expect("order utxo")
     .with_data_hash(order.data_hash().expect("order data hash"));
@@ -77,10 +86,12 @@ fn build_inputs(destination_amount: u64, change_amount: u64) -> MakeProofInputs 
         &source_mint,
         change_amount,
         &blinding(6),
+        OUTPUT_TREE_ID,
     )
     .expect("change utxo");
     let source_input_hash = fe(5);
     let external_data_hash = fe(8);
+    let private_tx_blinding = fe(21);
     let private_tx_hash = PrivateTxHash::new(
         &[source_input_hash, [0u8; 32]],
         &[
@@ -88,6 +99,7 @@ fn build_inputs(destination_amount: u64, change_amount: u64) -> MakeProofInputs 
             order_utxo.hash().expect("order utxo hash"),
         ],
         &external_data_hash,
+        &private_tx_blinding,
     )
     .hash()
     .expect("private tx hash");
@@ -98,6 +110,7 @@ fn build_inputs(destination_amount: u64, change_amount: u64) -> MakeProofInputs 
         change,
         source_input_hash,
         external_data_hash,
+        private_tx_blinding,
     }
 }
 
@@ -131,12 +144,6 @@ fn verify_with_generated_vk(
         Err(_) => return false,
     };
     verifier.verify().is_ok()
-}
-
-fn keys_in_sync(vk: &Groth16VerifyingkeyOwned) -> bool {
-    let borrowed = vk.as_borrowed();
-    borrowed.vk_ic.len() == VERIFYINGKEY.vk_ic.len()
-        && borrowed.vk_alpha_g1 == VERIFYINGKEY.vk_alpha_g1
 }
 
 #[test]
@@ -175,27 +182,18 @@ fn make_prove_verify() {
         "groth16 proof must verify against the make verifying key with private_tx_hash as the sole public input"
     );
 
-    if keys_in_sync(&vk) {
-        let proof: MakeProof = proof.into();
-        verify_groth16(
-            CompressedGroth16Proof {
-                a: &proof.proof_a,
-                b: &proof.proof_b,
-                c: &proof.proof_c,
-                commitment: None,
-            },
-            inputs.private_tx_hash,
-            &VERIFYINGKEY,
-        )
-        .expect("program verify_groth16 must accept a valid proof");
-    } else {
-        eprintln!(
-            "SKIP: committed make VERIFYINGKEY does not match the locally generated \
-             build/gnark/make/vk.bin (keys are gitignored and groth16 setup is randomized), \
-             so the on-chain verify_groth16 path was not exercised. Download the pinned keys \
-             matching swap-keys.CHECKSUM to run it."
-        );
-    }
+    let proof: MakeProof = proof.into();
+    verify_groth16(
+        CompressedGroth16Proof {
+            a: &proof.proof_a,
+            b: &proof.proof_b,
+            c: &proof.proof_c,
+            commitment: None,
+        },
+        inputs.private_tx_hash,
+        &VERIFYINGKEY,
+    )
+    .expect("the committed make VERIFYINGKEY must accept the proof; run `just ensure-swap-keys`");
 }
 
 #[test]

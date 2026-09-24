@@ -4,12 +4,13 @@ use anyhow::{anyhow, bail, Result};
 use borsh::BorshDeserialize;
 use solana_address::Address;
 use solana_pubkey::Pubkey;
-use zolana_client::{resolve_registered_address, Rpc};
+use zolana_client::Rpc;
 use zolana_keypair::{P256Pubkey, ShieldedAddress, ShieldedKeypair};
 use zolana_transaction::{
     serialization::confidential::Confidential, utxo::Blinding, DecodeCx, ShieldedTransaction,
-    UtxoSerialization, Wallet,
+    UtxoSerialization,
 };
+use zolana_wallet::{resolve_registered_address, Wallet};
 
 use super::{
     poll::{collect_tagged, index_until},
@@ -17,6 +18,7 @@ use super::{
 };
 use crate::{
     err,
+    shared::INDEXED_TREE_ID,
     state::{OrderTerms, OrderUtxo, PlainTextData},
     MarkerData,
 };
@@ -29,7 +31,7 @@ pub struct TakerOrder {
 
 pub struct TakerOrderCandidate {
     pub source_amount: u64,
-    pub source_mint: Address,
+    pub source_mint: zolana_transaction::Mint,
     pub destination_mint: Address,
     pub order_utxo_blinding: Blinding,
     pub order_data: PlainTextData,
@@ -67,7 +69,7 @@ pub fn scan_taker(
     Ok(Some(TakerOrderCandidate {
         source_amount: order_utxo_plaintext.amount,
         source_mint: resolve_mint(&wallet.registry, order_utxo_plaintext.asset_id)?,
-        destination_mint: resolve_mint(&wallet.registry, order_data.destination_asset_id)?,
+        destination_mint: resolve_mint(&wallet.registry, order_data.destination_asset_id)?.asset,
         order_utxo_blinding: order_utxo_plaintext.blinding,
         order_data,
         maker_pubkey: Pubkey::new_from_array(marker.maker_pubkey),
@@ -98,7 +100,7 @@ impl TakerOrderCandidate {
         };
         let order_utxo_hash = order_utxo
             .output_utxo(taker_viewing_pubkey)?
-            .hash()
+            .hash(INDEXED_TREE_ID)
             .map_err(err)?;
         if order_utxo_hash != self.order_utxo_hash {
             bail!("reconstructed order utxo hash does not match the committed leaf");
@@ -110,7 +112,7 @@ impl TakerOrderCandidate {
     }
 }
 
-pub fn index_taker<I: Rpc, R: Rpc>(
+pub fn index_taker<I: Rpc + Sync, R: Rpc>(
     wallet: &mut Wallet,
     keypair: &ShieldedKeypair,
     indexer: &I,
@@ -185,9 +187,8 @@ mod tests {
     #[test]
     fn scan_taker_ignores_transactions_for_other_takers() {
         let fixture = order_fixture();
-        let other_keypair =
-            ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([21u8; 32]))
-                .expect("other keypair");
+        let other_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([21u8; 32]))
+            .expect("other keypair");
         let other_wallet = Wallet::new(
             other_keypair.shielded_address().expect("other address"),
             fixture.wallet.registry.clone(),

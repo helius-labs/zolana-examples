@@ -6,7 +6,7 @@ import (
 
 	"github.com/consensys/gnark/frontend"
 
-	"zolana/prover/circuits/gadget"
+	"zolana/gnarksdk"
 	ve "zolana/prover/circuits/verifiable-encryption"
 	"zolana/prover/circuits/verifiable-encryption/aes"
 )
@@ -24,7 +24,7 @@ type Circuit struct {
 func (c *Circuit) Define(api frontend.API) error {
 	api.AssertIsEqual(c.Core.Order.TakeMode, orderterms.TakeModeVerifiable)
 
-	takerOwnerHash := gadget.PoseidonHash(api, []frontend.Variable{c.Core.Order.TakerPkFe, c.TakerNullifierPk})
+	takerOwnerHash := gnarksdk.Poseidon(api, c.Core.Order.TakerPkFe, c.TakerNullifierPk)
 	api.AssertIsEqual(c.Core.TakerIn.Owner, takerOwnerHash)
 
 	c.Core.Check(api, c.Public.PrivateTxHash)
@@ -42,24 +42,21 @@ type PublicInputs struct {
 }
 
 func (p PublicInputs) Check(api frontend.API, expiry frontend.Variable, ctHash frontend.Variable) {
-	publicInputHash := gadget.PoseidonHash(api, []frontend.Variable{p.PrivateTxHash, expiry, ctHash})
+	publicInputHash := gnarksdk.Poseidon(api, p.PrivateTxHash, expiry, ctHash)
 	api.AssertIsEqual(p.PublicInputHash, publicInputHash)
 }
 
 func (c *Circuit) checkVerifiableEncryption(api frontend.API) frontend.Variable {
-	sharedSecret := gadget.PoseidonHash(api, []frontend.Variable{
-		c.Core.OrderUtxo.Blinding,
-		frontend.Variable(orderterms.TakeEncKdfDomain),
-	})
+	sharedSecret := gnarksdk.Poseidon(api, c.Core.OrderUtxo.Blinding, orderterms.TakeEncKdfDomain)
 	aesGadget := aes.NewAESGadget(api)
 	key, nonce := ve.KeySchedule(api, sharedSecret, mergeKdfInfoVars(), len(mergeKdfInfo))
 
-	var plaintext [71]frontend.Variable
+	var plaintext [72]frontend.Variable
 	copy(plaintext[0:8], ve.FieldToBytesBE(api, c.Core.Order.DestinationAmount, 8))
 	copy(plaintext[8:40], ve.FieldToBytesBE(api, c.Core.Order.DestinationAsset, 32))
-	copy(plaintext[40:71], ve.FieldToBytesBE(api, c.Core.DestinationOutput.Blinding, 31))
+	copy(plaintext[40:72], ve.FieldToBytesBE(api, c.Core.DestinationOutput.Blinding, 32))
 	ciphertext := aes.CTREncrypt(api, aesGadget, key, nonce, plaintext[:])
-	return gadget.PoseidonHash(api, ve.PackBytesBE(api, ciphertext, 16))
+	return gnarksdk.HashBytes(api, ciphertext)
 }
 
 func mergeKdfInfoVars() []frontend.Variable {

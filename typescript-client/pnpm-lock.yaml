@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@heliuslabs/zolana':
-        specifier: git+ssh://git@github.com/helius-labs/zolana.git#4745bbb3bc60edd08ca0f348ea6cfc6a4ab168f8&path:/sdk-libs/ts
-        version: https://codeload.github.com/helius-labs/zolana/tar.gz/4745bbb3bc60edd08ca0f348ea6cfc6a4ab168f8#path:/sdk-libs/ts(@solana/kit@8.3.0(typescript@7.0.2))
+        specifier: git+ssh://git@github.com/helius-labs/zolana.git#v0.3.0-alpha&path:/sdk-libs/ts
+        version: https://codeload.github.com/helius-labs/zolana/tar.gz/c97e1de7ef4dfcf73934ed77bf7f4dd2e72fc043#path:/sdk-libs/ts(@solana/kit@8.3.0(typescript@7.0.2))
       '@solana-program/system':
         specifier: 0.14.1
         version: 0.14.1(@solana/kit@8.3.0(typescript@7.0.2))
@@ -22,7 +22,7 @@ importers:
         version: 8.3.0(typescript@7.0.2)
       dotenv:
         specifier: latest
-        version: 17.4.2
+        version: 18.0.3
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -32,7 +32,7 @@ importers:
         version: 0.61.0
       tsx:
         specifier: latest
-        version: 4.23.13
+        version: 4.23.15
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -195,9 +195,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@heliuslabs/zolana@https://codeload.github.com/helius-labs/zolana/tar.gz/4745bbb3bc60edd08ca0f348ea6cfc6a4ab168f8#path:/sdk-libs/ts':
-    resolution: {gitHosted: true, integrity: sha512-rOLxWOWPpMvsrQMcowSycUAdg/Z3brjg5cLdswZzcct9o7V1lZF9UUzzOpuP4iUKQj6JxQyfrCP2t5+8zBOHIg==, path: /sdk-libs/ts, tarball: https://codeload.github.com/helius-labs/zolana/tar.gz/4745bbb3bc60edd08ca0f348ea6cfc6a4ab168f8}
-    version: 0.1.6-alpha
+  '@heliuslabs/zolana@https://codeload.github.com/helius-labs/zolana/tar.gz/c97e1de7ef4dfcf73934ed77bf7f4dd2e72fc043#path:/sdk-libs/ts':
+    resolution: {gitHosted: true, integrity: sha512-JYue4MyLBEUH4raIm6WxRtrsE7UpKEDTMYt/DW8YbpWpJPxKshMGiFtQkjG24tFUxa4gZI2suOGuCHEMF05XQw==, path: /sdk-libs/ts, tarball: https://codeload.github.com/helius-labs/zolana/tar.gz/c97e1de7ef4dfcf73934ed77bf7f4dd2e72fc043}
+    version: 0.3.0-alpha
     engines: {node: '>=24'}
     peerDependencies:
       '@solana/kit': ^8.3.0
@@ -874,9 +874,10 @@ packages:
     resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
     engines: {node: '>=22.12.0'}
 
-  dotenv@17.4.2:
-    resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
+  dotenv@18.0.3:
+    resolution: {integrity: sha512-/8CJTyL817qPnfbQrJgOEcrU3fDrJkRIoXBE566wHuvIXKOCHUZhPqGPbCPi9SogjdGnreF0TlvnTgK6J/8zpA==}
     engines: {node: '>=12'}
+    hasBin: true
 
   esbuild@0.28.1:
     resolution: {integrity: sha512-HrJrvZv5ayxBzPfwphOoNzkzOIIlifzk0KJrGK2c8R4+LKpMtpYLQeUdjnwjWv/LZlkH2laZk+4w78pi99D4Vw==}
@@ -905,8 +906,8 @@ packages:
     resolution: {integrity: sha512-Pugqs6M0m7Lv1I7FtxN4aoyToKg1C4tu+/381vH35y8oENM/Ai7f7C4StcoK4/+BSw9ebcS8jRiVrORFKCALLw==}
     engines: {node: ^20.0.0 || >=22.0.0}
 
-  tsx@4.23.13:
-    resolution: {integrity: sha512-BL5MGkRln6aDYhb0xbQlEAGw743BaZYWdbWtdJOBriYJboKgUUYCadFp2/FpBBZquBC/ezNBn7wMMPx7FDZUDw==}
+  tsx@4.23.15:
+    resolution: {integrity: sha512-Yiex1Ovn8z2xPpOWckIiysV1SSyRMY9BkLF++q0yKiDxCqRhosKfMg3janKkiLBwZ5c/YryloKwGZcrEmtwxKw==}
     engines: {node: '>=18.0.0'}
     hasBin: true
 
@@ -1013,7 +1014,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@heliuslabs/zolana@https://codeload.github.com/helius-labs/zolana/tar.gz/4745bbb3bc60edd08ca0f348ea6cfc6a4ab168f8#path:/sdk-libs/ts(@solana/kit@8.3.0(typescript@7.0.2))':
+  '@heliuslabs/zolana@https://codeload.github.com/helius-labs/zolana/tar.gz/c97e1de7ef4dfcf73934ed77bf7f4dd2e72fc043#path:/sdk-libs/ts(@solana/kit@8.3.0(typescript@7.0.2))':
     dependencies:
       '@lightprotocol/hasher.rs': 0.2.1
       '@noble/ciphers': 2.2.0
@@ -1662,7 +1663,7 @@ snapshots:
 
   commander@15.0.0: {}
 
-  dotenv@17.4.2: {}
+  dotenv@18.0.3: {}
 
   esbuild@0.28.1:
     optionalDependencies:
@@ -1722,7 +1723,7 @@ snapshots:
 
   tinypool@2.1.0: {}
 
-  tsx@4.23.13:
+  tsx@4.23.15:
     dependencies:
       esbuild: 0.28.1
     optionalDependencies:

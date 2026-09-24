@@ -2,30 +2,39 @@ use anyhow::Result;
 use solana_address::Address;
 use zolana_keypair::ShieldedAddress;
 use zolana_transaction::{
-    instructions::{transact::SppProofOutputUtxo, types::SppProofInputUtxo},
     utxo::Blinding,
+    {instructions::transact::SppProofOutputUtxo, utxo::SppProofInputUtxo},
 };
 
 use crate::err;
 
+/// Raw id of the tree a rediscovered leaf was appended to. The tree id is the
+/// second element of a UTXO commitment, so the indexer must hash a candidate
+/// opening under the same id as the leaf it compares against.
+// TODO(tree-id): resolve the tree id from the tree account holding the leaf.
+pub const INDEXED_TREE_ID: u16 = 0;
+
 pub fn input_sum(inputs: &[SppProofInputUtxo], asset: &Address) -> i128 {
     inputs
         .iter()
-        .filter(|spend| &spend.utxo.asset == asset)
-        .map(|spend| i128::from(spend.utxo.amount))
+        .filter(|input_utxo| &input_utxo.utxo.asset.asset == asset)
+        .map(|input_utxo| i128::from(input_utxo.utxo.amount))
         .sum()
 }
 
-// Places the blinding in bytes [1..32], leaving the top byte zero for field
-// validity; only well-defined when a Blinding is exactly 31 bytes. Asserted at
-// compile time so a Blinding length change is a build error, not a runtime panic
-// in `copy_from_slice`.
-const _: () = assert!(core::mem::size_of::<Blinding>() == 31);
+// A Blinding is already a 32-byte big-endian field element. Asserted at compile
+// time so a Blinding width change is a build error, not a silent mismatch.
+const _: () = assert!(core::mem::size_of::<Blinding>() == 32);
 
 pub(crate) fn right_align_blinding(blinding: &Blinding) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    out[1..].copy_from_slice(blinding);
-    out
+    *blinding
+}
+
+#[cfg(test)]
+pub(crate) fn test_blinding(byte: u8) -> Blinding {
+    let mut blinding = [byte; 32];
+    blinding[0] = 0;
+    blinding
 }
 
 pub(crate) fn check_output_utxo(
@@ -37,18 +46,18 @@ pub(crate) fn check_output_utxo(
     let owner = output
         .owner_address
         .ok_or_else(|| err(format!("{label} owner address missing")))?;
-    if &output.asset != mint {
+    if &output.asset.asset != mint {
         return Err(err(format!("{label} asset mismatch")));
     }
     if output.amount != amount {
         return Err(err(format!("{label} amount mismatch")));
     }
     if output.data_hash.is_some()
-        || output.zone_data_hash.is_some()
-        || output.zone_program_id.is_some()
+        || output.ring_data_hash.is_some()
+        || output.ring_program_id.is_some()
     {
         return Err(err(format!(
-            "{label} must not carry data or zone commitments"
+            "{label} must not carry data or ring commitments"
         )));
     }
     Ok(owner)

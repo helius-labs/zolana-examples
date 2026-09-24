@@ -1,30 +1,30 @@
 use std::time::{Duration, Instant};
+use zolana_test_utils::utxo::{
+    encrypt_transaction_data, get_transaction_viewing_key, prepare_output_blindings,
+};
+use zolana_transaction::utxo::SppProofInputUtxo;
 
 use light_program_profiler::{
     mollusk::{register_profiling_syscalls, take_profiling_entries},
     report::{CuBenchmark, ReadmeConfig, SectionTable},
 };
-use mollusk_solana_account::Account as MolluskAccount;
-use mollusk_solana_instruction::{
-    AccountMeta as MolluskAccountMeta, Instruction as MolluskInstruction,
-};
-use mollusk_solana_pubkey::Pubkey as MolluskPubkey;
-use mollusk_svm::{program::loader_keys::LOADER_V3, result::Check, Mollusk};
+use mollusk_svm::{result::Check, Mollusk};
 use num_bigint::BigUint;
+use solana_account::Account;
 use solana_address::Address;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
-use solana_instruction::Instruction;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
-use solana_message::{v0, AddressLookupTableAccount, Message, VersionedMessage};
+use solana_message::Message;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use solana_transaction::{versioned::VersionedTransaction, Transaction};
-use swap_prover::{preload, CircuitId};
+use solana_transaction::Transaction;
+use swap_prover::{CircuitId, PROVER};
 use swap_sdk::{
     instructions::{
         cancel::{Cancel, CancelProofInputParams},
         make::{Make, MakeProofInputParams, OrderMarker, SppTxHashes},
-        take::{Take, TakeProofInputParams},
+        take::{take_blinding_seed, Take, TakeProofInputParams},
         take_verifiable_encryption::{
             TakeVerifiableEncryption, TakeVerifiableEncryptionProofInputParams,
         },
@@ -34,50 +34,39 @@ use swap_sdk::{
     state::{OrderTerms, OrderUtxo},
 };
 use zolana_client::{
-    MerkleContext, MerkleProof, NonInclusionProof, ProverClient, SpendProof, NULLIFIER_TREE_HEIGHT,
-    STATE_TREE_HEIGHT,
+    transaction_size, ComputeBudgetConfig, MerkleContext, MerkleProof, NonInclusionProof,
+    ProverClient, SpendProof, NULLIFIER_TREE_HEIGHT, STATE_TREE_HEIGHT,
 };
 use zolana_hasher::Poseidon;
 use zolana_interface::{
     instruction::instruction_data::transact::{OwnerTag, TransactIxData, TransactOutput},
     state::{
-        address_tree_params, discriminator::TREE_ACCOUNT_DISCRIMINATOR, tree_account_size,
-        STATE_HEIGHT,
+        default_tree_fees, discriminator::TREE_ACCOUNT_DISCRIMINATOR, nullifier_tree_params,
+        tree_account_size, STATE_HEIGHT,
     },
     SHIELDED_POOL_PROGRAM_ID,
 };
-use zolana_keypair::{random_blinding, ShieldedKeypair, ViewingKey};
+use zolana_keypair::{random_blinding, ShieldedKeypair, SigningKey};
 use zolana_merkle_tree::{indexed::IndexedMerkleTree, MerkleTree};
 use zolana_transaction::{
-    instructions::{
-        transact::{
-            encrypt_transaction_data, get_transaction_viewing_key,
-            spp_proof_inputs::BN254_MODULUS_DEC, ExternalData, SppProofInputs, SppProofOutputUtxo,
-        },
-        types::SppProofInputUtxo,
-    },
-    AssetRegistry, Data, Utxo, SOL_ASSET_ID, SOL_MINT,
+    instructions::transact::{ExternalData, SppProofInputs, SppProofOutputUtxo, BN254_MODULUS_DEC},
+    Data, Utxo, SOL_ASSET_ID, SOL_MINT,
 };
 use zolana_tree::TreeAccount;
 
 const PROFILING_SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../target/swap-bench");
 const OUTPUT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../BENCHMARK.md");
-const PROVER_KEYS_DIR: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../../prover/server/proving-keys"
-);
-
-fn to_mollusk_pubkey(key: &Pubkey) -> MolluskPubkey {
-    MolluskPubkey::new_from_array(key.to_bytes())
+fn to_mollusk_pubkey(key: &Pubkey) -> Pubkey {
+    Pubkey::new_from_array(key.to_bytes())
 }
 
-fn to_mollusk_instruction(ix: &Instruction) -> MolluskInstruction {
-    MolluskInstruction {
+fn to_mollusk_instruction(ix: &Instruction) -> Instruction {
+    Instruction {
         program_id: to_mollusk_pubkey(&ix.program_id),
         accounts: ix
             .accounts
             .iter()
-            .map(|meta| MolluskAccountMeta {
+            .map(|meta| AccountMeta {
                 pubkey: to_mollusk_pubkey(&meta.pubkey),
                 is_signer: meta.is_signer,
                 is_writable: meta.is_writable,
@@ -87,25 +76,26 @@ fn to_mollusk_instruction(ix: &Instruction) -> MolluskInstruction {
     }
 }
 
-fn mollusk_program_account(program_id: &MolluskPubkey) -> (MolluskPubkey, MolluskAccount) {
+fn mollusk_program_account(program_id: &Pubkey) -> (Pubkey, Account) {
     let account = mollusk_svm::program::create_program_account_loader_v3(program_id);
     (*program_id, account)
 }
 
-fn system_owned_account(lamports: u64) -> MolluskAccount {
-    MolluskAccount {
+fn system_owned_account(lamports: u64) -> Account {
+    Account {
         lamports,
         data: Vec::new(),
-        owner: MolluskPubkey::new_from_array([0u8; 32]),
+        owner: Pubkey::new_from_array([0u8; 32]),
         executable: false,
         rent_epoch: 0,
     }
 }
 
-fn build_tree_fixture(
-    tree: &Pubkey,
-    leaves: &[[u8; 32]],
-) -> (MolluskAccount, [u8; 32], [u8; 32], u16) {
+/// Raw id of the fixture tree. `build_tree_fixture` initializes the account with
+/// this id, and every UTXO commitment folds it in.
+const BENCH_TREE_ID: u16 = 0;
+
+fn build_tree_fixture(tree: &Pubkey, leaves: &[[u8; 32]]) -> (Account, [u8; 32], [u8; 32], u16) {
     let mut tree_account_bytes = vec![0u8; tree_account_size()];
     let root_index = leaves.len() as u16;
     let (utxo_root, nullifier_root) = {
@@ -113,23 +103,28 @@ fn build_tree_fixture(
             &mut tree_account_bytes,
             TREE_ACCOUNT_DISCRIMINATOR,
             STATE_HEIGHT as u8,
-            [1u8; 32],
             tree.to_bytes(),
-            address_tree_params(),
+            BENCH_TREE_ID,
+            nullifier_tree_params(),
+            default_tree_fees(nullifier_tree_params().input_queue_zkp_batch_size)
+                .expect("default tree fees"),
         )
         .expect("init tree account");
-        for leaf in leaves {
-            account.utxo_tree().append(*leaf);
+        for (slot, leaf) in (1_u64..).zip(leaves) {
+            account
+                .utxo_tree()
+                .append(*leaf, slot)
+                .expect("append leaf");
         }
         (
             account.get_utxo_tree_root(root_index).expect("utxo root"),
             account.get_nullifier_tree_root(0).expect("nullifier root"),
         )
     };
-    let fixture = MolluskAccount {
+    let fixture = Account {
         lamports: 1_000_000_000_000,
         data: tree_account_bytes,
-        owner: MolluskPubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID),
+        owner: Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID),
         executable: false,
         rent_epoch: 0,
     };
@@ -159,7 +154,7 @@ fn build_spend_proofs(
     tree: &Pubkey,
     state_tree: &MerkleTree<Poseidon>,
     nf_tree: &IndexedMerkleTree<Poseidon, usize>,
-    commitments: &[zolana_transaction::instructions::types::InputUtxoContext],
+    commitments: &[&SppProofInputUtxo],
     utxo_root: [u8; 32],
     nullifier_root: [u8; 32],
     root_index: u16,
@@ -208,9 +203,9 @@ fn build_spend_proofs(
 
 fn assemble_accounts(
     ix: &Instruction,
-    spp_id: &MolluskPubkey,
-    fixtures: &[(Pubkey, MolluskAccount)],
-) -> Vec<(MolluskPubkey, MolluskAccount)> {
+    spp_id: &Pubkey,
+    fixtures: &[(Pubkey, Account)],
+) -> Vec<(Pubkey, Account)> {
     let spp = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
     ix.accounts
         .iter()
@@ -236,30 +231,35 @@ fn keypair_from_payer(payer: &Keypair) -> ShieldedKeypair {
     let seed: [u8; 32] = payer.to_bytes()[..32]
         .try_into()
         .expect("ed25519 seed is the first 32 bytes");
-    ShieldedKeypair::from_ed25519(&seed, ViewingKey::new()).expect("keypair from payer")
+    ShieldedKeypair::from_keypair(SigningKey::from_ed25519_bytes(&seed))
+        .expect("keypair from payer")
 }
 
 fn prove_transact_timed(
     proof_inputs: SppProofInputs,
     spend_proofs: &[SpendProof],
     prover: &ProverClient,
+    keys: &[&zolana_keypair::NullifierKey],
 ) -> (TransactIxData, Duration) {
+    let dummy_proofs = zolana_test_utils::utxo::dummy_proofs(&proof_inputs);
     prover
-        .prove_transact(proof_inputs.clone(), spend_proofs)
+        .prove_transact(
+            proof_inputs.clone(),
+            spend_proofs,
+            &dummy_proofs,
+            &zolana_test_utils::utxo::ProofKeys(keys),
+        )
         .expect("warm prove transact");
     let start = Instant::now();
     let transact = prover
-        .prove_transact(proof_inputs, spend_proofs)
+        .prove_transact(
+            proof_inputs,
+            spend_proofs,
+            &dummy_proofs,
+            &zolana_test_utils::utxo::ProofKeys(keys),
+        )
         .expect("prove transact");
     (transact, start.elapsed())
-}
-
-fn start_prover() {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| {
-        std::env::set_var("ZOLANA_PROVER_KEYS_DIR", PROVER_KEYS_DIR);
-    });
-    zolana_client::spawn_prover().expect("spawn prover");
 }
 
 fn proving_time_table(spp: Duration, swap: Duration) -> SectionTable {
@@ -278,40 +278,25 @@ fn proving_time_table(spp: Duration, swap: Duration) -> SectionTable {
     }
 }
 
+/// The instruction measured against both packet ceilings. The legacy row keeps
+/// its compute-budget prefix because a legacy transaction had to buy its budget
+/// with an instruction; v1 states the same ceilings in the message header, so
+/// its row is the instruction alone.
 fn tx_size_table(ix: &Instruction, payer: &Pubkey) -> SectionTable {
     let compute = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
 
-    let message = Message::new(&[compute.clone(), ix.clone()], Some(payer));
+    let message = Message::new(&[compute, ix.clone()], Some(payer));
     let legacy = bincode::serialize(&Transaction::new_unsigned(message))
         .expect("serialize legacy")
         .len();
 
-    let alt = AddressLookupTableAccount {
-        key: Address::new_from_array([250u8; 32]),
-        addresses: ix
-            .accounts
-            .iter()
-            .filter(|meta| !meta.is_signer)
-            .map(|meta| Address::new_from_array(meta.pubkey.to_bytes()))
-            .chain(std::iter::once(Address::new_from_array(
-                ix.program_id.to_bytes(),
-            )))
-            .collect(),
-    };
-    let v0_message = v0::Message::try_compile(
+    let v1 = transaction_size(
         payer,
-        &[compute, ix.clone()],
-        std::slice::from_ref(&alt),
-        Default::default(),
+        std::slice::from_ref(ix),
+        ComputeBudgetConfig::new(1_400_000),
     )
-    .expect("compile v0 message");
-    let versioned = VersionedMessage::V0(v0_message);
-    let signature_count = versioned.header().num_required_signatures as usize;
-    let tx = VersionedTransaction {
-        signatures: vec![Default::default(); signature_count],
-        message: versioned,
-    };
-    let v0_alt = bincode::serialize(&tx).expect("serialize v0").len();
+    .expect("measure v1 transaction")
+    .bytes;
 
     SectionTable {
         title: "Transaction Size".into(),
@@ -319,13 +304,13 @@ fn tx_size_table(ix: &Instruction, payer: &Pubkey) -> SectionTable {
             "Instruction Data".into(),
             "Accounts".into(),
             "Legacy Tx".into(),
-            "v0 + ALT Tx".into(),
+            "v1 Tx".into(),
         ],
         rows: vec![vec![
             format!("{} bytes", ix.data.len()),
             ix.accounts.len().to_string(),
             format!("{} bytes", legacy),
-            format!("{} bytes", v0_alt),
+            format!("{} bytes", v1),
         ]],
     }
 }
@@ -335,13 +320,13 @@ fn tx_size_table(ix: &Instruction, payer: &Pubkey) -> SectionTable {
 fn bench_cu_swap() {
     std::env::set_var("SBF_OUT_DIR", PROFILING_SBF_DIR);
 
-    let swap_id = MolluskPubkey::new_from_array(*swap_program::ID.as_array());
-    let spp_id = MolluskPubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
+    let swap_id = Pubkey::new_from_array(*swap_program::ID.as_array());
+    let spp_id = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
 
     let mut mollusk = Mollusk::default();
     register_profiling_syscalls(&mut mollusk);
-    mollusk.add_program(&swap_id, "swap_program", &LOADER_V3);
-    mollusk.add_program(&spp_id, "shielded_pool_program", &LOADER_V3);
+    mollusk.add_program(&swap_id, "swap_program");
+    mollusk.add_program(&spp_id, "shielded_pool_program");
 
     let mut bench = CuBenchmark::new(ReadmeConfig {
         title: "Confidential Swap -- CU Benchmark".into(),
@@ -354,21 +339,27 @@ fn bench_cu_swap() {
              shielded-pool program is built plain, so the CU its CPI consumes is charged to the \
              `cpi_spp_transact*` row as a black box and its internal functions do not appear \
              here. Each instruction section also records its proving times (SPP transfer proof \
-             plus swap circuit proof) and its serialized transaction size: the instruction \
-             prefixed with a compute-budget limit ix, as a legacy transaction and as a v0 \
-             transaction with every non-signer account and the program id in one address lookup \
-             table (Solana's packet limit is 1232 bytes)."
+             plus swap circuit proof) and its serialized transaction size, measured twice: as a \
+             legacy transaction, which must prefix a compute-budget limit ix and may not exceed \
+             1232 bytes, and as the transaction v1 these instructions are actually sent as, which \
+             states its compute ceilings in the message header and may run to 4096 bytes. The \
+             protocol now sits between the two, so the legacy column is what a row would have to \
+             fit to be sendable the old way, not a limit that binds today."
                 .into(),
         output_path: OUTPUT_PATH.into(),
         regenerate_command: Some("just bench-swap".into()),
         ..Default::default()
     });
 
-    start_prover();
-    preload(CircuitId::Make).expect("preload make keys");
-    preload(CircuitId::Take).expect("preload take keys");
-    preload(CircuitId::TakeVerifiableEncryption).expect("preload take_verifiable_encryption keys");
-    preload(CircuitId::Cancel).expect("preload cancel keys");
+    zolana_test_utils::prover::spawn_workspace_prover();
+    PROVER.preload(CircuitId::Make).expect("preload make keys");
+    PROVER.preload(CircuitId::Take).expect("preload take keys");
+    PROVER
+        .preload(CircuitId::TakeVerifiableEncryption)
+        .expect("preload take_verifiable_encryption keys");
+    PROVER
+        .preload(CircuitId::Cancel)
+        .expect("preload cancel keys");
 
     bench_make(&mut mollusk, &spp_id, &mut bench);
     bench_take_derived(&mut mollusk, &spp_id, &mut bench);
@@ -378,27 +369,27 @@ fn bench_cu_swap() {
     bench.generate().expect("write BENCHMARK.md");
 }
 
-fn bench_make(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBenchmark) {
+fn bench_make(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     const INPUT_AMOUNT: u64 = 1_000_000;
     const SOURCE_AMOUNT: u64 = 400_000;
     const EXPIRY: u64 = 1_900_000_000;
 
-    let tree = Keypair::new().pubkey();
+    let tree = zolana_interface::pda::tree(BENCH_TREE_ID);
     let payer = Keypair::new();
     let maker = keypair_from_payer(&payer);
 
     let input_blinding = random_blinding();
     let input_utxo = Utxo {
         owner: maker.signing_pubkey(),
-        asset: SOL_MINT,
+        asset: zolana_transaction::Mint::SOL,
         amount: INPUT_AMOUNT,
         blinding: input_blinding,
-        zone_program_id: None,
+        ring_program_id: None,
         data: Data::default(),
     };
 
-    let taker = ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([0x4d; 32]))
-        .expect("taker keypair");
+    let taker =
+        ShieldedKeypair::from_keypair(&Keypair::new_from_array([0x4d; 32])).expect("taker keypair");
     let taker_address = taker.shielded_address().expect("taker address");
     let terms = OrderTerms {
         destination_mint: Address::new_from_array([7u8; 32]),
@@ -408,10 +399,10 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
         expiry: EXPIRY,
         take_mode: swap_prover::TAKE_MODE_VERIFIABLE,
     };
-    let order_utxo = OrderUtxo {
+    let mut order_utxo = OrderUtxo {
         terms,
         blinding: random_blinding(),
-        source_mint: SOL_MINT,
+        source_mint: zolana_transaction::Mint::SOL,
         source_amount: SOURCE_AMOUNT,
         destination_asset_id: 2,
     };
@@ -420,13 +411,24 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
         .expect("order output");
 
     let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
-    let spend = SppProofInputUtxo::new(input_utxo, &maker);
-    let input_utxos = vec![spend, SppProofInputUtxo::new_dummy()];
-    let assets = AssetRegistry::default();
+    let input_utxo: SppProofInputUtxo = zolana_test_utils::utxo::wallet(
+        input_utxo,
+        &maker.nullifier_key,
+        BENCH_TREE_ID,
+        0,
+        None,
+        None,
+    )
+    .expect("indexed input")
+    .into();
+    let input_utxos = vec![
+        input_utxo,
+        SppProofInputUtxo::dummy(BENCH_TREE_ID).expect("dummy"),
+    ];
 
     let order_utxo_asset = order_output_utxo.asset;
     let leftover =
-        input_sum(&input_utxos, &order_utxo_asset) - i128::from(order_output_utxo.amount);
+        input_sum(&input_utxos, &order_utxo_asset.asset) - i128::from(order_output_utxo.amount);
     let change_amount = u64::try_from(leftover).expect("insufficient order balance");
     let change = SppProofOutputUtxo::new(
         order_utxo_asset,
@@ -434,8 +436,17 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
         maker.shielded_address().expect("maker address"),
     )
     .expect("change output");
+    let mut transaction_outputs = vec![change, order_output_utxo];
+    let blinding_seed = prepare_output_blindings(&input_utxos, &mut transaction_outputs)
+        .expect("derive make output blindings");
+    let [change, order_output_utxo]: [_; 2] = transaction_outputs
+        .try_into()
+        .expect("make transaction has two outputs");
+    order_utxo.blinding = order_output_utxo.blinding;
 
-    let order_utxo_hash = order_output_utxo.hash().expect("order output hash");
+    let order_utxo_hash = order_output_utxo
+        .hash(BENCH_TREE_ID)
+        .expect("order output hash");
     let marker_message = OrderMarker {
         order_utxo_hash,
         maker_pubkey: payer.pubkey(),
@@ -449,8 +460,8 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
 
     let encoded = encrypt_transaction_data(
         &[change.clone(), order_output_utxo],
-        &assets,
         &transaction_viewing_key,
+        BENCH_TREE_ID,
     )
     .expect("encode make slots");
 
@@ -461,12 +472,15 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
         encoded.resolved_owner_tags,
         vec![marker_message],
     );
-    let spp_proof_inputs = SppProofInputs::new(
+    let spp_proof_inputs = SppProofInputs {
         input_utxos,
-        encoded.output_utxos,
+        output_utxos: encoded.output_utxos,
         external_data,
-        payer_address,
-    );
+        payer: payer_address,
+        blinding_seed,
+        output_tree_id: BENCH_TREE_ID,
+        cache_accounts: Default::default(),
+    };
 
     let commitments = spp_proof_inputs
         .input_utxo_hashes()
@@ -495,7 +509,12 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
 
     let prover = ProverClient::local();
     let swap_prover_client = SwapProverClient::new();
-    let (transact, spp_dur) = prove_transact_timed(spp_proof_inputs, &spend_proofs, &prover);
+    let (transact, spp_dur) = prove_transact_timed(
+        spp_proof_inputs,
+        &spend_proofs,
+        &prover,
+        &[&maker.nullifier_key],
+    );
     let swap_prove_start = Instant::now();
     let make_proof = swap_prover_client
         .prove_make(
@@ -530,17 +549,17 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
     bench.add_table("make", tx_size_table(&ix, &payer.pubkey()));
 }
 
-fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBenchmark) {
+fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     const SOURCE_AMOUNT: u64 = 400_000;
     const DESTINATION_AMOUNT: u64 = 250;
     const EXPIRY: u64 = 1_900_000_000;
 
-    let tree = Keypair::new().pubkey();
+    let tree = zolana_interface::pda::tree(BENCH_TREE_ID);
     let taker_payer = Keypair::new();
     let taker = keypair_from_payer(&taker_payer);
     let taker_address = taker.shielded_address().expect("taker address");
-    let maker = ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([0x51; 32]))
-        .expect("maker keypair");
+    let maker =
+        ShieldedKeypair::from_keypair(&Keypair::new_from_array([0x51; 32])).expect("maker keypair");
     let maker_address = maker.shielded_address().expect("maker address");
 
     let terms = OrderTerms {
@@ -554,7 +573,7 @@ fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut
     let order_utxo = OrderUtxo {
         terms,
         blinding: random_blinding(),
-        source_mint: SOL_MINT,
+        source_mint: zolana_transaction::Mint::SOL,
         source_amount: SOURCE_AMOUNT,
         destination_asset_id: SOL_ASSET_ID,
     };
@@ -564,31 +583,53 @@ fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut
 
     let taker_in = order_utxo.destination_output(taker_address, taker_in_blinding);
     let source_output = order_utxo.source_output(taker_address, source_output_blinding);
-    let destination_output = order_utxo
-        .derived_destination_output(maker_address)
-        .expect("destination output");
+    let destination_output = order_utxo.destination_output(maker_address, random_blinding());
 
-    let order_input_utxo = order_utxo.to_input_utxo().expect("order spend");
+    let order_input_utxo = order_utxo
+        .to_input_utxo(BENCH_TREE_ID, 0)
+        .expect("order input_utxo");
     let taker_utxo = Utxo {
         owner: taker.signing_pubkey(),
-        asset: SOL_MINT,
+        asset: zolana_transaction::Mint::SOL,
         amount: DESTINATION_AMOUNT,
         blinding: taker_in_blinding,
-        zone_program_id: None,
+        ring_program_id: None,
         data: Data::default(),
     };
-    let taker_spend = SppProofInputUtxo::new(taker_utxo, &taker);
+    let taker_input_utxo: SppProofInputUtxo = zolana_test_utils::utxo::wallet(
+        taker_utxo,
+        &taker.nullifier_key,
+        BENCH_TREE_ID,
+        1,
+        None,
+        None,
+    )
+    .expect("indexed input")
+    .into();
 
     let payer_address = Address::new_from_array(taker_payer.pubkey().to_bytes());
-    let assets = AssetRegistry::default();
-    let input_utxos = vec![order_input_utxo, taker_spend];
+    let input_utxos = vec![order_input_utxo, taker_input_utxo];
+    let mut transaction_outputs = vec![source_output, destination_output];
+    let blinding_seed = take_blinding_seed(&order_utxo.blinding).expect("take blinding seed");
+    let first_nullifier = input_utxos.first().expect("order input").nullifier();
+    let seed = zolana_transaction::derive_output_blinding_seed(&first_nullifier, &blinding_seed)
+        .expect("take seed");
+    zolana_test_utils::utxo::assign_output_blindings(
+        &mut transaction_outputs,
+        &first_nullifier,
+        &seed,
+    )
+    .expect("derive take output blindings");
+    let [source_output, destination_output]: [_; 2] = transaction_outputs
+        .try_into()
+        .expect("take transaction has two outputs");
     let transaction_viewing_key =
         get_transaction_viewing_key(&taker, &input_utxos).expect("take transaction viewing key");
 
     let encoded = encrypt_transaction_data(
         &[source_output.clone(), destination_output.clone()],
-        &assets,
         &transaction_viewing_key,
+        BENCH_TREE_ID,
     )
     .expect("encode take slots");
 
@@ -600,12 +641,15 @@ fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut
         vec![],
     );
     external_data.expiry_unix_ts = order_utxo.terms.expiry;
-    let spp_proof_inputs = SppProofInputs::new(
+    let spp_proof_inputs = SppProofInputs {
         input_utxos,
-        encoded.output_utxos,
+        output_utxos: encoded.output_utxos,
         external_data,
-        payer_address,
-    );
+        payer: payer_address,
+        blinding_seed,
+        output_tree_id: BENCH_TREE_ID,
+        cache_accounts: Default::default(),
+    };
 
     let commitments = spp_proof_inputs
         .input_utxo_hashes()
@@ -635,11 +679,24 @@ fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut
             .external_data
             .hash()
             .expect("external data hash"),
+        private_tx_blinding: spp_proof_inputs
+            .private_tx_blinding()
+            .expect("private tx blinding"),
+        input_tree_id: BENCH_TREE_ID,
+        output_tree_id: BENCH_TREE_ID,
     };
 
     let prover = ProverClient::local();
     let swap_prover_client = SwapProverClient::new();
-    let (transact, spp_dur) = prove_transact_timed(spp_proof_inputs, &spend_proofs, &prover);
+    let (transact, spp_dur) = prove_transact_timed(
+        spp_proof_inputs,
+        &spend_proofs,
+        &prover,
+        &[
+            &zolana_keypair::NullifierKey::from_secret([0; 31]),
+            &taker.nullifier_key,
+        ],
+    );
     let swap_prove_start = Instant::now();
     let take_proof = swap_prover_client
         .prove_take(
@@ -674,17 +731,17 @@ fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut
     bench.add_table("take", tx_size_table(&ix, &taker_payer.pubkey()));
 }
 
-fn bench_take(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBenchmark) {
+fn bench_take(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     const SOURCE_AMOUNT: u64 = 400_000;
     const DESTINATION_AMOUNT: u64 = 250;
     const EXPIRY: u64 = 1_900_000_000;
 
-    let tree = Keypair::new().pubkey();
+    let tree = zolana_interface::pda::tree(BENCH_TREE_ID);
     let taker_payer = Keypair::new();
     let taker = keypair_from_payer(&taker_payer);
     let taker_address = taker.shielded_address().expect("taker address");
-    let maker = ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([0x51; 32]))
-        .expect("maker keypair");
+    let maker =
+        ShieldedKeypair::from_keypair(&Keypair::new_from_array([0x51; 32])).expect("maker keypair");
     let maker_address = maker.shielded_address().expect("maker address");
 
     let terms = OrderTerms {
@@ -698,7 +755,7 @@ fn bench_take(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
     let order_utxo = OrderUtxo {
         terms,
         blinding: random_blinding(),
-        source_mint: SOL_MINT,
+        source_mint: zolana_transaction::Mint::SOL,
         source_amount: SOURCE_AMOUNT,
         destination_asset_id: SOL_ASSET_ID,
     };
@@ -711,38 +768,55 @@ fn bench_take(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
     let source_output = order_utxo.source_output(taker_address, source_output_blinding);
     let destination_output =
         order_utxo.destination_output(maker_address, destination_output_blinding);
-    let destination_ciphertext = order_utxo
-        .destination_ciphertext(&destination_output)
-        .expect("destination ciphertext");
-
-    let order_input_utxo = order_utxo.to_input_utxo().expect("order spend");
+    let order_input_utxo = order_utxo
+        .to_input_utxo(BENCH_TREE_ID, 0)
+        .expect("order input_utxo");
     let taker_utxo = Utxo {
         owner: taker.signing_pubkey(),
-        asset: SOL_MINT,
+        asset: zolana_transaction::Mint::SOL,
         amount: DESTINATION_AMOUNT,
         blinding: taker_in_blinding,
-        zone_program_id: None,
+        ring_program_id: None,
         data: Data::default(),
     };
-    let taker_spend = SppProofInputUtxo::new(taker_utxo, &taker);
+    let taker_input_utxo: SppProofInputUtxo = zolana_test_utils::utxo::wallet(
+        taker_utxo,
+        &taker.nullifier_key,
+        BENCH_TREE_ID,
+        1,
+        None,
+        None,
+    )
+    .expect("indexed input")
+    .into();
 
     let payer_address = Address::new_from_array(taker_payer.pubkey().to_bytes());
-    let assets = AssetRegistry::default();
     let destination_view_tag = maker_address
         .signing_pubkey
         .confidential_view_tag()
         .expect("maker view tag");
-    let input_utxos = vec![order_input_utxo, taker_spend];
+    let input_utxos = vec![order_input_utxo, taker_input_utxo];
+    let mut transaction_outputs = vec![source_output, destination_output];
+    let blinding_seed = prepare_output_blindings(&input_utxos, &mut transaction_outputs)
+        .expect("derive verifiable take output blindings");
+    let [source_output, destination_output]: [_; 2] = transaction_outputs
+        .try_into()
+        .expect("take transaction has two outputs");
+    let destination_ciphertext = order_utxo
+        .destination_ciphertext(&destination_output)
+        .expect("destination ciphertext");
     let transaction_viewing_key =
         get_transaction_viewing_key(&taker, &input_utxos).expect("take transaction viewing key");
 
     let mut encoded = encrypt_transaction_data(
         std::slice::from_ref(&source_output),
-        &assets,
         &transaction_viewing_key,
+        BENCH_TREE_ID,
     )
     .expect("encode take source slot");
-    let destination_utxo_hash = destination_output.hash().expect("take output hash");
+    let destination_utxo_hash = destination_output
+        .hash(BENCH_TREE_ID)
+        .expect("take output hash");
     encoded.outputs.push(TransactOutput {
         utxo_hash: destination_utxo_hash,
         owner_tag: OwnerTag::Inline(destination_view_tag),
@@ -759,12 +833,15 @@ fn bench_take(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
         vec![],
     );
     external_data.expiry_unix_ts = order_utxo.terms.expiry;
-    let spp_proof_inputs = SppProofInputs::new(
+    let spp_proof_inputs = SppProofInputs {
         input_utxos,
-        encoded.output_utxos,
+        output_utxos: encoded.output_utxos,
         external_data,
-        payer_address,
-    );
+        payer: payer_address,
+        blinding_seed,
+        output_tree_id: BENCH_TREE_ID,
+        cache_accounts: Default::default(),
+    };
 
     let commitments = spp_proof_inputs
         .input_utxo_hashes()
@@ -794,11 +871,24 @@ fn bench_take(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
             .external_data
             .hash()
             .expect("external data hash"),
+        private_tx_blinding: spp_proof_inputs
+            .private_tx_blinding()
+            .expect("private tx blinding"),
+        input_tree_id: BENCH_TREE_ID,
+        output_tree_id: BENCH_TREE_ID,
     };
 
     let prover = ProverClient::local();
     let swap_prover_client = SwapProverClient::new();
-    let (transact, spp_dur) = prove_transact_timed(spp_proof_inputs, &spend_proofs, &prover);
+    let (transact, spp_dur) = prove_transact_timed(
+        spp_proof_inputs,
+        &spend_proofs,
+        &prover,
+        &[
+            &zolana_keypair::NullifierKey::from_secret([0; 31]),
+            &taker.nullifier_key,
+        ],
+    );
     let swap_prove_start = Instant::now();
     let take_proof = swap_prover_client
         .prove_take_verifiable_encryption(
@@ -844,17 +934,17 @@ fn bench_take(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBench
     );
 }
 
-fn bench_cancel(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBenchmark) {
+fn bench_cancel(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     const SOURCE_AMOUNT: u64 = 400_000;
     const ORDER_EXPIRY: u64 = 1_000_000;
     const SPP_RELAYER_DEADLINE: u64 = u64::MAX;
 
-    let tree = Keypair::new().pubkey();
+    let tree = zolana_interface::pda::tree(BENCH_TREE_ID);
     let maker_payer = Keypair::new();
     let maker = keypair_from_payer(&maker_payer);
     let maker_address = maker.shielded_address().expect("maker address");
-    let taker = ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([0x4d; 32]))
-        .expect("taker keypair");
+    let taker =
+        ShieldedKeypair::from_keypair(&Keypair::new_from_array([0x4d; 32])).expect("taker keypair");
     let taker_viewing_pubkey = taker
         .shielded_address()
         .expect("taker address")
@@ -870,26 +960,30 @@ fn bench_cancel(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBen
     let order_utxo = OrderUtxo {
         terms,
         blinding: random_blinding(),
-        source_mint: SOL_MINT,
+        source_mint: zolana_transaction::Mint::SOL,
         source_amount: SOURCE_AMOUNT,
         destination_asset_id: 2,
     };
     let source_output_blinding = random_blinding();
 
-    let source_output = order_utxo.source_output(maker_address, source_output_blinding);
+    let mut source_output = order_utxo.source_output(maker_address, source_output_blinding);
 
-    let order_input_utxo = order_utxo.to_input_utxo().expect("order spend");
+    let order_input_utxo = order_utxo
+        .to_input_utxo(BENCH_TREE_ID, 0)
+        .expect("order input_utxo");
 
     let payer_address = Address::new_from_array(maker_payer.pubkey().to_bytes());
-    let assets = AssetRegistry::default();
     let input_utxos = vec![order_input_utxo];
+    let blinding_seed =
+        prepare_output_blindings(&input_utxos, std::slice::from_mut(&mut source_output))
+            .expect("derive cancel output blinding");
     let transaction_viewing_key =
         get_transaction_viewing_key(&maker, &input_utxos).expect("cancel transaction viewing key");
 
     let encoded = encrypt_transaction_data(
         std::slice::from_ref(&source_output),
-        &assets,
         &transaction_viewing_key,
+        BENCH_TREE_ID,
     )
     .expect("encode cancel slots");
 
@@ -901,12 +995,15 @@ fn bench_cancel(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBen
         vec![],
     );
     external_data.expiry_unix_ts = SPP_RELAYER_DEADLINE;
-    let spp_proof_inputs = SppProofInputs::new(
+    let spp_proof_inputs = SppProofInputs {
         input_utxos,
-        encoded.output_utxos,
+        output_utxos: encoded.output_utxos,
         external_data,
-        payer_address,
-    );
+        payer: payer_address,
+        blinding_seed,
+        output_tree_id: BENCH_TREE_ID,
+        cache_accounts: Default::default(),
+    };
 
     let commitments = spp_proof_inputs
         .input_utxo_hashes()
@@ -935,11 +1032,21 @@ fn bench_cancel(mollusk: &mut Mollusk, spp_id: &MolluskPubkey, bench: &mut CuBen
             .external_data
             .hash()
             .expect("external data hash"),
+        private_tx_blinding: spp_proof_inputs
+            .private_tx_blinding()
+            .expect("private tx blinding"),
+        input_tree_id: BENCH_TREE_ID,
+        output_tree_id: BENCH_TREE_ID,
     };
 
     let prover = ProverClient::local();
     let swap_prover_client = SwapProverClient::new();
-    let (transact, spp_dur) = prove_transact_timed(spp_proof_inputs, &spend_proofs, &prover);
+    let (transact, spp_dur) = prove_transact_timed(
+        spp_proof_inputs,
+        &spend_proofs,
+        &prover,
+        &[&zolana_keypair::NullifierKey::from_secret([0; 31])],
+    );
     let swap_prove_start = Instant::now();
     let cancel_proof = swap_prover_client
         .prove_cancel(

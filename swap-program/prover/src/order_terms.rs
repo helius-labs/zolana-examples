@@ -1,6 +1,5 @@
 use swap_program::instructions::shared::u64_right_align;
-
-use crate::bytes_to_decimal_string;
+use zolana_gnark_ffi_prover::decimal;
 
 pub const TAKE_MODE_DERIVED: u64 = 0;
 pub const TAKE_MODE_VERIFIABLE: u64 = 1;
@@ -31,12 +30,7 @@ impl OrderTermsProofInput {
         ];
         let mut entries: Vec<(String, Vec<String>)> = scalars
             .iter()
-            .map(|(suffix, value)| {
-                (
-                    format!("{prefix}_{suffix}"),
-                    vec![bytes_to_decimal_string(value)],
-                )
-            })
+            .map(|(suffix, value)| (format!("{prefix}_{suffix}"), vec![decimal(value)]))
             .collect();
         entries.push((
             format!("{prefix}_MakerViewingPk"),
@@ -47,4 +41,22 @@ impl OrderTermsProofInput {
         ));
         entries
     }
+}
+
+/// The witness keys one `orderterms.OrderTerms` prefix must produce, spelled out
+/// from the Go field names for the exact-key-set tests.
+#[cfg(test)]
+pub(crate) fn expected_order_terms_witness_keys(prefix: &str) -> Vec<String> {
+    [
+        "DestinationAsset",
+        "DestinationAmount",
+        "MakerOwnerHash",
+        "MakerViewingPk",
+        "Expiry",
+        "TakerPkFe",
+        "TakeMode",
+    ]
+    .iter()
+    .map(|suffix| format!("{prefix}_{suffix}"))
+    .collect()
 }

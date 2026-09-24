@@ -31,7 +31,7 @@ cp .env.example .env # ...and set API_KEY
 To run on localnet, configure in [`src/lib.ts`](src/lib.ts) and install:
 
 ```bash
-cargo install --git https://github.com/helius-labs/zolana --tag v0.1.0-alpha zolana-cli
+cargo install --git https://github.com/helius-labs/zolana --tag v0.3.0-alpha zolana-cli
 zolana dev start
 ```
 

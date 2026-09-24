@@ -1,15 +1,24 @@
 use anyhow::{bail, Result};
 use swap_prover::{MakeProofInputs, OrderTermsProofInput};
-use zolana_transaction::{
-    instructions::transact::{PrivateTxHash, SppProofInputs, SppProofOutputUtxo},
-    ProofInputUtxo,
+use zolana_client::ProofInputUtxo;
+use zolana_transaction::instructions::transact::{
+    PrivateTxHash, SppProofInputs, SppProofOutputUtxo,
 };
 
 use crate::{err, state::OrderUtxo};
 
+/// The parts of the SPP transact this make CPIs into that the make proof has to
+/// reproduce byte-for-byte, or the two proofs bind different `private_tx_hash`
+/// values and the instruction can never land.
 pub struct SppTxHashes {
     pub source_input_hash: [u8; 32],
     pub external_data_hash: [u8; 32],
+    /// `SppProofInputs::private_tx_blinding()`, the fifth `private_tx_hash`
+    /// preimage element.
+    pub private_tx_blinding: [u8; 32],
+    /// Raw id of the tree the order and change outputs are appended to; it is
+    /// the second element of every output's commitment.
+    pub output_tree_id: u16,
 }
 
 impl SppTxHashes {
@@ -19,8 +28,10 @@ impl SppTxHashes {
             .first()
             .ok_or_else(|| err("missing source input"))?;
         Ok(Self {
-            source_input_hash: source_input.hash().map_err(err)?,
+            source_input_hash: source_input.hash(),
             external_data_hash: spp_proof_inputs.external_data.hash().map_err(err)?,
+            private_tx_blinding: spp_proof_inputs.private_tx_blinding().map_err(err)?,
+            output_tree_id: spp_proof_inputs.output_tree_id,
         })
     }
 }
@@ -41,19 +52,28 @@ impl MakeProofInputParams {
             bail!("change asset does not match order source mint");
         }
         if self.change.data_hash.is_some()
-            || self.change.zone_data_hash.is_some()
-            || self.change.zone_program_id.is_some()
+            || self.change.ring_data_hash.is_some()
+            || self.change.ring_program_id.is_some()
         {
-            bail!("change output must not carry data or zone commitments");
+            bail!("change output must not carry data or ring commitments");
         }
         let order = OrderTermsProofInput::try_from(terms)?;
-        let order_utxo =
-            ProofInputUtxo::try_from(&self.order_utxo.to_input_utxo()?).map_err(err)?;
-        let change = ProofInputUtxo::try_from(&self.change).map_err(err)?;
+        // Both are created by this transaction, so both commit under the output
+        // tree's id.
+        let output_tree_id = self.spp_tx_hashes.output_tree_id;
+        let order_utxo = ProofInputUtxo::try_from((
+            &self
+                .order_utxo
+                .output_utxo(self.order_utxo.terms.destination.viewing_pubkey)?,
+            output_tree_id,
+        ))
+        .map_err(err)?;
+        let change = ProofInputUtxo::try_from((&self.change, output_tree_id)).map_err(err)?;
         let private_tx_hash = PrivateTxHash::new(
             &[self.spp_tx_hashes.source_input_hash, [0u8; 32]],
             &[change.hash().map_err(err)?, order_utxo.hash().map_err(err)?],
             &self.spp_tx_hashes.external_data_hash,
+            &self.spp_tx_hashes.private_tx_blinding,
         )
         .hash()
         .map_err(err)?;
@@ -64,6 +84,7 @@ impl MakeProofInputParams {
             change,
             source_input_hash: self.spp_tx_hashes.source_input_hash,
             external_data_hash: self.spp_tx_hashes.external_data_hash,
+            private_tx_blinding: self.spp_tx_hashes.private_tx_blinding,
         })
     }
 }
@@ -73,11 +94,14 @@ mod tests {
     use solana_address::Address;
     use solana_keypair::Keypair;
     use swap_prover::TAKE_MODE_DERIVED;
-    use zolana_keypair::{constants::BLINDING_LEN, shielded::ShieldedKeypair};
+    use zolana_keypair::shielded::ShieldedKeypair;
     use zolana_transaction::SOL_MINT;
 
     use super::*;
     use crate::state::{OrderTerms, OrderUtxo};
+
+    // TODO(tree-id): resolve the tree id from the tree account.
+    const OUTPUT_TREE_ID: u16 = 0;
 
     // A make funded by an input whose value equals the order amount produces a
     // zero-value change output. That output is non-dummy (owner = order
@@ -87,11 +111,10 @@ mod tests {
     // than the SPP transact it CPIs into and the instruction can never land.
     #[test]
     fn zero_change_folds_real_hash_matching_spp() {
-        let destination =
-            ShieldedKeypair::from_solana_keypair(&Keypair::new_from_array([21u8; 32]))
-                .expect("destination keypair")
-                .shielded_address()
-                .expect("destination address");
+        let destination = ShieldedKeypair::from_keypair(&Keypair::new_from_array([21u8; 32]))
+            .expect("destination keypair")
+            .shielded_address()
+            .expect("destination address");
 
         let order_utxo = OrderUtxo {
             terms: OrderTerms {
@@ -102,25 +125,28 @@ mod tests {
                 expiry: 1_700_000_000,
                 take_mode: TAKE_MODE_DERIVED,
             },
-            blinding: [11u8; BLINDING_LEN],
-            source_mint: SOL_MINT,
+            blinding: crate::shared::test_blinding(11),
+            source_mint: zolana_transaction::Mint::SOL,
             source_amount: 400_000,
             destination_asset_id: 1,
         };
-        let change = SppProofOutputUtxo::new(SOL_MINT, 0, destination).expect("change output");
+        let change = SppProofOutputUtxo::new(zolana_transaction::Mint::SOL, 0, destination)
+            .expect("change output");
         let spp_tx_hashes = SppTxHashes {
             source_input_hash: [3u8; 32],
             external_data_hash: [4u8; 32],
+            private_tx_blinding: [5u8; 32],
+            output_tree_id: OUTPUT_TREE_ID,
         };
 
         let source_input_hash = spp_tx_hashes.source_input_hash;
         let external_data_hash = spp_tx_hashes.external_data_hash;
-        let change_hash = change.hash().expect("change hash");
+        let private_tx_blinding = spp_tx_hashes.private_tx_blinding;
+        let change_hash = change.hash(OUTPUT_TREE_ID).expect("change hash");
         let order_utxo_hash = order_utxo
-            .to_input_utxo()
+            .to_input_utxo(OUTPUT_TREE_ID, 0)
             .expect("order input")
-            .hash()
-            .expect("order hash");
+            .hash();
 
         let inputs = MakeProofInputParams {
             order_utxo,
@@ -130,12 +156,13 @@ mod tests {
         .to_proof_inputs()
         .expect("proof inputs");
 
-        // SPP (spp_proof_inputs::message_hash) hashes a non-dummy output at its
+        // SPP (SppProofInputs::message_hash) hashes a non-dummy output at its
         // real hash; the make proof's public input must equal that.
         let expected = PrivateTxHash::new(
             &[source_input_hash, [0u8; 32]],
             &[change_hash, order_utxo_hash],
             &external_data_hash,
+            &private_tx_blinding,
         )
         .hash()
         .expect("private tx hash");

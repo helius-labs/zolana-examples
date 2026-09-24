@@ -1,11 +1,9 @@
 use anyhow::{bail, Result};
 use swap_program::instructions::cancel::CancelPublicInput;
 use swap_prover::{CancelProofInputs, OrderTermsProofInput};
+use zolana_client::ProofInputUtxo;
 use zolana_keypair::P256Pubkey;
-use zolana_transaction::{
-    instructions::transact::{PrivateTxHash, SppProofOutputUtxo},
-    ProofInputUtxo,
-};
+use zolana_transaction::instructions::transact::{PrivateTxHash, SppProofOutputUtxo};
 
 use crate::{err, shared::check_output_utxo, state::OrderUtxo};
 
@@ -14,6 +12,13 @@ pub struct CancelProofInputParams {
     pub taker_viewing_pubkey: P256Pubkey,
     pub source_output: SppProofOutputUtxo,
     pub external_data_hash: [u8; 32],
+    /// `SppProofInputs::private_tx_blinding()`, the fifth `private_tx_hash`
+    /// preimage element.
+    pub private_tx_blinding: [u8; 32],
+    /// Raw id of the tree the order UTXO is spent from.
+    pub input_tree_id: u16,
+    /// Raw id of the tree the source output is appended to.
+    pub output_tree_id: u16,
 }
 
 impl CancelProofInputParams {
@@ -22,21 +27,28 @@ impl CancelProofInputParams {
         let maker = check_output_utxo(
             "source_output",
             &self.source_output,
-            &self.order_utxo.source_mint,
+            &self.order_utxo.source_mint.asset,
             self.order_utxo.source_amount,
         )?;
         if maker != terms.destination {
             bail!("source output owner does not match the order destination");
         }
         let order = OrderTermsProofInput::try_from(terms)?;
-        let maker_owner_pk_field = maker.signing_pubkey.owner_pk_field().map_err(err)?;
-        let order_utxo =
-            ProofInputUtxo::try_from(&self.order_utxo.to_input_utxo()?).map_err(err)?;
-        let source_output = ProofInputUtxo::try_from(&self.source_output).map_err(err)?;
+        let maker_owner_pk_field = maker.signing_pubkey.owner_proof_input_hash().map_err(err)?;
+        let order_utxo = ProofInputUtxo::try_from((
+            &self
+                .order_utxo
+                .output_utxo(self.order_utxo.terms.destination.viewing_pubkey)?,
+            self.input_tree_id,
+        ))
+        .map_err(err)?;
+        let source_output =
+            ProofInputUtxo::try_from((&self.source_output, self.output_tree_id)).map_err(err)?;
         let private_tx_hash = PrivateTxHash::new(
             &[order_utxo.hash().map_err(err)?],
             &[source_output.hash().map_err(err)?],
             &self.external_data_hash,
+            &self.private_tx_blinding,
         )
         .hash()
         .map_err(err)?;
@@ -56,6 +68,7 @@ impl CancelProofInputParams {
             order_utxo,
             source_output,
             external_data_hash: self.external_data_hash,
+            private_tx_blinding: self.private_tx_blinding,
         })
     }
 }

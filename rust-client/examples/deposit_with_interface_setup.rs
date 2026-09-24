@@ -4,12 +4,11 @@ use rust_client_example::{
 };
 use solana_signer::Signer;
 use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
-use zolana_interface::{
-    instruction::{AssetDeposit, CreateSplInterface, Deposit, DepositAsset, DepositSplAccounts},
-    pda,
-    state::SplAssetRegistry,
-};
+use zolana_interface::{pda, state::SplAssetRegistry};
 use zolana_keypair::ShieldedKeypair;
+use zolana_program::instruction::{
+    AssetDeposit, CreateSplInterface, Deposit, DepositAsset, DepositSplAccounts,
+};
 use zolana_transaction::{decrypt_spendable, AssetRegistry};
 
 const DEPOSIT_AMOUNT: u64 = 1_000_000_000;
@@ -63,7 +62,6 @@ fn main() -> Result<()> {
             view_tag: sender_shielded_address.confidential_view_tag()?,
             owner: sender_shielded_address.owner_hash()?,
             amount: DEPOSIT_AMOUNT,
-            utxo_data: None,
             memo: None,
         }],
     }

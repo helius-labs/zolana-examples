@@ -1,15 +1,15 @@
 use anyhow::Result;
 use solana_address::Address;
 use zolana_keypair::ShieldedAddress;
-use zolana_transaction::instructions::{transact::SppProofOutputUtxo, types::SppProofInputUtxo};
+use zolana_transaction::{instructions::transact::SppProofOutputUtxo, utxo::SppProofInputUtxo};
 
 use crate::err;
 
 pub fn input_sum(inputs: &[SppProofInputUtxo], asset: &Address) -> i128 {
     inputs
         .iter()
-        .filter(|spend| &spend.utxo.asset == asset)
-        .map(|spend| i128::from(spend.utxo.amount))
+        .filter(|input_utxo| &input_utxo.utxo.asset.asset == asset)
+        .map(|input_utxo| i128::from(input_utxo.utxo.amount))
         .sum()
 }
 
@@ -22,18 +22,18 @@ pub(crate) fn check_output_utxo(
     let owner = output
         .owner_address
         .ok_or_else(|| err(format!("{label} owner address missing")))?;
-    if &output.asset != mint {
+    if &output.asset.asset != mint {
         return Err(err(format!("{label} asset mismatch")));
     }
     if output.amount != amount {
         return Err(err(format!("{label} amount mismatch")));
     }
     if output.data_hash.is_some()
-        || output.zone_data_hash.is_some()
-        || output.zone_program_id.is_some()
+        || output.ring_data_hash.is_some()
+        || output.ring_program_id.is_some()
     {
         return Err(err(format!(
-            "{label} must not carry data or zone commitments"
+            "{label} must not carry data or ring commitments"
         )));
     }
     Ok(owner)

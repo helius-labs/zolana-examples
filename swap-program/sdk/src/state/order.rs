@@ -1,17 +1,17 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use solana_address::Address;
 use swap_program::instructions::shared::u64_right_align;
 use swap_prover::OrderTermsProofInput;
 use wincode::{SchemaRead, SchemaWrite};
+use zolana_hasher::primitives::{hash_bytes, solana_owner_identity};
 use zolana_keypair::{
-    constants::BLINDING_LEN,
-    hash::{hash_field, poseidon},
-    CompressedShieldedAddress, NullifierKey, P256Pubkey, PublicKey, ShieldedAddress,
+    constants::BLINDING_LEN, hash::poseidon, CompressedShieldedAddress, NullifierKey, P256Pubkey,
+    PublicKey, ShieldedAddress,
 };
 use zolana_transaction::{
-    instructions::{transact::SppProofOutputUtxo, types::SppProofInputUtxo},
-    utxo::{Blinding, Utxo},
-    Data,
+    instructions::transact::SppProofOutputUtxo,
+    utxo::{Blinding, SppProofInputUtxo, Utxo},
+    Data, Mint,
 };
 
 use crate::err;
@@ -51,7 +51,7 @@ pub struct PlainTextData {
 pub struct OrderUtxo {
     pub terms: OrderTerms,
     pub blinding: Blinding,
-    pub source_mint: Address,
+    pub source_mint: Mint,
     pub source_amount: u64,
     pub destination_asset_id: u64,
 }
@@ -78,7 +78,7 @@ impl TryFrom<&OrderTerms> for OrderTermsProofInput {
 
     fn try_from(terms: &OrderTerms) -> Result<Self> {
         Ok(Self {
-            destination_asset: hash_field(terms.destination_mint.as_array()).map_err(err)?,
+            destination_asset: hash_bytes(terms.destination_mint.as_array()).map_err(err)?,
             destination_amount: terms.destination_amount,
             maker_owner_hash: terms.destination.owner_hash().map_err(err)?,
             maker_viewing_pk: *terms.destination.viewing_pubkey.as_bytes(),
@@ -110,10 +110,15 @@ impl DataHash for OrderTermsProofInput {
     }
 }
 
-// All instructions: the taker pubkey as the `taker_pk_fe` terms field.
+// All instructions: the taker pubkey as the `taker_pk_fe` terms field. The
+// take_verifiable_encryption circuit asserts
+// `TakerIn.Owner == Poseidon(TakerPkFe, TakerNullifierPk)`
+// (`prover/circuits/take_verifiable_encryption/take.go:27-28`), and the taker's
+// UTXO owner is `Poseidon(owner_proof_input_hash(pk), nullifier_pk)`, so this
+// must be the algorithm-tagged Solana identity, not the bare `hash_bytes`.
 impl DataHash for Address {
     fn data_hash(&self) -> Result<[u8; 32]> {
-        hash_field(self.as_array()).map_err(err)
+        solana_owner_identity(self.as_array()).map_err(err)
     }
 }
 
@@ -188,19 +193,37 @@ impl OrderUtxo {
 // take, take_verifiable_encryption, cancel: spend the order utxo and pay out the
 // source funds (to the taker on take, back to the maker on cancel).
 impl OrderUtxo {
-    /// The order input spend: the opening (terms + blinding) is the full spend
-    /// capability; the swap program signs for the PDA via `invoke_signed`.
-    pub fn to_input_utxo(&self) -> Result<SppProofInputUtxo> {
+    /// The order input spend, committed under the tree with the raw id
+    /// `tree_id`: the opening (terms + blinding) is the full spend capability;
+    /// the swap program signs for the PDA via `invoke_signed`.
+    ///
+    /// `tree_id` is a parameter rather than something the caller sets
+    /// afterwards, because both the commitment and the nullifier fold it in.
+    pub fn to_input_utxo(&self, tree_id: u16, leaf_index: u64) -> Result<SppProofInputUtxo> {
         let utxo = Utxo {
             owner: Self::pda_owner(),
             asset: self.source_mint,
             amount: self.source_amount,
             blinding: self.blinding,
-            zone_program_id: None,
+            ring_program_id: None,
             data: Data::default(),
         };
-        Ok(SppProofInputUtxo::new(utxo, Self::nullifier_key())
-            .with_data_hash(self.terms.data_hash()?))
+        let data_hash = self.terms.data_hash()?;
+        let key = Self::nullifier_key();
+        let nullifier_pubkey = key.pubkey()?;
+        let utxo_hash = utxo.hash(&nullifier_pubkey, &data_hash, &[0; 32], tree_id)?;
+        let nullifier = key.nullifier(&utxo_hash, &utxo.blinding)?;
+        Ok(SppProofInputUtxo {
+            utxo,
+            utxo_hash,
+            nullifier,
+            nullifier_pubkey,
+            data_hash: Some(data_hash),
+            ring_data_hash: None,
+            tree_id,
+            leaf_index,
+            cache_slot: None,
+        })
     }
 
     pub fn source_output(
@@ -226,7 +249,7 @@ impl OrderUtxo {
         blinding: Blinding,
     ) -> SppProofOutputUtxo {
         SppProofOutputUtxo {
-            asset: self.terms.destination_mint,
+            asset: Mint::new(self.terms.destination_mint, self.destination_asset_id),
             amount: self.terms.destination_amount,
             blinding,
             owner_address: Some(recipient),
@@ -235,19 +258,23 @@ impl OrderUtxo {
     }
 }
 
-// take: the take circuit derives the destination blinding from the order utxo
-// blinding, so the maker recomputes the payout from the opening instead of
-// decrypting a ciphertext.
 impl OrderUtxo {
+    /// Reconstruct the maker payout using the order opening and the first
+    /// nullifier published by its settlement. No settlement ciphertext is needed.
     pub fn derived_destination_output(
         &self,
-        recipient: ShieldedAddress,
+        first_nullifier: &[u8; 32],
     ) -> Result<SppProofOutputUtxo> {
-        Ok(self.destination_output(recipient, self.derived_destination_blinding()?))
-    }
-
-    pub fn derived_destination_blinding(&self) -> Result<Blinding> {
-        crate::instructions::take::derive_destination_blinding(&self.blinding)
+        if self.terms.take_mode != swap_prover::TAKE_MODE_DERIVED {
+            bail!("order does not use derived settlement");
+        }
+        use zolana_transaction::utxo::{
+            derive_output_blinding_seed, derive_transact_output_blinding,
+        };
+        let blinding_seed = crate::instructions::take::take_blinding_seed(&self.blinding)?;
+        let seed = derive_output_blinding_seed(first_nullifier, &blinding_seed).map_err(err)?;
+        let blinding = derive_transact_output_blinding(first_nullifier, &seed, 1).map_err(err)?;
+        Ok(self.destination_output(self.terms.destination, blinding))
     }
 }
 
@@ -265,7 +292,8 @@ impl OrderUtxo {
                 self.terms.destination_amount,
                 &destination_output.blinding,
             )?
-            .0,
+            .0
+            .to_vec(),
         )
     }
 }
@@ -278,12 +306,12 @@ mod tests {
     use super::*;
 
     fn sample_viewing_pk(seed: u8) -> P256Pubkey {
-        ViewingKey::from_seed(&[seed; 32], 0).unwrap().pubkey()
+        ViewingKey::from_bytes(&[seed; 32]).unwrap().pubkey()
     }
 
     fn sample_terms(take_mode: u64) -> OrderTermsProofInput {
         OrderTermsProofInput {
-            destination_asset: hash_field(&[2u8; 32]).expect("destination asset"),
+            destination_asset: hash_bytes(&[2u8; 32]).expect("destination asset"),
             destination_amount: 250,
             maker_owner_hash: [7u8; 32],
             maker_viewing_pk: *sample_viewing_pk(9).as_bytes(),
