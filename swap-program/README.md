@@ -63,3 +63,6 @@ for c in make take cancel take_verifiable_encryption; do
     "$c" "build/gnark/$c" --insecure-test-keys
 done
 ```
+
+To deploy the program with keys of your own, see
+[Deploy a program example to devnet](../README.md#deploy-a-program-example-to-devnet).
