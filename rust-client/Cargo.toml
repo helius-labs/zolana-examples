@@ -14,13 +14,21 @@ solana-keypair = "3.1.2"
 solana-signature = "3.4"
 solana-signer = "3.0"
 solana-system-interface = { version = "3.2", features = ["bincode"] }
+sha2 = { version = "0.10", optional = true }
 shellexpand = "3"
 spl-token-interface = "3.0.0"
+# The in-process gnark prover of the Zolana mobile SDK. Building it needs
+# Go 1.27.1 or newer.
+rust-gnark = { git = "https://github.com/helius-labs/zolana-mobile-sdk", rev = "bc0b1e1cf72bb39868105d9fef4676c51744aa3b", optional = true }
 zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "bf4048b603ce0a270718e893470613dba37c129b", features = ["indexer-api", "solana-rpc"] }
 zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "bf4048b603ce0a270718e893470613dba37c129b" }
 zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "bf4048b603ce0a270718e893470613dba37c129b" }
 zolana-program = { git = "https://github.com/helius-labs/zolana", rev = "bf4048b603ce0a270718e893470613dba37c129b" }
 zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "bf4048b603ce0a270718e893470613dba37c129b" }
+
+[features]
+# Prove on this machine instead of the prover server.
+local-prover = ["dep:rust-gnark", "dep:sha2"]
 
 [[example]]
 name = "register_private_wallet"
