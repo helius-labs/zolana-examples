@@ -8,6 +8,10 @@ on:
       - "typescript-client/**"
       - "swap-program/**"
       - "escrow-program/**"
+      - "compression-program/**"
+      - "dynamic-swap-program/**"
+      - "rfq/**"
+      - "scripts/program-examples.sh"
       - ".github/workflows/examples.yml"
   pull_request:
     paths:
@@ -15,6 +19,10 @@ on:
       - "typescript-client/**"
       - "swap-program/**"
       - "escrow-program/**"
+      - "compression-program/**"
+      - "dynamic-swap-program/**"
+      - "rfq/**"
+      - "scripts/program-examples.sh"
       - ".github/workflows/examples.yml"
   workflow_dispatch:
 
@@ -135,3 +143,48 @@ jobs:
       - name: Build escrow program (SBF)
         working-directory: escrow-program/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --features bpf-entrypoint
+
+  program-examples:
+    name: test / compression, dynamic swap, RFQ
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          components: rustfmt
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache-dependency-path: dynamic-swap-program/prover/circuits/go.sum
+
+      - name: Install just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libssl-dev pkg-config protobuf-compiler lsof
+
+      - name: Cache Cargo builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            compression-program -> ../target/program-examples
+            dynamic-swap-program -> ../target/program-examples
+            rfq -> ../target/program-examples
+
+      - name: Prepare the pinned local stack
+        run: scripts/program-examples.sh prepare
+
+      - name: Check imported examples
+        run: scripts/program-examples.sh check
+
+      - name: Run localnet tests
+        run: scripts/program-examples.sh test all
