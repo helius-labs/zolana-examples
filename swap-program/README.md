@@ -52,8 +52,10 @@ and needs no checkout.
 
 The circuit tests need the pinned proving and verifying keys, whose hashes are
 in [`swap-keys.CHECKSUM`](swap-keys.CHECKSUM). They are insecure test keys from
-a fixed public seed, UNSAFE for production. Generate them into `build/gnark/`
-with the `swap-prover-setup` binary:
+a fixed public seed. That is the recommended setup for integration tests, and it
+is secure there because a test validator holds nothing a forged proof could
+take. They are UNSAFE for production. Generate them into `build/gnark/` with the
+`swap-prover-setup` binary:
 
 ```bash
 for c in make take cancel take_verifiable_encryption; do

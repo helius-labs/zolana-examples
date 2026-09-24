@@ -9,10 +9,13 @@ name = "timelock_escrow_program"
 crate-type = ["cdylib", "lib"]
 
 [features]
-# The committed verifying keys come from an example setup nobody vouches for,
-# so they are generated as SetupKind::InsecureTest and do not compile without
-# this feature. On by default: this program is a test/example, never a
-# devnet or mainnet deployment.
+# The committed verifying keys come from an insecure test setup
+# (SetupKind::InsecureTest): the setup randomness is a fixed public seed, so
+# the keys are reproducible and need no trusted setup ceremony. That is the
+# recommended setup for integration tests, and it is secure there because a
+# test validator holds nothing a forged proof could take. The keys do not
+# compile without this feature, which is on by default because this program is
+# an example, never a devnet or mainnet deployment.
 default = ["insecure-test-setup"]
 insecure-test-setup = []
 bpf-entrypoint = []
