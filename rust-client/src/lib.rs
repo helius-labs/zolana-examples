@@ -10,17 +10,6 @@ use spl_token_interface::instruction::{initialize_account3, initialize_mint2, mi
 use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::{pda, SPL_TOKEN_ACCOUNT_LEN, SPL_TOKEN_MINT_ACCOUNT_LEN};
 
-/// One Helius URL for RPC, the indexer, and the prover.
-/// Toggle the `localnet:` lines to run against a local stack instead.
-pub fn connect(url: &str) -> Result<ZolanaClient<SolanaRpc>> {
-    Ok(ZolanaClient::from_urls(SolanaRpc::new(url), url, url)?)
-    // localnet: Ok(ZolanaClient::from_urls(
-    //     SolanaRpc::new("http://127.0.0.1:8899"),
-    //     "http://127.0.0.1:8784",
-    //     "http://127.0.0.1:3001",
-    // )?)
-}
-
 /// The Solana CLI wallet (`ZOLANA_PAYER_KEYPAIR`, defaults to
 /// `~/.config/solana/id.json`).
 pub fn cli_keypair() -> Result<Keypair> {
