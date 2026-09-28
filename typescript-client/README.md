@@ -2,7 +2,7 @@
 
 TypeScript client examples for `@heliuslabs/zolana`.
 
-- **[register_private_wallet](examples/register_private_wallet.ts)** - Register a private wallet
+- **[register_private_wallet](examples/register_private_wallet.ts)** - Register a private wallet and enable merging in one transaction
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw
 - **[deposit_with_interface_setup](examples/deposit_with_interface_setup.ts)** - Create a token interface and deposit in one transaction
 - **[sync_balance](examples/sync_balance.ts)** - Read the private SOL and SPL balances
