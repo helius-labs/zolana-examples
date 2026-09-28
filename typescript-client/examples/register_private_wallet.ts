@@ -1,15 +1,18 @@
 import {
   ShieldedKeypair,
   SigningKey,
-  buildRegistrationTransaction,
   createZolanaClient,
 } from "@heliuslabs/zolana";
-import { isWalletRegistered } from "@heliuslabs/zolana/wallet";
+import { getUserRecordPda } from "@heliuslabs/zolana/addresses";
+import {
+  getRegisterInstruction,
+  getSetMergingEnabledInstruction,
+} from "@heliuslabs/zolana/instructions";
+import { fetchUserRecord } from "@heliuslabs/zolana/wallet";
 
 import {
   cliKeypair,
   sendAndConfirmFactory,
-  sendTransactionFactory,
   setup,
   transferLamportsInstruction,
 } from "../src/lib.js";
@@ -23,15 +26,17 @@ async function main(): Promise<void> {
   const client =
     await createZolanaClient(clientConfig);
 
-  // Initialize the sender's private wallet and local authority
-  // to decrypt transactions and sync balances.
-  // The Solana signer and private wallet are derived from the same Ed25519 seed.
+  // Derive your Solana keypair for signing and the shielded keypair for
+  // encryption from the same Ed25519 seed.
   const sender = ShieldedKeypair.fromKeypair(
     SigningKey.generate("ed25519"),
   );
   const senderSigner = sender.toSolanaSigner();
+  const owner = senderSigner.address;
+  const shieldedAddress =
+    sender.shieldedAddress();
 
-  // The SDK hands back a transaction; the CLI functions as sponsor to sign and send.
+  // The CLI wallet funds the sender, who pays for its own registration.
   const payer = ShieldedKeypair.fromKeypair(
     await cliKeypair(),
   ).toSolanaSigner();
@@ -41,35 +46,67 @@ async function main(): Promise<void> {
   )([
     transferLamportsInstruction(
       payer.address,
-      senderSigner.address,
+      owner,
       FUND_LAMPORTS,
     ),
   ]);
-  const registration =
-    await buildRegistrationTransaction({
-      client,
-      owner: senderSigner.address,
-      address: sender.shieldedAddress(),
+
+  // Register the Solana address in the onchain registry so it can receive
+  // private transfers. Anyone can look up the record to check this.
+
+  // 1. Derive the registry record PDA from the owner's Solana address and
+  // build the registration instruction.
+  const { address: userRecord } =
+    await getUserRecordPda(owner);
+  const registerIx = getRegisterInstruction({
+    userRecord,
+    owner: senderSigner,
+    nullifierPublicKey:
+      shieldedAddress.nullifierPublicKey,
+    viewingPublicKey:
+      shieldedAddress.viewingPublicKey.toBytes(),
+  });
+
+  // 2. Add `merging_enabled = true` in the same transaction,
+  // so the SDK can merge fragmented UTXOs in the background.
+  const setMergingEnabledIx =
+    getSetMergingEnabledInstruction({
+      userRecord,
+      owner: senderSigner,
+      enabled: true,
     });
-  if (registration !== undefined) {
-    await sendTransactionFactory(
+
+  // 3. Send and confirm like any Solana transaction.
+  const registrationTx =
+    await sendAndConfirmFactory(
       client,
       senderSigner,
-    )(registration);
-  }
+    )([registerIx, setMergingEnabledIx]);
 
-  const registered = await isWalletRegistered({
+  // 4. Read the record back from the registry.
+  const record = await fetchUserRecord({
     rpc: client,
-    owner: senderSigner.address,
+    owner,
   });
-  if (!registered) {
+  if (record === undefined) {
     throw new Error(
-      "expected the wallet to be registered",
+      `expected a user record for ${owner}`,
+    );
+  }
+  if (!record.mergingEnabled) {
+    throw new Error(
+      "expected merging_enabled=true after registration",
     );
   }
 
   console.log(
-    `ok private wallet solana_address=${senderSigner.address}`,
+    `ok private wallet solana_address=${owner} ` +
+      `user_record=${userRecord} ` +
+      `merging_enabled=${record.mergingEnabled} ` +
+      `tx=${registrationTx.signature}`,
+  );
+  console.log(
+    `https://explorer.solana.com/tx/${registrationTx.signature}?cluster=devnet`,
   );
 }
 
