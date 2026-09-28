@@ -52,16 +52,13 @@ async function main(): Promise<void> {
     ),
   ]);
 
-  // Register the private wallet and enable merging in one transaction.
-  // The registry record lives under the Solana address and publishes the
-  // private wallet's keys, so others can send to it by Solana address.
+  // Register the Solana address in the onchain registry so it can receive
+  // private transfers. Anyone can look up the record to check this.
 
-  // 1. Derive the record address the registry program creates for this owner.
+  // 1. Derive the registry record PDA from the owner's Solana address and
+  // build the registration instruction.
   const { address: userRecord } =
     await getUserRecordPda(owner);
-
-  // 2. Build the registration instruction with the wallet's public keys.
-  // `register` creates the record with merging disabled, so it must come first.
   const registerIx = getRegisterInstruction({
     userRecord,
     owner: senderSigner,
@@ -71,8 +68,8 @@ async function main(): Promise<void> {
       shieldedAddress.viewingPublicKey.toBytes(),
   });
 
-  // 3. Opt the wallet into `merge_transact`, which lets a merge service
-  // consolidate its private balance into fewer UTXOs.
+  // 2. Add `merging_enabled = true` in the same transaction,
+  // so the SDK can merge fragmented UTXOs in the background.
   const setMergingEnabledIx =
     getSetMergingEnabledInstruction({
       userRecord,
@@ -80,14 +77,14 @@ async function main(): Promise<void> {
       enabled: true,
     });
 
-  // 4. Send and confirm like any Solana transaction.
+  // 3. Send and confirm like any Solana transaction.
   const registrationTx =
     await sendAndConfirmFactory(
       client,
       senderSigner,
     )([registerIx, setMergingEnabledIx]);
 
-  // 5. Read the record back from the registry.
+  // 4. Read the record back from the registry.
   const record = await fetchUserRecord({
     rpc: client,
     owner,
