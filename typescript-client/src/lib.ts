@@ -29,9 +29,7 @@ import {
 import {
   SigningKey,
   createZolanaClient,
-  initializePoseidon,
   type Bytes32,
-  type ZolanaClientConfig,
 } from "@heliuslabs/zolana";
 import { getCreateAccountInstruction } from "@solana-program/system";
 import {
@@ -44,23 +42,11 @@ import {
 } from "@solana-program/token";
 export type Client = Awaited<ReturnType<typeof createZolanaClient>>;
 
-export interface ExampleSetup {
-  readonly clientConfig: ZolanaClientConfig;
-}
-
 export interface ConfirmedTransaction {
   readonly signature: Signature;
   /** Slot the transaction landed in; drives the indexer freshness gates. */
   readonly slot: bigint;
 }
-
-// Will be exposed through a single devnet URL. Currently exposed as they are.
-const RPC_URL = "https://devnet.helius-rpc.com";
-const INDEXER_URL = "https://d2xah7tnhdhcom.cloudfront.net";
-const PROVER_URL = "https://d21ni15goiip6l.cloudfront.net";
-// localnet: const RPC_URL = "http://127.0.0.1:8899";
-// localnet: const INDEXER_URL = "http://127.0.0.1:8784";
-// localnet: const PROVER_URL = "http://127.0.0.1:3001";
 
 function expandedPath(value: string): string {
   return value === "~"
@@ -95,29 +81,6 @@ export async function cliKeypair(): Promise<SigningKey> {
   } finally {
     seed.fill(0);
   }
-}
-
-function clientConfigFromEnv(): ZolanaClientConfig {
-  const endpoint = process.env["ZOLANA_ENDPOINT"]?.trim();
-  const apiKey = process.env["API_KEY"]?.trim();
-  const solanaRpcUrl =
-    endpoint || (apiKey ? `${RPC_URL}/?api-key=${apiKey}` : undefined);
-  // localnet: const solanaRpcUrl = endpoint || RPC_URL;
-  if (!solanaRpcUrl) {
-    throw new Error("set API_KEY or ZOLANA_ENDPOINT");
-  }
-  return Object.freeze({
-    solanaRpcUrl,
-    indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || INDEXER_URL,
-    proverUrl: process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL,
-  });
-}
-
-export async function setup(): Promise<ExampleSetup> {
-  await initializePoseidon();
-  return Object.freeze({
-    clientConfig: clientConfigFromEnv(),
-  });
 }
 
 const SYSTEM_PROGRAM_ADDRESS = address("11111111111111111111111111111111");

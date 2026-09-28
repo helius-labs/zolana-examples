@@ -9,14 +9,13 @@ import {
   LocalShieldedKeys,
 } from "@heliuslabs/zolana/transaction";
 
-import { cliKeypair, setup } from "../src/lib.js";
+import { cliKeypair } from "../src/lib.js";
 
 async function main(): Promise<void> {
-  const { clientConfig } = await setup();
-
-  // Connect to the RPC, indexer, and prover.
-  const client =
-    await createZolanaClient(clientConfig);
+  const client = await createZolanaClient({
+    solanaRpcUrl: `https://devnet.helius-rpc.com/?api-key=${process.env.API_KEY}`,
+  });
+  // localnet: const client = await createZolanaClient({});
 
   // Initialize the sender's private wallet and local authority
   // to decrypt transactions and sync balances.

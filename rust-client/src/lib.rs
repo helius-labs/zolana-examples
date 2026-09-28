@@ -1,5 +1,4 @@
-//! Shared setup for the examples: the fee payer, Helius RPC, Photon indexer,
-//! prover, and funded test tokens.
+//! Shared helpers for the examples: the fee payer and funded test tokens.
 
 use anyhow::{anyhow, Result};
 use solana_address::Address;
@@ -11,38 +10,15 @@ use spl_token_interface::instruction::{initialize_account3, initialize_mint2, mi
 use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::{pda, SPL_TOKEN_ACCOUNT_LEN, SPL_TOKEN_MINT_ACCOUNT_LEN};
 
-/// The RPC, Photon indexer, and prover the examples talk to.
-pub const RPC_URL: &str = "https://devnet.helius-rpc.com";
-pub const INDEXER_URL: &str = "https://d2xah7tnhdhcom.cloudfront.net";
-pub const PROVER_URL: &str = "https://d21ni15goiip6l.cloudfront.net";
-// localnet: pub const RPC_URL: &str = "http://127.0.0.1:8899";
-// localnet: pub const INDEXER_URL: &str = "http://127.0.0.1:8784";
-// localnet: pub const PROVER_URL: &str = "http://127.0.0.1:3001";
-
-/// Service URLs and the default tree.
-pub struct SetupContext {
-    pub rpc_url: String,
-    pub indexer_url: String,
-    pub prover_url: String,
-    pub tree: Address,
-}
-
-/// Read the environment settings and the `API_KEY` for the Helius devnet RPC.
-/// Defaults are Helius plus the Photon/prover HTTPS endpoints. Toggle the `localnet:`
-/// lines to run against a local stack instead.
-pub fn setup() -> Result<SetupContext> {
-    dotenvy::dotenv().ok();
-    let tree = pda::tree(0);
-    let api_key = std::env::var("API_KEY").map_err(|_| anyhow!("set API_KEY"))?;
-    let rpc_url = format!("{RPC_URL}/?api-key={api_key}");
-    // localnet: let rpc_url = RPC_URL.to_string();
-
-    Ok(SetupContext {
-        rpc_url,
-        indexer_url: INDEXER_URL.to_string(),
-        prover_url: PROVER_URL.to_string(),
-        tree,
-    })
+/// One Helius URL for RPC, the indexer, and the prover.
+/// Toggle the `localnet:` lines to run against a local stack instead.
+pub fn connect(url: &str) -> Result<ZolanaClient<SolanaRpc>> {
+    Ok(ZolanaClient::from_urls(SolanaRpc::new(url), url, url)?)
+    // localnet: Ok(ZolanaClient::from_urls(
+    //     SolanaRpc::new("http://127.0.0.1:8899"),
+    //     "http://127.0.0.1:8784",
+    //     "http://127.0.0.1:3001",
+    // )?)
 }
 
 /// The Solana CLI wallet (`ZOLANA_PAYER_KEYPAIR`, defaults to

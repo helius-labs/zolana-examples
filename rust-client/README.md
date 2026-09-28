@@ -18,7 +18,7 @@ cp .env.example .env
 
 By default, the examples use your CLI wallet as `payer`. Make sure it's funded with [devnet SOL](https://faucet.solana.com/).
 
-To run on localnet, toggle `localnet` in [`src/lib.rs`](src/lib.rs).
+To run on localnet, toggle the `localnet:` comment inside `connect` in [`src/lib.rs`](src/lib.rs).
 
 ## Run
 

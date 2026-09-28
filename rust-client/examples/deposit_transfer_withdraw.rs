@@ -1,8 +1,9 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{cli_keypair, landed_slot, setup, SetupContext};
+use rust_client_example::{cli_keypair, connect, landed_slot};
 use solana_keypair::Keypair;
 use solana_signer::Signer;
-use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::{IndexerRpcConfig, Rpc};
+use zolana_interface::pda;
 use zolana_keypair::ShieldedKeypair;
 use zolana_program::instruction::{
     AssetDeposit, Deposit, DepositAsset, Transact, TransactInterfaceTransferAccounts,
@@ -17,15 +18,8 @@ const TRANSFER_AMOUNT: u64 = 3_000_000;
 const WITHDRAW_AMOUNT: u64 = 3_000_000;
 
 fn main() -> Result<()> {
-    let SetupContext {
-        rpc_url,
-        indexer_url,
-        prover_url,
-        tree,
-    } = setup()?;
-
-    // Connect to the RPC, indexer, and prover.
-    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
+    let client = connect("https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY")?;
+    let tree = pda::tree(0);
 
     // Mints that are registered with Solana Rings for privacy.
     let assets = AssetRegistry::default();

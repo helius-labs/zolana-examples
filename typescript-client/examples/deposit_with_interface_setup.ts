@@ -23,20 +23,20 @@ import type { Instruction } from "@solana/kit";
 import {
   cliKeypair,
   sendAndConfirmFactory,
-  setup,
   setupTestToken,
 } from "../src/lib.js";
 
 const DEPOSIT_AMOUNT = 1_000_000_000n;
 
 async function main(): Promise<void> {
-  const { clientConfig } = await setup();
+  const client = await createZolanaClient({
+    solanaRpcUrl: `https://devnet.helius-rpc.com/?api-key=${process.env.API_KEY}`,
+  });
+  // localnet: const client = await createZolanaClient({});
   const senderKeypair =
     ShieldedKeypair.fromKeypair(
       await cliKeypair(),
     );
-  const client =
-    await createZolanaClient(clientConfig);
   const senderSigner =
     senderKeypair.toSolanaSigner();
   const senderAddress =

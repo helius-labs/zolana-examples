@@ -1,9 +1,7 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{
-    cli_keypair, landed_slot, setup, setup_test_token, SetupContext, TestToken,
-};
+use rust_client_example::{cli_keypair, connect, landed_slot, setup_test_token, TestToken};
 use solana_signer::Signer;
-use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::{IndexerRpcConfig, Rpc};
 use zolana_interface::{pda, state::SplAssetRegistry};
 use zolana_keypair::ShieldedKeypair;
 use zolana_program::instruction::{
@@ -14,13 +12,8 @@ use zolana_transaction::{decrypt_spendable, AssetRegistry};
 const DEPOSIT_AMOUNT: u64 = 1_000_000_000;
 
 fn main() -> Result<()> {
-    let SetupContext {
-        rpc_url,
-        indexer_url,
-        prover_url,
-        tree,
-    } = setup()?;
-    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
+    let client = connect("https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY")?;
+    let tree = pda::tree(0);
     let sender_solana_keypair = cli_keypair()?;
     let sender = ShieldedKeypair::from_keypair(&sender_solana_keypair)?;
     let sender_pubkey = sender_solana_keypair.pubkey();

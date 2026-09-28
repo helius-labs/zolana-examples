@@ -24,7 +24,6 @@ import {
 import {
   cliKeypair,
   sendAndConfirmFactory,
-  setup,
 } from "../src/lib.js";
 
 const DEPOSIT_AMOUNT = 10_000_000n;
@@ -32,11 +31,10 @@ const TRANSFER_AMOUNT = 3_000_000n;
 const WITHDRAW_AMOUNT = 3_000_000n;
 
 async function main(): Promise<void> {
-  const { clientConfig } = await setup();
-
-  // Connect to Helius devnet RPC plus the Photon indexer and prover.
-  const client =
-    await createZolanaClient(clientConfig);
+  const client = await createZolanaClient({
+    solanaRpcUrl: `https://devnet.helius-rpc.com/?api-key=${process.env.API_KEY}`,
+  });
+  // localnet: const client = await createZolanaClient({});
 
   // Initialize the sender's private wallet and local authority
   // to decrypt transactions and sync balances.
