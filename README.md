@@ -14,7 +14,7 @@
 
 |  |  |
 |---------|-------------|
-| [`register_private_wallet`](typescript-client/examples/register_private_wallet.ts) | Register a private wallet and enable merging in one transaction. |
+| [`register_private_wallet`](typescript-client/examples/register_private_wallet.ts) | Register a private wallet. |
 | [`deposit_transfer_withdraw`](typescript-client/examples/deposit_transfer_withdraw.ts) | Deposit, private transfer, and withdraw. |
 | [`deposit_with_interface_setup`](typescript-client/examples/deposit_with_interface_setup.ts) | Create a token interface and deposit in one transaction. |
 | [`sync_balance`](typescript-client/examples/sync_balance.ts) | Read the private SOL and SPL balances. |
