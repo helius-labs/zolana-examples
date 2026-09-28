@@ -5,72 +5,67 @@ import {
   createZolanaClient,
 } from "@heliuslabs/zolana";
 import { isWalletRegistered } from "@heliuslabs/zolana/wallet";
+import { getTransferSolInstruction } from "@solana-program/system";
 
 import {
   cliKeypair,
   sendAndConfirmFactory,
   sendTransactionFactory,
-  setup,
-  transferLamportsInstruction,
 } from "../src/lib.js";
 
 const FUND_LAMPORTS = 10_000_000n;
 
-async function main(): Promise<void> {
-  const { clientConfig } = await setup();
+const client = await createZolanaClient({
+  solanaRpcUrl: `https://devnet.helius-rpc.com/?api-key=${process.env.API_KEY}`,
+});
+// localnet: zolana dev start. RPC port :8899, indexer port :8784, prover port :3001.
+// const client = await createZolanaClient({});
 
-  // Connect to the RPC, indexer, and prover.
-  const client =
-    await createZolanaClient(clientConfig);
+// Initialize the sender's private wallet and local authority
+// to decrypt transactions and sync balances.
+// The Solana signer and private wallet are derived from the same Ed25519 seed.
+const sender = ShieldedKeypair.fromKeypair(
+  SigningKey.generate("ed25519"),
+);
+const senderSigner = sender.toSolanaSigner();
 
-  // Initialize the sender's private wallet and local authority
-  // to decrypt transactions and sync balances.
-  // The Solana signer and private wallet are derived from the same Ed25519 seed.
-  const sender = ShieldedKeypair.fromKeypair(
-    SigningKey.generate("ed25519"),
-  );
-  const senderSigner = sender.toSolanaSigner();
-
-  // The SDK hands back a transaction; the CLI functions as sponsor to sign and send.
-  const payer = ShieldedKeypair.fromKeypair(
-    await cliKeypair(),
-  ).toSolanaSigner();
-  await sendAndConfirmFactory(
+// The SDK hands back a transaction; the CLI functions as sponsor to sign and send.
+const payer = ShieldedKeypair.fromKeypair(
+  await cliKeypair(),
+).toSolanaSigner();
+await sendAndConfirmFactory(
+  client,
+  payer,
+)([
+  getTransferSolInstruction({
+    source: payer,
+    destination: senderSigner.address,
+    amount: FUND_LAMPORTS,
+  }),
+]);
+const registration =
+  await buildRegistrationTransaction({
     client,
-    payer,
-  )([
-    transferLamportsInstruction(
-      payer.address,
-      senderSigner.address,
-      FUND_LAMPORTS,
-    ),
-  ]);
-  const registration =
-    await buildRegistrationTransaction({
-      client,
-      owner: senderSigner.address,
-      address: sender.shieldedAddress(),
-    });
-  if (registration !== undefined) {
-    await sendTransactionFactory(
-      client,
-      senderSigner,
-    )(registration);
-  }
-
-  const registered = await isWalletRegistered({
-    rpc: client,
     owner: senderSigner.address,
+    address: sender.shieldedAddress(),
   });
-  if (!registered) {
-    throw new Error(
-      "expected the wallet to be registered",
-    );
-  }
+if (registration !== undefined) {
+  await sendTransactionFactory(
+    client,
+    senderSigner,
+  )(registration);
+}
 
-  console.log(
-    `ok private wallet solana_address=${senderSigner.address}`,
+const registered = await isWalletRegistered({
+  rpc: client,
+  owner: senderSigner.address,
+});
+if (!registered) {
+  throw new Error(
+    "expected the wallet to be registered",
   );
 }
 
-await main();
+console.log(
+  `ok private wallet solana_address=${senderSigner.address}`,
+);

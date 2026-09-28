@@ -28,7 +28,7 @@ cp .env.example .env # ...and set API_KEY
 
 **Localnet**:
 
-To run on localnet, configure in [`src/lib.ts`](src/lib.ts) and install:
+To run on localnet, uncomment the `localnet:` line in each example and install:
 
 ```bash
 cargo install --git https://github.com/helius-labs/zolana --tag v0.3.0-alpha zolana-cli
@@ -36,9 +36,7 @@ zolana dev start
 ```
 
 ```typescript
-const RPC_URL = "http://127.0.0.1:8899";
-const INDEXER_URL = "http://127.0.0.1:8784";
-const PROVER_URL = "http://127.0.0.1:3001";
+// localnet: const client = await createZolanaClient({});
 ```
 
 ## Run

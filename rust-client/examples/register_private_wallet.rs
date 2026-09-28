@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rust_client_example::{cli_keypair, setup, SetupContext};
+use rust_client_example::cli_keypair;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 use solana_system_interface::instruction::transfer;
@@ -10,15 +10,16 @@ use zolana_wallet::{build_registration_transaction_sync, is_wallet_registered_sy
 const FUND_LAMPORTS: u64 = 10_000_000;
 
 fn main() -> Result<()> {
-    let SetupContext {
-        rpc_url,
-        indexer_url,
-        prover_url,
-        ..
-    } = setup()?;
-
-    // Connect to the RPC, indexer, and prover.
-    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
+    dotenvy::dotenv().ok();
+    let api_key = std::env::var("API_KEY")?;
+    let url = format!("https://devnet.helius-rpc.com/?api-key={api_key}");
+    let client = ZolanaClient::from_urls(SolanaRpc::new(&url), &url, &url)?;
+    // localnet: zolana dev start. RPC port :8899, indexer port :8784, prover port :3001.
+    // let client = ZolanaClient::from_urls(
+    //     SolanaRpc::new("http://127.0.0.1:8899"),
+    //     "http://127.0.0.1:8784",
+    //     "http://127.0.0.1:3001",
+    // )?;
 
     // Initialize the sender's private wallet and local authority
     // to decrypt transactions and sync balances.

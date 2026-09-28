@@ -1,7 +1,5 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{
-    cli_keypair, landed_slot, setup, setup_test_token, SetupContext, TestToken,
-};
+use rust_client_example::{cli_keypair, landed_slot, setup_test_token, TestToken};
 use solana_signer::Signer;
 use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::{pda, state::SplAssetRegistry};
@@ -14,13 +12,17 @@ use zolana_transaction::{decrypt_spendable, AssetRegistry};
 const DEPOSIT_AMOUNT: u64 = 1_000_000_000;
 
 fn main() -> Result<()> {
-    let SetupContext {
-        rpc_url,
-        indexer_url,
-        prover_url,
-        tree,
-    } = setup()?;
-    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
+    dotenvy::dotenv().ok();
+    let api_key = std::env::var("API_KEY")?;
+    let url = format!("https://devnet.helius-rpc.com/?api-key={api_key}");
+    let client = ZolanaClient::from_urls(SolanaRpc::new(&url), &url, &url)?;
+    // localnet: zolana dev start. RPC port :8899, indexer port :8784, prover port :3001.
+    // let client = ZolanaClient::from_urls(
+    //     SolanaRpc::new("http://127.0.0.1:8899"),
+    //     "http://127.0.0.1:8784",
+    //     "http://127.0.0.1:3001",
+    // )?;
+    let tree = pda::tree(0);
     let sender_solana_keypair = cli_keypair()?;
     let sender = ShieldedKeypair::from_keypair(&sender_solana_keypair)?;
     let sender_pubkey = sender_solana_keypair.pubkey();
