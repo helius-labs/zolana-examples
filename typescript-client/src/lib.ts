@@ -4,8 +4,6 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 
 import {
-  AccountRole,
-  address,
   appendTransactionMessageInstructions,
   assertIsTransactionWithBlockhashLifetime,
   createTransactionMessage,
@@ -118,27 +116,6 @@ export async function setup(): Promise<ExampleSetup> {
   return Object.freeze({
     clientConfig: clientConfigFromEnv(),
   });
-}
-
-const SYSTEM_PROGRAM_ADDRESS = address("11111111111111111111111111111111");
-
-/** Move `lamports` of SOL from `from` to `to`. */
-export function transferLamportsInstruction(
-  from: Address,
-  to: Address,
-  lamports: bigint,
-): Instruction {
-  const data = new Uint8Array(12);
-  data[0] = 2;
-  new DataView(data.buffer).setBigUint64(4, lamports, true);
-  return {
-    programAddress: SYSTEM_PROGRAM_ADDRESS,
-    accounts: [
-      { address: from, role: AccountRole.WRITABLE_SIGNER },
-      { address: to, role: AccountRole.WRITABLE },
-    ],
-    data,
-  };
 }
 
 /**
