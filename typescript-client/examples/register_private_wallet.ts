@@ -5,13 +5,13 @@ import {
   createZolanaClient,
 } from "@heliuslabs/zolana";
 import { isWalletRegistered } from "@heliuslabs/zolana/wallet";
+import { getTransferSolInstruction } from "@solana-program/system";
 
 import {
   cliKeypair,
   sendAndConfirmFactory,
   sendTransactionFactory,
   setup,
-  transferLamportsInstruction,
 } from "../src/lib.js";
 
 const FUND_LAMPORTS = 10_000_000n;
@@ -39,11 +39,11 @@ async function main(): Promise<void> {
     client,
     payer,
   )([
-    transferLamportsInstruction(
-      payer.address,
-      senderSigner.address,
-      FUND_LAMPORTS,
-    ),
+    getTransferSolInstruction({
+      source: payer,
+      destination: senderSigner.address,
+      amount: FUND_LAMPORTS,
+    }),
   ]);
   const registration =
     await buildRegistrationTransaction({
