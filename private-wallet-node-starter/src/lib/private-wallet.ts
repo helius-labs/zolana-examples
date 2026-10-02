@@ -14,7 +14,6 @@ import {
   signTransactionWithSigners,
   type Signature,
   type Transaction,
-  type TransactionPartialSigner,
 } from "@solana/kit";
 import { generateP256KeyPair } from "@turnkey/crypto";
 import {
@@ -44,7 +43,7 @@ import {
   ZOLANA_PROVER_URL,
 } from "./config.js";
 import releaseJson from "./release.json" with { type: "json" };
-import { saveWallet, type StoredWallet } from "./store.js";
+import { rememberSlot, saveWallet, type StoredWallet } from "./store.js";
 import {
   createSubOrganization,
   grantEnclaveBootstrap,
@@ -145,8 +144,8 @@ async function publicKey(clientKey: webcrypto.JsonWebKey): Promise<Uint8Array> {
 }
 
 /**
- * Creates a private wallet: a Turnkey wallet in your Helius project whose
- * private keys the Helius enclave derives from it and holds.
+ * Creates a wallet: a Turnkey wallet in your Helius project, and the private
+ * keys the Helius enclave derives from it and holds.
  */
 export async function createPrivateWallet(): Promise<StoredWallet> {
   const ownerKey = generateP256KeyPair();
@@ -156,6 +155,22 @@ export async function createPrivateWallet(): Promise<StoredWallet> {
   };
   const { organizationId, walletId, address } =
     await createSubOrganization(owner);
+  try {
+    return await enablePrivateWallet(owner, organizationId, walletId, address);
+  } catch (error) {
+    console.error(
+      `wallet ${address} in sub-organization ${organizationId} was created, but enabling its private wallet failed`,
+    );
+    throw error;
+  }
+}
+
+async function enablePrivateWallet(
+  owner: StoredWallet["ownerKey"],
+  organizationId: string,
+  walletId: string,
+  address: string,
+): Promise<StoredWallet> {
   const api = turnkey(owner, organizationId);
 
   // Verify the enclave before giving its key any authority over the wallet.
@@ -215,49 +230,60 @@ export async function createPrivateWallet(): Promise<StoredWallet> {
   return wallet;
 }
 
-/** A stored wallet, synced, with its enclave-held keys and Turnkey signer. */
+export type OpenWallet = Awaited<ReturnType<typeof openPrivateWallet>>;
+
+/**
+ * A stored wallet with its enclave-held keys and Turnkey signer, synced to
+ * the slot of its last transaction.
+ */
 export async function openPrivateWallet(stored: StoredWallet) {
-  const { client, connection } = await enclave(
+  const client = await zolana;
+  const { client: tvc, connection } = await enclave(
     stored.descriptor,
     stored.clientKey,
   );
   const keys = new TvcKeys({
-    client,
+    client: tvc,
     connection,
     identity: stored.identity,
     sealedSeed: stored.sealedSeed,
   });
   const shieldedAddress = shieldedAddressOf(stored.identity);
   const wallet = new Wallet({ identity: shieldedAddress });
-  await syncWallet({ client: await zolana, wallet, keys });
+  await syncWallet({
+    client,
+    wallet,
+    keys,
+    ...(stored.lastSlot
+      ? { config: { requireSlot: BigInt(stored.lastSlot) } }
+      : {}),
+  });
+  const signer = transactionSigner(
+    turnkey(stored.ownerKey, stored.organizationId),
+    stored.address,
+  );
+
+  /** Signs `transaction` with the Turnkey wallet, sends it and waits for it to land. */
+  async function send(transaction: Transaction): Promise<Signature> {
+    const signed = await signTransactionWithSigners([signer], transaction);
+    assertIsFullySignedTransaction(signed);
+    assertIsTransactionWithinSizeLimit(signed);
+    await sendTransactionWithoutConfirmingFactory({ rpc: client.solanaRpc })(
+      signed,
+      { commitment: client.commitment },
+    );
+    const signature = getSignatureFromTransaction(signed);
+    const slot = await client.confirmTransaction(signature);
+    await rememberSlot(stored.address, slot);
+    return signature;
+  }
+
   return {
     keys,
     wallet,
     shieldedAddress,
-    signer: transactionSigner(
-      turnkey(stored.ownerKey, stored.organizationId),
-      stored.address,
-    ),
+    signer,
+    send,
     privateLamports: () => wallet.balance(SOL_MINT).amount,
   };
-}
-
-/** Signs `transaction` with `signer`, sends it and waits for confirmation. */
-export async function send(
-  transaction: Transaction,
-  signer: TransactionPartialSigner,
-): Promise<Signature> {
-  const client = await zolana;
-  const signed = await signTransactionWithSigners([signer], transaction);
-  assertIsFullySignedTransaction(signed);
-  assertIsTransactionWithinSizeLimit(signed);
-  await sendTransactionWithoutConfirmingFactory({ rpc: client.solanaRpc })(
-    signed,
-    {
-      commitment: client.commitment,
-    },
-  );
-  const signature = getSignatureFromTransaction(signed);
-  await client.confirmTransaction(signature);
-  return signature;
 }

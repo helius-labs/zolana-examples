@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@heliuslabs/zolana": "^0.3.1-alpha",
+    "@solana-program/system": "0.14.1",
+    "@solana-program/token": "0.16.1",
     "@solana/kit": "^8.3.0",
     "@turnkey/crypto": "^2.13.2",
     "@turnkey/sdk-server": "^8.6.0",

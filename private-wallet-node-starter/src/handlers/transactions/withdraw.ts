@@ -1,8 +1,8 @@
 import { buildWithdrawalTransaction } from "@heliuslabs/zolana";
 import { address, isAddress } from "@solana/kit";
 import type { RequestHandler } from "express";
-import { lamports } from "../../lib/amount.js";
-import { openPrivateWallet, send, zolana } from "../../lib/private-wallet.js";
+import { positiveAmount } from "../../lib/amount.js";
+import { openPrivateWallet, zolana } from "../../lib/private-wallet.js";
 import { loadWallet } from "../../lib/store.js";
 
 /**
@@ -24,7 +24,7 @@ export const withdraw: RequestHandler<{ address: string }> = async (
     res.status(404).json({ error: "no such wallet" });
     return;
   }
-  const amount = lamports(req.body?.lamports);
+  const amount = positiveAmount(req.body?.lamports);
   const recipient = req.body?.recipient ?? stored.address;
   if (
     amount === undefined ||
@@ -34,7 +34,7 @@ export const withdraw: RequestHandler<{ address: string }> = async (
     res.status(400).json({ error: "invalid recipient or lamports" });
     return;
   }
-  const { keys, wallet, signer } = await openPrivateWallet(stored);
+  const { keys, wallet, signer, send } = await openPrivateWallet(stored);
   const transaction = await buildWithdrawalTransaction({
     client: await zolana,
     wallet,
@@ -43,5 +43,5 @@ export const withdraw: RequestHandler<{ address: string }> = async (
     recipient: address(recipient),
     amount,
   });
-  res.json({ signature: await send(transaction, signer) });
+  res.json({ signature: await send(transaction) });
 };
