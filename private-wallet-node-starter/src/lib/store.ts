@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { webcrypto } from "node:crypto";
 import type { SealedSeed, ShieldedIdentity } from "@zolana/tvc-wallet";
@@ -23,6 +23,11 @@ export type StoredWallet = {
   readonly descriptor: WalletDescriptor;
   readonly identity: ShieldedIdentity;
   readonly sealedSeed: SealedSeed;
+  /**
+   * The slot of the wallet's last transaction, as a decimal string. The
+   * indexer must have reached it before the wallet's private state is read.
+   */
+  readonly lastSlot?: string;
 };
 
 const walletPath = (walletAddress: string) =>
@@ -34,6 +39,22 @@ export async function saveWallet(wallet: StoredWallet): Promise<void> {
     mode: 0o600,
     flag: "wx",
   });
+}
+
+/** Records the slot the wallet's latest transaction landed in. */
+export async function rememberSlot(
+  walletAddress: string,
+  slot: bigint,
+): Promise<void> {
+  const stored = await loadWallet(walletAddress);
+  if (!stored) throw new Error(`no stored wallet ${walletAddress}`);
+  const path = walletPath(walletAddress);
+  await writeFile(
+    `${path}.tmp`,
+    JSON.stringify({ ...stored, lastSlot: String(slot) }, null, 2),
+    { mode: 0o600 },
+  );
+  await rename(`${path}.tmp`, path);
 }
 
 export async function loadWallet(

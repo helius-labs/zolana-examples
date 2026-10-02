@@ -65,6 +65,11 @@ export async function bootstrapWithApproval<T>(
 ): Promise<T> {
   const done = new AbortController();
   const signal = AbortSignal.any([done.signal, AbortSignal.timeout(65_000)]);
+  const aborted = new Promise<never>((_resolve, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), {
+      once: true,
+    });
+  });
   const pending = async () => {
     const { activities } = await api.getActivities({
       organizationId: expected.organizationId,
@@ -77,10 +82,18 @@ export async function bootstrapWithApproval<T>(
     }
     return activities;
   };
-  // Never approve an activity from an earlier run.
-  const earlier = new Set((await pending()).map((activity) => activity.id));
-  const operation = bootstrap(signal).finally(() => done.abort());
-  const approval = (async () => {
+  try {
+    // Never approve an activity from an earlier run.
+    const previous = await Promise.race([pending(), aborted]);
+    const earlier = new Set(previous.map((activity) => activity.id));
+    const operation = bootstrap(signal);
+    const approval = approve(earlier);
+    return await Promise.race([operation, approval.then(() => operation)]);
+  } finally {
+    done.abort();
+  }
+
+  async function approve(earlier: ReadonlySet<string>): Promise<void> {
     while (!signal.aborted) {
       const candidates = (await pending()).filter(
         (activity) =>
@@ -106,8 +119,5 @@ export async function bootstrapWithApproval<T>(
       }
       await delay(250, undefined, { signal });
     }
-  })().catch((error: unknown) => {
-    if (!done.signal.aborted) throw error;
-  });
-  return Promise.race([operation, approval.then(() => operation)]);
+  }
 }
