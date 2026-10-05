@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use rust_client_example::{cli_keypair, setup, SetupContext};
 use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
-use zolana_transaction::{AssetRegistry, ShieldedTransaction, Wallet, DEFAULT_TAG_WINDOW};
+use zolana_transaction::{decrypt, AssetRegistry, ShieldedTransaction, WalletUtxo};
 
 fn main() -> Result<()> {
     let SetupContext {
@@ -18,8 +20,10 @@ fn main() -> Result<()> {
     // The Solana signer and the private wallet are derived from the same
     // Ed25519 seed.
     let owner = ShieldedKeypair::from_keypair(&cli_keypair()?)?;
+    let assets = AssetRegistry::default();
 
-    // Fetch every confidential transaction tagged for this wallet.
+    // Every confidential transaction to or from this wallet carries its owner
+    // tag: payments to it, its own sends and their change.
     let owner_tag = owner
         .shielded_address()?
         .signing_pubkey
@@ -34,14 +38,39 @@ fn main() -> Result<()> {
         cursor = Some(next);
     }
 
-    // Decrypt them into a wallet, which also records each one as history.
-    let mut wallet = Wallet::new(owner.shielded_address()?, AssetRegistry::default())?;
-    wallet.sync(&owner, &transactions, 0, DEFAULT_TAG_WINDOW)?;
-    for tx in wallet.private_transactions() {
+    // Decrypt the notes these transactions created for this wallet, spent or
+    // not. A transaction spends a note by publishing its nullifier.
+    let decrypted = decrypt(&owner, &transactions, &assets)?;
+    let by_nullifier: HashMap<[u8; 32], &WalletUtxo> = decrypted
+        .utxos
+        .iter()
+        .map(|utxo| (utxo.nullifier, utxo))
+        .collect();
+
+    for tx in &transactions {
+        let received = decrypted
+            .utxos
+            .iter()
+            .filter(|utxo| utxo.tx_signature == tx.tx_signature);
+        let spent = tx
+            .nullifiers
+            .iter()
+            .filter_map(|nullifier| by_nullifier.get(nullifier).copied());
         println!(
-            "ok kind={:?} direction={:?} mint={} amount={} tx={}",
-            tx.kind, tx.direction, tx.asset, tx.amount, tx.id.signature,
+            "ok tx={} slot={} received=[{}] spent=[{}]",
+            tx.tx_signature,
+            tx.slot,
+            amounts(received),
+            amounts(spent),
         );
     }
     Ok(())
+}
+
+/// `mint:amount` per note.
+fn amounts<'a>(utxos: impl Iterator<Item = &'a WalletUtxo>) -> String {
+    utxos
+        .map(|utxo| format!("{}:{}", utxo.utxo.asset.asset, utxo.utxo.amount))
+        .collect::<Vec<_>>()
+        .join(",")
 }
