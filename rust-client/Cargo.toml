@@ -20,11 +20,11 @@ spl-token-interface = "3.0.0"
 # The in-process gnark prover of the Zolana mobile SDK. Building it needs
 # Go 1.27.1 or newer.
 rust-gnark = { git = "https://github.com/helius-labs/zolana-mobile-sdk", rev = "bc0b1e1cf72bb39868105d9fef4676c51744aa3b", optional = true }
-zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "bf4048b603ce0a270718e893470613dba37c129b", features = ["indexer-api", "solana-rpc"] }
-zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "bf4048b603ce0a270718e893470613dba37c129b" }
-zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "bf4048b603ce0a270718e893470613dba37c129b" }
-zolana-program = { git = "https://github.com/helius-labs/zolana", rev = "bf4048b603ce0a270718e893470613dba37c129b" }
-zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "bf4048b603ce0a270718e893470613dba37c129b" }
+zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "971c5c0e429d3886fb20f6638d68c581acdcdd42", features = ["indexer-api", "solana-rpc"] }
+zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "971c5c0e429d3886fb20f6638d68c581acdcdd42" }
+zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "971c5c0e429d3886fb20f6638d68c581acdcdd42" }
+zolana-program = { git = "https://github.com/helius-labs/zolana", rev = "971c5c0e429d3886fb20f6638d68c581acdcdd42" }
+zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "971c5c0e429d3886fb20f6638d68c581acdcdd42" }
 
 [features]
 # Prove on this machine instead of the prover server.
