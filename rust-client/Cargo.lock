@@ -2302,7 +2302,7 @@ dependencies = [
 [[package]]
 name = "rust-gnark"
 version = "0.0.3"
-source = "git+https://github.com/helius-labs/zolana-mobile-sdk?rev=bc0b1e1cf72bb39868105d9fef4676c51744aa3b#bc0b1e1cf72bb39868105d9fef4676c51744aa3b"
+source = "git+https://github.com/helius-labs/zolana-mobile-sdk?rev=311403b816e0870db6739b3103c4333a935f3e5e#311403b816e0870db6739b3103c4333a935f3e5e"
 dependencies = [
  "anyhow",
  "bindgen",
