@@ -1,6 +1,12 @@
 //! Shared setup for the examples: the fee payer, Helius RPC, Photon indexer,
 //! prover, and funded test tokens.
 
+#[cfg(feature = "local-prover")]
+mod local_prover;
+
+#[cfg(feature = "local-prover")]
+pub use local_prover::LocalProver;
+
 use anyhow::{anyhow, Result};
 use solana_address::Address;
 use solana_keypair::{read_keypair_file, Keypair};
@@ -124,4 +130,14 @@ pub fn landed_slot(client: &ZolanaClient<SolanaRpc>, signature: Signature) -> Re
         .and_then(|status| status.as_ref())
         .map(|status| status.slot)
         .ok_or_else(|| anyhow!("transaction status missing after confirmation"))
+}
+
+/// Where the local prover reads proving keys (`ZOLANA_PROVER_KEYS_DIR`,
+/// defaults to `~/.config/zolana/proving-keys`, where the zolana prover server
+/// keeps its verified downloads).
+#[cfg(feature = "local-prover")]
+pub fn proving_keys_dir() -> String {
+    let path = std::env::var("ZOLANA_PROVER_KEYS_DIR")
+        .unwrap_or_else(|_| "~/.config/zolana/proving-keys".to_string());
+    shellexpand::tilde(&path).into_owned()
 }

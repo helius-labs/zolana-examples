@@ -26,6 +26,12 @@ fn main() -> Result<()> {
 
     // Connect to the RPC, indexer, and prover.
     let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
+    // With `--features local-prover`, prove on this machine instead: the
+    // nullifier secrets in the proof request never leave it.
+    #[cfg(feature = "local-prover")]
+    let client = client.with_prover(rust_client_example::LocalProver::new(
+        rust_client_example::proving_keys_dir(),
+    ));
 
     // Mints that are registered with Solana Rings for privacy.
     let assets = AssetRegistry::default();
