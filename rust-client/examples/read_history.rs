@@ -3,7 +3,8 @@ use rust_client_example::{cli_keypair, setup, SetupContext};
 use zolana_client::{SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::AssetRegistry;
-use zolana_wallet::{sync_wallet_with_config, SyncWalletConfig, Wallet};
+// The stateful wallet, with its transaction history, lives in zolana-test-utils.
+use zolana_test_utils::wallet::{sync_wallet_with_config, SyncWalletConfig, Wallet};
 
 fn main() -> Result<()> {
     let SetupContext {

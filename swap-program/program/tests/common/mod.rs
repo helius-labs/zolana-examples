@@ -21,7 +21,7 @@ use zolana_interface::{
     N_PUBLIC_SLOTS, SHIELDED_POOL_PROGRAM_ID,
 };
 
-const SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../target/deploy");
+const SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/deploy");
 
 #[derive(Clone, Copy)]
 pub enum Wrapper {
