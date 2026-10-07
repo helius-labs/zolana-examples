@@ -19,6 +19,6 @@ export const HELIUS_API_URL = "https://dev-api.helius.xyz/v0";
 export const TURNKEY_API_URL = "https://api.turnkey.com";
 export const TURNKEY_AUTH_PROXY_URL = "https://authproxy.turnkey.com";
 
-export const SOLANA_RPC_URL = `https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
-export const ZOLANA_INDEXER_URL = "https://d2xah7tnhdhcom.cloudfront.net";
-export const ZOLANA_PROVER_URL = "https://d21ni15goiip6l.cloudfront.net";
+export const SOLANA_RPC_URL = `https://beta-devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+export const ZOLANA_INDEXER_URL = `https://beta-devnet.helius-rpc.com/v1/zolana?api-key=${HELIUS_API_KEY}`;
+export const ZOLANA_PROVER_URL = `https://beta-devnet.helius-rpc.com/v1/zolana?api-key=${HELIUS_API_KEY}`;
