@@ -179,7 +179,8 @@ struct EscrowIxData {
 After unlock, the escrow UTXO is reclaimed to the committed `owner_hash`. The timelock escrow
 program verifies the [withdraw proof](#withdraw-circuit), then CPIs SPP
 [`transact`](../../docs/spec.md#transact). The transact is 1-in/1-out: the escrow UTXO in, an
-`amount` `asset_id` UTXO to `owner_hash` out. The creator signs as a dedicated readonly signer; the
+`amount` `asset_id` UTXO to `owner_hash` out, proved at the SPP `(1, 2)` shape with compact padding
+in the second output slot, which the instruction data leaves out. The creator signs as a dedicated readonly signer; the
 program includes `hash_bytes` of its pubkey in the proof's public input and the circuit checks it
 against the committed `owner_hash`, so only the creator can withdraw, and the creator knows the
 refund blinding it chose. The timelock escrow program supplies the escrow-authority PDA signer via
@@ -242,9 +243,10 @@ UTXO in; change + escrow UTXO out), padded to the SPP `(2, 2)` proving shape.
 - **Constraints:**
   - The `private_tx_hash` recomputation mirrors the padded transact exactly: the input hash chain
     covers `[source_input, 0]`, the output hash chain covers `[change, escrow_utxo]`, and the
-    address hash chain covers `[0, 0]` (see [private_tx_hash](../../docs/spec.md#spp-proof---solana-privacy-zk-proof)).
+    address hash chain is the zero chain, each folding only its nonzero entries (see
+    [private_tx_hash](../../docs/spec.md#spp-proof---solana-privacy-zk-proof)).
     The source input hash is supplied directly, not recomputed by the circuit; the change slot
-    contributes 0 when the change amount is 0.
+    contributes nothing when the change amount is 0.
   - The escrow UTXO output committed in `private_tx_hash` has `data_hash = Poseidon(escrow terms)`,
     `ring_program_id = 0` and `ring_data_hash = 0` (the [default, non-ring](../../docs/spec.md#default-ring)
     UTXO variant), and a nonzero amount, so the public SPP escrow UTXO output commits the terms.
@@ -254,7 +256,8 @@ UTXO in; change + escrow UTXO out), padded to the SPP `(2, 2)` proving shape.
 ### Withdraw circuit
 
 Reclaims the escrow UTXO to the committed `owner_hash` after unlock. Matches the 1-in/1-out
-transact (escrow UTXO in; source-to-owner out). The program enforces `now > unlock` against the
+transact (escrow UTXO in; source-to-owner out), proved at the SPP `(1, 2)` shape with a compact
+padding second output that the private transaction hash does not see. The program enforces `now > unlock` against the
 Clock; the circuit only reveals `unlock` and checks it equals the committed term.
 
 - **Public inputs:** `Poseidon(private_tx_hash, unlock, owner_pk_field)`, where `owner_pk_field` is
