@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@heliuslabs/zolana':
-        specifier: ^0.3.1-alpha
-        version: 0.3.1-alpha(@solana/kit@8.4.0(typescript@7.0.2))
+        specifier: ^0.4.0-alpha
+        version: 0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2))
       '@solana-program/system':
         specifier: 0.14.1
         version: 0.14.1(@solana/kit@8.4.0(typescript@7.0.2))
@@ -27,8 +27,8 @@ importers:
         specifier: ^8.6.0
         version: 8.6.0(typescript@7.0.2)
       '@zolana/tvc-wallet':
-        specifier: github:helius-labs/zolana-tvc#d7b5393ed24906ec31de3dbe364ef6bf08e57eda&path:/packages/tvc-wallet
-        version: https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/d7b5393ed24906ec31de3dbe364ef6bf08e57eda#path:/packages/tvc-wallet(@heliuslabs/zolana@0.3.1-alpha(@solana/kit@8.4.0(typescript@7.0.2)))(@solana/kit@8.4.0(typescript@7.0.2))
+        specifier: github:helius-labs/zolana-tvc#eef4844e6903f9790a978fdd6b852bf09a8b490c&path:/packages/tvc-wallet
+        version: https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/eef4844e6903f9790a978fdd6b852bf09a8b490c#path:/packages/tvc-wallet(@heliuslabs/zolana@0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2)))(@solana/kit@8.4.0(typescript@7.0.2))
       dotenv:
         specifier: ^17.2.2
         version: 17.4.2
@@ -213,11 +213,19 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@heliuslabs/zolana@0.3.1-alpha':
-    resolution: {integrity: sha512-sQ8XCkMEUwZcKXneWS334keKx7BVOfKl9fBsuWbQxI52n5dKYcgsZkgrDfLCT8exu31Qx82IAYtcOhaCD7KIrw==}
+  '@heliuslabs/zolana@0.4.0-alpha':
+    resolution: {integrity: sha512-KWNDOZLjs7KE4Q5tW05uAVDdUXbzZRAf+UwOcdYM6HmwlsKi+4UW5vMOI/2y0rSFBKg3VOn+N9ZKxAbLDBpRnQ==}
     engines: {node: '>=24'}
     peerDependencies:
       '@solana/kit': ^8.3.0
+
+  '@hpke/common@1.10.1':
+    resolution: {integrity: sha512-moJwhmtLtuxiUzzNp1jpfBfx8yefKoO9D/RCR9dmwrnc7qjJqId1rEtQz+lSlU5cabX8daToMSx/7HayXOiaFw==}
+    engines: {node: '>=16.0.0'}
+
+  '@hpke/core@1.9.0':
+    resolution: {integrity: sha512-pFxWl1nNJeQCSUFs7+GAblHvXBCjn9EPN65vdKlYQil2aURaRxfGMO6vBKGqm1YHTKwiAxJQNEI70PbSowMP9Q==}
+    engines: {node: '>=16.0.0'}
 
   '@lightprotocol/hasher.rs@0.2.1':
     resolution: {integrity: sha512-uslXM+t8kIOeQKccS8eJIPhVglnaIrz06AUVYJjeR9RHM/26KFEKK431a5mBxvaAwVhRLM0s9ZFN+C9wKgNAjA==}
@@ -433,6 +441,11 @@ packages:
 
   '@peculiar/x509@1.12.3':
     resolution: {integrity: sha512-+Mzq+W7cNEKfkNZzyLl6A6ffqc3r21HGZUezgfKxpZrkORfOqgRXnS80Zu0IV6a9Ue9QBJeKD7kN0iWfc3bhRQ==}
+
+  '@phala/dcap-qvl@0.6.5':
+    resolution: {integrity: sha512-zhQjaQV3AoSlYSUi8EZsQvW5+02Fh2OMoJhsLI1MWzu0X2GXumfzNmQrd7MYwziTLCwTWxzZsfmh6jsJlGXZfQ==}
+    engines: {node: '>=14.0.0'}
+    hasBin: true
 
   '@scure/base@1.2.6':
     resolution: {integrity: sha512-g/nm5FgUa//MCj1gV09zTJTaM6KBAHqLN907YVQqf7zC49+DcO4B1so4ZX07Ef10Twr6nuqYEH9GEggFXA4Fmg==}
@@ -1033,8 +1046,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/d7b5393ed24906ec31de3dbe364ef6bf08e57eda#path:/packages/tvc-wallet':
-    resolution: {gitHosted: true, integrity: sha512-0+yM2E1JFjkQDkdWFKIzbtOWtW/cyZmdrq7pcUkDG14BZtKejBG57RjoDKBf7dIFqNQrQV1r7+J12+EV0aqdTQ==, path: /packages/tvc-wallet, tarball: https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/d7b5393ed24906ec31de3dbe364ef6bf08e57eda}
+  '@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/eef4844e6903f9790a978fdd6b852bf09a8b490c#path:/packages/tvc-wallet':
+    resolution: {gitHosted: true, integrity: sha512-8wF6Dg/LWNOHaps5UqS/uy403XPI+1CeABj83x7n5G5Gjp76rLcC5JsmU85knB67yd5wTusPPG160VkeEhxleQ==, path: /packages/tvc-wallet, tarball: https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/eef4844e6903f9790a978fdd6b852bf09a8b490c}
     version: 0.0.0
     engines: {node: '>=24'}
     peerDependencies:
@@ -1060,6 +1073,9 @@ packages:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
     engines: {node: '>= 0.6'}
 
+  asn1.js@5.4.1:
+    resolution: {integrity: sha512-+I//4cYPccV8LdmBLiX8CYvf9Sp3vQsrqu2QNXRcrbiWvcx/UdlFiqUJJzxRQxgsZmvhXhn4cSKeSmoFjVdupA==}
+
   asn1js@3.0.10:
     resolution: {integrity: sha512-S2s3aOytiKdFRdulw2qPE51MzjzVOisppcVv7jVFR+Kw0kxwvFrDcYA0h7Ndqbmj0HkMIXYWaoj7fli8kgx1eg==}
     engines: {node: '>=12.0.0'}
@@ -1070,6 +1086,9 @@ packages:
   base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
 
+  bn.js@4.12.5:
+    resolution: {integrity: sha512-3aRg6/JxfffFD+OlOjOFR3Vo79l39ooBTFucxx+MT3dhCtzn3EmiUPQo+6/OZuI2jbXi3YKgmiTFBgChQMwIRQ==}
+
   bn.js@5.2.5:
     resolution: {integrity: sha512-Vq886eXykuP5E6HcKSSStP3bJgrE6In5WKxVUvJ8XGpWWYs2xZHWqUwzCtGgEtBcxyd57KBFDPFoUfNzdaHCNg==}
 
@@ -1079,6 +1098,9 @@ packages:
 
   borsh@2.0.0:
     resolution: {integrity: sha512-kc9+BgR3zz9+cjbwM8ODoUB4fs3X3I5A/HtX7LZKxCLaMrEeDFoBpnhZY//DTS1VZBSs6S5v46RZRbZjRFspEg==}
+
+  brorand@1.1.0:
+    resolution: {integrity: sha512-cKV8tMCEpQs4hK/ik71d6LrPOnpkpGBR0wzxqr68g2m/LB2GxVYQroAjMJZRVM1Y4BCjCKc3vAamxSzOY2RP+w==}
 
   bs58@6.0.0:
     resolution: {integrity: sha512-PD0wEnEYg6ijszw/u8s+iI3H17cTymlrwkKhDhPZq+Sokl3AU4htyBFTjAeNAlCCmg0f53g6ih3jATyCKftTfw==}
@@ -1103,6 +1125,10 @@ packages:
 
   cbor-js@0.1.0:
     resolution: {integrity: sha512-7sQ/TvDZPl7csT1Sif9G0+MA0I0JOVah8+wWlJVQdVEgIbCzlN/ab3x+uvMNsc34TUvO6osQTAmB2ls80JX6tw==}
+
+  cborg@6.1.3:
+    resolution: {integrity: sha512-Kb/wD/AFuVcqvVjR+HYNOjNiuhVJ2C+RWxQE2Yqq2WVlVkRjdvVLkkM6QsL3NMsBRh+rgNc+aXmcraA+X0HObQ==}
+    hasBin: true
 
   chalk@5.6.2:
     resolution: {integrity: sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA==}
@@ -1158,6 +1184,9 @@ packages:
 
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
+
+  elliptic@6.6.1:
+    resolution: {integrity: sha512-RaddvvMatK2LJHqFJ+YA4WysVN5Ita9E35botqIYspQ4TkRAlCicdzKOjlyv/1Za5RyTNn7di//eEV0uTAfe3g==}
 
   encodeurl@2.0.0:
     resolution: {integrity: sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg==}
@@ -1230,9 +1259,15 @@ packages:
     resolution: {integrity: sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ==}
     engines: {node: '>= 0.4'}
 
+  hash.js@1.1.7:
+    resolution: {integrity: sha512-taOaskGt4z4SOANNseOviYDvjEJinIkRgmp7LbKP2YTTmVxWBl87s/uzK9r+44BclBSp2X7K1hqeNfz9JbBeXA==}
+
   hasown@2.0.4:
     resolution: {integrity: sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==}
     engines: {node: '>= 0.4'}
+
+  hmac-drbg@1.0.1:
+    resolution: {integrity: sha512-Tti3gMqLdZfhOQY1Mzf/AanLiqh1WTiJgEj26ZuYQ9fbkLomzGchCws4FyrSd4VkpBfiNhaE1On+lOz894jvXg==}
 
   http-errors@2.0.1:
     resolution: {integrity: sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ==}
@@ -1279,6 +1314,12 @@ packages:
   mime-types@3.0.2:
     resolution: {integrity: sha512-Lbgzdk0h4juoQ9fCKXW4by0UJqj+nOOrI9MJ1sSj4nI8aI2eo1qmvQEie4VD1glsS250n15LsWsYtCugiStS5A==}
     engines: {node: '>=18'}
+
+  minimalistic-assert@1.0.1:
+    resolution: {integrity: sha512-UtJcAD4yEaGtjPezWuO9wC4nwUnVH/8/Im3yEHQP4b67cXlD/Qr9hdITCU1xDbSEXg2XKNaP8jsReV7vQd00/A==}
+
+  minimalistic-crypto-utils@1.0.1:
+    resolution: {integrity: sha512-JIYlbt6g8i5jKfJ3xz7rF0LXmv2TkDxBLUkiBeZ7bAx4GnnNMr8xFpGnOxn6GhTEHx3SjRrZEoU+j04prX1ktg==}
 
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
@@ -1575,16 +1616,29 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@heliuslabs/zolana@0.3.1-alpha(@solana/kit@8.4.0(typescript@7.0.2))':
+  '@heliuslabs/zolana@0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2))':
     dependencies:
+      '@hpke/core': 1.9.0
       '@lightprotocol/hasher.rs': 0.2.1
       '@noble/ciphers': 2.4.0
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0
+      '@peculiar/asn1-schema': 2.10.0
+      '@peculiar/asn1-x509': 2.10.0
+      '@phala/dcap-qvl': 0.6.5
       '@solana-program/system': 0.14.1(@solana/kit@8.4.0(typescript@7.0.2))
       '@solana-program/token': 0.16.1(@solana/kit@8.4.0(typescript@7.0.2))
       '@solana/kit': 8.4.0(typescript@7.0.2)
       bn.js: 5.2.5
+      cborg: 6.1.3
+    transitivePeerDependencies:
+      - encoding
+
+  '@hpke/common@1.10.1': {}
+
+  '@hpke/core@1.9.0':
+    dependencies:
+      '@hpke/common': 1.10.1
 
   '@lightprotocol/hasher.rs@0.2.1': {}
 
@@ -1771,6 +1825,19 @@ snapshots:
       reflect-metadata: 0.2.2
       tslib: 2.8.1
       tsyringe: 4.10.0
+
+  '@phala/dcap-qvl@0.6.5':
+    dependencies:
+      '@peculiar/asn1-schema': 2.10.0
+      '@peculiar/asn1-x509': 2.10.0
+      asn1.js: 5.4.1
+      bn.js: 5.2.5
+      buffer: 6.0.3
+      elliptic: 6.6.1
+      hash.js: 1.1.7
+      node-fetch: 2.7.0
+    transitivePeerDependencies:
+      - encoding
 
   '@scure/base@1.2.6':
     optional: true
@@ -2469,9 +2536,9 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/d7b5393ed24906ec31de3dbe364ef6bf08e57eda#path:/packages/tvc-wallet(@heliuslabs/zolana@0.3.1-alpha(@solana/kit@8.4.0(typescript@7.0.2)))(@solana/kit@8.4.0(typescript@7.0.2))':
+  '@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/eef4844e6903f9790a978fdd6b852bf09a8b490c#path:/packages/tvc-wallet(@heliuslabs/zolana@0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2)))(@solana/kit@8.4.0(typescript@7.0.2))':
     dependencies:
-      '@heliuslabs/zolana': 0.3.1-alpha(@solana/kit@8.4.0(typescript@7.0.2))
+      '@heliuslabs/zolana': 0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2))
       '@noble/ciphers': 1.2.1
       '@noble/curves': 1.8.1
       '@noble/hashes': 1.7.1
@@ -2490,6 +2557,13 @@ snapshots:
       mime-types: 3.0.2
       negotiator: 1.1.0
 
+  asn1.js@5.4.1:
+    dependencies:
+      bn.js: 4.12.5
+      inherits: 2.0.4
+      minimalistic-assert: 1.0.1
+      safer-buffer: 2.1.2
+
   asn1js@3.0.10:
     dependencies:
       pvtsutils: 1.3.6
@@ -2499,6 +2573,8 @@ snapshots:
   base-x@5.0.1: {}
 
   base64-js@1.5.1: {}
+
+  bn.js@4.12.5: {}
 
   bn.js@5.2.5: {}
 
@@ -2517,6 +2593,8 @@ snapshots:
       - supports-color
 
   borsh@2.0.0: {}
+
+  brorand@1.1.0: {}
 
   bs58@6.0.0:
     dependencies:
@@ -2545,6 +2623,8 @@ snapshots:
       get-intrinsic: 1.3.0
 
   cbor-js@0.1.0: {}
+
+  cborg@6.1.3: {}
 
   chalk@5.6.2: {}
 
@@ -2581,6 +2661,16 @@ snapshots:
       gopd: 1.2.0
 
   ee-first@1.1.1: {}
+
+  elliptic@6.6.1:
+    dependencies:
+      bn.js: 4.12.5
+      brorand: 1.1.0
+      hash.js: 1.1.7
+      hmac-drbg: 1.0.1
+      inherits: 2.0.4
+      minimalistic-assert: 1.0.1
+      minimalistic-crypto-utils: 1.0.1
 
   encodeurl@2.0.0: {}
 
@@ -2703,9 +2793,20 @@ snapshots:
 
   has-symbols@1.1.0: {}
 
+  hash.js@1.1.7:
+    dependencies:
+      inherits: 2.0.4
+      minimalistic-assert: 1.0.1
+
   hasown@2.0.4:
     dependencies:
       function-bind: 1.1.2
+
+  hmac-drbg@1.0.1:
+    dependencies:
+      hash.js: 1.1.7
+      minimalistic-assert: 1.0.1
+      minimalistic-crypto-utils: 1.0.1
 
   http-errors@2.0.1:
     dependencies:
@@ -2743,6 +2844,10 @@ snapshots:
   mime-types@3.0.2:
     dependencies:
       mime-db: 1.54.0
+
+  minimalistic-assert@1.0.1: {}
+
+  minimalistic-crypto-utils@1.0.1: {}
 
   ms@2.1.3: {}
 

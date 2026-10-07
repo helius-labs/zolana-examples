@@ -77,6 +77,8 @@ export const zolana = initializePoseidon().then(() =>
     solanaRpcUrl: SOLANA_RPC_URL,
     indexerUrl: ZOLANA_INDEXER_URL,
     proverUrl: ZOLANA_PROVER_URL,
+    // The enclave completes resolved proof inputs; it has no indexed proving.
+    proofDataSource: "client",
   }),
 );
 
