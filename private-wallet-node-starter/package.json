@@ -9,13 +9,13 @@
     "check": "oxfmt --check . && tsc --noEmit"
   },
   "dependencies": {
-    "@heliuslabs/zolana": "^0.3.1-alpha",
+    "@heliuslabs/zolana": "^0.4.0-alpha",
     "@solana-program/system": "0.14.1",
     "@solana-program/token": "0.16.1",
     "@solana/kit": "^8.3.0",
     "@turnkey/crypto": "^2.13.2",
     "@turnkey/sdk-server": "^8.6.0",
-    "@zolana/tvc-wallet": "github:helius-labs/zolana-tvc#d7b5393ed24906ec31de3dbe364ef6bf08e57eda&path:/packages/tvc-wallet",
+    "@zolana/tvc-wallet": "github:helius-labs/zolana-tvc#eef4844e6903f9790a978fdd6b852bf09a8b490c&path:/packages/tvc-wallet",
     "dotenv": "^17.2.2",
     "express": "^5.1.0"
   },
