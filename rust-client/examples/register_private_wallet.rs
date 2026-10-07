@@ -3,9 +3,12 @@ use rust_client_example::{cli_keypair, setup, SetupContext};
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 use solana_system_interface::instruction::transfer;
-use zolana_client::{sign_transaction, Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::{
+    sign_transaction,
+    user_registry::{build_registration_transaction_sync, is_wallet_registered_sync},
+    Rpc, SolanaRpc, ZolanaClient,
+};
 use zolana_keypair::ShieldedKeypair;
-use zolana_wallet::{build_registration_transaction_sync, is_wallet_registered_sync};
 
 const FUND_LAMPORTS: u64 = 10_000_000;
 

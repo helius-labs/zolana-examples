@@ -13,9 +13,9 @@ name = "swap-prover-setup"
 path = "src/bin/setup.rs"
 
 [dependencies]
-zolana-gnark-ffi-prover = { git = "https://github.com/helius-labs/zolana", tag = "v0.3.0-alpha" }
+zolana-gnark-ffi-prover = { git = "https://github.com/helius-labs/zolana", tag = "v0.4.0-alpha" }
 swap-program = { path = "../program" }
-zolana-client = { git = "https://github.com/helius-labs/zolana", tag = "v0.3.0-alpha" }
+zolana-client = { git = "https://github.com/helius-labs/zolana", tag = "v0.4.0-alpha" }
 # Not used directly: a resolution floor for this standalone crate, which has no
 # shared lockfile. solana-address 2.7 and solana-signature 3.6 moved to wincode
 # 0.6; without the floor this crate alone resolves them next to
@@ -25,4 +25,4 @@ zolana-client = { git = "https://github.com/helius-labs/zolana", tag = "v0.3.0-a
 solana-transaction = { version = "4.1.6", default-features = false }
 
 [build-dependencies]
-zolana-gnark-ffi-prover-build = { git = "https://github.com/helius-labs/zolana", tag = "v0.3.0-alpha" }
+zolana-gnark-ffi-prover-build = { git = "https://github.com/helius-labs/zolana", tag = "v0.4.0-alpha" }
