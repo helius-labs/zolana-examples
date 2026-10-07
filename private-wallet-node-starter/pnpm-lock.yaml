@@ -27,8 +27,8 @@ importers:
         specifier: ^8.6.0
         version: 8.6.0(typescript@7.0.2)
       '@zolana/tvc-wallet':
-        specifier: github:helius-labs/zolana-tvc#eef4844e6903f9790a978fdd6b852bf09a8b490c&path:/packages/tvc-wallet
-        version: https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/eef4844e6903f9790a978fdd6b852bf09a8b490c#path:/packages/tvc-wallet(@heliuslabs/zolana@0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2)))(@solana/kit@8.4.0(typescript@7.0.2))
+        specifier: github:helius-labs/zolana-tvc#6e80f73cfe503231d0e2f3a827cc2887c64a2e84&path:/packages/tvc-wallet
+        version: https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/6e80f73cfe503231d0e2f3a827cc2887c64a2e84#path:/packages/tvc-wallet(@heliuslabs/zolana@0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2)))(@solana/kit@8.4.0(typescript@7.0.2))
       dotenv:
         specifier: ^17.2.2
         version: 17.4.2
@@ -1046,8 +1046,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/eef4844e6903f9790a978fdd6b852bf09a8b490c#path:/packages/tvc-wallet':
-    resolution: {gitHosted: true, integrity: sha512-8wF6Dg/LWNOHaps5UqS/uy403XPI+1CeABj83x7n5G5Gjp76rLcC5JsmU85knB67yd5wTusPPG160VkeEhxleQ==, path: /packages/tvc-wallet, tarball: https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/eef4844e6903f9790a978fdd6b852bf09a8b490c}
+  '@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/6e80f73cfe503231d0e2f3a827cc2887c64a2e84#path:/packages/tvc-wallet':
+    resolution: {gitHosted: true, integrity: sha512-YCc8scCH5zcpP6fgiEyqLlRTJnlMRtyGPFnIojexPh7eP2NMAz3aBR69mg0oc4Kq54tgzCICemsFIcVPFwAo0w==, path: /packages/tvc-wallet, tarball: https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/6e80f73cfe503231d0e2f3a827cc2887c64a2e84}
     version: 0.0.0
     engines: {node: '>=24'}
     peerDependencies:
@@ -2536,7 +2536,7 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/eef4844e6903f9790a978fdd6b852bf09a8b490c#path:/packages/tvc-wallet(@heliuslabs/zolana@0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2)))(@solana/kit@8.4.0(typescript@7.0.2))':
+  '@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/6e80f73cfe503231d0e2f3a827cc2887c64a2e84#path:/packages/tvc-wallet(@heliuslabs/zolana@0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2)))(@solana/kit@8.4.0(typescript@7.0.2))':
     dependencies:
       '@heliuslabs/zolana': 0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2))
       '@noble/ciphers': 1.2.1

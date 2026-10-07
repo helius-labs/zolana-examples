@@ -15,7 +15,7 @@
     "@solana/kit": "^8.3.0",
     "@turnkey/crypto": "^2.13.2",
     "@turnkey/sdk-server": "^8.6.0",
-    "@zolana/tvc-wallet": "github:helius-labs/zolana-tvc#eef4844e6903f9790a978fdd6b852bf09a8b490c&path:/packages/tvc-wallet",
+    "@zolana/tvc-wallet": "github:helius-labs/zolana-tvc#6e80f73cfe503231d0e2f3a827cc2887c64a2e84&path:/packages/tvc-wallet",
     "dotenv": "^17.2.2",
     "express": "^5.1.0"
   },
