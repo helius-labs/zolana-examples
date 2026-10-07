@@ -1,12 +1,12 @@
 {
   "releasePolicy": {
-    "authoritySetId": "private-wallet-devnet-2a73497-2026-09",
+    "authoritySetId": "private-wallet-devnet-d58c10e-2026-10",
     "policy": {
       "acceptedExecutableDigests": [
-        "d6b629f960cf9c0d2d7908b8561750822b4d7b5b9eea06dc17435f401e0e7755"
+        "fd8f2d34c306297c4e1a5fd44cdeb298fcb93598341042eb68124f17e8fb32ad"
       ],
       "acceptedManifestDigests": [
-        "8db0af954efd9007e675294c39b1b4b1e0e6868a24fd8eea769c41c974143f0f"
+        "5604e88713fb8a6c5b5a80cb2e3cbc74d8169c9aca4413f296a3a7357638b246"
       ],
       "allowedOperations": [
         "Bootstrap",
@@ -16,35 +16,35 @@
         "Prove"
       ],
       "environment": "development",
-      "expiresAtMs": "1822149276677",
+      "expiresAtMs": "1822933650921",
       "maxEncryptedRequestBytes": 262144,
       "maxEncryptedResponseBytes": 262144,
       "quorumKeyEpoch": "1",
       "quorumKeyId": "b45f8b07-4d2c-4c72-a2a5-a5eadc3c1373",
       "quorumPublicKey": "045f94c33297c675fbdbc54e3a0ddc22179890eaf7d9cf5a9cced2ca030e8b45facd815678c3847ee243f7bd60f363bd4643e1a7dcbf511ff9ce13c5ae1728ec3c042a3db90e4f0ba995a6e79a443da956bb4ba6323f62f1d85f642b8883605d0a2518c0fecfbc01b338581149365fa02ebfc566a321c7fa795019c45672a3b23616",
-      "releaseId": "private-wallet-devnet-2a73497",
+      "releaseId": "private-wallet-devnet-d58c10e",
       "revocationEpoch": "0",
       "securityDomainId": "6833d54afc265196b7051a12acc448f28e3a34e0a1339f8a31ee4283c54fb3fd",
       "turnkeyProofSchemaVersions": ["turnkey.boot_proof.v1"],
       "turnkeyTrustRootId": "aws-nitro-root-g1",
       "tvcApplicationId": "4e6a5228-bb42-4dff-bc2e-9ad4cffa9e39",
-      "validFromMs": "1790613276677",
+      "validFromMs": "1791397650921",
       "version": 1
     },
     "signatures": [
       {
-        "keyId": "private-wallet-devnet-2a73497-authority-1",
+        "keyId": "private-wallet-devnet-d58c10e-authority-1",
         "scheme": "p256-sha256",
-        "signature": "de6cb70a78706006b809c15cb35b48a471b12318e994ad5054231edd044208f877c2da5c03ba6bc574a88c3da97310b95e0fee27a251a5a44c227727bddf417c"
+        "signature": "09538fbabbcd9622f59181edd8c6c09cc16436d8906c04f31687f3488ce233770b614f948d10c12002f8083ac814d99e3a1b1437778a833e2fcea0431b478c2f"
       }
     ]
   },
   "releaseAuthorities": {
-    "authoritySetId": "private-wallet-devnet-2a73497-2026-09",
+    "authoritySetId": "private-wallet-devnet-d58c10e-2026-10",
     "keys": [
       {
-        "keyId": "private-wallet-devnet-2a73497-authority-1",
-        "publicKey": "044b17e09f578c1b25056f7ed9afa69fa19177bd77763f40cdff361b2c516df1a927edd49c741182777633913cb4e93fa10c883ef4e08ceef7c90ff515f1051fc6"
+        "keyId": "private-wallet-devnet-d58c10e-authority-1",
+        "publicKey": "04a7fa7ec24c69d81014d756485648cfbe14de301e21466d8c285421f879e41d067f275a8c8d967c6782c9220a11aad97478a5cf02c1572196cfe718507a0ad2c2"
       }
     ],
     "minimumRevocationEpoch": "0",
