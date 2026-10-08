@@ -1,9 +1,8 @@
 use anyhow::Result;
-use rust_client_example::{cli_keypair, setup, SetupContext};
+use rust_client_example::{asset_registry, cli_keypair, setup, SetupContext};
 use solana_signer::Signer;
 use zolana_client::{SolanaRpc, SpendableUtxos, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
-use zolana_transaction::AssetRegistry;
 
 fn main() -> Result<()> {
     let SetupContext {
@@ -20,7 +19,7 @@ fn main() -> Result<()> {
     // to decrypt transactions and sync balances.
     // The Solana signer and private wallet are derived from the same Ed25519 seed.
     let sender = ShieldedKeypair::from_keypair(&cli_keypair()?)?;
-    let assets = AssetRegistry::default();
+    let assets = asset_registry(&client)?;
 
     // Fetch the transactions tagged for this wallet and decrypt its spendable UTXOs.
     let spendable = SpendableUtxos::new(&sender, &assets).fetch(&client)?;
