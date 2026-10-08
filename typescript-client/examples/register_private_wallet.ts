@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   );
   const senderSigner = sender.toSolanaSigner();
 
-  // The SDK hands back a transaction; the CLI functions as sponsor to sign and send.
+  // The SDK hands back a transaction; the app owns signing and sending.
   const payer = ShieldedKeypair.fromKeypair(
     await cliKeypair(),
   ).toSolanaSigner();
@@ -45,6 +45,8 @@ async function main(): Promise<void> {
       FUND_LAMPORTS,
     ),
   ]);
+
+  // Create a private wallet. This registers inbox -> shielded_public_key in the protocol registry.
   const registration =
     await buildRegistrationTransaction({
       client,

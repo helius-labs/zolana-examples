@@ -34,9 +34,9 @@ const WITHDRAW_AMOUNT = 3_000_000n;
 async function main(): Promise<void> {
   const { clientConfig } = await setup();
 
-  // Connect to Helius devnet RPC plus the Photon indexer and prover.
   const client =
     await createZolanaClient(clientConfig);
+  // localnet: const client = await createZolanaClient({});
 
   // Initialize the sender's private wallet and local authority
   // to decrypt transactions and sync balances.

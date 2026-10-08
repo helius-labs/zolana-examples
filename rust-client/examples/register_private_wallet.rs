@@ -19,7 +19,7 @@ fn main() -> Result<()> {
         ..
     } = setup()?;
 
-    // Connect to the RPC, indexer, and prover.
+    // Load the funded fee payer and devnet settings, then connect.
     let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
 
     // Initialize the sender's private wallet and local authority
@@ -27,7 +27,6 @@ fn main() -> Result<()> {
     // The Solana signer and private wallet are derived from the same Ed25519 seed.
     let sender = ShieldedKeypair::from_keypair(&Keypair::new())?;
 
-    // The SDK hands back a message; the CLI functions as sponsor to sign and send.
     let payer = cli_keypair()?;
     client.create_and_send_transaction(
         &[transfer(&payer.pubkey(), &sender.pubkey(), FUND_LAMPORTS)],
@@ -35,6 +34,8 @@ fn main() -> Result<()> {
         &[&payer],
         client.compute_budget(),
     )?;
+
+    // Create a private wallet. This registers inbox -> shielded_public_key in the protocol registry.
     if let Some(registration) = build_registration_transaction_sync(
         &client,
         sender.pubkey(),

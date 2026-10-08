@@ -20,7 +20,6 @@ zolana-client = { git = "https://github.com/helius-labs/zolana", tag = "v0.4.0-a
 zolana-interface = { git = "https://github.com/helius-labs/zolana", tag = "v0.4.0-alpha" }
 zolana-keypair = { git = "https://github.com/helius-labs/zolana", tag = "v0.4.0-alpha" }
 zolana-program = { git = "https://github.com/helius-labs/zolana", tag = "v0.4.0-alpha" }
-zolana-test-utils = { git = "https://github.com/helius-labs/zolana", tag = "v0.4.0-alpha" }
 zolana-transaction = { git = "https://github.com/helius-labs/zolana", tag = "v0.4.0-alpha" }
 
 [[example]]
