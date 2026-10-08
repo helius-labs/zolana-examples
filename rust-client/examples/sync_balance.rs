@@ -1,10 +1,9 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use rust_client_example::{cli_keypair, setup, SetupContext};
 use solana_signer::Signer;
-use zolana_client::{SolanaRpc, ZolanaClient};
+use zolana_client::{SolanaRpc, SpendableUtxos, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::AssetRegistry;
-use zolana_wallet::{sync_wallet_with_config, SyncWalletConfig, Wallet};
 
 fn main() -> Result<()> {
     let SetupContext {
@@ -23,24 +22,14 @@ fn main() -> Result<()> {
     let sender = ShieldedKeypair::from_keypair(&cli_keypair()?)?;
     let assets = AssetRegistry::default();
 
-    // Sync all transaction pages and resolve SPL asset registrations.
-    let mut wallet = Wallet::new(sender.shielded_address()?, assets)
-        .map_err(|e| anyhow!("create wallet: {e:?}"))?;
-    let report = sync_wallet_with_config(
-        &mut wallet,
-        &sender,
-        &client,
-        SyncWalletConfig {
-            page_limit: 50,
-            ..SyncWalletConfig::default()
-        },
-    )?;
+    // Fetch the transactions tagged for this wallet and decrypt its spendable UTXOs.
+    let spendable = SpendableUtxos::new(&sender, &assets).fetch(&client)?;
     anyhow::ensure!(
-        report.unknown_asset_ids.is_empty(),
+        spendable.unknown_asset_ids.is_empty(),
         "could not resolve SPL asset registrations"
     );
 
-    for b in wallet.balances(false)? {
+    for b in &spendable.balances.assets {
         println!(
             "ok solana_address={} mint={} amount={} utxos={}",
             sender.pubkey(),

@@ -28,7 +28,7 @@ model, order terms, instructions, and circuits.
 ## Build
 
 Each crate is its own package with no shared workspace, so build them one at a
-time. The Zolana crates come from the `v0.3.0-alpha` tag of
+time. The Zolana crates come from the `v0.4.0-alpha` tag of
 [helius-labs/zolana](https://github.com/helius-labs/zolana). Run the commands
 below from `swap-program/`.
 
@@ -44,7 +44,7 @@ and `zolana/gnarksdk` Go modules, which
 named `zolana` next to the `zolana-examples` checkout:
 
 ```bash
-git clone --branch v0.3.0-alpha https://github.com/helius-labs/zolana ../../zolana
+git clone --branch v0.4.0-alpha https://github.com/helius-labs/zolana ../../zolana
 ```
 
 The Go bridge to Rust ships inside the `zolana-gnark-ffi-prover-build` crate

@@ -12,13 +12,10 @@ use mollusk_svm::{result::Check, Mollusk};
 use num_bigint::BigUint;
 use solana_account::Account;
 use solana_address::Address;
-use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
-use solana_message::Message;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use solana_transaction::Transaction;
 use timelock_escrow_prover::{CircuitId, PROVER};
 use timelock_escrow_sdk::{
     instructions::{
@@ -31,7 +28,7 @@ use timelock_escrow_sdk::{
 };
 use zolana_client::{
     transaction_size, ComputeBudgetConfig, MerkleContext, MerkleProof, NonInclusionProof,
-    ProverClient, SpendProof, NULLIFIER_TREE_HEIGHT, STATE_TREE_HEIGHT,
+    ProverClient, ProverExt, SpendProof, NULLIFIER_TREE_HEIGHT, STATE_TREE_HEIGHT,
 };
 use zolana_hasher::Poseidon;
 use zolana_interface::{
@@ -288,18 +285,9 @@ fn proving_time_table(spp: Duration, circuit: Duration) -> SectionTable {
     }
 }
 
-/// The instruction measured against both packet ceilings. The legacy row keeps
-/// its compute-budget prefix because a legacy transaction had to buy its budget
-/// with an instruction; v1 states the same ceilings in the message header, so
-/// its row is the instruction alone.
+/// The version 1 transaction this instruction is sent as. Its compute ceilings
+/// live in the message header.
 fn tx_size_table(ix: &Instruction, payer: &Pubkey) -> SectionTable {
-    let compute = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
-
-    let message = Message::new(&[compute, ix.clone()], Some(payer));
-    let legacy = bincode::serialize(&Transaction::new_unsigned(message))
-        .expect("serialize legacy")
-        .len();
-
     let v1 = transaction_size(
         payer,
         std::slice::from_ref(ix),
@@ -310,16 +298,10 @@ fn tx_size_table(ix: &Instruction, payer: &Pubkey) -> SectionTable {
 
     SectionTable {
         title: "Transaction Size".into(),
-        headers: vec![
-            "Instruction Data".into(),
-            "Accounts".into(),
-            "Legacy Tx".into(),
-            "v1 Tx".into(),
-        ],
+        headers: vec!["Instruction Data".into(), "Accounts".into(), "v1 Tx".into()],
         rows: vec![vec![
             format!("{} bytes", ix.data.len()),
             ix.accounts.len().to_string(),
-            format!("{} bytes", legacy),
             format!("{} bytes", v1),
         ]],
     }
@@ -348,12 +330,9 @@ fn bench_cu_escrow() {
              timelock escrow program is profiled; the shielded-pool program is built plain, so the CU \
              its CPI consumes is charged to the `cpi_spp_transact*` row as a black box and its internal \
              functions do not appear here. Each instruction section also records its proving times (SPP \
-             transfer proof plus the escrow/withdraw circuit proof) and its serialized transaction \
-             size, measured twice: as a legacy transaction, which must prefix a compute-budget limit \
-             ix and may not exceed 1232 bytes, and as the transaction v1 these instructions are \
-             actually sent as, which states its compute ceilings in the message header and may run to \
-             4096 bytes. The protocol now sits between the two, so the legacy column is what a row \
-             would have to fit to be sendable the old way, not a limit that binds today."
+             transfer proof plus the escrow/withdraw circuit proof) and the serialized size of the \
+             version 1 transaction these instructions are sent as, which states its compute ceilings \
+             in the message header and may run to 4096 bytes."
                 .into(),
         output_path: OUTPUT_PATH.into(),
         regenerate_command: Some("just bench-escrow".into()),
@@ -548,15 +527,24 @@ fn bench_withdraw(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmar
         asset: zolana_transaction::Mint::SOL,
         amount: LOCK_AMOUNT,
     };
-    let mut source_output = escrow_utxo.source_output(creator_address, random_blinding());
+    let source_output = escrow_utxo.source_output(creator_address, random_blinding());
 
     let escrow_input_utxo = escrow_utxo
         .to_input_utxo(BENCH_TREE_ID, 0)
         .expect("escrow input_utxo");
     let input_utxos = vec![escrow_input_utxo];
-    let blinding_seed =
-        prepare_output_blindings(&input_utxos, std::slice::from_mut(&mut source_output))
-            .expect("derive withdraw output blinding");
+    let mut withdraw_outputs = vec![
+        source_output,
+        SppProofOutputUtxo {
+            compact: true,
+            ..Default::default()
+        },
+    ];
+    let blinding_seed = prepare_output_blindings(&input_utxos, &mut withdraw_outputs)
+        .expect("derive withdraw output blinding");
+    let [source_output, compact_output]: [_; 2] = withdraw_outputs
+        .try_into()
+        .expect("withdraw transaction has two output slots");
 
     let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
     let transaction_viewing_key = get_transaction_viewing_key(&creator, &input_utxos)
@@ -578,7 +566,7 @@ fn bench_withdraw(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmar
     external_data.expiry_unix_ts = SPP_RELAYER_DEADLINE;
     let spp_proof_inputs = SppProofInputs {
         input_utxos,
-        output_utxos: encoded.output_utxos,
+        output_utxos: [encoded.output_utxos, vec![compact_output]].concat(),
         external_data,
         payer: payer_address,
         blinding_seed,
@@ -608,10 +596,6 @@ fn bench_withdraw(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmar
     let withdraw_proof_inputs = WithdrawProofInputParams {
         escrow_utxo: escrow_utxo.clone(),
         source_output,
-        external_data_hash: spp_proof_inputs
-            .external_data
-            .hash()
-            .expect("external data hash"),
         private_tx_blinding: spp_proof_inputs
             .private_tx_blinding()
             .expect("private tx blinding"),
