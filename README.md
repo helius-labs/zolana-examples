@@ -20,6 +20,12 @@
 | [`sync_balance`](typescript-client/examples/sync_balance.ts) | Read the private SOL and SPL balances. |
 | [`read_history`](typescript-client/examples/read_history.ts) | Read the private transaction history. |
 
+### Private wallets with a Helius API key
+
+|  |  |
+|---------|-------------|
+| [`private-wallet-node-starter/`](private-wallet-node-starter/README.md) | An Express server that creates private wallets whose keys the Helius enclave holds: create, deposit, private transfer, withdraw, and balances. |
+
 ### Program examples
 
 |  |  |
