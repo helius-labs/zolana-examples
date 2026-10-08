@@ -9,7 +9,10 @@ use solana_signer::Signer;
 use solana_system_interface::instruction::create_account;
 use spl_token_interface::instruction::{initialize_account3, initialize_mint2, mint_to};
 use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
-use zolana_interface::{pda, SPL_TOKEN_ACCOUNT_LEN, SPL_TOKEN_MINT_ACCOUNT_LEN};
+use zolana_interface::{
+    pda, state::SplAssetRegistry, SPL_TOKEN_ACCOUNT_LEN, SPL_TOKEN_MINT_ACCOUNT_LEN,
+};
+use zolana_transaction::AssetRegistry;
 
 /// The RPC, Photon indexer, and prover the examples talk to.
 pub const RPC_URL: &str = "https://devnet.helius-rpc.com";
@@ -113,6 +116,18 @@ pub fn setup_test_token(
         mint: mint.pubkey(),
         source_token: source_token.pubkey(),
     })
+}
+
+/// Every SPL asset the shielded pool has registered, so decryption can map
+/// the asset IDs in UTXOs to their mints. SOL is always known.
+pub fn asset_registry(client: &ZolanaClient<SolanaRpc>) -> Result<AssetRegistry> {
+    let mut assets = AssetRegistry::default();
+    for (_, account) in client.get_program_accounts(pda::shielded_pool_program_id())? {
+        if let Ok(registry) = SplAssetRegistry::from_account_bytes(&account.data) {
+            assets.insert(registry.asset_id, registry.mint)?;
+        }
+    }
+    Ok(assets)
 }
 
 /// Slot the confirmed transaction landed in, which drives the indexer

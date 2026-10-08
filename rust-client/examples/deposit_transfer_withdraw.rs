@@ -24,7 +24,6 @@ fn main() -> Result<()> {
         tree,
     } = setup()?;
 
-    // Connect to the RPC, indexer, and prover.
     let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
 
     // Mints that are registered with Solana Rings for privacy.
@@ -205,7 +204,7 @@ fn main() -> Result<()> {
             // SPL:     TransactInterfaceTransferAccounts::SplWithdrawal(
             // SPL:         zolana_program::instruction::TransactSplWithdrawalAccounts {
             // SPL:             mint: spl.mint,
-            // SPL:             vault: spl.vault,
+            // SPL:             spl_interface: spl.vault,
             // SPL:             user_token_account: spl.user_token_account,
             // SPL:             token_program: spl.token_program,
             // SPL:         },
