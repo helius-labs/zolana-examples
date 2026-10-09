@@ -26,6 +26,7 @@
 |---------|-------------|
 | [`swap-program/`](swap-program/) | A confidential swap between a maker and a taker. |
 | [`escrow-program/`](escrow-program/) | A timelock escrow on SPP: lock a private balance until a deadline, then release or reclaim. |
+| [`k-lend-rfq/`](k-lend-rfq/) | Private Kamino kVault deposits and withdrawals through an RFQ market maker. |
 
 ## Documentation
 - [Demo](https://helius-privacy-demo.fly.dev/)
