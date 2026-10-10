@@ -1,11 +1,11 @@
 //! Tested invariants:
-//! 1. A fill naming an order id the maker never issued is rejected with
+//! 1. A fill naming an order id the market maker never issued is rejected with
 //!    `UnknownOrder`.
 //! 2. A fill after the order's TTL is rejected with `OrderExpired`, and a
 //!    later `order_ttl` update does not extend an order already quoted. An
 //!    expired order leaves the `open_orders` count.
-//! 3. A user transfer paying the maker less than the order's `amount_in` is
-//!    rejected with `Underpaid`, and the failed fill consumed the order: the
+//! 3. A user transfer paying the market maker less than the order's `amount_in`
+//!    is rejected with `Underpaid`, and the failed fill consumed the order: the
 //!    same request again is rejected with `UnknownOrder`.
 //! 4. An order is consumed by its first fill; a second fill of the same order
 //!    is rejected with `UnknownOrder`.
@@ -14,26 +14,26 @@
 //!    consolidation widens what a new quote offers, a transfer one shape
 //!    wider than the stored width is rejected with `UserTransferTooWide`
 //!    naming the stored width, and a transfer at the stored width is filled.
-//! 6. The maker refuses to quote an amount its inventory cannot pay, with
-//!    `InsufficientInventory`.
+//! 6. The market maker refuses to quote an amount its inventory cannot pay,
+//!    with `InsufficientInventory`.
 //! 7. The user refuses a swap message paying less than the quoted
 //!    `amount_out`, with `BelowQuote`.
-//! 8. The user refuses a swap message whose maker transfer pays the user
+//! 8. The user refuses a swap message whose market maker transfer pays the user
 //!    nothing, with `UnexpectedOutputs { received: 0 }`.
 //! 9. The user refuses to build an order needing more inputs than the offer
 //!    allows, with `TooManyInputs`.
 //! 10. The fill's co-sign deadline never exceeds the order's expiry
-//!     (`quoted_at + order_ttl`), and the maker refuses a settle after that
-//!     deadline and the release grace, with `UnknownFill`.
-//! 11. The maker refuses a settle carrying a signature that does not verify,
-//!     with `InvalidUserSignature`, and the fill stays open for the real
-//!     signature, which lands the swap.
+//!     (`quoted_at + order_ttl`), and the market maker refuses a settle after
+//!     that deadline and the release grace, with `UnknownFill`.
+//! 11. The market maker refuses a settle carrying a signature that does not
+//!     verify, with `InvalidUserSignature`, and the fill stays open for the
+//!     real signature, which lands the swap.
 //! 12. The user refuses a swap message of any other shape than its transfer,
-//!     the maker's transfer and the marker, paid by the offer's fee payer:
-//!     a fourth (system transfer) instruction and another fee payer with
-//!     `UnexpectedTransaction`, a maker transfer naming the user's signer
-//!     with `UnexpectedSigner`, and a user transfer altered in one byte with
-//!     `UserTransferAltered`.
+//!     the market maker's transfer and the marker, paid by the offer's fee
+//!     payer: a fourth (system transfer) instruction and another fee payer with
+//!     `UnexpectedTransaction`, a market maker transfer naming the user's
+//!     signer with `UnexpectedSigner`, and a user transfer altered in one byte
+//!     with `UserTransferAltered`.
 //! 13. With the fee raised to `FULL_BPS`, a quote pays nothing and is refused
 //!     with `QuoteZero` before an order opens.
 
@@ -47,7 +47,7 @@ use zolana_client::{compile_message, Rpc};
 use zolana_keypair::ShieldedAddress;
 
 use k_lend_market_maker::{
-    ConcurrencyConfig, ConfigUpdate, Holdings, InventoryProfile, MakerError, TokenConfig,
+    ConcurrencyConfig, ConfigUpdate, Holdings, InventoryProfile, MarketMakerError, TokenConfig,
     SWAP_COMPUTE_BUDGET,
 };
 use k_lend_rfq_sdk::{
@@ -56,11 +56,12 @@ use k_lend_rfq_sdk::{
 };
 
 use k_lend_rfq_test_utils::{
-    assert::{assert_maker_error, assert_swap_error},
+    assert::{assert_market_maker_error, assert_swap_error},
     chain::{blocking, compile_swap, confirm_indexed, read_vault},
     market_maker::plain_deposit_out,
     setup::{
-        setup, setup_with, SetupConfig, TestEnv, FEE_BPS, SEED_DEPOSIT, USER_SHIELD_COLLATERAL,
+        setup, setup_with, SetupConfig, TestEnv, FEE_BPS, SEED_DEPOSIT_COLLATERAL,
+        USER_SHIELD_COLLATERAL,
     },
 };
 
@@ -76,8 +77,9 @@ const QUOTE_TTL: Duration = Duration::from_secs(45);
 /// Shares seeded for the width test, shielded as `FRAGMENTS` equal UTXOs.
 const FRAGMENTS: usize = 5;
 /// Collateral of the width test's deposits: its shares need four of the
-/// `FRAGMENTS` share UTXOs (three hold `3 / 5` of `SEED_DEPOSIT`, less than
-/// the quote), so the maker transfer is four inputs wide at quote time.
+/// `FRAGMENTS` share UTXOs (three hold `3 / 5` of `SEED_DEPOSIT_COLLATERAL`,
+/// less than the quote), so the market maker transfer is four inputs wide at
+/// quote time.
 const FRAGMENTED_COLLATERAL: u64 = 130_000_000;
 /// User collateral of the width test: two UTXOs, each above
 /// `FRAGMENTED_COLLATERAL`.
@@ -87,11 +89,11 @@ const WIDE_USER_COLLATERAL: u64 = 300_000_000;
 const SYSTEM_TRANSFER_TAG: [u8; 4] = 2u32.to_le_bytes();
 /// Lamports of the extra system transfer in the shape test.
 const EXTRA_TRANSFER_LAMPORTS: u64 = 1;
-/// The time after a fill's deadline by which the maker has released it.
+/// The time after a fill's deadline by which the market maker has released it.
 const RELEASE_GRACE: Duration = Duration::from_secs(5);
 
-/// Invariant 1: a fill naming an order id the maker never issued fails with
-/// `UnknownOrder`.
+/// Invariant 1: a fill naming an order id the market maker never issued fails
+/// with `UnknownOrder`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn fill_rejects_unknown_order() -> Result<()> {
     let TestEnv {
@@ -201,7 +203,7 @@ async fn fill_rejects_underpaid_order() -> Result<()> {
         &localnet,
         vec![user_wallet.first_utxo(pair.token_mint)?],
         amount_in - 1,
-        offer.maker,
+        offer.market_maker,
         offer.fee_payer,
     )?;
     let request = SwapRequest {
@@ -258,11 +260,12 @@ async fn fill_rejects_already_filled_order() -> Result<()> {
 }
 
 /// Invariant 5: two orders are quoted while the shares are split into
-/// `FRAGMENTS` UTXOs (a four-input maker transfer); a consolidation into one
-/// UTXO then makes a new quote offer a wider user transfer. The first order's
-/// fill one shape above its stored width fails with `UserTransferTooWide`
-/// naming the stored width, which a fill-time recomputation would have
-/// accepted; the second order's fill at the stored width succeeds.
+/// `FRAGMENTS` UTXOs (a four-input market maker transfer); a consolidation into
+/// one UTXO then makes a new quote offer a wider user transfer. The first
+/// order's fill one shape above its stored width fails with
+/// `UserTransferTooWide` naming the stored width, which a fill-time
+/// recomputation would have accepted; the second order's fill at the stored
+/// width succeeds.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn fill_rejects_transfer_wider_than_offered() -> Result<()> {
     let min_utxo_value = ConcurrencyConfig::default().profile.min_utxo_value;
@@ -338,8 +341,9 @@ async fn fill_rejects_transfer_wider_than_offered() -> Result<()> {
     Ok(())
 }
 
-/// Invariant 6: a quote the maker's empty share inventory cannot pay fails
-/// with `InsufficientInventory` for the shares the plain share math prices.
+/// Invariant 6: a quote the market maker's empty share inventory cannot pay
+/// fails with `InsufficientInventory` for the shares the plain share math
+/// prices.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn quote_rejects_unfunded_inventory() -> Result<()> {
     let TestEnv {
@@ -369,8 +373,8 @@ async fn quote_rejects_unfunded_inventory() -> Result<()> {
     Ok(())
 }
 
-/// Invariant 7: a swap message whose maker transfer pays `amount_out - 1`
-/// fails the user's check with `BelowQuote`.
+/// Invariant 7: a swap message whose market maker transfer pays
+/// `amount_out - 1` fails the user's check with `BelowQuote`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn verify_rejects_fill_below_quote() -> Result<()> {
     let env = funded(SetupConfig::new(28)).await?;
@@ -386,7 +390,7 @@ async fn verify_rejects_fill_below_quote() -> Result<()> {
         .await?;
     let order = user.order(&localnet.client, pair, &offer).await?;
     let quoted = offer.quote.amount_out;
-    let short = maker_transfer(&env, user.identity(), quoted - 1)?;
+    let short = market_maker_transfer(&env, user.identity(), quoted - 1)?;
     let marker = order_marker_instruction(&offer.fee_payer, offer.id, offer.marker_lamports)?;
     let message = compile_swap(
         localnet.client.rpc(),
@@ -409,8 +413,9 @@ async fn verify_rejects_fill_below_quote() -> Result<()> {
     Ok(())
 }
 
-/// Invariant 8: a swap message whose maker transfer pays the maker itself
-/// fails the user's check with `UnexpectedOutputs { received: 0 }`.
+/// Invariant 8: a swap message whose market maker transfer pays the
+/// market maker itself fails the user's check with
+/// `UnexpectedOutputs { received: 0 }`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn verify_rejects_misdirected_fill() -> Result<()> {
     let env = funded(SetupConfig::new(29)).await?;
@@ -425,7 +430,7 @@ async fn verify_rejects_misdirected_fill() -> Result<()> {
         .quote(pair, Direction::Deposit, SWAP_COLLATERAL)
         .await?;
     let order = user.order(&localnet.client, pair, &offer).await?;
-    let misdirected = maker_transfer(&env, market_maker.identity(), offer.quote.amount_out)?;
+    let misdirected = market_maker_transfer(&env, market_maker.identity(), offer.quote.amount_out)?;
     let marker = order_marker_instruction(&offer.fee_payer, offer.id, offer.marker_lamports)?;
     let message = compile_swap(
         localnet.client.rpc(),
@@ -507,10 +512,10 @@ async fn settle_rejects_late_signature() -> Result<()> {
         "share utxos after the release: got {utxos_after_release:?}, want {utxos_before:?}"
     );
 
-    assert_maker_error(
+    assert_market_maker_error(
         market_maker.settle(&fill.fill, user_signature).await,
         "UnknownFill",
-        |error| matches!(error, MakerError::UnknownFill),
+        |error| matches!(error, MarketMakerError::UnknownFill),
     );
     market_maker.shutdown().await;
     Ok(())
@@ -536,7 +541,7 @@ async fn settle_rejects_bad_signature_and_keeps_fill_open() -> Result<()> {
     user.verify_quote(&pair, &order, &fill.fill.message)?;
     let user_address = user.wallet().signer().pubkey();
 
-    assert_maker_error(
+    assert_market_maker_error(
         market_maker
             .settle(&fill.fill, Signature::from([7u8; 64]))
             .await,
@@ -544,7 +549,7 @@ async fn settle_rejects_bad_signature_and_keeps_fill_open() -> Result<()> {
         |error| {
             matches!(
                 error,
-                MakerError::InvalidUserSignature { signer } if *signer == user_address
+                MarketMakerError::InvalidUserSignature { signer } if *signer == user_address
             )
         },
     );
@@ -581,7 +586,8 @@ async fn verify_rejects_unexpected_message_shape() -> Result<()> {
         .await?;
     let order = user.order(&localnet.client, pair, &offer).await?;
     let user_transfer = order.request.transfer.clone();
-    let maker = maker_transfer(&env, user.identity(), offer.quote.amount_out)?;
+    let market_maker_instruction =
+        market_maker_transfer(&env, user.identity(), offer.quote.amount_out)?;
     let marker = order_marker_instruction(&offer.fee_payer, offer.id, offer.marker_lamports)?;
     let (blockhash, _) = blocking(|| localnet.client.rpc().get_latest_blockhash())?;
     let compile = |payer: &Address, instructions: &[Instruction]| {
@@ -591,7 +597,12 @@ async fn verify_rejects_unexpected_message_shape() -> Result<()> {
     let extra = system_transfer(&offer.fee_payer, &market_maker.address());
     let four = compile(
         &offer.fee_payer,
-        &[user_transfer.clone(), maker.clone(), marker.clone(), extra],
+        &[
+            user_transfer.clone(),
+            market_maker_instruction.clone(),
+            marker.clone(),
+            extra,
+        ],
     )?;
     assert_swap_error(
         user.verify_quote(pair, &order, &four),
@@ -602,7 +613,11 @@ async fn verify_rejects_unexpected_message_shape() -> Result<()> {
     let other_payer = Address::new_unique();
     let wrong_payer = compile(
         &other_payer,
-        &[user_transfer.clone(), maker.clone(), marker.clone()],
+        &[
+            user_transfer.clone(),
+            market_maker_instruction.clone(),
+            marker.clone(),
+        ],
     )?;
     assert_swap_error(
         user.verify_quote(pair, &order, &wrong_payer),
@@ -611,16 +626,16 @@ async fn verify_rejects_unexpected_message_shape() -> Result<()> {
     );
 
     let user_signer = user.wallet().signer().pubkey();
-    let mut signing_maker = maker.clone();
-    signing_maker
+    let mut signing_market_maker = market_maker_instruction.clone();
+    signing_market_maker
         .accounts
         .push(AccountMeta::new_readonly(user_signer, true));
-    let user_signs_maker = compile(
+    let user_signs_market_maker = compile(
         &offer.fee_payer,
-        &[user_transfer.clone(), signing_maker, marker.clone()],
+        &[user_transfer.clone(), signing_market_maker, marker.clone()],
     )?;
     assert_swap_error(
-        user.verify_quote(pair, &order, &user_signs_maker),
+        user.verify_quote(pair, &order, &user_signs_market_maker),
         "UnexpectedSigner of the user's signer",
         |error| matches!(error, SwapError::UnexpectedSigner { signer } if *signer == user_signer),
     );
@@ -631,7 +646,10 @@ async fn verify_rejects_unexpected_message_shape() -> Result<()> {
         .last_mut()
         .ok_or_else(|| anyhow!("the user transfer has no data"))?;
     *last ^= 1;
-    let altered = compile(&offer.fee_payer, &[altered, maker, marker])?;
+    let altered = compile(
+        &offer.fee_payer,
+        &[altered, market_maker_instruction, marker],
+    )?;
     assert_swap_error(
         user.verify_quote(pair, &order, &altered),
         "UserTransferAltered",
@@ -691,19 +709,24 @@ async fn quote_rejects_zero_payout() -> Result<()> {
 
 // Test fixtures and shared helpers.
 
-/// Boots the localnet of `config` and seeds the maker with the shares of a
-/// `SEED_DEPOSIT` vault deposit, so it can quote deposits.
+/// Boots the localnet of `config` and seeds the market maker with the shares of
+/// a `SEED_DEPOSIT_COLLATERAL` vault deposit, so it can quote deposits.
 async fn funded(config: SetupConfig) -> Result<TestEnv> {
     let env = setup_with(config).await?;
     env.market_maker
-        .seed_inventory(&env.pair, SEED_DEPOSIT, 0)
+        .seed_inventory(&env.pair, SEED_DEPOSIT_COLLATERAL, 0)
         .await?;
     Ok(env)
 }
 
-/// A maker transfer of `amount` shares from the maker's largest share UTXO
-/// to `recipient`, proved with the maker's wallet outside the market maker.
-fn maker_transfer(env: &TestEnv, recipient: ShieldedAddress, amount: u64) -> Result<Instruction> {
+/// A market maker transfer of `amount` shares from the market maker's largest
+/// share UTXO to `recipient`, proved with the market maker's wallet outside the
+/// market maker.
+fn market_maker_transfer(
+    env: &TestEnv,
+    recipient: ShieldedAddress,
+    amount: u64,
+) -> Result<Instruction> {
     let TestEnv {
         localnet,
         market_maker,

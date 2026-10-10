@@ -11,7 +11,7 @@ use solana_signature::Signature;
 use zolana_client::{SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedAddress;
 
-use k_lend_market_maker::{Holdings, MakerFill, MarketMaker};
+use k_lend_market_maker::{Holdings, MarketMaker, MarketMakerFill};
 
 use crate::{
     chain::{blocking, confirm_indexed},
@@ -118,7 +118,7 @@ impl User {
         market_maker: &MarketMaker,
         pair: &Pair,
         order: &Order,
-        fill: &MakerFill,
+        fill: &MarketMakerFill,
     ) -> Result<Signature> {
         self.verify_quote(pair, order, &fill.fill.message)?;
         let user_signature = self.sign(&fill.fill.message)?;
@@ -133,7 +133,7 @@ impl User {
         market_maker: &MarketMaker,
         pair: &Pair,
         order: &Order,
-        fill: &MakerFill,
+        fill: &MarketMakerFill,
     ) -> Result<()> {
         let signature = self.settle(market_maker, pair, order, fill).await?;
         confirm_indexed(client, signature, "swap")?;

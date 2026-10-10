@@ -1,9 +1,9 @@
 //! The UTXO denomination profile of one asset: the set of UTXO amounts the
-//! maker aims to hold for a given balance. Change outputs and upkeep
+//! market maker aims to hold for a given balance. Change outputs and upkeep
 //! consolidations are split toward these targets, so the inventory keeps
 //! UTXOs of the sizes fills need without growing without bound.
 
-use crate::error::MakerError;
+use crate::error::MarketMakerError;
 
 /// Target UTXO amounts for a balance: one large UTXO of `balance / d` per
 /// divisor `d` in `large`, then the rest in up to `small` equal parts, no
@@ -97,32 +97,32 @@ impl InventoryProfile {
         self.fill(value, missing, max_parts)
     }
 
-    /// The UTXO of `utxos` holding the most above its matched target, and
-    /// how to split it into its target plus the missing targets, in at most
-    /// `max_parts` parts. `Ok(None)` when no UTXO is above its target or
-    /// the split yields fewer than two parts; `MakerError::AmountOverflow`
+    /// The UTXO of `utxos` holding the most above its matched target, and how
+    /// to split it into its target plus the missing targets, in at most
+    /// `max_parts` parts. `Ok(None)` when no UTXO is above its target or the
+    /// split yields fewer than two parts; `MarketMakerError::AmountOverflow`
     /// when `utxos` sum above `u64::MAX`.
     pub fn split(
         &self,
         utxos: &[u64],
         max_parts: usize,
-    ) -> Result<Option<(usize, Vec<u64>)>, MakerError> {
-        let balance = checked_sum(utxos).ok_or(MakerError::AmountOverflow {
+    ) -> Result<Option<(usize, Vec<u64>)>, MarketMakerError> {
+        let balance = checked_sum(utxos).ok_or(MarketMakerError::AmountOverflow {
             context: "profile split balance",
         })?;
         let targets = self.targets(balance);
         let matching = match_utxos(&targets, utxos);
-        let Some((index, amount, own)) = utxos
+        let Some((utxo_index, amount, own)) = utxos
             .iter()
             .zip(&matching.utxos)
             .enumerate()
-            .filter_map(|(index, (amount, target))| {
-                let own = target.unwrap_or(0);
+            .filter_map(|(utxo_index, (amount, matched_target))| {
+                let own = matched_target.unwrap_or(0);
                 let above = amount.checked_sub(own).filter(|above| *above > 0)?;
-                Some((index, *amount, own, above))
+                Some((utxo_index, *amount, own, above))
             })
             .max_by_key(|(_, _, _, above)| *above)
-            .map(|(index, amount, own, _)| (index, amount, own))
+            .map(|(utxo_index, amount, own, _)| (utxo_index, amount, own))
         else {
             return Ok(None);
         };
@@ -132,7 +132,7 @@ impl InventoryProfile {
             .chain(unmatched(&targets, &matching))
             .collect();
         let parts = self.fill(amount, wanted, max_parts);
-        Ok((parts.len() >= 2).then_some((index, parts)))
+        Ok((parts.len() >= 2).then_some((utxo_index, parts)))
     }
 
     /// Greedily takes `wanted` amounts out of `value`, leaving room for the
@@ -144,12 +144,12 @@ impl InventoryProfile {
         }
         let mut parts = Vec::new();
         let mut rest = value;
-        for target in wanted {
+        for wanted_amount in wanted {
             if parts.len().saturating_add(1) >= max_parts.max(1) {
                 break;
             }
-            if let Some(left) = rest.checked_sub(target) {
-                parts.push(target);
+            if let Some(left) = rest.checked_sub(wanted_amount) {
+                parts.push(wanted_amount);
                 rest = left;
             }
         }
@@ -182,7 +182,7 @@ fn unmatched(targets: &[u64], matching: &Matching) -> Vec<u64> {
         .iter()
         .zip(&matching.targets)
         .filter(|(_, matched)| !**matched)
-        .map(|(target, _)| *target)
+        .map(|(target_amount, _)| *target_amount)
         .collect();
     missing.sort_by_key(|amount| std::cmp::Reverse(*amount));
     missing
@@ -194,11 +194,10 @@ fn match_utxos(targets: &[u64], utxos: &[u64]) -> Matching {
     let mut pairs: Vec<(f64, usize, usize)> = targets
         .iter()
         .enumerate()
-        .flat_map(|(target_index, target)| {
-            utxos
-                .iter()
-                .enumerate()
-                .map(move |(utxo_index, utxo)| (distance(*target, *utxo), target_index, utxo_index))
+        .flat_map(|(target_index, target_amount)| {
+            utxos.iter().enumerate().map(move |(utxo_index, utxo)| {
+                (distance(*target_amount, *utxo), target_index, utxo_index)
+            })
         })
         .collect();
     pairs.sort_by(|left, right| left.0.total_cmp(&right.0));
@@ -212,13 +211,13 @@ fn match_utxos(targets: &[u64], utxos: &[u64]) -> Matching {
         if !free {
             continue;
         }
-        if let (Some(target_matched), Some(utxo), Some(target)) = (
+        if let (Some(target_matched), Some(utxo), Some(target_amount)) = (
             matching.targets.get_mut(target_index),
             matching.utxos.get_mut(utxo_index),
             targets.get(target_index),
         ) {
             *target_matched = true;
-            *utxo = Some(*target);
+            *utxo = Some(*target_amount);
         }
     }
     matching
@@ -226,10 +225,10 @@ fn match_utxos(targets: &[u64], utxos: &[u64]) -> Matching {
 
 /// Distance on a log scale, so a UTXO twice its target is as far off as one
 /// half of it, at any denomination.
-fn distance(target: u64, utxo: u64) -> f64 {
-    let target = (target.max(1) as f64).ln();
-    let utxo = (utxo.max(1) as f64).ln();
-    (target - utxo).abs()
+fn distance(target_amount: u64, utxo_amount: u64) -> f64 {
+    let target_log = (target_amount.max(1) as f64).ln();
+    let utxo_log = (utxo_amount.max(1) as f64).ln();
+    (target_log - utxo_log).abs()
 }
 
 /// `amount` split into `parts` near-equal parts (the last takes the

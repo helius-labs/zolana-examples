@@ -1,4 +1,4 @@
-//! Initial inventory: moving the maker's public tokens into the shielded
+//! Initial inventory: moving the market maker's public tokens into the shielded
 //! pool, optionally through a vault deposit for the share side.
 
 use zolana_interface::pda;
@@ -8,7 +8,7 @@ use k_lend_rfq_sdk::pair::Pair;
 use super::rebalance::{RebalanceKind, RebalanceRequest};
 use crate::{
     api::{Inner, VaultOperation},
-    error::MakerError,
+    error::MarketMakerError,
     transactions::{
         kvault::{read_vault, token_balance},
         send::{SendOutcome, SendRequest},
@@ -17,24 +17,24 @@ use crate::{
 };
 
 impl Inner {
-    /// Deposits `deposit` collateral from the maker's public account into
-    /// the vault and shields the minted shares, plus `collateral` collateral,
-    /// in one transaction. The shielded share amount is resolved from a
-    /// simulation of the deposit (`TailShield::resolve`), sweeping a residual
-    /// already in the share account.
+    /// Deposits `deposit` collateral from the market maker's public account
+    /// into the vault and shields the minted shares, plus `collateral`
+    /// collateral, in one transaction. The shielded share amount is resolved
+    /// from a simulation of the deposit (`TailShield::resolve`), sweeping a
+    /// residual already in the share account.
     ///
     /// Sent directly, not through the coordinator: it runs before trading.
-    /// Errors with `MakerError::AmountZero` when both amounts are zero, and
-    /// with the send path's rejection; a send whose outcome is unknown is
+    /// Errors with `MarketMakerError::AmountZero` when both amounts are zero,
+    /// and with the send path's rejection; a send whose outcome is unknown is
     /// treated as sent and confirmed through `settled`.
     pub async fn seed_inventory(
         &self,
         pair: &Pair,
         deposit: u64,
         collateral: u64,
-    ) -> Result<VaultOperation, MakerError> {
+    ) -> Result<VaultOperation, MarketMakerError> {
         if deposit == 0 && collateral == 0 {
-            return Err(MakerError::AmountZero);
+            return Err(MarketMakerError::AmountZero);
         }
         let rpc = self.services.rpc.as_ref();
         let before = read_vault(rpc, pair.vault).await?;

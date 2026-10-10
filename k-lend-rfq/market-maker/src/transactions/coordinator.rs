@@ -1,6 +1,6 @@
 //! The coordinator: one task that owns the step table, the operation queue
 //! and the running settings, and handles every event in turn. All state
-//! changes of the maker happen here, so no two steps can be scheduled
+//! changes of the market maker happen here, so no two steps can be scheduled
 //! against the same inputs; slow rpc, indexer and prover work, including the
 //! vault reads and previews of automatic rebalances, runs in spawned tasks
 //! that report back through `Event`s.
@@ -33,13 +33,13 @@ use super::{
 use crate::{
     api::Inner,
     config::{ConfigUpdate, Settings},
-    error::MakerError,
+    error::MarketMakerError,
     inventory::balance::pending::{FillRanges, Outflow, PendingBalance},
     inventory::{
         consolidate::ConsolidateReceipt,
         rebalance::{CheckedPair, RangeWarning, RebalanceBackoff, RebalanceOrder},
     },
-    swap::fill::{FillOrder, MakerFill},
+    swap::fill::{FillOrder, MarketMakerFill},
     transactions::Identity,
 };
 
@@ -76,7 +76,7 @@ impl Operation {
 /// What a successful operation answers with.
 pub enum OperationOutcome {
     /// The swap message is ready for the user; answered before it lands.
-    Filled(MakerFill),
+    Filled(MarketMakerFill),
     /// The consolidation landed.
     Consolidated(ConsolidateReceipt),
     /// The rebalance landed; `vault_before` is the state it was previewed
@@ -88,7 +88,7 @@ pub enum OperationOutcome {
 }
 
 /// Where an operation's outcome is sent.
-pub type OperationReply = oneshot::Sender<Result<OperationOutcome, MakerError>>;
+pub type OperationReply = oneshot::Sender<Result<OperationOutcome, MarketMakerError>>;
 
 /// An operation with its reply channel and the steps it has used up.
 pub struct QueuedOperation {
@@ -107,7 +107,7 @@ pub enum Event {
     Settle {
         message: VersionedMessage,
         user_signature: Signature,
-        reply: oneshot::Sender<Result<Signature, MakerError>>,
+        reply: oneshot::Sender<Result<Signature, MarketMakerError>>,
     },
     /// A fill's co-signing deadline passed.
     Expire(StepId),
@@ -116,7 +116,7 @@ pub enum Event {
     /// A prove task finished.
     Proven {
         step: StepId,
-        result: Result<ProvenStep, MakerError>,
+        outcome: Result<ProvenStep, MarketMakerError>,
     },
     /// A status poll spawned by `spawn_poll_statuses` finished.
     Polled(StatusPoll),
@@ -127,7 +127,7 @@ pub enum Event {
     /// A configuration update from the api.
     UpdateConfig {
         update: ConfigUpdate,
-        reply: oneshot::Sender<Result<(), MakerError>>,
+        reply: oneshot::Sender<Result<(), MarketMakerError>>,
     },
     /// Read of the number of fills waiting for the user's signature.
     OpenFills { reply: oneshot::Sender<usize> },
@@ -155,7 +155,7 @@ pub struct Runtime {
     pub tasks: TaskTracker,
 }
 
-/// The shared services every part of the maker calls.
+/// The shared services every part of the market maker calls.
 #[derive(Clone)]
 pub struct Services {
     pub rpc: Arc<dyn AsyncRpc>,
@@ -255,7 +255,7 @@ impl Coordinator {
 
     /// Spawns a status poll and runs the periodic work. Upkeep and rebalance
     /// triggers wait while an aborted operation awaits its spent check: the
-    /// maker is not idle until that operation is requeued or failed.
+    /// market maker is not idle until that operation is requeued or failed.
     async fn on_status_tick(&mut self) {
         self.spawn_poll_statuses();
         self.send_ready();
@@ -281,7 +281,7 @@ impl Coordinator {
             } => self.on_settle(&message, user_signature, reply).await,
             Event::Expire(step) => self.on_expire(step).await,
             Event::Send(step) => self.on_send_retry(step),
-            Event::Proven { step, result } => self.on_proven(step, result).await,
+            Event::Proven { step, outcome } => self.on_proven(step, outcome).await,
             Event::Sent { step, outcome } => self.on_sent(step, outcome).await,
             Event::Polled(poll) => self.on_polled(poll).await,
             Event::Synced => self.try_schedule().await,
@@ -359,7 +359,7 @@ impl Coordinator {
     /// Contract: no new step is scheduled after cancellation (`try_schedule`
     /// returns early and `discard` fails instead of requeueing). Transactions
     /// already sent are polled until they confirm, fail or expire. Everything
-    /// else is released with `MakerError::ShuttingDown`: queued and newly
+    /// else is released with `MarketMakerError::ShuttingDown`: queued and newly
     /// arriving operations, settle and config requests, every step that
     /// never reached the chain (reservations released, pending balance
     /// settled, fill settle channel answered), every aborted operation
@@ -386,7 +386,7 @@ impl Coordinator {
         self.release_unsent_steps();
         self.release_spent_checks();
         for operation in std::mem::take(&mut self.scheduled).into_values() {
-            self.fail(operation, MakerError::ShuttingDown);
+            self.fail(operation, MarketMakerError::ShuttingDown);
         }
         self.awaiting_spent_check.clear();
     }
@@ -404,27 +404,27 @@ impl Coordinator {
             let Some(mut step) = self.steps.remove(id) else {
                 continue;
             };
-            self.release_step(&mut step, MakerError::ShuttingDown);
+            self.release_step(&mut step, MarketMakerError::ShuttingDown);
             let Some(operation_id) = step.operation else {
                 continue;
             };
             match self.scheduled.remove(&operation_id) {
-                Some(operation) => self.fail(operation, MakerError::ShuttingDown),
+                Some(operation) => self.fail(operation, MarketMakerError::ShuttingDown),
                 None => self.services.pending.drop_fill(operation_id),
             }
         }
     }
 
-    /// Fails every queued operation with `MakerError::ShuttingDown`.
+    /// Fails every queued operation with `MarketMakerError::ShuttingDown`.
     fn reject_queued(&mut self) {
         for operation in std::mem::take(&mut self.queue) {
-            self.reject(operation, MakerError::ShuttingDown);
+            self.reject(operation, MarketMakerError::ShuttingDown);
         }
     }
 
     /// Releases the amount a queued `operation` committed and fails it with
     /// `error`.
-    fn reject(&self, operation: QueuedOperation, error: MakerError) {
+    fn reject(&self, operation: QueuedOperation, error: MarketMakerError) {
         self.services
             .pending
             .unqueue(operation.operation.asset(), operation.operation.amount());
@@ -432,21 +432,22 @@ impl Coordinator {
     }
 
     /// Answers `operation` with `error` and drops its fill flows.
-    pub fn fail(&self, operation: QueuedOperation, error: MakerError) {
+    pub fn fail(&self, operation: QueuedOperation, error: MarketMakerError) {
         self.services.pending.drop_fill(operation.id);
         let _ = operation.reply.send(Err(error));
     }
 
     /// Handles an event during shutdown: requests are refused with
-    /// `MakerError::ShuttingDown`, send and poll results are still applied.
+    /// `MarketMakerError::ShuttingDown`, send and poll results are still
+    /// applied.
     async fn drain_event(&mut self, event: Event) {
         match event {
-            Event::Operation(operation) => self.reject(operation, MakerError::ShuttingDown),
+            Event::Operation(operation) => self.reject(operation, MarketMakerError::ShuttingDown),
             Event::Settle { reply, .. } => {
-                let _ = reply.send(Err(MakerError::ShuttingDown));
+                let _ = reply.send(Err(MarketMakerError::ShuttingDown));
             }
             Event::UpdateConfig { reply, .. } => {
-                let _ = reply.send(Err(MakerError::ShuttingDown));
+                let _ = reply.send(Err(MarketMakerError::ShuttingDown));
             }
             Event::OpenFills { reply } => {
                 let _ = reply.send(self.steps.awaiting_signature());
@@ -465,20 +466,23 @@ impl Coordinator {
 impl Inner {
     /// Admits `operation` and waits for its outcome.
     ///
-    /// Checks, in order: the maker is not shutting down
-    /// (`MakerError::ShuttingDown`); a fill pays a non-zero amount
-    /// (`MakerError::AmountZero`); a fill's flows keep both assets in their
-    /// ranges against the net balance (`PendingBalance::queue_fill`,
+    /// Checks, in order: the market maker is not shutting down
+    /// (`MarketMakerError::ShuttingDown`); a fill pays a non-zero amount
+    /// (`MarketMakerError::AmountZero`); a fill's flows keep both assets in
+    /// their ranges against the net balance (`PendingBalance::queue_fill`,
     /// `SwapError::OutsideTargetRange`); the unreserved balance covers the
     /// amount net of queued operations (`PendingBalance::queue`,
-    /// `MakerError::InsufficientBalance`). An admission that fails leaves no
-    /// pending entry behind.
-    pub async fn operation(&self, operation: Operation) -> Result<OperationOutcome, MakerError> {
+    /// `MarketMakerError::InsufficientBalance`). An admission that fails leaves
+    /// no pending entry behind.
+    pub async fn operation(
+        &self,
+        operation: Operation,
+    ) -> Result<OperationOutcome, MarketMakerError> {
         if self.runtime.cancel.is_cancelled() {
-            return Err(MakerError::ShuttingDown);
+            return Err(MarketMakerError::ShuttingDown);
         }
         if matches!(&operation, Operation::Fill(order) if order.amount == 0) {
-            return Err(MakerError::AmountZero);
+            return Err(MarketMakerError::AmountZero);
         }
         let pending = &self.services.pending;
         let id = pending.next_operation();
@@ -515,8 +519,10 @@ impl Inner {
         if self.runtime.events.send(Event::Operation(queued)).is_err() {
             pending.unqueue(asset, amount);
             pending.drop_fill(id);
-            return Err(MakerError::ShuttingDown);
+            return Err(MarketMakerError::ShuttingDown);
         }
-        outcome.await.map_err(|_| MakerError::CoordinatorStopped)?
+        outcome
+            .await
+            .map_err(|_| MarketMakerError::CoordinatorStopped)?
     }
 }

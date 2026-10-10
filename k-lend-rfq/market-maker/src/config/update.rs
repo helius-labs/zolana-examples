@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     api::Inner,
-    error::MakerError,
+    error::MarketMakerError,
     inventory::balance::profile::InventoryProfile,
     inventory::balance::sync::registered_asset,
     transactions::{
@@ -38,12 +38,12 @@ pub struct ConfigUpdate {
     pub utxo_profiles: Vec<(Address, InventoryProfile)>,
     /// Pairs to start serving. Before anything changes, each one's vault is
     /// read and checked like at start (`check_vault`): a vault that does not
-    /// exist fails with `MakerError::VaultMissing`, a missing or unparsable
-    /// pricing account with `MakerError::VaultState`, and a `token_mint`
-    /// that is not the vault's mint or a `shares_mint`, `token_vault` or
-    /// `authority` that is not the vault's PDA with
-    /// `MakerError::Config(ConfigError::VaultMismatch)`. Their mints must
-    /// then be registered in the pool (`MakerError::AssetNotRegistered`).
+    /// exist fails with `MarketMakerError::VaultMissing`, a missing or
+    /// unparsable pricing account with `MarketMakerError::VaultState`, and a
+    /// `token_mint` that is not the vault's mint or a `shares_mint`,
+    /// `token_vault` or `authority` that is not the vault's PDA with
+    /// `MarketMakerError::Config(ConfigError::VaultMismatch)`. Their mints must
+    /// then be registered in the pool (`MarketMakerError::AssetNotRegistered`).
     pub add_pairs: Vec<Pair>,
     /// Vaults of pairs to stop serving; they retire first.
     pub remove_pairs: Vec<Address>,
@@ -77,7 +77,8 @@ impl Settings {
     /// - `fee_bps` above `FULL_BPS`: [`ConfigError::FeeAboveFull`];
     /// - a zero `order_ttl`: [`ConfigError::ZeroOrderTtl`];
     /// - an added vault that is configured (or still retiring):
-    ///   [`ConfigError::PairExists`]; added twice: [`ConfigError::DuplicatePair`];
+    ///   [`ConfigError::PairExists`]; added twice:
+    ///   [`ConfigError::DuplicatePair`];
     /// - a `remove_pairs` vault that is neither configured nor added by this
     ///   update: [`ConfigError::UnknownPair`];
     /// - a `ranges` asset or profile mint that belongs to no configured or
@@ -163,25 +164,25 @@ impl Inner {
     /// registers their mints and rescans the account so UTXOs of the new
     /// assets are found.
     ///
-    /// Each added pair's vault is checked first (`check_vault`, the same
-    /// check as `MarketMaker::start`), so a missing vault fails with
-    /// `MakerError::VaultMissing` and a pair whose addresses are not the
-    /// vault's with `MakerError::Config(ConfigError::VaultMismatch)` before
-    /// anything changes. The added mints are resolved next, so an
-    /// unregistered one fails with `MakerError::AssetNotRegistered`, still
-    /// before anything changes. They
-    /// are then inserted into the asset registry before the update reaches
-    /// the coordinator, so a fill on a new pair, possible as soon as the
-    /// coordinator applied it, can always decrypt the user's outputs; a
-    /// registry insert error therefore fails the call before the update is
-    /// applied. A rejected update fails with `MakerError::Config` (see
-    /// `Settings::check`) and changes no settings.
+    /// Each added pair's vault is checked first (`check_vault`, the same check
+    /// as `MarketMaker::start`), so a missing vault fails with
+    /// `MarketMakerError::VaultMissing` and a pair whose addresses are not the
+    /// vault's with `MarketMakerError::Config(ConfigError::VaultMismatch)`
+    /// before anything changes. The added mints are resolved next, so an
+    /// unregistered one fails with `MarketMakerError::AssetNotRegistered`,
+    /// still before anything changes. They are then inserted into the asset
+    /// registry before the update reaches the coordinator, so a fill on a new
+    /// pair, possible as soon as the coordinator applied it, can always decrypt
+    /// the user's outputs; a registry insert error therefore fails the call
+    /// before the update is applied. A rejected update fails with
+    /// `MarketMakerError::Config` (see `Settings::check`) and changes no
+    /// settings.
     ///
     /// Registry entries added for an update that is later rejected (or that
     /// the coordinator never applies) are not rolled back: an entry only maps
     /// a mint to its on-chain asset id, and without a pair using the mint no
     /// quote or fill touches it, so on its own it is harmless.
-    pub async fn update_config(&self, update: ConfigUpdate) -> Result<(), MakerError> {
+    pub async fn update_config(&self, update: ConfigUpdate) -> Result<(), MarketMakerError> {
         for pair in &update.add_pairs {
             check_vault(self.services.rpc.as_ref(), pair).await?;
         }
@@ -209,10 +210,10 @@ impl Inner {
         self.runtime
             .events
             .send(Event::UpdateConfig { update, reply })
-            .map_err(|_| MakerError::ShuttingDown)?;
+            .map_err(|_| MarketMakerError::ShuttingDown)?;
         applied
             .await
-            .map_err(|_| MakerError::CoordinatorStopped)??;
+            .map_err(|_| MarketMakerError::CoordinatorStopped)??;
         if added.is_empty() {
             return Ok(());
         }
@@ -228,9 +229,9 @@ impl Coordinator {
     pub async fn on_update_config(
         &mut self,
         update: ConfigUpdate,
-        reply: oneshot::Sender<Result<(), MakerError>>,
+        reply: oneshot::Sender<Result<(), MarketMakerError>>,
     ) {
-        let applied = self.config.apply(update).map_err(MakerError::from);
+        let applied = self.config.apply(update).map_err(MarketMakerError::from);
         if applied.is_ok() {
             self.publish_config();
         }

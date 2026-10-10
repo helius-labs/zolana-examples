@@ -23,9 +23,9 @@ use crate::swap::SwapError;
 /// index points past the static account keys.
 pub fn instructions(message: &VersionedMessage) -> Result<Vec<Instruction>> {
     let keys = message.static_account_keys();
-    let key = |index: u8| -> Result<Address> {
+    let key = |key_index: u8| -> Result<Address> {
         Ok(*keys
-            .get(usize::from(index))
+            .get(usize::from(key_index))
             .ok_or(SwapError::UnexpectedTransaction)?)
     };
     message
@@ -35,12 +35,12 @@ pub fn instructions(message: &VersionedMessage) -> Result<Vec<Instruction>> {
             let accounts = compiled
                 .accounts
                 .iter()
-                .map(|&index| {
+                .map(|&key_index| {
                     Ok(AccountMeta {
-                        pubkey: key(index)?,
-                        is_signer: message.is_signer(usize::from(index)),
+                        pubkey: key(key_index)?,
+                        is_signer: message.is_signer(usize::from(key_index)),
                         is_writable: message.is_maybe_writable_with_reserved_addresses(
-                            usize::from(index),
+                            usize::from(key_index),
                             None::<&BTreeSet<Address>>,
                         ),
                     })
@@ -55,17 +55,18 @@ pub fn instructions(message: &VersionedMessage) -> Result<Vec<Instruction>> {
         .collect()
 }
 
-/// Decodes the `TransactIxData` payload of a zolana `transact` instruction.
+/// Decodes the `TransactIxData` of a zolana `transact` instruction.
 ///
 /// Errors with `SwapError::UnexpectedTransaction` when `instruction` is not
 /// addressed to the zolana program or its tag is not `transact`, and with a
-/// decode error when the payload does not deserialize.
+/// decode error when the instruction data does not deserialize.
 pub fn transact_data(instruction: &Instruction) -> Result<TransactIxData> {
     if instruction.program_id != PROGRAM_ID_PUBKEY {
         return Err(SwapError::UnexpectedTransaction.into());
     }
-    let Some((&tag::TRANSACT, payload)) = instruction.data.split_first() else {
+    let Some((&tag::TRANSACT, instruction_data)) = instruction.data.split_first() else {
         return Err(SwapError::UnexpectedTransaction.into());
     };
-    TransactIxData::deserialize(payload).map_err(|e| anyhow!("decode transact: {e}"))
+    TransactIxData::deserialize(instruction_data)
+        .map_err(|error| anyhow!("decode transact: {error}"))
 }

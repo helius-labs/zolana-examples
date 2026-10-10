@@ -95,10 +95,10 @@ pub fn snapshot_vault(rpc_url: &str, vault: &Address) -> Result<Vec<(Address, Ac
 
     let mut accounts = vec![(*vault, vault_account)];
     accounts.extend(pricing);
-    for (index, (address, account)) in fetched.into_iter().enumerate() {
+    for (account_index, (address, account)) in fetched.into_iter().enumerate() {
         match account {
             Some(account) => accounts.push((address, account)),
-            None if index < needed_count => {
+            None if account_index < needed_count => {
                 return Err(anyhow!("account {address} of vault {vault} missing"))
             }
             None => {}
@@ -112,7 +112,7 @@ pub fn snapshot_vault(rpc_url: &str, vault: &Address) -> Result<Vec<(Address, Ac
 /// adjusted; the token program's `transfer` does not read it. Errors if a
 /// field lies outside `TOKEN_ACCOUNT_SIZE` bytes.
 pub fn token_account(mint: &Address, owner: &Address, amount: u64) -> Result<Account> {
-    let mut data = vec![0u8; TOKEN_ACCOUNT_SIZE];
+    let mut account_data = vec![0u8; TOKEN_ACCOUNT_SIZE];
     for (offset, bytes) in [
         (0, mint.as_ref()),
         (TOKEN_ACCOUNT_OWNER_OFFSET, owner.as_ref()),
@@ -123,7 +123,8 @@ pub fn token_account(mint: &Address, owner: &Address, amount: u64) -> Result<Acc
         ),
     ] {
         let range = offset..offset + bytes.len();
-        data.get_mut(range.clone())
+        account_data
+            .get_mut(range.clone())
             .ok_or_else(|| {
                 anyhow!("token account field {range:?} outside {TOKEN_ACCOUNT_SIZE} bytes")
             })?
@@ -131,7 +132,7 @@ pub fn token_account(mint: &Address, owner: &Address, amount: u64) -> Result<Acc
     }
     Ok(Account {
         lamports: TOKEN_ACCOUNT_LAMPORTS,
-        data,
+        data: account_data,
         owner: spl_token_program_id(),
         executable: false,
         rent_epoch: 0,

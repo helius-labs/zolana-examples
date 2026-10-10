@@ -1,7 +1,7 @@
 //! Assertions on the exact error a market maker or user call fails with.
 
 use anyhow::Result;
-use k_lend_market_maker::MakerError;
+use k_lend_market_maker::MarketMakerError;
 use k_lend_rfq_sdk::swap::SwapError;
 
 /// Asserts that `call` failed with a [`SwapError`] for which `is_want`
@@ -12,14 +12,14 @@ pub fn assert_swap_error<T>(call: Result<T>, want: &str, is_want: impl FnOnce(&S
     assert_error(call, want, is_want);
 }
 
-/// Asserts that `call` failed with a [`MakerError`] for which `is_want`
+/// Asserts that `call` failed with a [`MarketMakerError`] for which `is_want`
 /// holds. `want` names the expected variant in the failure message
 /// `got {err:?}, want {want}`.
 #[track_caller]
-pub fn assert_maker_error<T>(
+pub fn assert_market_maker_error<T>(
     call: Result<T>,
     want: &str,
-    is_want: impl FnOnce(&MakerError) -> bool,
+    is_want: impl FnOnce(&MarketMakerError) -> bool,
 ) {
     assert_error(call, want, is_want);
 }

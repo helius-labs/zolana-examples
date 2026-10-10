@@ -1,7 +1,8 @@
-//! Transaction sizing. Every limit the maker advertises or enforces (user
-//! transfer width, maker inputs and outputs, consolidation width) is found
-//! by building placeholder instructions of the real size and measuring the
-//! compiled v1 transaction, so the limits track the zolana encoding exactly.
+//! Transaction sizing. Every limit the market maker advertises or enforces
+//! (user transfer width, market maker inputs and outputs, consolidation width)
+//! is found by building placeholder instructions of the real size and measuring
+//! the compiled v1 transaction, so the limits track the zolana encoding
+//! exactly.
 
 use solana_address::Address;
 use solana_instruction::Instruction;
@@ -33,17 +34,17 @@ use k_lend_rfq_sdk::{
 
 use crate::swap::fill::SWAP_COMPUTE_BUDGET;
 
-/// Fewest outputs of the maker's swap transfer: the payment to the user and
-/// the maker's change.
-pub const MAKER_MIN_OUTPUTS: usize = 2;
+/// Fewest outputs of the market maker's swap transfer: the payment to the user
+/// and the market maker's change.
+pub const MARKET_MAKER_MIN_OUTPUTS: usize = 2;
 /// Solana's per-transaction compute unit limit: a transaction cannot request
 /// more than 1.4M units (`MAX_COMPUTE_UNIT_LIMIT`, agave `compute-budget`).
 pub const MAX_COMPUTE_UNITS: u32 = 1_400_000;
 // The placeholder addresses below only need to be distinct from each other
-// and from the maker's keys, so each account costs its own 32 bytes.
+// and from the market maker's keys, so each account costs its own 32 bytes.
 const PLACEHOLDER_USER: Address = Address::new_from_array([7; 32]);
-/// Stands in for a user input tree distinct from the maker's, so the user
-/// placeholder pays for a second tree account and tree context.
+/// Stands in for a user input tree distinct from the market maker's, so the
+/// user placeholder pays for a second tree account and tree context.
 const PLACEHOLDER_USER_TREE: Address = Address::new_from_array([10; 32]);
 const PLACEHOLDER_MINT: Address = Address::new_from_array([8; 32]);
 const PLACEHOLDER_TOKEN_ACCOUNT: Address = Address::new_from_array([9; 32]);
@@ -88,15 +89,16 @@ struct TransferTemplate {
     seed: u8,
 }
 
-/// Sizes the maker's transactions against the transaction v1 limits.
+/// Sizes the market maker's transactions against the transaction v1 limits.
 ///
 /// A swap transaction holds exactly three instructions: the user's transfer,
-/// the maker's transfer and the order marker (`order_marker_instruction`).
-/// Every swap size computed here (`max_user_inputs`, `max_maker_inputs`,
-/// `max_maker_outputs`) includes a placeholder marker, so the user transfer
-/// width advertised in an offer leaves room for it.
+/// the market maker's transfer and the order marker
+/// (`order_marker_instruction`). Every swap size computed here
+/// (`max_user_inputs`, `max_market_maker_inputs`, `max_market_maker_outputs`)
+/// includes a placeholder marker, so the user transfer width advertised in an
+/// offer leaves room for it.
 pub struct SwapBudget {
-    maker: Address,
+    market_maker: Address,
     tree: Address,
     data_len: usize,
     marker: Instruction,
@@ -106,23 +108,24 @@ pub struct SwapBudget {
 }
 
 impl SwapBudget {
-    /// Sizes against `maker` as fee payer and `tree` as the maker's tree.
+    /// Sizes against `market_maker` as fee payer and `tree` as the
+    /// market maker's tree.
     ///
     /// Errors with `BudgetError::ComputeBudgetExceeded` when the swap
     /// compute budget is above the Solana limit, and with
     /// `BudgetError::NoSupportedShape` when no consolidation with
     /// `consolidate_outputs` outputs fits.
     pub fn new(
-        maker: Address,
+        market_maker: Address,
         tree: Address,
         consolidate_outputs: usize,
     ) -> Result<Self, BudgetError> {
         check_compute_units()?;
         let mut budget = Self {
-            maker,
+            market_maker,
             tree,
             data_len: output_data_len()?,
-            marker: order_marker_instruction(&maker, PLACEHOLDER_ORDER, 0)?,
+            marker: order_marker_instruction(&market_maker, PLACEHOLDER_ORDER, 0)?,
             max_consolidate_inputs: 0,
         };
         budget.max_consolidate_inputs = budget.max_consolidate_inputs_with(
@@ -180,14 +183,14 @@ impl SwapBudget {
     }
 
     /// The most inputs a user transfer with `USER_OUTPUTS` outputs can take
-    /// next to a maker transfer of shape `maker` and the order marker, or
-    /// `None` if not even the narrowest fits.
+    /// next to a market maker transfer of shape `market_maker` and the order
+    /// marker, or `None` if not even the narrowest fits.
     ///
     /// Assumes the user's inputs come from at most two trees; a wider user
     /// transfer is rejected at fill time with `UserTransferTooWide` or
     /// `TransactionTooLarge`.
-    pub fn max_user_inputs(&self, maker: Shape) -> Result<Option<usize>, BudgetError> {
-        let maker = self.placeholder(self.maker_template(maker));
+    pub fn max_user_inputs(&self, market_maker: Shape) -> Result<Option<usize>, BudgetError> {
+        let market_maker = self.placeholder(self.market_maker_template(market_maker));
         let mut user_shapes: Vec<Shape> = SPP_SUPPORTED_SHAPES
             .into_iter()
             .filter(|shape| shape.n_outputs() == USER_OUTPUTS)
@@ -201,24 +204,24 @@ impl SwapBudget {
                 extra_input_tree: Some(PLACEHOLDER_USER_TREE),
                 seed: 1,
             });
-            if self.swap_size(user, maker.clone())?.fits() {
+            if self.swap_size(user, market_maker.clone())?.fits() {
                 return Ok(Some(shape.n_inputs()));
             }
         }
         Ok(None)
     }
 
-    /// The narrowest shape a maker swap transfer can have: one input and
-    /// `MAKER_MIN_OUTPUTS` outputs.
-    pub fn narrowest_maker(&self) -> Result<Shape, BudgetError> {
-        smallest_shape(1, MAKER_MIN_OUTPUTS).ok_or(BudgetError::NoSupportedShape {
+    /// The narrowest shape a market maker swap transfer can have: one input and
+    /// `MARKET_MAKER_MIN_OUTPUTS` outputs.
+    pub fn narrowest_market_maker(&self) -> Result<Shape, BudgetError> {
+        smallest_shape(1, MARKET_MAKER_MIN_OUTPUTS).ok_or(BudgetError::NoSupportedShape {
             inputs: 1,
-            outputs: MAKER_MIN_OUTPUTS,
+            outputs: MARKET_MAKER_MIN_OUTPUTS,
         })
     }
 
     /// A placeholder of the narrowest user transfer: one input from the
-    /// maker's tree and `USER_OUTPUTS` outputs.
+    /// market maker's tree and `USER_OUTPUTS` outputs.
     pub fn narrowest_user_transfer(&self) -> Result<Instruction, BudgetError> {
         let shape = smallest_shape(1, USER_OUTPUTS).ok_or(BudgetError::NoSupportedShape {
             inputs: 1,
@@ -233,37 +236,40 @@ impl SwapBudget {
         }))
     }
 
-    /// The most inputs a maker transfer with `MAKER_MIN_OUTPUTS` outputs can
-    /// take next to `user_transfer` and the order marker. Errors with
-    /// `BudgetError::NoSupportedShape` when none fits.
-    pub fn max_maker_inputs(&self, user_transfer: &Instruction) -> Result<usize, BudgetError> {
+    /// The most inputs a market maker transfer with `MARKET_MAKER_MIN_OUTPUTS`
+    /// outputs can take next to `user_transfer` and the order marker. Errors
+    /// with `BudgetError::NoSupportedShape` when none fits.
+    pub fn max_market_maker_inputs(
+        &self,
+        user_transfer: &Instruction,
+    ) -> Result<usize, BudgetError> {
         let mut widest = 0;
         for shape in SPP_SUPPORTED_SHAPES
             .into_iter()
-            .filter(|shape| shape.n_outputs() >= MAKER_MIN_OUTPUTS)
+            .filter(|shape| shape.n_outputs() >= MARKET_MAKER_MIN_OUTPUTS)
         {
             if shape.n_inputs() <= widest {
                 continue;
             }
-            let maker = self.placeholder(self.maker_template(shape));
-            if self.swap_size(user_transfer.clone(), maker)?.fits() {
+            let market_maker = self.placeholder(self.market_maker_template(shape));
+            if self.swap_size(user_transfer.clone(), market_maker)?.fits() {
                 widest = shape.n_inputs();
             }
         }
         if widest == 0 {
             return Err(BudgetError::NoSupportedShape {
                 inputs: 1,
-                outputs: MAKER_MIN_OUTPUTS,
+                outputs: MARKET_MAKER_MIN_OUTPUTS,
             });
         }
         Ok(widest)
     }
 
-    /// The most outputs a maker transfer of at least `inputs` inputs can
+    /// The most outputs a market maker transfer of at least `inputs` inputs can
     /// have next to `user_transfer` and the order marker. Errors with
-    /// `BudgetError::NoSupportedShape` when fewer than `MAKER_MIN_OUTPUTS`
-    /// fit.
-    pub fn max_maker_outputs(
+    /// `BudgetError::NoSupportedShape` when fewer than
+    /// `MARKET_MAKER_MIN_OUTPUTS` fit.
+    pub fn max_market_maker_outputs(
         &self,
         user_transfer: &Instruction,
         inputs: usize,
@@ -276,22 +282,22 @@ impl SwapBudget {
             if shape.n_outputs() <= fitting {
                 continue;
             }
-            let maker = self.placeholder(self.maker_template(shape));
-            if self.swap_size(user_transfer.clone(), maker)?.fits() {
+            let market_maker = self.placeholder(self.market_maker_template(shape));
+            if self.swap_size(user_transfer.clone(), market_maker)?.fits() {
                 fitting = shape.n_outputs();
             }
         }
-        if fitting < MAKER_MIN_OUTPUTS {
+        if fitting < MARKET_MAKER_MIN_OUTPUTS {
             return Err(BudgetError::NoSupportedShape {
                 inputs,
-                outputs: MAKER_MIN_OUTPUTS,
+                outputs: MARKET_MAKER_MIN_OUTPUTS,
             });
         }
         Ok(fitting)
     }
 
-    /// The size of `transfers` compiled with the maker as fee payer; errors
-    /// with `BudgetError::TransactionTooLarge` when it does not fit.
+    /// The size of `transfers` compiled with the market maker as fee payer;
+    /// errors with `BudgetError::TransactionTooLarge` when it does not fit.
     pub fn check(&self, transfers: &[Instruction]) -> Result<TransactionSize, BudgetError> {
         let size = self.size(transfers)?;
         if size.fits() {
@@ -307,20 +313,20 @@ impl SwapBudget {
     fn swap_size(
         &self,
         user: Instruction,
-        maker: Instruction,
+        market_maker: Instruction,
     ) -> Result<TransactionSize, BudgetError> {
-        self.size(&[user, maker, self.marker.clone()])
+        self.size(&[user, market_maker, self.marker.clone()])
     }
 
     fn size(&self, transfers: &[Instruction]) -> Result<TransactionSize, BudgetError> {
         Ok(transaction_size(
-            &self.maker,
+            &self.market_maker,
             transfers,
             SWAP_COMPUTE_BUDGET,
         )?)
     }
 
-    fn maker_template(&self, shape: Shape) -> TransferTemplate {
+    fn market_maker_template(&self, shape: Shape) -> TransferTemplate {
         TransferTemplate {
             shape,
             owner_signer: None,
@@ -335,10 +341,10 @@ impl SwapBudget {
     fn placeholder(&self, template: TransferTemplate) -> Instruction {
         let data_len = self.data_len;
         let inputs = (0..template.shape.n_inputs())
-            .map(|index| {
+            .map(|input_index| {
                 let mut nullifier_hash = [template.seed; 32];
                 if let Some(last) = nullifier_hash.last_mut() {
-                    *last = u8::try_from(index).unwrap_or(u8::MAX);
+                    *last = u8::try_from(input_index).unwrap_or(u8::MAX);
                 }
                 InputUtxo {
                     nullifier_hash,
@@ -367,7 +373,7 @@ impl SwapBudget {
             })
             .collect();
         let transact = Transact {
-            payer: self.maker,
+            payer: self.market_maker,
             input_trees,
             output_tree: self.tree,
             owner_signers: template.owner_signer.into_iter().collect(),
@@ -451,7 +457,7 @@ fn output_data_len() -> Result<usize, BudgetError> {
 mod tests {
     use super::*;
 
-    const MAKER: Address = Address::new_from_array([1; 32]);
+    const MARKET_MAKER: Address = Address::new_from_array([1; 32]);
     const TREE: Address = Address::new_from_array([2; 32]);
 
     /// Consolidation sizing follows the requested output count, not
@@ -460,7 +466,7 @@ mod tests {
     /// `NoSupportedShape`.
     #[test]
     fn consolidate_outputs_are_not_clamped_to_user_outputs() -> Result<(), BudgetError> {
-        let budget = SwapBudget::new(MAKER, TREE, 1)?;
+        let budget = SwapBudget::new(MARKET_MAKER, TREE, 1)?;
         let widest_output_shape = SPP_SUPPORTED_SHAPES
             .into_iter()
             .map(|shape| shape.n_outputs())

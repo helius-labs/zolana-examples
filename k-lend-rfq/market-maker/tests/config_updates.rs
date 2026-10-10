@@ -1,9 +1,9 @@
 //! Tested invariants:
 //! 1. A fee update prices new quotes at the new fee, while a quote issued
 //!    before the update fills at its stored price: the user's holdings and the
-//!    maker's net balance move by exactly that quote's amounts.
+//!    market maker's net balance move by exactly that quote's amounts.
 //! 2. Tightening a target range triggers one automatic rebalance that brings
-//!    the maker's collateral inside the new range.
+//!    the market maker's collateral inside the new range.
 //! 3. Removing a pair refuses new quotes with `PairNotServed` while a fill
 //!    already issued for it still settles at its quoted amounts.
 //! 4. Adding a pair fails, before anything changes, with `VaultMissing` when
@@ -20,7 +20,7 @@ use solana_address::Address;
 use zolana_program_test::fixture;
 
 use k_lend_market_maker::{
-    ConfigError, ConfigUpdate, Holdings, MakerError, MarketMaker, RangeChange, RangeUpdate,
+    ConfigError, ConfigUpdate, Holdings, MarketMaker, MarketMakerError, RangeChange, RangeUpdate,
     TargetRange,
 };
 use k_lend_rfq_sdk::{
@@ -29,12 +29,12 @@ use k_lend_rfq_sdk::{
 };
 
 use k_lend_rfq_test_utils::{
-    assert::assert_maker_error,
+    assert::assert_market_maker_error,
     chain::{blocking, confirm_indexed, read_vault, wait_for_account},
     market_maker::{net_holdings, plain_deposit_out, share_account, wait_for_rebalance},
     setup::{
-        create_vault, setup, TestEnv, FEE_BPS, POLL, REBALANCE_TIMEOUT, SEED_DEPOSIT, SETTLE_GRACE,
-        VAULT_VISIBLE_TIMEOUT,
+        create_vault, setup, TestEnv, FEE_BPS, POLL, REBALANCE_TIMEOUT, SEED_DEPOSIT_COLLATERAL,
+        SETTLE_GRACE, VAULT_VISIBLE_TIMEOUT,
     },
 };
 
@@ -43,7 +43,7 @@ const SEED_COLLATERAL: u64 = 20_000_000;
 const SWAP_COLLATERAL: u64 = 10_000_000;
 const WITHDRAW_SHARES: u64 = 2_000_000;
 const RAISED_FEE_BPS: u64 = FEE_BPS + 20;
-const TIGHT_RANGE_MAX: u64 = 10_000_000;
+const TIGHT_COLLATERAL_MAX: u64 = 10_000_000;
 const RETIRE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Invariants 1-5: runtime config updates reach new quotes, ranges and pairs
@@ -59,7 +59,7 @@ async fn config_updates_apply_to_new_quotes_ranges_and_pairs() -> Result<()> {
     } = setup(TEST_NUMBER).await?;
     let rpc = localnet.client.rpc();
     market_maker
-        .seed_inventory(&pair, SEED_DEPOSIT, SEED_COLLATERAL)
+        .seed_inventory(&pair, SEED_DEPOSIT_COLLATERAL, SEED_COLLATERAL)
         .await?;
 
     // Invariant 1: new quotes use the raised fee, the earlier quote fills at
@@ -99,10 +99,10 @@ async fn config_updates_apply_to_new_quotes_ranges_and_pairs() -> Result<()> {
         after_update.quote.amount_out,
         before_update.quote.amount_out
     );
-    // The raised fee is still active: the maker fills the earlier quote at
-    // the price it stored when it issued it.
+    // The raised fee is still active: the market maker fills the earlier quote
+    // at the price it stored when it issued it.
     let user_before = user.holdings(&pair)?;
-    let maker_before = net_holdings(&market_maker, &pair);
+    let market_maker_before = net_holdings(&market_maker, &pair);
     let order = user.order(&localnet.client, &pair, &before_update).await?;
     let fill = market_maker.fill(&pair, &order.request).await?;
     user.complete(&localnet.client, &market_maker, &pair, &order, &fill)
@@ -115,17 +115,17 @@ async fn config_updates_apply_to_new_quotes_ranges_and_pairs() -> Result<()> {
             shares: user_before.shares + before_update.quote.amount_out,
         }
     );
-    let maker_after_swap = net_holdings(&market_maker, &pair);
+    let market_maker_after_swap = net_holdings(&market_maker, &pair);
     assert_eq!(
-        maker_after_swap,
+        market_maker_after_swap,
         Holdings {
-            collateral: maker_before.collateral + before_update.quote.amount_in,
-            shares: maker_before.shares - before_update.quote.amount_out,
+            collateral: market_maker_before.collateral + before_update.quote.amount_in,
+            shares: market_maker_before.shares - before_update.quote.amount_out,
         }
     );
 
     // Invariant 2: a tightened range triggers one rebalance into it.
-    let tight_range = TargetRange::new(0, TIGHT_RANGE_MAX)?;
+    let tight_range = TargetRange::new(0, TIGHT_COLLATERAL_MAX)?;
     let vault_before_rebalance = read_vault(rpc, &pair)?;
     let share_account_before = share_account(rpc, &market_maker, &pair)?;
     market_maker
@@ -150,10 +150,11 @@ async fn config_updates_apply_to_new_quotes_ranges_and_pairs() -> Result<()> {
     assert_eq!(
         holdings,
         Holdings {
-            collateral: maker_after_swap.collateral - deposited,
-            // The rebalance sweeps the seed's unshielded residual (up to 10 bps of `minted`)
-            // and leaves its own margin in the share account.
-            shares: maker_after_swap.shares + share_account_before + minted - share_account_after,
+            collateral: market_maker_after_swap.collateral - deposited,
+            // The rebalance sweeps the seed's unshielded residual (up to 10 bps
+            // of `minted`) and leaves its own margin in the share account.
+            shares: market_maker_after_swap.shares + share_account_before + minted
+                - share_account_after,
         }
     );
     assert!(
@@ -174,12 +175,12 @@ async fn config_updates_apply_to_new_quotes_ranges_and_pairs() -> Result<()> {
             ..ConfigUpdate::default()
         })
         .await?;
-    assert_maker_error(
+    assert_market_maker_error(
         market_maker
             .quote(&pair, Direction::Withdrawal, WITHDRAW_SHARES)
             .await,
         "PairNotServed of the removed pair",
-        |error| matches!(error, MakerError::PairNotServed { vault } if *vault == pair.vault),
+        |error| matches!(error, MarketMakerError::PairNotServed { vault } if *vault == pair.vault),
     );
     let settled = user.settle(&market_maker, &pair, &order, &fill).await?;
     confirm_indexed(&localnet.client, settled, "swap")?;
@@ -195,7 +196,7 @@ async fn config_updates_apply_to_new_quotes_ranges_and_pairs() -> Result<()> {
     // Invariant 4: a pair of a missing vault, then a pair of unregistered
     // assets, is refused.
     let missing = Pair::new(Address::new_from_array([42; 32]), pair.token_mint);
-    assert_maker_error(
+    assert_market_maker_error(
         market_maker
             .update_config(ConfigUpdate {
                 add_pairs: vec![missing],
@@ -203,14 +204,14 @@ async fn config_updates_apply_to_new_quotes_ranges_and_pairs() -> Result<()> {
             })
             .await,
         "VaultMissing of the vault that does not exist",
-        |error| matches!(error, MakerError::VaultMissing { vault } if *vault == missing.vault),
+        |error| matches!(error, MarketMakerError::VaultMissing { vault } if *vault == missing.vault),
     );
     let unregistered = blocking(|| -> Result<Pair> {
         let unregistered = create_vault(rpc, &fixture::payer(), pair.token_mint)?;
         wait_for_account(rpc, &unregistered.vault, VAULT_VISIBLE_TIMEOUT)?;
         Ok(unregistered)
     })?;
-    assert_maker_error(
+    assert_market_maker_error(
         market_maker
             .update_config(ConfigUpdate {
                 add_pairs: vec![unregistered],
@@ -221,7 +222,7 @@ async fn config_updates_apply_to_new_quotes_ranges_and_pairs() -> Result<()> {
         |error| {
             matches!(
                 error,
-                MakerError::AssetNotRegistered { mint } if *mint == unregistered.shares_mint
+                MarketMakerError::AssetNotRegistered { mint } if *mint == unregistered.shares_mint
             )
         },
     );
@@ -252,8 +253,10 @@ async fn readd_after_retirement(market_maker: &MarketMaker, pair: &Pair) -> Resu
         let Err(error) = readded else {
             return Ok(());
         };
-        match error.downcast::<MakerError>() {
-            Ok(MakerError::Config(ConfigError::PairExists { vault })) if vault == pair.vault => {
+        match error.downcast::<MarketMakerError>() {
+            Ok(MarketMakerError::Config(ConfigError::PairExists { vault }))
+                if vault == pair.vault =>
+            {
                 if Instant::now() >= deadline {
                     return Err(anyhow!(
                         "pair {vault} still exists after {RETIRE_TIMEOUT:?}, want it retired"

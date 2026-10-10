@@ -25,7 +25,7 @@ use k_lend_rfq_sdk::{
     swap::FULL_BPS,
 };
 
-use crate::{error::MakerError, inventory::balance::profile::InventoryProfile};
+use crate::{error::MarketMakerError, inventory::balance::profile::InventoryProfile};
 
 pub use update::{ConfigUpdate, RangeChange, RangeUpdate};
 
@@ -91,7 +91,7 @@ pub struct MarketMakerConfig {
     pub quotes: QuoteConfig,
 }
 
-/// The services the maker talks to.
+/// The services the market maker talks to.
 #[derive(Clone, Debug)]
 pub struct ConnectionConfig {
     /// Solana json-rpc.
@@ -100,7 +100,7 @@ pub struct ConnectionConfig {
     pub photon_url: String,
     /// The prover server; `None` uses the client's default address.
     pub prover_url: Option<String>,
-    /// The state tree the maker's UTXOs live in and its outputs go to.
+    /// The state tree the market maker's UTXOs live in and its outputs go to.
     pub tree: Address,
     /// The zolana id of `tree`.
     pub tree_id: u16,
@@ -108,13 +108,14 @@ pub struct ConnectionConfig {
 
 /// The market maker's wallet, split into the three roles it acts in.
 ///
-/// - `keys` opens the outputs addressed to the maker (sync and fill checks),
-///   derives its nullifiers and per-transaction viewing keys, and names its
-///   shielded address.
+/// - `keys` opens the outputs addressed to the market maker (sync and fill
+///   checks), derives its nullifiers and per-transaction viewing keys, and
+///   names its shielded address.
 /// - `authority` puts the nullifier secret into a proof witness, the one place
 ///   the secret itself is consumed.
 /// - `signer` signs every Solana transaction as fee payer, including the
-///   co-signature on a swap; its pubkey is the maker's fee payer address.
+///   co-signature on a swap; its pubkey is the market maker's fee payer
+///   address.
 ///
 /// Each role is an operation, not key material: none of the three needs the
 /// secret in this process, so a TEE or a remote key holder can implement them.
@@ -140,9 +141,9 @@ impl IdentityConfig {
 /// The inventory settings of one mint, shared by every pair that trades it.
 #[derive(Clone, Debug, Default)]
 pub struct TokenConfig {
-    /// The balance the maker keeps the mint in: quotes that would leave it
-    /// are refused and automatic rebalances steer back into it. `None`
-    /// means unbounded.
+    /// The balance the market maker keeps the mint in: quotes that would leave
+    /// it are refused and automatic rebalances steer back into it. `None` means
+    /// unbounded.
     pub range: Option<TargetRange>,
     /// The UTXO profile; `None` uses `ConcurrencyConfig::profile`.
     pub profile: Option<InventoryProfile>,
@@ -230,8 +231,8 @@ pub struct QuoteConfig {
     /// to cover the drift between the quoted and the executed vault price
     /// (see `VaultState`).
     pub fee_bps: u64,
-    /// An offer expires this long after it was quoted; the maker checks the
-    /// deadline when the fill request arrives and the user checks it before
+    /// An offer expires this long after it was quoted; the market maker checks
+    /// the deadline when the fill request arrives and the user checks it before
     /// proving.
     pub order_ttl: Duration,
 }
@@ -263,7 +264,7 @@ fn check_order_ttl(order_ttl: Duration) -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// Rejects a `ConcurrencyConfig` the maker cannot run on:
+/// Rejects a `ConcurrencyConfig` the market maker cannot run on:
 /// - a zero `status_interval` or `sync_interval` with
 ///   [`ConfigError::ZeroInterval`]: `tokio::time::interval` panics on a zero
 ///   period, which would stop the coordinator or the sync task;
@@ -332,12 +333,12 @@ const fn pair_assets(pair: &Pair) -> [Address; 2] {
     [pair.token_mint, pair.shares_mint]
 }
 
-/// The validated settings the maker runs on.
+/// The validated settings the market maker runs on.
 #[derive(Clone, Debug)]
 pub(crate) struct Settings {
     pub quotes: QuoteConfig,
     /// Vaults removed by an update: no quotes or fills (open orders on them
-    /// fail with `MakerError::PairNotServed`); queued operations and
+    /// fail with `MarketMakerError::PairNotServed`); queued operations and
     /// in-flight steps finish before `drop_retired` removes the pair.
     pub retiring: HashSet<Address>,
     pub profile: InventoryProfile,
@@ -406,10 +407,10 @@ impl Settings {
         self.pairs.iter().find(|pair| pair.vault == *vault)
     }
 
-    /// Whether the maker quotes and fills on `pair`: it is configured with
-    /// the same token mint and PDAs and is not retiring, else
-    /// `MakerError::PairNotServed`.
-    pub fn serves(&self, pair: &Pair) -> Result<(), MakerError> {
+    /// Whether the market maker quotes and fills on `pair`: it is configured
+    /// with the same token mint and PDAs and is not retiring, else
+    /// `MarketMakerError::PairNotServed`.
+    pub fn serves(&self, pair: &Pair) -> Result<(), MarketMakerError> {
         let served = self
             .pair(&pair.vault)
             .is_some_and(|configured| configured == pair)
@@ -417,7 +418,7 @@ impl Settings {
         if served {
             Ok(())
         } else {
-            Err(MakerError::PairNotServed { vault: pair.vault })
+            Err(MarketMakerError::PairNotServed { vault: pair.vault })
         }
     }
 

@@ -18,12 +18,12 @@ use crate::pair::{Pair, VaultState};
 /// larger fee is rejected.
 pub const FULL_BPS: u64 = 10_000;
 
-/// Every way a quote, fill or pre-signing check of a swap fails. The maker's
-/// checks and the user's checks share it, so a test or client can match the
-/// exact variant whichever side rejected.
+/// Every way a quote, fill or pre-signing check of a swap fails. The
+/// market maker's checks and the user's checks share it, so a test or client
+/// can match the exact variant whichever side rejected.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SwapError {
-    /// The maker's available inventory of `asset` sums to less than the
+    /// The market maker's available inventory of `asset` sums to less than the
     /// amount to pay (at quote or at fill).
     #[error(
         "the market maker's largest {asset} utxo holds {available}, the fill needs {required}"
@@ -36,9 +36,9 @@ pub enum SwapError {
     #[error(
         "the market maker cannot pay {required} {asset} with at most {max_inputs} inputs next to a user transfer"
     )]
-    /// The maker's inventory covers the amount only with more than
+    /// The market maker's inventory covers the amount only with more than
     /// `max_inputs` UTXOs, or leaves no room for a user input.
-    MakerTransferTooWide {
+    MarketMakerTransferTooWide {
         asset: Address,
         required: u64,
         max_inputs: usize,
@@ -46,7 +46,7 @@ pub enum SwapError {
     #[error(
         "the swap would leave {asset} at {balance_after}, outside its target range {min}..={max}"
     )]
-    /// The swap would push the maker's net balance of `asset` out of its
+    /// The swap would push the market maker's net balance of `asset` out of its
     /// configured target range.
     OutsideTargetRange {
         asset: Address,
@@ -62,25 +62,25 @@ pub enum SwapError {
     PublicTransfer { count: usize },
     /// The message or instruction does not have the swap's shape: wrong fee
     /// payer, instruction count, program, tag or account index.
-    #[error("the transaction is not the user's transfer followed by one maker transact")]
+    #[error("the transaction is not the user's transfer followed by one market maker transact")]
     UnexpectedTransaction,
     /// The first instruction of the swap message differs from the transfer
     /// the user proved.
     #[error("the transaction does not carry the user's transfer as the user built it")]
     UserTransferAltered,
-    /// The maker's transfer does not pay the user exactly one output of the
-    /// quoted asset.
-    #[error("the maker's transfer pays the user {received} outputs, expected one")]
+    /// The market maker's transfer does not pay the user exactly one output of
+    /// the quoted asset.
+    #[error("the market maker's transfer pays the user {received} outputs, expected one")]
     UnexpectedOutputs { received: usize },
     /// A decrypted output does not hash to the commitment the transaction
     /// publishes for it, so the plaintext cannot be trusted.
     #[error("output {slot} does not open to its commitment")]
     CommitmentMismatch { slot: usize },
-    /// The user's outputs to the maker do not sum to exactly the order's
+    /// The user's outputs to the market maker do not sum to exactly the order's
     /// `amount_in` (more is rejected as well).
-    #[error("the user's transfer pays the maker {received}, the quote takes {expected}")]
+    #[error("the user's transfer pays the market maker {received}, the quote takes {expected}")]
     Underpaid { expected: u64, received: u64 },
-    /// The maker's output to the user holds less than the quoted
+    /// The market maker's output to the user holds less than the quoted
     /// `amount_out`.
     #[error("the fill pays {offered}, the quote pays {quoted}")]
     BelowQuote { quoted: u64, offered: u64 },
@@ -98,12 +98,12 @@ pub enum SwapError {
     /// No proof shape in `SPP_SUPPORTED_SHAPES` is wide enough.
     #[error("no supported shape takes {inputs} inputs and {outputs} outputs")]
     NoSupportedShape { inputs: usize, outputs: usize },
-    /// The maker holds no open order `order`: never issued, swept after
+    /// The market maker holds no open order `order`: never issued, swept after
     /// expiry, or already consumed by an earlier fill attempt.
     #[error("the market maker issued no open order {order}")]
     UnknownOrder { order: OrderId },
-    /// The order's expiry passed before the fill (maker) or before proving
-    /// (user).
+    /// The order's expiry passed before the fill (market maker) or before
+    /// proving (user).
     #[error("order {order} expired before the fill")]
     OrderExpired { order: OrderId },
     /// The order's marker account already exists on chain.
@@ -126,18 +126,18 @@ pub enum SwapError {
     /// order is opened for it.
     #[error("a swap of {amount_in} prices to zero")]
     QuoteZero { amount_in: u64 },
-    /// An instruction of the swap message other than the user's transfer
-    /// names `signer` as a signer: a user signing key, or for the maker's
+    /// An instruction of the swap message other than the user's transfer names
+    /// `signer` as a signer: a user signing key, or for the market maker's
     /// transfer any key but the offer's fee payer. The user's signature would
     /// authorize it.
     #[error("the swap message names {signer} as a signer outside the user's transfer")]
     UnexpectedSigner { signer: Address },
 }
 
-/// Identifies one offer the market maker issued. The maker draws it at
+/// Identifies one offer the market maker issued. The market maker draws it at
 /// random when it quotes and keeps the quoted amounts under it; at fill time
-/// the maker resolves the id against its own record and rejects an id that is
-/// unknown, expired, already filled or quoted for another pair.
+/// the market maker resolves the id against its own record and rejects an id
+/// that is unknown, expired, already filled or quoted for another pair.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct OrderId(pub [u8; ORDER_ID_BYTES]);
 
@@ -168,8 +168,8 @@ impl fmt::Display for OrderId {
 /// funding, zero space and the system program as owner.
 ///
 /// Every swap transaction ends with this instruction, so each fill locks the
-/// rent minimum of an empty account (`lamports`, paid by the maker as fee
-/// payer) at the marker address. The system program rejects the creation of
+/// rent minimum of an empty account (`lamports`, paid by the market maker as
+/// fee payer) at the marker address. The system program rejects the creation of
 /// an account that already exists with `SystemError::AccountAlreadyInUse`
 /// (custom code 0), so a second transaction filling the same order fails
 /// on-chain. Reclaiming the locked lamports after the order expires
@@ -231,12 +231,12 @@ impl Quote {
     ///
     /// - Deposit: the gross is [`VaultState::shares_for_deposit`], the plain
     ///   share math for all of `amount_in` tokens. The vault's crank funds,
-    ///   deposit cap and minimum deposit do not apply: the maker pays the
-    ///   shares from its inventory, and those limits bound only its own
+    ///   deposit cap and minimum deposit do not apply: the market maker pays
+    ///   the shares from its inventory, and those limits bound only its own
     ///   rebalance deposit. So the quote prices every token the user pays.
     /// - Withdrawal: the gross is the tokens [`VaultState::withdraw`] pays for
-    ///   `amount_in` shares net of the withdrawal penalty, so the maker never
-    ///   quotes more collateral than its own vault withdrawal realises.
+    ///   `amount_in` shares net of the withdrawal penalty, so the market maker
+    ///   never quotes more collateral than its own vault withdrawal realises.
     ///
     /// `amount_out = floor(gross * (FULL_BPS - fee_bps) / FULL_BPS)`; a
     /// `fee_bps` above `FULL_BPS` quotes zero. Errors with the `VaultError`
@@ -268,26 +268,27 @@ impl Quote {
     }
 }
 
-/// The maker's answer to a quote request, binding until `expires_at`.
+/// The market maker's answer to a quote request, binding until `expires_at`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Offer {
-    /// The order this offer opens. The user names it in its `SwapRequest`;
-    /// the maker checks at fill time that it is known, unexpired, unfilled and
-    /// quoted for the requested pair.
+    /// The order this offer opens. The user names it in its `SwapRequest`; the
+    /// market maker checks at fill time that it is known, unexpired, unfilled
+    /// and quoted for the requested pair.
     pub id: OrderId,
-    /// Unix seconds; the maker refuses a fill after this time.
+    /// Unix seconds; the market maker refuses a fill after this time.
     pub expires_at: u64,
     pub quote: Quote,
-    /// The maker's shielded address, the recipient of the user's transfer.
-    pub maker: ShieldedAddress,
-    /// The maker's public key that pays the swap's fee and signs first.
+    /// The market maker's shielded address, the recipient of the user's
+    /// transfer.
+    pub market_maker: ShieldedAddress,
+    /// The market maker's public key that pays the swap's fee and signs first.
     pub fee_payer: Address,
     /// Most inputs the user's transfer may spend; the rest of the
-    /// transaction is sized for the maker's transfer.
+    /// transaction is sized for the market maker's transfer.
     pub max_user_inputs: usize,
     /// Outputs the user's transfer must have (payment and change).
     pub user_outputs: usize,
-    /// The rent minimum of an empty account. The maker funds the order's
+    /// The rent minimum of an empty account. The market maker funds the order's
     /// marker account (`order_marker_instruction`) with it, and the user
     /// rebuilds the marker instruction from it when checking the swap message.
     pub marker_lamports: u64,
@@ -295,28 +296,31 @@ pub struct Offer {
 
 /// The user's fill request: the order and the proven transfer that pays it.
 pub struct SwapRequest {
-    /// The order being filled. The maker takes the amounts from its own record
-    /// of this order, never from the request, and rejects the fill if the
-    /// order is unknown, expired, already filled or quoted for another pair.
+    /// The order being filled. The market maker takes the amounts from its own
+    /// record of this order, never from the request, and rejects the fill if
+    /// the order is unknown, expired, already filled or quoted for another
+    /// pair.
     pub order: OrderId,
-    /// The user's shielded address, the recipient of the maker's transfer.
+    /// The user's shielded address, the recipient of the market maker's
+    /// transfer.
     pub user: ShieldedAddress,
-    /// The user's proven zolana `transact` paying `amount_in` to the maker.
+    /// The user's proven zolana `transact` paying `amount_in` to the
+    /// market maker.
     pub transfer: Instruction,
 }
 
 /// The user's side of a swap in progress: the offer and the request sent to
-/// the maker.
+/// the market maker.
 pub struct Order {
     pub offer: Offer,
     pub request: SwapRequest,
 }
 
-/// The swap message the maker returns for the user to verify and sign.
+/// The swap message the market maker returns for the user to verify and sign.
 pub struct Fill {
-    /// Unsigned message: user transfer, maker transfer, order marker.
+    /// Unsigned message: user transfer, market maker transfer, order marker.
     pub message: VersionedMessage,
-    /// The maker refuses to co-sign at or after this instant.
+    /// The market maker refuses to co-sign at or after this instant.
     pub expires_at: Instant,
 }
 

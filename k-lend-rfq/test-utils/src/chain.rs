@@ -29,9 +29,10 @@ pub fn blocking<R>(work: impl FnOnce() -> R) -> R {
     }
 }
 
-/// Reads `pair.vault`, then its `GlobalConfig` and every allocated reserve
-/// in one `get_multiple_accounts`, and prices it with
-/// [`VaultState::from_accounts`]: the maker's `read_vault` over the sync rpc.
+/// Reads `pair.vault`, then its `GlobalConfig` and every allocated reserve in
+/// one `get_multiple_accounts`, and prices it with
+/// [`VaultState::from_accounts`]: the market maker's `read_vault` over the sync
+/// rpc.
 ///
 /// Two round trips: the reserves are read at the same or a later slot than
 /// the vault, against the allocations of the first read. Errors when any of
@@ -59,7 +60,7 @@ pub fn read_vault(rpc: &SolanaRpc, pair: &Pair) -> Result<VaultState> {
         let reserves = accounts.collect::<Result<Vec<_>>>()?;
         let reserves: Vec<(Address, &[u8])> = reserves
             .iter()
-            .map(|(address, data)| (*address, data.as_slice()))
+            .map(|(address, reserve_data)| (*address, reserve_data.as_slice()))
             .collect();
         VaultState::from_accounts(&vault_data, &global_config, &reserves)
     })
@@ -89,11 +90,11 @@ pub fn confirm_indexed(
     what: &str,
 ) -> Result<()> {
     blocking(|| client.confirm_private_transaction_sync(signature))
-        .map_err(|e| anyhow!("index {what} {signature}: {e:?}"))
+        .map_err(|error| anyhow!("index {what} {signature}: {error:?}"))
 }
 
 /// Compiles `instructions` paid by `payer` on the latest blockhash with the
-/// maker's `SWAP_COMPUTE_BUDGET`.
+/// market maker's `SWAP_COMPUTE_BUDGET`.
 pub fn compile_swap(
     rpc: &SolanaRpc,
     payer: &Address,
@@ -171,7 +172,7 @@ pub fn simulate_token_balance(
             logs.join("\n")
         ));
     }
-    let data = simulated
+    let account_data = simulated
         .accounts
         .and_then(|accounts| accounts.into_iter().next())
         .flatten()
@@ -180,7 +181,7 @@ pub fn simulate_token_balance(
         .decode()
         .ok_or_else(|| anyhow!("account {account} data does not decode"))?;
     Ok(Simulated {
-        token_amount: token_account_amount(&data)
+        token_amount: token_account_amount(&account_data)
             .ok_or_else(|| anyhow!("token account {account} too short"))?,
         units_consumed: simulated
             .units_consumed
@@ -200,7 +201,8 @@ pub fn compute_units(rpc: &SolanaRpc, signature: &Signature) -> Result<u64> {
 }
 
 /// The balances of `owner`'s public collateral and share accounts of `pair`,
-/// where a maker's kVault tail leaves what it does not deposit or shield.
+/// where a market maker's kVault tail leaves what it does not deposit or
+/// shield.
 pub fn public_balances(rpc: &SolanaRpc, owner: &Address, pair: &Pair) -> Result<[u64; 2]> {
     let balance =
         |mint: &Address| kvault::token_balance(rpc, &pda::associated_token_address(owner, mint));

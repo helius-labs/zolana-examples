@@ -1,5 +1,5 @@
-//! Balances the maker has committed but that are not yet reflected in its
-//! indexed UTXOs: amounts queued operations will spend, change of in-flight
+//! Balances the market maker has committed but that are not yet reflected in
+//! its indexed UTXOs: amounts queued operations will spend, change of in-flight
 //! steps, and the in- and outflows of admitted fills. Each amount is counted
 //! from admission until the indexed balance takes it over, and never twice.
 
@@ -19,18 +19,19 @@ use k_lend_rfq_sdk::swap::SwapError;
 use super::reservations::Reservations;
 use crate::{
     config::TargetRange,
-    error::MakerError,
+    error::MarketMakerError,
     transactions::steps::{OperationId, StepId},
 };
 
-/// The maker's balance bookkeeping shared by the api and the coordinator.
+/// The market maker's balance bookkeeping shared by the api and the
+/// coordinator.
 pub struct PendingBalance {
     /// The indexed UTXOs and which steps hold them.
     pub reservations: Arc<Reservations>,
     /// Per asset, the amount queued operations will spend.
     queued: Mutex<HashMap<Address, u64>>,
-    /// Per in-flight step, the asset and amount of the maker's own outputs
-    /// (change, shielded vault proceeds) it will create.
+    /// Per in-flight step, the asset and amount of the market maker's own
+    /// outputs (change, shielded vault proceeds) it will create.
     incoming: Mutex<HashMap<StepId, (Address, u64)>>,
     fills: Mutex<FillFlows>,
     next_operation: AtomicU64,
@@ -40,8 +41,8 @@ pub struct PendingBalance {
     range_refusals: AtomicUsize,
 }
 
-/// What a user pays the maker in an admitted fill, counted in the maker's net
-/// balance until the payment is indexed.
+/// What a user pays the market maker in an admitted fill, counted in the
+/// market maker's net balance until the payment is indexed.
 ///
 /// Lifecycle: recorded by `queue_fill` when the fill is admitted, without
 /// the outputs `Reservations` already tracks; each output
@@ -49,14 +50,14 @@ pub struct PendingBalance {
 /// `Reservations` (from then on `Reservations::balance` counts it); the inflow
 /// is removed once its last output lands, or as a whole by `drop_fill` when the
 /// fill does not land. `finish_fill` leaves it in place: the user's UTXO is
-/// only in the maker's balance once sync has indexed it.
+/// only in the market maker's balance once sync has indexed it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Inflow {
     pub asset: Address,
     pub outputs: Vec<InflowOutput>,
 }
 
-/// One output of the user's transfer that pays the maker.
+/// One output of the user's transfer that pays the market maker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InflowOutput {
     pub utxo_hash: [u8; 32],
@@ -76,11 +77,11 @@ impl Inflow {
     }
 }
 
-/// What the maker pays the user in an admitted fill, subtracted from the net
-/// balance until whichever comes first: the fill's selected inputs
-/// (`fill_inputs`) leave `Reservations` (sync or landing removed them as
-/// spent, so `Reservations::balance` already shows the payment), the fill
-/// lands (`finish_fill`), or it is dropped (`drop_fill`).
+/// What the market maker pays the user in an admitted fill, subtracted from the
+/// net balance until whichever comes first: the fill's selected inputs
+/// (`fill_inputs`) leave `Reservations` (sync or landing removed them as spent,
+/// so `Reservations::balance` already shows the payment), the fill lands
+/// (`finish_fill`), or it is dropped (`drop_fill`).
 #[derive(Clone, Copy)]
 pub struct Outflow {
     pub asset: Address,
@@ -99,8 +100,8 @@ pub struct FillRanges {
 struct FillFlows {
     inflows: HashMap<OperationId, Inflow>,
     outflows: HashMap<OperationId, Outflow>,
-    /// The commitments of the maker inputs the fill's current step spends,
-    /// set once inputs are selected (`fill_inputs`).
+    /// The commitments of the market maker inputs the fill's current step
+    /// spends, set once inputs are selected (`fill_inputs`).
     outflow_inputs: HashMap<OperationId, Vec<[u8; 32]>>,
 }
 
@@ -163,12 +164,12 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The direction an amount moves relative to the maker's balance.
+/// The direction an amount moves relative to the market maker's balance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Flow {
-    /// The maker receives it.
+    /// The market maker receives it.
     In,
-    /// The maker pays it.
+    /// The market maker pays it.
     Out,
 }
 
@@ -224,22 +225,22 @@ impl PendingBalance {
     /// Commits `amount` of `asset` to a queued operation; the caller
     /// releases it with `unqueue` when the operation leaves the queue.
     ///
-    /// What admission may count, its single definition: every maker UTXO of
-    /// `asset` no step holds, indexed or not
+    /// What admission may count, its single definition: every market maker UTXO
+    /// of `asset` no step holds, indexed or not
     /// (`Reservations::unreserved_balance`), plus the own outputs in-flight
     /// steps will create (`expect`), minus what queued operations already
     /// committed. An unindexed UTXO is the change of a landed step: it is
-    /// counted from landing on, so a fill admitted between landing and sync
-    /// is backlogged until sync indexes the change instead of refused. Each
-    /// amount is in exactly one term: `expect` covers a step's outputs until
-    /// it lands (`settle`), `Reservations` from then on.
+    /// counted from landing on, so a fill admitted between landing and sync is
+    /// backlogged until sync indexes the change instead of refused. Each amount
+    /// is in exactly one term: `expect` covers a step's outputs until it lands
+    /// (`settle`), `Reservations` from then on.
     ///
-    /// Errors with `MakerError::InsufficientBalance` if `amount` exceeds what
-    /// admission may count, and `MakerError::AmountOverflow` if a sum
-    /// overflows. The subtraction of the queued amount saturates on purpose:
-    /// queued operations can exceed the balance after UTXOs left it, which
-    /// leaves nothing available.
-    pub fn queue(&self, asset: Address, amount: u64) -> Result<(), MakerError> {
+    /// Errors with `MarketMakerError::InsufficientBalance` if `amount` exceeds
+    /// what admission may count, and `MarketMakerError::AmountOverflow` if a
+    /// sum overflows. The subtraction of the queued amount saturates on
+    /// purpose: queued operations can exceed the balance after UTXOs left it,
+    /// which leaves nothing available.
+    pub fn queue(&self, asset: Address, amount: u64) -> Result<(), MarketMakerError> {
         // Reservations before `incoming`: a step that lands is settled before
         // its outputs are tracked, so this order never counts them twice.
         let unreserved = self.reservations.unreserved_balance(&asset)?;
@@ -248,12 +249,12 @@ impl PendingBalance {
         let entry = queued.entry(asset).or_default();
         let available = unreserved
             .checked_add(incoming)
-            .ok_or(MakerError::AmountOverflow {
+            .ok_or(MarketMakerError::AmountOverflow {
                 context: "admission balance",
             })?
             .saturating_sub(*entry);
         if available < amount {
-            return Err(MakerError::InsufficientBalance {
+            return Err(MarketMakerError::InsufficientBalance {
                 asset,
                 available,
                 requested: amount,
@@ -261,7 +262,7 @@ impl PendingBalance {
         }
         *entry = entry
             .checked_add(amount)
-            .ok_or(MakerError::AmountOverflow {
+            .ok_or(MarketMakerError::AmountOverflow {
                 context: "queued amount",
             })?;
         Ok(())
@@ -279,7 +280,7 @@ impl PendingBalance {
     /// balance under one lock so concurrent fills cannot both pass: first the
     /// outflow against `ranges.outflow`, then the inflow against
     /// `ranges.inflow`, each failing with `SwapError::OutsideTargetRange`
-    /// (wrapped in `MakerError::Swap`).
+    /// (wrapped in `MarketMakerError::Swap`).
     ///
     /// Inflow outputs `Reservations` already tracks are left out: they
     /// already landed (for example a user transfer reused for a second
@@ -291,7 +292,7 @@ impl PendingBalance {
         mut inflow: Inflow,
         outflow: Outflow,
         ranges: FillRanges,
-    ) -> Result<(), MakerError> {
+    ) -> Result<(), MarketMakerError> {
         let mut fills = locked(&self.fills);
         inflow
             .outputs
@@ -317,7 +318,7 @@ impl PendingBalance {
         Ok(())
     }
 
-    /// Records the commitments of the maker inputs the fill `operation`
+    /// Records the commitments of the market maker inputs the fill `operation`
     /// spends, replacing those of an earlier attempt. From the moment any of
     /// them leaves `Reservations` the outflow stops counting
     /// (`FillFlows::net_balance`). Ignored for an operation without an
@@ -358,7 +359,7 @@ impl PendingBalance {
         });
     }
 
-    /// Records the maker's own outputs `step` will create, counted by
+    /// Records the market maker's own outputs `step` will create, counted by
     /// `queue` as available until `settle`.
     pub fn expect(&self, step: StepId, asset: Address, amount: u64) {
         locked(&self.incoming).insert(step, (asset, amount));
@@ -416,13 +417,13 @@ impl PendingBalance {
     }
 
     /// Sum of the outputs of `asset` recorded by `expect`; errors with
-    /// `MakerError::AmountOverflow` if it overflows `u64`.
-    fn incoming(&self, asset: &Address) -> Result<u64, MakerError> {
+    /// `MarketMakerError::AmountOverflow` if it overflows `u64`.
+    fn incoming(&self, asset: &Address) -> Result<u64, MarketMakerError> {
         locked(&self.incoming)
             .values()
             .filter(|(incoming, _)| incoming == asset)
             .try_fold(0u64, |total, (_, amount)| total.checked_add(*amount))
-            .ok_or(MakerError::AmountOverflow {
+            .ok_or(MarketMakerError::AmountOverflow {
                 context: "incoming own outputs",
             })
     }
@@ -452,7 +453,7 @@ mod tests {
         outflow: None,
     };
 
-    /// A maker UTXO of `asset` with commitment and nullifier `hash`.
+    /// A market maker UTXO of `asset` with commitment and nullifier `hash`.
     fn tracked(
         asset: Address,
         hash: [u8; 32],
@@ -585,7 +586,7 @@ mod tests {
         assert!(
             matches!(
                 refused,
-                Err(MakerError::InsufficientBalance {
+                Err(MarketMakerError::InsufficientBalance {
                     available: 0,
                     requested: 1,
                     ..

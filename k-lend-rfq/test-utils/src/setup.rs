@@ -47,13 +47,13 @@ pub const FEE_BPS: u64 = 30;
 /// split evenly over `USER_UTXOS` deposits.
 pub const USER_SHIELD_COLLATERAL: u64 = 100_000_000;
 const USER_UTXOS: u64 = 2;
-const MAKER_ACTOR: u8 = 0;
+const MARKET_MAKER_ACTOR: u8 = 0;
 const FIRST_USER_ACTOR: u8 = 1;
 /// Collateral transferred to the market maker's public token account at
 /// setup, in collateral base units.
 pub const MARKET_MAKER_PUBLIC_COLLATERAL: u64 = 500_000_000;
 /// Tokens of a snapshot vault's mint written to the payer's account at
-/// setup, in base units; covers the users' and the maker's funding.
+/// setup, in base units; covers the users' and the market maker's funding.
 const SNAPSHOT_PAYER_TOKENS: u64 = 1_000_000_000_000;
 /// The SPL Token program's `Transfer` instruction tag
 /// (`TokenInstruction::Transfer`, variant 3), followed by the amount as a
@@ -62,9 +62,10 @@ const SPL_TRANSFER_TAG: u8 = 3;
 /// How long setup waits for the pair's vault to be readable before it
 /// starts the market maker.
 pub const VAULT_VISIBLE_TIMEOUT: Duration = Duration::from_secs(10);
-/// Collateral of the maker's seed vault deposit in most tests, in collateral
-/// base units; a test that needs another seed keeps its own constant.
-pub const SEED_DEPOSIT: u64 = 200_000_000;
+/// Collateral of the market maker's seed vault deposit in most tests, in
+/// collateral base units; a test that needs another seed keeps its own
+/// constant.
+pub const SEED_DEPOSIT_COLLATERAL: u64 = 200_000_000;
 /// Minimum UTXO value of the inventory profiles tests configure, in base
 /// units.
 pub const MIN_UTXO_VALUE: u64 = 1_000_000;
@@ -81,8 +82,8 @@ pub struct TestEnv {
     pub user: User,
     pub users: Vec<User>,
     pub market_maker: MarketMaker,
-    /// The wallet behind `market_maker`, for tests that build or sign maker
-    /// transfers by hand.
+    /// The wallet behind `market_maker`, for tests that build or sign
+    /// market maker transfers by hand.
     pub market_maker_wallet: TestWallet,
     pub collateral_mint: Address,
     pub pair: Pair,
@@ -153,8 +154,8 @@ fn token_transfer_ix(
     authority: &Address,
     amount: u64,
 ) -> Instruction {
-    let mut data = vec![SPL_TRANSFER_TAG];
-    data.extend_from_slice(&amount.to_le_bytes());
+    let mut instruction_data = vec![SPL_TRANSFER_TAG];
+    instruction_data.extend_from_slice(&amount.to_le_bytes());
     Instruction {
         program_id: spl_token_program_id(),
         accounts: vec![
@@ -162,7 +163,7 @@ fn token_transfer_ix(
             AccountMeta::new(*destination, false),
             AccountMeta::new_readonly(*authority, true),
         ],
-        data,
+        data: instruction_data,
     }
 }
 
@@ -199,18 +200,18 @@ fn register_spl_mint(rpc: &SolanaRpc, payer: &Keypair, mint: Address) -> Result<
     }
     .instruction();
     send(rpc, &[ix], payer, &[payer])?;
-    let registry = pda::spl_asset_registry(&mint);
-    let data = rpc
-        .get_account(registry)?
-        .ok_or_else(|| anyhow!("mint registry {registry} missing"))?
+    let registry_pda = pda::spl_asset_registry(&mint);
+    let registry_data = rpc
+        .get_account(registry_pda)?
+        .ok_or_else(|| anyhow!("mint registry {registry_pda} missing"))?
         .data;
-    Ok(SplAssetRegistry::from_account_bytes(&data)
-        .map_err(|e| anyhow!("mint registry {registry}: {e:?}"))?
+    Ok(SplAssetRegistry::from_account_bytes(&registry_data)
+        .map_err(|error| anyhow!("mint registry {registry_pda}: {error:?}"))?
         .asset_id)
 }
 
 /// The pair's collateral, its asset id and the payer's token account users
-/// and the maker are funded from.
+/// and the market maker are funded from.
 struct Collateral {
     mint: Address,
     asset_id: u64,
@@ -286,7 +287,7 @@ fn snapshot_vault(
 struct Booted {
     localnet: FixtureLocalnet,
     users: Vec<TestWallet>,
-    maker: TestWallet,
+    market_maker_wallet: TestWallet,
     collateral_mint: Address,
     pair: Pair,
 }
@@ -300,11 +301,12 @@ pub async fn setup_with(config: SetupConfig) -> Result<TestEnv> {
     let Booted {
         localnet,
         users,
-        maker,
+        market_maker_wallet,
         collateral_mint,
         pair,
     } = blocking(|| boot(ports, &config))?;
-    // Surfpool can lag in exposing a just-written account, and the maker's start reads the vault.
+    // Surfpool can lag in exposing a just-written account, and the
+    // market maker's start reads the vault.
     blocking(|| wait_for_account(localnet.client.rpc(), &pair.vault, VAULT_VISIBLE_TIMEOUT))?;
     let market_maker = MarketMaker::start(MarketMakerConfig {
         connection: ConnectionConfig {
@@ -314,7 +316,7 @@ pub async fn setup_with(config: SetupConfig) -> Result<TestEnv> {
             tree: localnet.tree,
             tree_id: localnet.tree_id,
         },
-        identity: maker.identity_config(),
+        identity: market_maker_wallet.identity_config(),
         pairs: vec![pair],
         tokens: vec![
             (pair.token_mint, config.collateral),
@@ -340,7 +342,7 @@ pub async fn setup_with(config: SetupConfig) -> Result<TestEnv> {
         user,
         users: users.collect(),
         market_maker,
-        market_maker_wallet: maker,
+        market_maker_wallet,
         collateral_mint,
         pair,
     })
@@ -413,16 +415,16 @@ fn boot(ports: LocalnetPorts, config: &SetupConfig) -> Result<Booted> {
     let mut assets = AssetRegistry::default();
     assets.insert(collateral.asset_id, collateral_mint)?;
     assets.insert(share_asset_id, pair.shares_mint)?;
-    let market_maker = TestWallet::new(MAKER_ACTOR, &assets)?;
+    let market_maker_wallet = TestWallet::new(MARKET_MAKER_ACTOR, &assets)?;
 
     for mint in [collateral_mint, pair.shares_mint] {
-        create_associated_token_account(rpc, &payer, &market_maker.address(), &mint)?;
+        create_associated_token_account(rpc, &payer, &market_maker_wallet.address(), &mint)?;
     }
     send(
         rpc,
         &[token_transfer_ix(
             &collateral.payer_account,
-            &pda::associated_token_address(&market_maker.address(), &collateral_mint),
+            &pda::associated_token_address(&market_maker_wallet.address(), &collateral_mint),
             &payer.pubkey(),
             MARKET_MAKER_PUBLIC_COLLATERAL,
         )],
@@ -460,7 +462,7 @@ fn boot(ports: LocalnetPorts, config: &SetupConfig) -> Result<Booted> {
             localnet
                 .client
                 .confirm_private_transaction_sync(user_deposit)
-                .map_err(|e| anyhow!("index deposit of user {actor}: {e:?}"))?;
+                .map_err(|error| anyhow!("index deposit of user {actor}: {error:?}"))?;
         }
         user.sync(localnet.client.indexer())?;
         users.push(user);
@@ -469,7 +471,7 @@ fn boot(ports: LocalnetPorts, config: &SetupConfig) -> Result<Booted> {
     Ok(Booted {
         localnet,
         users,
-        maker: market_maker,
+        market_maker_wallet,
         collateral_mint,
         pair,
     })

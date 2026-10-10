@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use crate::{
-    error::MakerError,
+    error::MarketMakerError,
     transactions::{
         confirm::Retry,
         coordinator::{Coordinator, Event},
@@ -26,7 +26,7 @@ impl Coordinator {
         });
     }
 
-    /// Aborts step `id` with `MakerError::ReservationExpired` and
+    /// Aborts step `id` with `MarketMakerError::ReservationExpired` and
     /// `Retry::Fail` if it is still `AwaitingSignature` and its fill deadline
     /// has passed. A step that was signed, aborted or rescheduled in the
     /// meantime is left alone, so a stale timer is harmless.
@@ -40,8 +40,12 @@ impl Coordinator {
                     .is_some_and(|deadline| Instant::now() >= deadline)
         });
         if expired {
-            self.abort(id, MakerError::ReservationExpired { step: id }, Retry::Fail)
-                .await;
+            self.abort(
+                id,
+                MarketMakerError::ReservationExpired { step: id },
+                Retry::Fail,
+            )
+            .await;
         }
     }
 }

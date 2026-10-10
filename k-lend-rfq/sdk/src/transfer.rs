@@ -23,8 +23,8 @@ use crate::swap::SwapError;
 
 /// Outputs of a swap-side transfer: the payment to the recipient and the
 /// sender's change (`ConfidentialTransaction::transfer` adds both; padding
-/// fills the rest of the shape). The maker's fill rejects a user transfer
-/// with any other count (`SwapError::UserTransferOutputs`).
+/// fills the rest of the shape). The market maker's fill rejects a user
+/// transfer with any other count (`SwapError::UserTransferOutputs`).
 pub const USER_OUTPUTS: usize = 2;
 
 /// Picks the narrowest supported shape with at least `inputs` inputs and
@@ -107,16 +107,16 @@ impl Transfer {
             .map(|input| input.nullifier)
             .collect();
         let owner_signers = proof_inputs.owner_signer_pubkeys()?;
-        let data = client
+        let ix_data = client
             .prove_transact(proof_inputs, None, authority)
-            .map_err(|e| anyhow!("prove transfer: {e:?}"))?;
+            .map_err(|error| anyhow!("prove transfer: {error:?}"))?;
         let instruction = Transact {
             payer,
             input_trees: vec![tree],
             output_tree: tree,
             owner_signers,
             interface_transfer_accounts: Vec::new(),
-            data,
+            data: ix_data,
         }
         .instruction();
         Ok(TransferInstruction {
@@ -136,7 +136,7 @@ pub struct Receiver<'a> {
 }
 
 impl Receiver<'_> {
-    /// The outputs of `data` encrypted to the receiver's viewing key, with
+    /// The outputs of `transact` encrypted to the receiver's viewing key, with
     /// their commitments, in output order. Outputs that are plaintext,
     /// another scheme or for another key are skipped.
     ///
@@ -144,12 +144,12 @@ impl Receiver<'_> {
     /// the transaction publishes for it; a mismatch errors with
     /// `SwapError::CommitmentMismatch`, since the ciphertext alone does not
     /// bind the amount the chain records.
-    pub fn received_outputs(&self, data: &TransactIxData) -> Result<Vec<(Utxo, [u8; 32])>> {
+    pub fn received_outputs(&self, transact: &TransactIxData) -> Result<Vec<(Utxo, [u8; 32])>> {
         let identity = self.keys.address()?;
         let mut received = Vec::new();
-        for (slot, output) in data.outputs.iter().enumerate() {
+        for (slot, output) in transact.outputs.iter().enumerate() {
             let Some(plaintext) =
-                self.decrypt_output(&identity, output.data.as_deref(), data, slot)?
+                self.decrypt_output(&identity, output.data.as_deref(), transact, slot)?
             else {
                 continue;
             };

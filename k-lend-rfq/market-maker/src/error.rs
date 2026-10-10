@@ -1,5 +1,5 @@
 //! The market maker's error type. Swap checks keep their `SwapError` inside
-//! `MakerError::Swap`, so callers can match the exact check that failed.
+//! `MarketMakerError::Swap`, so callers can match the exact check that failed.
 
 use k_lend_rfq_sdk::swap::SwapError;
 use solana_address::Address;
@@ -17,7 +17,7 @@ use crate::{
 
 /// Every failure of a market maker operation.
 #[derive(Debug, Error)]
-pub enum MakerError {
+pub enum MarketMakerError {
     /// Queuing an operation found its asset's unreserved balance, plus the
     /// change of in-flight steps, minus queued amounts, short.
     #[error("{asset} balance {available} minus queued operations cannot cover {requested}")]
@@ -107,7 +107,7 @@ pub enum MakerError {
     MalformedMessage { required: usize, accounts: usize },
 
     #[error("the market maker is not a signer of the message")]
-    MakerNotSigner,
+    MarketMakerNotSigner,
 
     #[error("the message has no user signer")]
     MissingUserSigner,

@@ -1,5 +1,5 @@
-//! Input selection over the maker's tracked UTXOs. Only UTXOs with a known
-//! leaf index are ever selected, since an input without one cannot be
+//! Input selection over the market maker's tracked UTXOs. Only UTXOs with a
+//! known leaf index are ever selected, since an input without one cannot be
 //! proven. `select` and `width` run the same `pick`, so the width a quote
 //! promises is the width the fill selects on the same inventory.
 

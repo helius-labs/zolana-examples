@@ -1,7 +1,8 @@
-//! Filling an order: checks the user's proven transfer against the maker's
-//! own order record, schedules the maker's paying transfer, and compiles the
-//! three-instruction swap message the user co-signs. The amounts paid and
-//! received always come from the order, never from the request.
+//! Filling an order: checks the user's proven transfer against the
+//! market maker's own order record, schedules the market maker's paying
+//! transfer, and compiles the three-instruction swap message the user co-signs.
+//! The amounts paid and received always come from the order, never from the
+//! request.
 
 use std::{sync::PoisonError, time::Instant};
 
@@ -23,7 +24,7 @@ use k_lend_rfq_sdk::{
 
 use crate::{
     api::Inner,
-    error::MakerError,
+    error::MarketMakerError,
     inventory::balance::{
         pending::{Inflow, InflowOutput},
         select::select,
@@ -42,7 +43,7 @@ use crate::{
 /// it adds no instruction to the swap message.
 pub const SWAP_COMPUTE_BUDGET: ComputeBudgetConfig = ComputeBudgetConfig::new(MAX_COMPUTE_UNITS);
 /// Index of the order marker instruction in the swap message, after the
-/// user's transfer and the maker's transfer.
+/// user's transfer and the market maker's transfer.
 pub const MARKER_INSTRUCTION_INDEX: u8 = 2;
 /// The custom code of `SystemError::AccountAlreadyInUse` (the first variant
 /// of solana-system-interface `SystemError`), which the marker instruction
@@ -50,25 +51,25 @@ pub const MARKER_INSTRUCTION_INDEX: u8 = 2;
 pub const ACCOUNT_ALREADY_IN_USE: u32 = 0;
 
 /// What `fill` returns: the unsigned swap message for the user, plus the
-/// maker's own view of the transfer it contains.
-pub struct MakerFill {
-    /// The swap message and the instant after which the maker no longer
+/// market maker's own view of the transfer it contains.
+pub struct MarketMakerFill {
+    /// The swap message and the instant after which the market maker no longer
     /// co-signs it.
     pub fill: Fill,
-    /// Nullifiers of the maker UTXOs the swap spends.
+    /// Nullifiers of the market maker UTXOs the swap spends.
     pub spent: Vec<[u8; 32]>,
-    /// The maker's change outputs, which appear once the swap lands.
+    /// The market maker's change outputs, which appear once the swap lands.
     pub change: Vec<WalletUtxo>,
 }
 
 /// A checked fill handed to the coordinator: the order's amounts, the user's
-/// transfer and the maker's inflow from it.
+/// transfer and the market maker's inflow from it.
 pub struct FillOrder {
     /// The order being filled; its marker ends the swap message.
     pub order: OrderId,
     /// Lamports the marker account is funded with.
     pub marker_lamports: u64,
-    /// The asset the maker pays.
+    /// The asset the market maker pays.
     pub asset: Address,
     /// The order's `amount_out`.
     pub amount: u64,
@@ -76,7 +77,8 @@ pub struct FillOrder {
     pub recipient: ShieldedAddress,
     /// The user's proven transfer, placed first in the swap message.
     pub user_transfer: Instruction,
-    /// The user's outputs to the maker, tracked as pending until they land.
+    /// The user's outputs to the market maker, tracked as pending until they
+    /// land.
     pub inflow: Inflow,
     /// The order's expiry (`OpenOrder::expires_at`). Scheduling and offering
     /// reject the fill with `SwapError::OrderExpired` once it has passed, and
@@ -90,7 +92,8 @@ impl Inner {
     /// message for the user to co-sign.
     ///
     /// Checks, in order:
-    /// 1. the maker serves `pair`, else `MakerError::PairNotServed`;
+    /// 1. the market maker serves `pair`, else
+    ///    `MarketMakerError::PairNotServed`;
     /// 2. the order is open, unexpired and quoted for `pair`
     ///    (`OpenOrders::take`: `SwapError::UnknownOrder`,
     ///    `SwapError::OrderExpired`, `SwapError::OrderPairMismatch`); the
@@ -100,18 +103,18 @@ impl Inner {
     /// 4. admission (`Inner::operation`): both assets stay in range against
     ///    the net balance (`SwapError::OutsideTargetRange`), and the
     ///    unreserved balance covers `amount_out`
-    ///    (`MakerError::InsufficientBalance`, returned as
+    ///    (`MarketMakerError::InsufficientBalance`, returned as
     ///    `SwapError::InsufficientInventory`);
-    /// 5. scheduling and proving the maker's transfer; any failure there is
-    ///    returned as its `MakerError` (for example
-    ///    `MakerError::FragmentedInventory`), and an order that expires
+    /// 5. scheduling and proving the market maker's transfer; any failure there
+    ///    is returned as its `MarketMakerError` (for example
+    ///    `MarketMakerError::FragmentedInventory`), and an order that expires
     ///    before its message is offered as `SwapError::OrderExpired`.
     ///
     /// The co-sign deadline is the order's expiry, never later: the absolute
     /// `OpenOrder::expires_at` travels with the fill, so neither a backlog
     /// nor proving nor a requeue can extend the quote, and the `expires_at`
     /// returned in `Fill` equals it.
-    pub async fn fill(&self, pair: &Pair, request: &SwapRequest) -> Result<MakerFill> {
+    pub async fn fill(&self, pair: &Pair, request: &SwapRequest) -> Result<MarketMakerFill> {
         self.settings().serves(pair)?;
         let order = self.orders.take(request.order, pair)?;
         let quote = order.quote;
@@ -132,7 +135,7 @@ impl Inner {
             }))
             .await
             .map_err(|error| match error {
-                MakerError::InsufficientBalance {
+                MarketMakerError::InsufficientBalance {
                     asset,
                     available,
                     requested,
@@ -141,17 +144,17 @@ impl Inner {
                     required: requested,
                     available,
                 }),
-                MakerError::Swap(error) => anyhow::Error::from(error),
+                MarketMakerError::Swap(error) => anyhow::Error::from(error),
                 other => anyhow::Error::from(other),
             })?;
         match outcome {
             OperationOutcome::Filled(fill) => Ok(fill),
-            _ => Err(MakerError::UnexpectedOutcome { expected: "fill" }.into()),
+            _ => Err(MarketMakerError::UnexpectedOutcome { expected: "fill" }.into()),
         }
     }
 
     /// Checks the user's transfer `request.transfer` against the order and
-    /// returns the maker's inflow from it.
+    /// returns the market maker's inflow from it.
     ///
     /// Checks, in order:
     /// 1. it is a zolana `transact`, else `SwapError::UnexpectedTransaction`;
@@ -161,13 +164,13 @@ impl Inner {
     ///    else `SwapError::UserTransferTooWide`;
     /// 4. it has exactly `USER_OUTPUTS` outputs, else
     ///    `SwapError::UserTransferOutputs`;
-    /// 5. every output the maker can decrypt opens to its commitment, else
-    ///    `SwapError::CommitmentMismatch`;
+    /// 5. every output the market maker can decrypt opens to its commitment,
+    ///    else `SwapError::CommitmentMismatch`;
     /// 6. the decrypted outputs of `asset_in` sum to exactly `amount_in`,
     ///    else `SwapError::AmountOverflow` or `SwapError::Underpaid`.
     ///
-    /// Width and output count are checked because the maker's transfer is
-    /// sized for the room the user transfer leaves in the transaction.
+    /// Width and output count are checked because the market maker's transfer
+    /// is sized for the room the user transfer leaves in the transaction.
     ///
     /// Zero-amount outputs are left out of the inflow: sync never tracks a
     /// zero-amount UTXO, so such an output would never land and its inflow
@@ -179,23 +182,23 @@ impl Inner {
         max: usize,
         request: &SwapRequest,
     ) -> Result<Inflow> {
-        let user_data = transact_data(&request.transfer)?;
-        if !user_data.interface_transfers.is_empty() {
+        let user_transact = transact_data(&request.transfer)?;
+        if !user_transact.interface_transfers.is_empty() {
             return Err(SwapError::PublicTransfer {
-                count: user_data.interface_transfers.len(),
+                count: user_transact.interface_transfers.len(),
             }
             .into());
         }
-        if user_data.inputs.len() > max {
+        if user_transact.inputs.len() > max {
             return Err(SwapError::UserTransferTooWide {
-                inputs: user_data.inputs.len(),
+                inputs: user_transact.inputs.len(),
                 max,
             }
             .into());
         }
-        if user_data.outputs.len() != USER_OUTPUTS {
+        if user_transact.outputs.len() != USER_OUTPUTS {
             return Err(SwapError::UserTransferOutputs {
-                outputs: user_data.outputs.len(),
+                outputs: user_transact.outputs.len(),
                 expected: USER_OUTPUTS,
             }
             .into());
@@ -210,7 +213,7 @@ impl Inner {
             registry: &registry,
             tree_id: self.identity.tree_id,
         }
-        .received_outputs(&user_data)?
+        .received_outputs(&user_transact)?
         .into_iter()
         .filter(|(utxo, _)| utxo.asset.asset == asset_in && utxo.amount > 0)
         .collect();
@@ -218,7 +221,7 @@ impl Inner {
             .iter()
             .try_fold(0u64, |total, (utxo, _)| total.checked_add(utxo.amount))
             .ok_or(SwapError::AmountOverflow {
-                context: "user outputs to the maker",
+                context: "user outputs to the market maker",
             })?;
         if received != amount_in {
             return Err(SwapError::Underpaid {
@@ -241,25 +244,26 @@ impl Inner {
 }
 
 impl Coordinator {
-    /// Selects maker inputs for `order` and schedules the paying transfer.
+    /// Selects market maker inputs for `order` and schedules the paying
+    /// transfer.
     ///
     /// A fill whose order expired (`Instant::now() >= order.deadline`, for
     /// example after waiting in the backlog) is rejected with
     /// `SwapError::OrderExpired` before any input is selected, so no proof is
     /// spent on a dead order.
     ///
-    /// The input and output limits come from the transaction budget left
-    /// next to the user's transfer. Change is split per the asset's inventory
+    /// The input and output limits come from the transaction budget left next
+    /// to the user's transfer. Change is split per the asset's inventory
     /// profile. When no selection fits, `unschedulable` decides between
-    /// retrying, backlogging and `MakerError::FragmentedInventory`; a budget
-    /// or planning error rejects the operation.
+    /// retrying, backlogging and `MarketMakerError::FragmentedInventory`; a
+    /// budget or planning error rejects the operation.
     pub async fn schedule_fill(
         &mut self,
         id: OperationId,
         order: &FillOrder,
-    ) -> Result<ScheduleOutcome, MakerError> {
+    ) -> Result<ScheduleOutcome, MarketMakerError> {
         if Instant::now() >= order.deadline {
-            return Err(MakerError::Swap(SwapError::OrderExpired {
+            return Err(MarketMakerError::Swap(SwapError::OrderExpired {
                 order: order.order,
             }));
         }
@@ -267,7 +271,7 @@ impl Coordinator {
         let max_inputs = self
             .services
             .budget
-            .max_maker_inputs(&order.user_transfer)?;
+            .max_market_maker_inputs(&order.user_transfer)?;
         let Some(selection) = select(&available, order.amount, max_inputs) else {
             return self
                 .unschedulable(order.asset, order.amount, max_inputs)
@@ -276,10 +280,11 @@ impl Coordinator {
         let max_outputs = self
             .services
             .budget
-            .max_maker_outputs(&order.user_transfer, selection.inputs.len())?;
+            .max_market_maker_outputs(&order.user_transfer, selection.inputs.len())?;
         let change = own_value(&selection, order.amount)?;
         let inputs = selection.hashes();
-        // Every tracked UTXO of the asset outside the selection counts, reserved ones included.
+        // Every tracked UTXO of the asset outside the selection counts,
+        // reserved ones included.
         let tracked = self.services.pending.reservations.utxos(&order.asset);
         let others = other_amounts(
             tracked.iter().map(|utxo| (&utxo.utxo_hash, utxo.amount)),
@@ -327,20 +332,20 @@ impl Coordinator {
     /// The outcome for a fill no input selection can pay: `Retry` if unsent
     /// upkeep steps on `asset` were discarded to free their UTXOs,
     /// `Backlogged` if UTXOs of `asset` are reserved by an in-flight step or
-    /// not yet indexed, else `MakerError::FragmentedInventory`.
+    /// not yet indexed, else `MarketMakerError::FragmentedInventory`.
     async fn unschedulable(
         &mut self,
         asset: Address,
         amount: u64,
         max_inputs: usize,
-    ) -> Result<ScheduleOutcome, MakerError> {
+    ) -> Result<ScheduleOutcome, MarketMakerError> {
         if self.preempt_upkeep(&asset).await {
             return Ok(ScheduleOutcome::Retry);
         }
         if self.waits_for_utxos(&asset) {
             return Ok(ScheduleOutcome::Backlogged);
         }
-        Err(MakerError::FragmentedInventory {
+        Err(MarketMakerError::FragmentedInventory {
             asset,
             available: self.services.pending.reservations.balance(&asset),
             requested: amount,
@@ -348,14 +353,15 @@ impl Coordinator {
         })
     }
 
-    /// Compiles the swap message for fill step `id` and hands it to the
-    /// waiting `fill` call. The message holds exactly three instructions: the
-    /// user's transfer, the maker's transfer and, at
-    /// `MARKER_INSTRUCTION_INDEX`, `order_marker_instruction(payer, order,
-    /// marker_lamports)`. The maker signs as fee payer, which is also the
-    /// marker's seed base, so the marker adds no signer. `latest` is the
-    /// blockhash and its last valid block height fetched by the prove task, so
-    /// no rpc call runs on the coordinator loop.
+    /// Compiles the swap message for fill step `id` and hands it to the waiting
+    /// `fill` call. The message holds exactly three instructions: the user's
+    /// transfer, the market maker's transfer and, at
+    /// `MARKER_INSTRUCTION_INDEX`,
+    /// `order_marker_instruction(payer, order, marker_lamports)`. The
+    /// market maker signs as fee payer, which is also the marker's seed base,
+    /// so the marker adds no signer. `latest` is the blockhash and its last
+    /// valid block height fetched by the prove task, so no rpc call runs on the
+    /// coordinator loop.
     ///
     /// The message's co-sign deadline (`Fill::expires_at`) is the order's
     /// expiry `FillTransfer::deadline`, never later.
@@ -366,7 +372,7 @@ impl Coordinator {
     /// transaction budget or a compile error with `Retry::Fail`; a failed
     /// blockhash fetch with `Retry::Requeue`. A step that is gone or no
     /// longer a fill is ignored.
-    pub async fn offer_fill(&mut self, id: StepId, latest: Result<(Hash, u64), MakerError>) {
+    pub async fn offer_fill(&mut self, id: StepId, latest: Result<(Hash, u64), MarketMakerError>) {
         let parts = self.steps.get(id).and_then(|step| {
             let fill = step.fill.as_ref()?;
             Some((
@@ -377,7 +383,8 @@ impl Coordinator {
                 fill.deadline,
             ))
         });
-        let Some((user_transfer, maker_transfer, order, marker_lamports, expires_at)) = parts
+        let Some((user_transfer, market_maker_transfer, order, marker_lamports, expires_at)) =
+            parts
         else {
             return;
         };
@@ -387,7 +394,7 @@ impl Coordinator {
             order,
             marker_lamports,
             expires_at,
-            [user_transfer, maker_transfer],
+            [user_transfer, market_maker_transfer],
             latest,
         );
         let (message, last_valid_block_height) = match compiled {
@@ -409,7 +416,7 @@ impl Coordinator {
         fill.last_valid_block_height = last_valid_block_height;
         fill.expires_at = Some(expires_at);
         step.state = StepState::AwaitingSignature;
-        let transfer = MakerFill {
+        let transfer = MarketMakerFill {
             fill: Fill {
                 message,
                 expires_at,
@@ -430,15 +437,19 @@ impl Coordinator {
                 .is_ok()
         });
         if !delivered {
-            self.discard(id, MakerError::ReservationExpired { step: id }, Retry::Fail)
-                .await;
+            self.discard(
+                id,
+                MarketMakerError::ReservationExpired { step: id },
+                Retry::Fail,
+            )
+            .await;
             self.try_schedule().await;
         }
     }
 
     /// Steps 1-2 of `offer_fill`, in order: the order has not expired
     /// (`SwapError::OrderExpired`), the marker is valid, and the user's
-    /// transfer, the maker's transfer and the marker fit the transaction
+    /// transfer, the market maker's transfer and the marker fit the transaction
     /// budget, all checked before any signature is asked for and failing
     /// with `Retry::Fail`; the prove task fetched a blockhash (its error with
     /// `Retry::Requeue`); the message compiles against it (`Retry::Fail`).
@@ -448,18 +459,18 @@ impl Coordinator {
         order: OrderId,
         marker_lamports: u64,
         expires_at: Instant,
-        [user_transfer, maker_transfer]: [Instruction; 2],
-        latest: Result<(Hash, u64), MakerError>,
-    ) -> Result<(VersionedMessage, u64), (MakerError, Retry)> {
+        [user_transfer, market_maker_transfer]: [Instruction; 2],
+        latest: Result<(Hash, u64), MarketMakerError>,
+    ) -> Result<(VersionedMessage, u64), (MarketMakerError, Retry)> {
         if Instant::now() >= expires_at {
             return Err((
-                MakerError::Swap(SwapError::OrderExpired { order }),
+                MarketMakerError::Swap(SwapError::OrderExpired { order }),
                 Retry::Fail,
             ));
         }
         let marker = order_marker_instruction(&self.identity.payer, order, marker_lamports)
             .map_err(|error| (error.into(), Retry::Fail))?;
-        let transfers = [user_transfer, maker_transfer, marker];
+        let transfers = [user_transfer, market_maker_transfer, marker];
         self.services
             .budget
             .check(&transfers)

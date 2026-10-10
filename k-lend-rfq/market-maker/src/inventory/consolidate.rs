@@ -1,14 +1,14 @@
-//! Consolidation: merging and splitting the maker's own UTXOs of one asset
-//! toward its inventory profile. Explicit consolidations are operations;
-//! upkeep consolidations run only when the maker is idle and yield to any
-//! fill that needs their UTXOs.
+//! Consolidation: merging and splitting the market maker's own UTXOs of one
+//! asset toward its inventory profile. Explicit consolidations are operations;
+//! upkeep consolidations run only when the market maker is idle and yield to
+//! any fill that needs their UTXOs.
 
 use solana_address::Address;
 use solana_signature::Signature;
 
 use crate::{
     api::Inner,
-    error::MakerError,
+    error::MarketMakerError,
     inventory::balance::{
         profile::InventoryProfile,
         reservations::TrackedUtxo,
@@ -49,8 +49,8 @@ impl UpkeepPolicy<'_> {
     /// The upkeep transfer for the available `utxos`, or `None` when they
     /// already match the profile. Surplus UTXOs are merged first; only when
     /// there is none is a UTXO split to create missing targets. Errors with
-    /// `MakerError::AmountOverflow` when the UTXOs sum above `u64::MAX`.
-    pub fn plan(&self, utxos: &[TrackedUtxo]) -> Result<Option<Upkeep>, MakerError> {
+    /// `MarketMakerError::AmountOverflow` when the UTXOs sum above `u64::MAX`.
+    pub fn plan(&self, utxos: &[TrackedUtxo]) -> Result<Option<Upkeep>, MarketMakerError> {
         let utxos: Vec<TrackedUtxo> = utxos
             .iter()
             .filter(|utxo| utxo.amount() > 0)
@@ -60,7 +60,7 @@ impl UpkeepPolicy<'_> {
         let balance = amounts
             .iter()
             .try_fold(0u64, |total, amount| total.checked_add(*amount))
-            .ok_or(MakerError::AmountOverflow {
+            .ok_or(MarketMakerError::AmountOverflow {
                 context: "upkeep balance",
             })?;
         let surplus = self.profile.surplus_utxos(balance, &amounts);
@@ -82,7 +82,8 @@ impl UpkeepPolicy<'_> {
         if inputs < 2 {
             return None;
         }
-        // Only the available UTXOs passed to the planner count, reserved ones are left out.
+        // Only the available UTXOs passed to the planner count, reserved ones
+        // are left out.
         let others = other_amounts(
             utxos
                 .iter()
@@ -95,13 +96,13 @@ impl UpkeepPolicy<'_> {
     }
 
     /// Splits the UTXO furthest above its target into a one-input transfer.
-    fn split(&self, utxos: &[TrackedUtxo]) -> Result<Option<Upkeep>, MakerError> {
+    fn split(&self, utxos: &[TrackedUtxo]) -> Result<Option<Upkeep>, MarketMakerError> {
         let amounts: Vec<u64> = utxos.iter().map(TrackedUtxo::amount).collect();
-        let Some((index, parts)) = self.profile.split(&amounts, max_outputs_for(1))? else {
+        let Some((utxo_index, parts)) = self.profile.split(&amounts, max_outputs_for(1))? else {
             return Ok(None);
         };
         Ok(utxos
-            .get(index)
+            .get(utxo_index)
             .and_then(Selection::single)
             .map(|selection| Upkeep { selection, parts }))
     }
@@ -109,13 +110,16 @@ impl UpkeepPolicy<'_> {
 
 impl Inner {
     /// Consolidates the available UTXOs of `asset` (the largest first, up to
-    /// one transaction's width) into the profile's parts and waits for it
-    /// to land. Errors with `MakerError::NothingToConsolidate` when fewer than
-    /// two UTXOs are available.
-    pub async fn consolidate(&self, asset: Address) -> Result<ConsolidateReceipt, MakerError> {
+    /// one transaction's width) into the profile's parts and waits for it to
+    /// land. Errors with `MarketMakerError::NothingToConsolidate` when fewer
+    /// than two UTXOs are available.
+    pub async fn consolidate(
+        &self,
+        asset: Address,
+    ) -> Result<ConsolidateReceipt, MarketMakerError> {
         match self.operation(Operation::Consolidate(asset)).await? {
             OperationOutcome::Consolidated(receipt) => Ok(receipt),
-            _ => Err(MakerError::UnexpectedOutcome {
+            _ => Err(MarketMakerError::UnexpectedOutcome {
                 expected: "consolidation",
             }),
         }
@@ -129,14 +133,15 @@ impl Coordinator {
         &mut self,
         id: OperationId,
         asset: Address,
-    ) -> Result<ScheduleOutcome, MakerError> {
+    ) -> Result<ScheduleOutcome, MarketMakerError> {
         let available = self.services.pending.reservations.available(&asset);
         if available.len() < 2 {
-            return Err(MakerError::NothingToConsolidate { asset });
+            return Err(MarketMakerError::NothingToConsolidate { asset });
         }
         let selection = select_all(&available, self.services.budget.max_consolidate_inputs);
         let inputs = selection.inputs.len();
-        // Every tracked UTXO of the asset outside the selection counts, reserved ones included.
+        // Every tracked UTXO of the asset outside the selection counts,
+        // reserved ones included.
         let tracked = self.services.pending.reservations.utxos(&asset);
         let others = other_amounts(
             tracked.iter().map(|utxo| (&utxo.utxo_hash, utxo.amount)),
@@ -159,7 +164,7 @@ impl Coordinator {
         operation: Option<OperationId>,
         selection: Selection,
         parts: Vec<u64>,
-    ) -> Result<StepId, MakerError> {
+    ) -> Result<StepId, MarketMakerError> {
         let plan = plan_consolidate(selection, 0, parts)?;
         self.schedule_transfer(TransferStep {
             kind: StepKind::Consolidate,
@@ -212,8 +217,8 @@ impl Coordinator {
     }
 
     /// Discards every unsent upkeep step on `asset` (requeue, error
-    /// `MakerError::Preempted`) so a fill can use its UTXOs. Returns whether
-    /// any was discarded. Sent steps are left to land.
+    /// `MarketMakerError::Preempted`) so a fill can use its UTXOs. Returns
+    /// whether any was discarded. Sent steps are left to land.
     pub async fn preempt_upkeep(&mut self, asset: &Address) -> bool {
         let unsent: Vec<StepId> = self
             .steps
@@ -224,7 +229,7 @@ impl Coordinator {
             .map(|step| step.id)
             .collect();
         for id in &unsent {
-            self.discard(*id, MakerError::Preempted, Retry::Requeue)
+            self.discard(*id, MarketMakerError::Preempted, Retry::Requeue)
                 .await;
         }
         !unsent.is_empty()

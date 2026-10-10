@@ -15,7 +15,7 @@ use k_lend_rfq_sdk::{
 
 use crate::{chain::public_balances, setup::POLL};
 
-/// The maker's net balance of each asset of `pair`: reservations plus
+/// The market maker's net balance of each asset of `pair`: reservations plus
 /// unindexed inflows minus the outflows of unlanded fills.
 pub fn net_holdings(market_maker: &MarketMaker, pair: &Pair) -> Holdings {
     Holdings {
@@ -24,8 +24,8 @@ pub fn net_holdings(market_maker: &MarketMaker, pair: &Pair) -> Holdings {
     }
 }
 
-/// The balance of the maker's public share account: the margin a kVault tail
-/// leaves unshielded and the next tail sweeps.
+/// The balance of the market maker's public share account: the margin a kVault
+/// tail leaves unshielded and the next tail sweeps.
 pub fn share_account(rpc: &SolanaRpc, market_maker: &MarketMaker, pair: &Pair) -> Result<u64> {
     let [_, shares] = public_balances(rpc, &market_maker.address(), pair)?;
     Ok(shares)
@@ -43,8 +43,9 @@ pub fn sweep_cap(paid: u64) -> u64 {
     bps_of(paid, SWEEP_CAP_BPS)
 }
 
-/// `bps` per whole basis point of `paid`, at least 1. The reference the
-/// tests compare the maker with, so it does not call the maker's own math.
+/// `bps` per whole basis point of `paid`, at least 1. The reference the tests
+/// compare the market maker with, so it does not call the market maker's own
+/// math.
 fn bps_of(paid: u64, bps: u64) -> u64 {
     (paid / FULL_BPS).saturating_mul(bps).max(1)
 }

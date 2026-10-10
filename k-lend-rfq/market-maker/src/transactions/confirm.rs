@@ -19,16 +19,16 @@ use super::{
     steps::{OperationId, Step, StepId, StepKind, StepState},
 };
 use crate::{
-    error::MakerError, inventory::balance::reservations::TrackedUtxo,
+    error::MarketMakerError, inventory::balance::reservations::TrackedUtxo,
     inventory::consolidate::ConsolidateReceipt,
 };
 
 /// Steps an operation may run (each with fresh inputs and proof) before it
-/// fails with `MakerError::OperationFailed`; bounds the retries of an
+/// fails with `MarketMakerError::OperationFailed`; bounds the retries of an
 /// operation that fails for a persistent reason.
 const OPERATION_ATTEMPTS: u32 = 3;
 /// Sends of one step before it is aborted: expired sends (each resent on a
-/// fresh blockhash) before `MakerError::NotLanded`, and consecutive sends
+/// fresh blockhash) before `MarketMakerError::NotLanded`, and consecutive sends
 /// that never reached the rpc (`SendOutcome::NotSent`) before their error.
 pub const SEND_ATTEMPTS: usize = 5;
 /// zolana `ShieldedPoolError` codes after which proving the same inputs
@@ -94,12 +94,12 @@ pub struct PolledStatuses {
 
 /// The result of one spawned status poll, carried back by `Event::Polled`.
 pub struct StatusPoll {
-    pub statuses: Result<PolledStatuses, MakerError>,
+    pub statuses: Result<PolledStatuses, MarketMakerError>,
     /// The spent checks the poll resolved, handed back so the loop can finish
     /// the decisions waiting on them.
     pub checks: Vec<SpentCheck>,
     /// The utxo hashes among `checks` whose nullifier PDA exists on-chain.
-    pub spent: Result<Vec<[u8; 32]>, MakerError>,
+    pub spent: Result<Vec<[u8; 32]>, MarketMakerError>,
 }
 
 /// What `Coordinator::discard` does with the operation of an aborted step,
@@ -108,13 +108,14 @@ pub struct StatusPoll {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Disposal {
     /// `Retry::Fail`, or `OPERATION_ATTEMPTS` reached: fail with
-    /// `MakerError::OperationFailed`.
+    /// `MarketMakerError::OperationFailed`.
     Exhausted,
     /// `count` of the step's inputs are no longer tracked (sync saw their
-    /// nullifiers on chain): fail with `MakerError::InputsSpent`.
+    /// nullifiers on chain): fail with `MarketMakerError::InputsSpent`.
     InputsSpent { count: usize },
-    /// Requeue now: the step had no tracked inputs, or the maker is shutting
-    /// down (`requeue` then fails it with `MakerError::ShuttingDown`).
+    /// Requeue now: the step had no tracked inputs, or the market maker is
+    /// shutting down (`requeue` then fails it with
+    /// `MarketMakerError::ShuttingDown`).
     Requeue,
     /// Look up the nullifiers of the tracked inputs first
     /// (`finish_spent_check` decides).
@@ -132,7 +133,7 @@ struct DisposalInput {
     untracked: usize,
     /// The step's inputs the reservations still track.
     tracked: usize,
-    /// Whether the maker is shutting down.
+    /// Whether the market maker is shutting down.
     cancelled: bool,
 }
 
@@ -255,7 +256,7 @@ impl Coordinator {
             match classify(&sends, &statuses, polled.block_height) {
                 StepStatus::Confirmed { signature } => self.on_confirmed(id, signature).await,
                 StepStatus::Failed { reason, custom } => {
-                    self.handle_failure(id, custom, MakerError::TransactionFailed(reason))
+                    self.handle_failure(id, custom, MarketMakerError::TransactionFailed(reason))
                         .await
                 }
                 StepStatus::Expired => self.on_expired(id).await,
@@ -299,8 +300,8 @@ impl Coordinator {
     /// When `spent > 0` inputs of the operation are spent on-chain, its
     /// transaction (or another spender) consumed them. Rerunning it would act
     /// twice, for a rebalance a second deposit or withdrawal, and the outputs
-    /// of a landed transaction reach the inventory through sync anyway, so
-    /// the operation fails with `MakerError::InputsSpent`. Otherwise it is
+    /// of a landed transaction reach the inventory through sync anyway, so the
+    /// operation fails with `MarketMakerError::InputsSpent`. Otherwise it is
     /// requeued. Returns whether it was requeued.
     fn finish_spent_check(&mut self, id: OperationId, spent: usize) -> bool {
         if !self.awaiting_spent_check.remove(&id) {
@@ -310,7 +311,7 @@ impl Coordinator {
             return false;
         };
         if spent > 0 {
-            self.fail(operation, MakerError::InputsSpent { count: spent });
+            self.fail(operation, MarketMakerError::InputsSpent { count: spent });
             return false;
         }
         self.requeue(operation)
@@ -320,7 +321,7 @@ impl Coordinator {
     /// with `ShuttingDown` after cancellation. Returns whether it was queued.
     fn requeue(&mut self, operation: QueuedOperation) -> bool {
         if self.runtime.cancel.is_cancelled() {
-            self.fail(operation, MakerError::ShuttingDown);
+            self.fail(operation, MarketMakerError::ShuttingDown);
             return false;
         }
         match self
@@ -357,7 +358,7 @@ impl Coordinator {
         &mut self,
         id: StepId,
         custom: Option<CustomError>,
-        error: MakerError,
+        error: MarketMakerError,
     ) {
         let Some(step) = self.steps.get(id) else {
             return;
@@ -367,7 +368,7 @@ impl Coordinator {
             .and(step.fill.as_ref())
             .map(|fill| fill.order);
         if let Some(order) = already_filled {
-            let error = MakerError::Swap(SwapError::OrderAlreadyFilled { order });
+            let error = MarketMakerError::Swap(SwapError::OrderAlreadyFilled { order });
             self.abort(id, error, Retry::Fail).await;
             return;
         }
@@ -389,7 +390,7 @@ impl Coordinator {
 
     /// Every send of step `id` expired unlanded. A fill fails (its order
     /// cannot be re-signed); another step is resent, unless its sends are
-    /// exhausted (`SEND_ATTEMPTS`, or a rejected resend) or the maker is
+    /// exhausted (`SEND_ATTEMPTS`, or a rejected resend) or the market maker is
     /// shutting down, in which case it is aborted and requeued.
     /// The caller (`apply_statuses`) has just checked that the step exists.
     async fn on_expired(&mut self, id: StepId) {
@@ -402,7 +403,8 @@ impl Coordinator {
             || step.sends.len() >= SEND_ATTEMPTS
             || self.runtime.cancel.is_cancelled()
         {
-            self.abort(id, MakerError::NotLanded, kind.retry()).await;
+            self.abort(id, MarketMakerError::NotLanded, kind.retry())
+                .await;
         } else {
             self.spawn_send(id);
         }
@@ -457,7 +459,7 @@ impl Coordinator {
     }
 
     /// `discard`s step `id`, then schedules what its release made possible.
-    pub async fn abort(&mut self, id: StepId, error: MakerError, retry: Retry) {
+    pub async fn abort(&mut self, id: StepId, error: MarketMakerError, retry: Retry) {
         self.discard(id, error, retry).await;
         self.try_schedule().await;
     }
@@ -467,14 +469,15 @@ impl Coordinator {
     /// order:
     /// - no operation waits (upkeep, or a fill whose caller is gone): nothing;
     /// - `Retry::Fail` or `OPERATION_ATTEMPTS` reached: fails it now with
-    ///   `MakerError::OperationFailed`;
+    ///   `MarketMakerError::OperationFailed`;
     /// - some of the step's inputs are no longer tracked: sync removed them
     ///   because their nullifiers are on chain, so the step's transaction (or
     ///   another spender) consumed them; fails it now with
-    ///   `MakerError::InputsSpent` counting the untracked inputs, since
+    ///   `MarketMakerError::InputsSpent` counting the untracked inputs, since
     ///   rerunning it could act twice (for a rebalance, a second deposit or
     ///   withdrawal);
-    /// - after cancellation: fails it now with `MakerError::ShuttingDown`;
+    /// - after cancellation: fails it now with
+    ///   `MarketMakerError::ShuttingDown`;
     /// - `Retry::Requeue`: defers the decision to `finish_spent_check`, which
     ///   runs once the next status poll has looked up the nullifier PDAs of
     ///   the step's tracked inputs, because an operation whose inputs were
@@ -489,7 +492,7 @@ impl Coordinator {
     /// the inputs cannot be selected by a new step meanwhile; `drain` releases
     /// what is still held on shutdown (`release_spent_checks`). A step that
     /// never reached the rpc releases them at once.
-    pub async fn discard(&mut self, id: StepId, error: MakerError, retry: Retry) {
+    pub async fn discard(&mut self, id: StepId, error: MarketMakerError, retry: Retry) {
         tracing::warn!(step = id, %error, "aborting step");
         let Some(mut step) = self.steps.remove(id) else {
             return;
@@ -531,11 +534,12 @@ impl Coordinator {
             return;
         };
         match disposal {
-            Disposal::Exhausted => {
-                self.fail(operation, MakerError::OperationFailed { attempts, reason })
-            }
+            Disposal::Exhausted => self.fail(
+                operation,
+                MarketMakerError::OperationFailed { attempts, reason },
+            ),
             Disposal::InputsSpent { count } => {
-                self.fail(operation, MakerError::InputsSpent { count })
+                self.fail(operation, MarketMakerError::InputsSpent { count })
             }
             Disposal::Requeue | Disposal::AwaitSpentCheck => {
                 self.requeue(operation);
@@ -545,14 +549,14 @@ impl Coordinator {
 
     /// Releases what a removed step holds: its UTXO reservations and what
     /// `release_pending` releases.
-    pub fn release_step(&self, step: &mut Step, error: MakerError) {
+    pub fn release_step(&self, step: &mut Step, error: MarketMakerError) {
         self.services.pending.reservations.release(step.id);
         self.release_pending(step, error);
     }
 
     /// Releases a removed step's pending balance entries and answers the
     /// settle channel of a fill with `Err(error)`; its UTXO reservations stay.
-    fn release_pending(&self, step: &mut Step, error: MakerError) {
+    fn release_pending(&self, step: &mut Step, error: MarketMakerError) {
         self.services.pending.settle(step.id);
         if let Some(settle) = step.fill.as_mut().and_then(|fill| fill.settle.take()) {
             let _ = settle.send(Err(error));
@@ -575,10 +579,10 @@ impl Coordinator {
             .iter()
             .filter_map(|hash| self.services.pending.reservations.get(hash))
             .map(|utxo| {
-                let tree = pda::tree(utxo.wallet.tree_id);
+                let tree_pda = pda::tree(utxo.wallet.tree_id);
                 (
                     utxo.utxo_hash(),
-                    pda::nullifier_pda(&tree, &utxo.wallet.nullifier).0,
+                    pda::nullifier_pda(&tree_pda, &utxo.wallet.nullifier).0,
                 )
             })
             .collect()
@@ -613,7 +617,7 @@ impl Coordinator {
 async fn poll_sent(
     sender: &SendQueue,
     sent: Vec<(StepId, Vec<Sent>)>,
-) -> Result<PolledStatuses, MakerError> {
+) -> Result<PolledStatuses, MarketMakerError> {
     if sent.is_empty() {
         return Ok(PolledStatuses {
             steps: Vec::new(),
@@ -647,7 +651,7 @@ async fn poll_sent(
 async fn spent_inputs(
     rpc: &dyn AsyncRpc,
     checks: &[SpentCheck],
-) -> Result<Vec<[u8; 32]>, MakerError> {
+) -> Result<Vec<[u8; 32]>, MarketMakerError> {
     let inputs: Vec<&([u8; 32], Address)> = checks.iter().flat_map(|check| &check.inputs).collect();
     let mut spent = Vec::new();
     for batch in inputs.chunks(ACCOUNTS_BATCH) {
@@ -655,7 +659,7 @@ async fn spent_inputs(
         let accounts = rpc
             .get_multiple_accounts(pdas)
             .await
-            .map_err(MakerError::Rpc)?;
+            .map_err(MarketMakerError::Rpc)?;
         spent.extend(
             batch
                 .iter()
@@ -669,9 +673,12 @@ async fn spent_inputs(
 
 /// Waits until `signature` is confirmed and the indexer has it, polling with
 /// the zolana client's default indexer backoff. Errors with
-/// `MakerError::NotConfirmed` or `MakerError::NotIndexed` when the backoff
-/// runs out first.
-pub async fn confirm_indexed(services: &Services, signature: Signature) -> Result<(), MakerError> {
+/// `MarketMakerError::NotConfirmed` or `MarketMakerError::NotIndexed` when the
+/// backoff runs out first.
+pub async fn confirm_indexed(
+    services: &Services,
+    signature: Signature,
+) -> Result<(), MarketMakerError> {
     let poll = IndexerPollConfig::default();
     let mut confirmed = false;
     for delay in std::iter::once(Duration::ZERO).chain(poll.backoff()) {
@@ -681,14 +688,14 @@ pub async fn confirm_indexed(services: &Services, signature: Signature) -> Resul
                 .rpc
                 .confirm_transaction(signature)
                 .await
-                .map_err(MakerError::Rpc)?;
+                .map_err(MarketMakerError::Rpc)?;
         }
         if confirmed
             && !services
                 .indexer
                 .get_shielded_transactions_by_signature(signature, None)
                 .await
-                .map_err(MakerError::Indexer)?
+                .map_err(MarketMakerError::Indexer)?
                 .transactions
                 .is_empty()
         {
@@ -696,9 +703,9 @@ pub async fn confirm_indexed(services: &Services, signature: Signature) -> Resul
         }
     }
     if confirmed {
-        Err(MakerError::NotIndexed { signature })
+        Err(MarketMakerError::NotIndexed { signature })
     } else {
-        Err(MakerError::NotConfirmed { signature })
+        Err(MarketMakerError::NotConfirmed { signature })
     }
 }
 

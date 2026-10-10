@@ -22,9 +22,9 @@ use k_lend_rfq_test_utils::{
     setup::{setup, TestEnv},
 };
 
-const SEED_DEPOSIT: u64 = 50_000_000;
+const SEED_DEPOSIT_COLLATERAL: u64 = 50_000_000;
 const SEED_COLLATERAL: u64 = 20_000_000;
-const DEPOSIT: u64 = 5_000_000;
+const DEPOSIT_COLLATERAL: u64 = 5_000_000;
 
 /// Invariant 1: recreating the marker of a landed order fails with
 /// `AccountAlreadyInUse`.
@@ -41,11 +41,11 @@ async fn order_marker_prevents_second_fill() -> Result<()> {
     let client = &localnet.client;
     let rpc = client.rpc();
     market_maker
-        .seed_inventory(&pair, SEED_DEPOSIT, SEED_COLLATERAL)
+        .seed_inventory(&pair, SEED_DEPOSIT_COLLATERAL, SEED_COLLATERAL)
         .await?;
 
     let offer = market_maker
-        .quote(&pair, Direction::Deposit, DEPOSIT)
+        .quote(&pair, Direction::Deposit, DEPOSIT_COLLATERAL)
         .await?;
     let order = user.order(client, &pair, &offer).await?;
     let fill = market_maker.fill(&pair, &order.request).await?;
@@ -92,24 +92,24 @@ async fn verify_rejects_marker_for_another_order() -> Result<()> {
     } = setup(21).await?;
     let client = &localnet.client;
     market_maker
-        .seed_inventory(&pair, SEED_DEPOSIT, SEED_COLLATERAL)
+        .seed_inventory(&pair, SEED_DEPOSIT_COLLATERAL, SEED_COLLATERAL)
         .await?;
 
     let offer = market_maker
-        .quote(&pair, Direction::Deposit, DEPOSIT)
+        .quote(&pair, Direction::Deposit, DEPOSIT_COLLATERAL)
         .await?;
     let order = user.order(client, &pair, &offer).await?;
     let fill = market_maker.fill(&pair, &order.request).await?;
     user.verify_quote(&pair, &order, &fill.fill.message)?;
 
-    let [user_transfer, maker_transfer, _marker] =
+    let [user_transfer, market_maker_transfer, _marker] =
         <[_; 3]>::try_from(instructions(&fill.fill.message)?)
             .map_err(|found| anyhow!("expected three instructions, found {}", found.len()))?;
     let other_marker =
         order_marker_instruction(&offer.fee_payer, OrderId::random(), offer.marker_lamports)?;
     let message = compile_message(
         &offer.fee_payer,
-        &[user_transfer, maker_transfer, other_marker],
+        &[user_transfer, market_maker_transfer, other_marker],
         *fill.fill.message.recent_blockhash(),
         SWAP_COMPUTE_BUDGET,
     )?;

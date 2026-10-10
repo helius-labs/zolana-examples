@@ -43,7 +43,7 @@ impl TestWallet {
             .try_into()?;
         let keypair = ShieldedKeypair::from_keypair(SigningKey::from_ed25519_bytes(&seed))?;
         let wallet = Wallet::new(keypair.shielded_address()?, assets.clone())
-            .map_err(|e| anyhow!("wallet of actor {actor}: {e:?}"))?;
+            .map_err(|error| anyhow!("wallet of actor {actor}: {error:?}"))?;
         Ok(Self {
             wallet,
             keypair: Arc::new(keypair),
@@ -73,7 +73,7 @@ impl TestWallet {
 
     pub fn sync(&mut self, indexer: &(impl Rpc + Sync)) -> Result<()> {
         sync_wallet(&mut self.wallet, self.keypair.as_ref(), indexer)
-            .map_err(|e| anyhow!("sync wallet {}: {e:?}", self.keypair.pubkey()))?;
+            .map_err(|error| anyhow!("sync wallet {}: {error:?}", self.keypair.pubkey()))?;
         self.sync_every_event(indexer)
     }
 
@@ -94,12 +94,11 @@ impl TestWallet {
                 Some(PAGE_LIMIT),
                 None,
             )?;
-            transactions.extend(
-                response
-                    .transactions
-                    .into_iter()
-                    .filter(|tx| !tx.proofless && tx.tx_viewing_pk.is_some() && tx.salt.is_some()),
-            );
+            transactions.extend(response.transactions.into_iter().filter(|transaction| {
+                !transaction.proofless
+                    && transaction.tx_viewing_pk.is_some()
+                    && transaction.salt.is_some()
+            }));
             cursor = response.next_cursor;
             if cursor.is_none() {
                 break;

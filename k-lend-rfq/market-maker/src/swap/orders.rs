@@ -1,6 +1,6 @@
-//! The maker's book of open orders. An order exists from its quote until
+//! The market maker's book of open orders. An order exists from its quote until
 //! its first fill attempt or its expiry, and is removed before it is checked,
-//! so no order id can be filled twice by the maker.
+//! so no order id can be filled twice by the market maker.
 
 use std::time::Instant;
 
@@ -10,23 +10,24 @@ use k_lend_rfq_sdk::{
     swap::{OrderId, Quote, SwapError},
 };
 
-/// An order the maker issued in `Inner::quote` and has not yet consumed.
+/// An order the market maker issued in `Inner::quote` and has not yet consumed.
 /// The amounts a fill pays come from `quote`, never from the user's request.
 #[derive(Debug, Clone, Copy)]
 pub struct OpenOrder {
     /// The pair the order was quoted on; a fill must name the same pair.
     pub pair: Pair,
-    /// The amounts and direction the maker committed to.
+    /// The amounts and direction the market maker committed to.
     pub quote: Quote,
     /// The user transfer width the offer advertised; the fill enforces this
-    /// value, not the maker's current maximum.
+    /// value, not the market maker's current maximum.
     pub max_user_inputs: usize,
     /// Issue instant plus the `order_ttl` in force at quote time. The order is
     /// fillable while `Instant::now() < expires_at`.
     pub expires_at: Instant,
 }
 
-/// The orders the maker has issued and not yet consumed, keyed by order id.
+/// The orders the market maker has issued and not yet consumed, keyed by order
+/// id.
 ///
 /// Every order lives here from its quote until its first fill attempt or its
 /// expiry. Expired orders are dropped by `sweep`, which runs on every quote, so
@@ -111,8 +112,8 @@ mod tests {
     };
     const ORDER_TTL: Duration = Duration::from_secs(60);
 
-    /// Invariant 1: a fill naming a second pair the maker serves is refused
-    /// with `OrderPairMismatch`, and the order is gone afterwards.
+    /// Invariant 1: a fill naming a second pair the market maker serves is
+    /// refused with `OrderPairMismatch`, and the order is gone afterwards.
     #[test]
     fn take_rejects_order_of_another_pair() {
         let quoted = Pair::new(Address::new_from_array([10; 32]), COLLATERAL_MINT);

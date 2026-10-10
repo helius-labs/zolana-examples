@@ -1,4 +1,4 @@
-//! The maker's tracked UTXOs and which in-flight step holds each one. A
+//! The market maker's tracked UTXOs and which in-flight step holds each one. A
 //! UTXO is reserved by at most one step at a time, and a UTXO whose
 //! nullifier was seen spent is never tracked again, so no two steps can
 //! spend the same input and a late sync cannot resurrect a spent one.
@@ -7,7 +7,7 @@ use dashmap::{mapref::entry::Entry, DashMap, DashSet};
 use solana_address::Address;
 use zolana_transaction::WalletUtxo;
 
-use crate::{error::MakerError, transactions::steps::StepId};
+use crate::{error::MarketMakerError, transactions::steps::StepId};
 
 /// Operator-facing view of one tracked UTXO.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,11 +20,11 @@ pub struct InventoryUtxo {
     pub reserved: bool,
 }
 
-/// A maker UTXO and, once the indexer has placed it, its leaf index.
+/// A market maker UTXO and, once the indexer has placed it, its leaf index.
 #[derive(Clone)]
 pub struct TrackedUtxo {
     pub wallet: WalletUtxo,
-    /// `None` for the maker's own outputs between landing and indexing;
+    /// `None` for the market maker's own outputs between landing and indexing;
     /// such a UTXO counts in the balance but cannot be proven yet.
     pub leaf_index: Option<u64>,
 }
@@ -83,21 +83,21 @@ impl Reservations {
         self.utxos.get(utxo_hash).map(|entry| entry.value().clone())
     }
 
-    /// Reserves every UTXO of `utxo_hashes` for `step`, or none of them:
-    /// errors with `MakerError::UtxoNotTracked` for an unknown UTXO and
-    /// `MakerError::UtxoReserved` for one another step holds. Re-reserving
-    /// for the same step is allowed.
-    pub fn reserve(&self, step: StepId, utxo_hashes: &[[u8; 32]]) -> Result<(), MakerError> {
+    /// Reserves every UTXO of `utxo_hashes` for `step`, or none of them: errors
+    /// with `MarketMakerError::UtxoNotTracked` for an unknown UTXO and
+    /// `MarketMakerError::UtxoReserved` for one another step holds.
+    /// Re-reserving for the same step is allowed.
+    pub fn reserve(&self, step: StepId, utxo_hashes: &[[u8; 32]]) -> Result<(), MarketMakerError> {
         for hash in utxo_hashes {
             if !self.utxos.contains_key(hash) {
-                return Err(MakerError::UtxoNotTracked(*hash));
+                return Err(MarketMakerError::UtxoNotTracked(*hash));
             }
             if self
                 .reserved
                 .get(hash)
                 .is_some_and(|holder| *holder != step)
             {
-                return Err(MakerError::UtxoReserved(*hash));
+                return Err(MarketMakerError::UtxoReserved(*hash));
             }
         }
         for hash in utxo_hashes {
@@ -193,24 +193,25 @@ impl Reservations {
     }
 
     /// Sum of the amounts of the UTXOs of `asset` no step holds, indexed or
-    /// not. A UTXO without a leaf index is the maker's own output of a landed
-    /// step: it cannot be selected until sync indexes it, but it will be, so
-    /// admission (`PendingBalance::queue`) counts it and scheduling backlogs
-    /// the operation until then (`Coordinator::waits_for_utxos`). Errors with
-    /// `MakerError::AmountOverflow` if the sum overflows `u64`.
-    pub fn unreserved_balance(&self, asset: &Address) -> Result<u64, MakerError> {
+    /// not. A UTXO without a leaf index is the market maker's own output of a
+    /// landed step: it cannot be selected until sync indexes it, but it will
+    /// be, so admission (`PendingBalance::queue`) counts it and scheduling
+    /// backlogs the operation until then (`Coordinator::waits_for_utxos`).
+    /// Errors with `MarketMakerError::AmountOverflow` if the sum overflows
+    /// `u64`.
+    pub fn unreserved_balance(&self, asset: &Address) -> Result<u64, MarketMakerError> {
         self.utxos
             .iter()
             .filter(|entry| self.is_unreserved(asset, entry.key(), entry.value()))
             .try_fold(0u64, |total, entry| total.checked_add(entry.amount()))
-            .ok_or(MakerError::AmountOverflow {
+            .ok_or(MarketMakerError::AmountOverflow {
                 context: "unreserved balance",
             })
     }
 
     /// Sum of the amounts of every tracked UTXO of `asset`: includes reserved
-    /// UTXOs and UTXOs not yet indexed. This is the maker's total holding,
-    /// not what it can spend now.
+    /// UTXOs and UTXOs not yet indexed. This is the market maker's total
+    /// holding, not what it can spend now.
     ///
     /// The sum saturates at `u64::MAX` on purpose: it is an infallible view
     /// for range checks, rebalance sizing and error reports. The tracked

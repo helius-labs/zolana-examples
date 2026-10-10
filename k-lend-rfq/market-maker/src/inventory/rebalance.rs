@@ -1,4 +1,4 @@
-//! Rebalancing the maker's inventory through the vault: a public kVault
+//! Rebalancing the market maker's inventory through the vault: a public kVault
 //! deposit or withdrawal funded by an unshielding transfer and followed by a
 //! shield of the proceeds, in one transaction. Automatic rebalances keep each
 //! asset inside its target range and never push the other asset out of its
@@ -34,7 +34,7 @@ use k_lend_rfq_sdk::{
 use crate::{
     api::{Holdings, Inner, VaultOperation},
     config::TargetRange,
-    error::MakerError,
+    error::MarketMakerError,
     inventory::balance::select::{max_outputs_for, select},
     transactions::{
         confirm::confirm_indexed,
@@ -63,7 +63,7 @@ pub enum RebalanceKind {
 }
 
 impl RebalanceKind {
-    /// The asset of `pair` the maker unshields and hands to the vault.
+    /// The asset of `pair` the market maker unshields and hands to the vault.
     pub fn spent_asset(self, pair: &Pair) -> Address {
         match self {
             Self::Shares => pair.token_mint,
@@ -71,7 +71,7 @@ impl RebalanceKind {
         }
     }
 
-    /// The asset of `pair` the vault pays and the maker shields.
+    /// The asset of `pair` the vault pays and the market maker shields.
     pub fn received_asset(self, pair: &Pair) -> Address {
         match self {
             Self::Shares => pair.shares_mint,
@@ -89,7 +89,7 @@ pub struct RebalanceRequest {
     pub amount: u64,
 }
 
-/// A previewed rebalance, the payload of `Operation::Rebalance`. The preview
+/// A previewed rebalance, carried by `Operation::Rebalance`. The preview
 /// fixes the amount the rebalance spends (`tail.withdrawal`) and the shape
 /// of its transaction, so scheduling it needs no rpc. A requeued attempt
 /// reuses the preview: the shield amount is resolved from a simulation
@@ -102,12 +102,12 @@ pub struct RebalanceOrder {
 }
 
 impl RebalanceOrder {
-    /// The asset the maker unshields and hands to the vault.
+    /// The asset the market maker unshields and hands to the vault.
     pub fn spent_asset(&self) -> Address {
         self.kind.spent_asset(&self.pair)
     }
 
-    /// The amount of the spent asset the rebalance pays to the maker's
+    /// The amount of the spent asset the rebalance pays to the market maker's
     /// public account (`RebalanceTail::withdrawal`).
     pub fn amount(&self) -> u64 {
         self.tail.withdrawal
@@ -154,8 +154,8 @@ enum RebalanceNeed {
 
 /// The situation an automatic rebalance was triggered in: the pair's net
 /// balances and the vault's uninvested tokens and issued shares. A rebalance
-/// that lands changes the balances, so the same key again means the earlier
-/// one failed (or the vault and the maker were otherwise left as they were).
+/// that lands changes the balances, so the same key again means the earlier one
+/// failed (or the vault and the market maker were otherwise left as they were).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BackoffKey {
     balances: Holdings,
@@ -211,12 +211,12 @@ pub enum RangeOutcome {
 pub struct CheckedPair {
     pub pair: Pair,
     pub balances: Holdings,
-    pub outcome: Result<RangeOutcome, MakerError>,
+    pub outcome: Result<RangeOutcome, MarketMakerError>,
 }
 
 /// The vault preview errors that block a rebalance until the vault or the
-/// maker's balances change, rather than failing the range check: retrying
-/// them every tick would only repeat the warning.
+/// market maker's balances change, rather than failing the range check:
+/// retrying them every tick would only repeat the warning.
 fn blocking(error: &anyhow::Error) -> Option<VaultError> {
     error
         .downcast_ref::<VaultError>()
@@ -236,7 +236,7 @@ fn blocking(error: &anyhow::Error) -> Option<VaultError> {
 pub struct RebalanceTail {
     /// The vault state the preview ran against.
     pub before: VaultState,
-    /// Amount of the spent asset the transfer pays to the maker's public
+    /// Amount of the spent asset the transfer pays to the market maker's public
     /// account: the deposit's tokens (crank funds included) or the shares
     /// the withdrawal burns.
     pub withdrawal: u64,
@@ -249,7 +249,7 @@ pub struct RebalanceTail {
 
 impl RebalanceRequest {
     /// The tail of the request against vault state `before`.
-    /// `account_before` is the balance of the maker's account of the
+    /// `account_before` is the balance of the market maker's account of the
     /// received asset, swept by the shield; `plan` splits the shielded
     /// amount, and `also_shield` adds UTXOs of other assets to the shield
     /// instruction. The shielded amount is resolved by `TailShield::resolve`;
@@ -258,18 +258,18 @@ impl RebalanceRequest {
     pub fn tail(
         &self,
         before: VaultState,
-        maker: &Identity,
+        market_maker: &Identity,
         plan: ShieldPlan,
         account_before: u64,
         also_shield: Vec<(Address, u64)>,
-    ) -> Result<RebalanceTail, MakerError> {
+    ) -> Result<RebalanceTail, MarketMakerError> {
         let pair = &self.pair;
-        let user = UserAccounts::associated(maker.payer, pair);
-        let math = |error: anyhow::Error| MakerError::VaultMath {
+        let user = UserAccounts::associated(market_maker.payer, pair);
+        let math = |error: anyhow::Error| MarketMakerError::VaultMath {
             vault: pair.vault,
             reason: error.to_string(),
         };
-        let instruction = |error: KvaultError| MakerError::VaultInstruction {
+        let instruction = |error: KvaultError| MarketMakerError::VaultInstruction {
             vault: pair.vault,
             reason: error.to_string(),
         };
@@ -304,13 +304,13 @@ impl RebalanceRequest {
         let shield = TailShield {
             vault_instruction,
             asset,
-            asset_account: pda::associated_token_address(&maker.payer, &asset),
+            asset_account: pda::associated_token_address(&market_maker.payer, &asset),
             before: account_before,
             plan,
             also_shield,
             compute_units: vault_compute_units(before.reserves.as_slice().len()),
         };
-        let sizing = shield.sizing_instructions(maker)?;
+        let sizing = shield.sizing_instructions(market_maker)?;
         Ok(RebalanceTail {
             before,
             withdrawal,
@@ -320,17 +320,17 @@ impl RebalanceRequest {
     }
 }
 
-/// Previews `request` against `state`: reads the balance of the maker's
+/// Previews `request` against `state`: reads the balance of the market maker's
 /// account of the received asset (swept by the shield) and builds the tail.
-/// Errors with the rpc error, `MakerError::TokenAccount`, or the errors of
-/// `RebalanceRequest::tail`.
+/// Errors with the rpc error, `MarketMakerError::TokenAccount`, or the errors
+/// of `RebalanceRequest::tail`.
 async fn preview(
     rpc: &dyn AsyncRpc,
     identity: &Identity,
     request: RebalanceRequest,
     state: VaultState,
     plan: ShieldPlan,
-) -> Result<RebalanceOrder, MakerError> {
+) -> Result<RebalanceOrder, MarketMakerError> {
     let account_before = token_balance(
         rpc,
         pda::associated_token_address(&identity.payer, &request.kind.received_asset(&request.pair)),
@@ -356,7 +356,7 @@ impl Inner {
         pair: &Pair,
         kind: RebalanceKind,
         amount: u64,
-    ) -> Result<VaultOperation, MakerError> {
+    ) -> Result<VaultOperation, MarketMakerError> {
         self.sync().await?;
         let rpc = self.services.rpc.as_ref();
         let state = read_vault(rpc, pair.vault).await?;
@@ -379,7 +379,7 @@ impl Inner {
                 self.settled(pair, *vault_before, receipt.signature, receipt.inputs)
                     .await
             }
-            _ => Err(MakerError::UnexpectedOutcome {
+            _ => Err(MarketMakerError::UnexpectedOutcome {
                 expected: "rebalance",
             }),
         }
@@ -394,7 +394,7 @@ impl Inner {
         before: VaultState,
         signature: Signature,
         inputs: usize,
-    ) -> Result<VaultOperation, MakerError> {
+    ) -> Result<VaultOperation, MarketMakerError> {
         confirm_indexed(&self.services, signature).await?;
         self.sync().await?;
         let after = read_vault(self.services.rpc.as_ref(), pair.vault).await?;
@@ -410,9 +410,9 @@ impl Inner {
 }
 
 impl Coordinator {
-    /// Schedules the transfer that pays `order.amount()` of the spent asset
-    /// to the maker's public account, followed by the kVault instruction and
-    /// the shield of the received asset, both from the order's preview. No
+    /// Schedules the transfer that pays `order.amount()` of the spent asset to
+    /// the market maker's public account, followed by the kVault instruction
+    /// and the shield of the received asset, both from the order's preview. No
     /// rpc runs here: the shield amount is resolved from a simulation in the
     /// prove task (`TailShield::resolve`), and the transaction is sized with
     /// the widest shield that resolution can produce.
@@ -430,17 +430,17 @@ impl Coordinator {
         &mut self,
         id: OperationId,
         order: &RebalanceOrder,
-    ) -> Result<ScheduleOutcome, MakerError> {
+    ) -> Result<ScheduleOutcome, MarketMakerError> {
         // 1. The preview fixes the amount and the tail's shape.
         let asset = order.spent_asset();
         let tail = &order.tail;
-        let target = WithdrawalTarget {
+        let withdrawal_target = WithdrawalTarget {
             owner: self.identity.payer,
             token_program: pda::spl_token_program_id(),
         };
         // 2. The widest input count that fits next to the public withdrawal
         //    and the tail.
-        let accounts = target.spl_accounts(asset);
+        let accounts = withdrawal_target.spl_accounts(asset);
         let budget = self.services.budget.clone();
         let max_inputs = budget.max_consolidate_inputs_with(1, accounts, &tail.sizing)?;
         // 3. The fewest available UTXOs covering the withdrawal.
@@ -453,17 +453,17 @@ impl Coordinator {
                 .iter()
                 .filter(|utxo| utxo.leaf_index.is_some())
                 .try_fold(0u64, |total, utxo| total.checked_add(utxo.amount()))
-                .ok_or(MakerError::AmountOverflow {
+                .ok_or(MarketMakerError::AmountOverflow {
                     context: "rebalance selectable balance",
                 })?;
             return Err(if total < tail.withdrawal {
-                MakerError::InsufficientBalance {
+                MarketMakerError::InsufficientBalance {
                     asset,
                     available: total,
                     requested: tail.withdrawal,
                 }
             } else {
-                MakerError::FragmentedInventory {
+                MarketMakerError::FragmentedInventory {
                     asset,
                     available: self.services.pending.reservations.balance(&asset),
                     requested: tail.withdrawal,
@@ -474,14 +474,13 @@ impl Coordinator {
         // 4. Split the change toward the profile with the most outputs whose
         //    shape still fits the transaction.
         let inputs = selection.inputs.len();
-        let kept =
-            selection
-                .total
-                .checked_sub(tail.withdrawal)
-                .ok_or(MakerError::AmountOverflow {
-                    context: "rebalance change",
-                })?;
-        // Every tracked UTXO of the asset outside the selection counts, reserved ones included.
+        let kept = selection.total.checked_sub(tail.withdrawal).ok_or(
+            MarketMakerError::AmountOverflow {
+                context: "rebalance change",
+            },
+        )?;
+        // Every tracked UTXO of the asset outside the selection counts,
+        // reserved ones included.
         let tracked = self.services.pending.reservations.utxos(&asset);
         let others = other_amounts(
             tracked.iter().map(|utxo| (&utxo.utxo_hash, utxo.amount)),
@@ -505,7 +504,7 @@ impl Coordinator {
             asset,
             operation: Some(id),
             plan,
-            withdrawal: Some(target),
+            withdrawal: Some(withdrawal_target),
             tail: Some(tail.shield.clone()),
             vault_before: Some(tail.before.clone()),
             fill: None,
@@ -514,7 +513,7 @@ impl Coordinator {
         .map(|_| ScheduleOutcome::Scheduled)
     }
 
-    /// Starts the automatic range check when the maker is idle (nothing
+    /// Starts the automatic range check when the market maker is idle (nothing
     /// queued, no step in flight, no range preview running). Runs no rpc:
     /// it only classifies balances and spawns the preview.
     ///
@@ -615,10 +614,10 @@ impl Coordinator {
     /// Every `Conflict` and `Skip` is counted (`MarketMaker::range_refusals`),
     /// logged or not.
     ///
-    /// An order is queued only if the preview still applies: the maker is
-    /// still idle, the pair is still served unchanged, and both net
-    /// balances equal the ones the preview sized it with. Otherwise it is
-    /// dropped and the next idle tick checks again.
+    /// An order is queued only if the preview still applies: the market maker
+    /// is still idle, the pair is still served unchanged, and both net balances
+    /// equal the ones the preview sized it with. Otherwise it is dropped and
+    /// the next idle tick checks again.
     pub async fn on_ranges_previewed(&mut self, checked: Vec<CheckedPair>) {
         self.preview_in_flight = false;
         for CheckedPair {
@@ -680,8 +679,8 @@ impl Coordinator {
         self.range_warnings.insert(vault, warning);
     }
 
-    /// Whether an order previewed for `pair` at `balances` still applies:
-    /// the maker is idle, the pair is served unchanged and not retiring, and
+    /// Whether an order previewed for `pair` at `balances` still applies: the
+    /// market maker is idle, the pair is served unchanged and not retiring, and
     /// its net balances are still `balances`.
     fn preview_applies(&self, pair: &Pair, balances: Holdings) -> bool {
         self.is_idle()
@@ -783,7 +782,7 @@ impl RangeCandidate {
         self,
         rpc: &dyn AsyncRpc,
         identity: &Identity,
-    ) -> Result<RangeOutcome, MakerError> {
+    ) -> Result<RangeOutcome, MarketMakerError> {
         let state = read_vault(rpc, self.pair.vault).await?;
         let key = BackoffKey {
             balances: self.balances,
@@ -841,14 +840,14 @@ impl RangeCandidate {
 ///
 /// When neither fits, a `blocking` refusal of the deposit, else of the
 /// withdrawal, yields `Skip`; otherwise the result is `Conflict`. Errors of
-/// the conversions return `MakerError::VaultMath`.
+/// the conversions return `MarketMakerError::VaultMath`.
 fn rebalance_need(
     pair: &Pair,
     balances: Holdings,
     collateral_range: Option<TargetRange>,
     shares_range: Option<TargetRange>,
     state: &VaultState,
-) -> Result<RebalanceNeed, MakerError> {
+) -> Result<RebalanceNeed, MarketMakerError> {
     // 1. Classify both assets against their ranges.
     let Holdings { collateral, shares } = balances;
     let too_much_collateral = collateral_range.filter(|range| collateral > range.max());
@@ -867,7 +866,7 @@ fn rebalance_need(
         kind,
         amount,
     };
-    let math = |error: VaultError| MakerError::VaultMath {
+    let math = |error: VaultError| MarketMakerError::VaultMath {
         vault: pair.vault,
         reason: error.to_string(),
     };
@@ -1006,7 +1005,8 @@ mod tests {
 
     use super::*;
 
-    /// 3 tokens per 2 shares: deposits and withdrawals round in the vault's favour.
+    /// 3 tokens per 2 shares: deposits and withdrawals round in the vault's
+    /// favour.
     const STATE: VaultState = VaultState {
         token_mint: Address::new_from_array([1; 32]),
         token_program: Address::new_from_array([2; 32]),

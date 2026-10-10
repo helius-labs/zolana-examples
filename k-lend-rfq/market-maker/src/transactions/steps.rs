@@ -1,5 +1,5 @@
-//! Steps: the unit the coordinator proves, sends and confirms. One step is
-//! one maker transaction (a fill's transfer, a consolidation, a rebalance).
+//! Steps: the unit the coordinator proves, sends and confirms. One step is one
+//! market maker transaction (a fill's transfer, a consolidation, a rebalance).
 //! A step holds its input reservations from admission until it leaves the
 //! table, confirmed or released.
 
@@ -18,7 +18,7 @@ use super::{
     send::Sent,
     shield::{ShieldPlan, REBALANCE_COMPUTE_BUDGET},
 };
-use crate::{error::MakerError, swap::fill::SWAP_COMPUTE_BUDGET};
+use crate::{error::MarketMakerError, swap::fill::SWAP_COMPUTE_BUDGET};
 use k_lend_rfq_sdk::{pair::VaultState, swap::OrderId};
 
 /// Identifies a step for the coordinator's lifetime.
@@ -30,9 +30,9 @@ pub type OperationId = u64;
 /// The transaction a step builds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StepKind {
-    /// The maker's transfer in a swap; sent only after the user signs.
+    /// The market maker's transfer in a swap; sent only after the user signs.
     Fill,
-    /// A transfer of the maker to itself.
+    /// A transfer of the market maker to itself.
     Consolidate,
     /// An unshielding transfer followed by a kVault instruction and a shield.
     Rebalance,
@@ -87,7 +87,7 @@ pub struct FillTransfer {
     /// instant so that backlog, proving and requeues cannot push it out.
     /// No proof is started and no message offered once it has passed.
     pub deadline: Instant,
-    /// Nullifiers of the maker inputs, reported to the user.
+    /// Nullifiers of the market maker inputs, reported to the user.
     pub spends: Vec<[u8; 32]>,
     /// The unsigned swap message, set by `offer_fill`.
     pub message: Option<VersionedMessage>,
@@ -100,11 +100,11 @@ pub struct FillTransfer {
     /// The fully signed swap, set by `on_settle`.
     pub transaction: Option<VersionedTransaction>,
     /// Answers the `settle` call once the swap lands or fails.
-    pub settle: Option<oneshot::Sender<Result<Signature, MakerError>>>,
+    pub settle: Option<oneshot::Sender<Result<Signature, MarketMakerError>>>,
 }
 
 /// The tail of a kVault operation: the kVault instruction and the shield of
-/// the asset it pays to the maker's public account.
+/// the asset it pays to the market maker's public account.
 ///
 /// The `VaultState` preview the operation was sized with is an estimate: the
 /// kVault program charges fees and accrues interest at execution, so the
@@ -117,7 +117,7 @@ pub struct TailShield {
     pub vault_instruction: Instruction,
     /// The mint the kVault instruction pays out.
     pub asset: Address,
-    /// The maker's associated token account of `asset`.
+    /// The market maker's associated token account of `asset`.
     pub asset_account: Address,
     /// The balance of `asset_account` when the operation was scheduled. Up
     /// to a dust cap of it (residuals of earlier tails) is swept by this
@@ -132,7 +132,7 @@ pub struct TailShield {
     pub compute_units: u32,
 }
 
-/// One maker transaction in progress.
+/// One market maker transaction in progress.
 pub struct Step {
     pub id: StepId,
     pub kind: StepKind,
@@ -142,7 +142,7 @@ pub struct Step {
     pub operation: Option<OperationId>,
     /// Commitments of the reserved inputs.
     pub inputs: Vec<[u8; 32]>,
-    /// The maker's own outputs the step creates (change, consolidation).
+    /// The market maker's own outputs the step creates (change, consolidation).
     pub expected_outputs: Vec<WalletUtxo>,
     /// The witness; the prove task proves a copy, so a retry reproves it.
     pub proof: ProofWork,

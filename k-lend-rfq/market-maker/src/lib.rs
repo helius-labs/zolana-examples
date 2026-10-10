@@ -16,12 +16,12 @@ pub use self::{
         ConcurrencyConfig, ConfigError, ConfigUpdate, ConnectionConfig, IdentityConfig,
         MarketMakerConfig, QuoteConfig, RangeChange, RangeUpdate, TargetRange, TokenConfig,
     },
-    error::MakerError,
+    error::MarketMakerError,
     inventory::{
         balance::{profile::InventoryProfile, reservations::InventoryUtxo},
         consolidate::ConsolidateReceipt,
     },
-    swap::fill::{MakerFill, SWAP_COMPUTE_BUDGET},
+    swap::fill::{MarketMakerFill, SWAP_COMPUTE_BUDGET},
     transactions::{
         budget::MAX_COMPUTE_UNITS,
         shield::{vault_compute_units, SHIELD_MARGIN_BPS, SWEEP_CAP_BPS},

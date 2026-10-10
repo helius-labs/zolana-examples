@@ -108,9 +108,9 @@ pub struct GlobalConfigView {
     pub withdrawal_penalty_bps: u64,
 }
 
-/// The klend `Reserve` fields the SDK reads, copied verbatim from the
-/// account; the `_sf` fields are raw `Fraction` bits. They are the inputs of
-/// the reserve's cToken exchange rate (see `price::collateral_to_liquidity_sf`).
+/// The klend `Reserve` fields the SDK reads, copied verbatim from the account;
+/// the `_sf` fields are raw `Fraction` bits. They are the inputs of the
+/// reserve's cToken exchange rate (see `price::collateral_to_liquidity_sf`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReserveView {
     pub lending_market: Address,
@@ -509,9 +509,9 @@ mod tests {
     /// `vault_state` parses account bytes that start at an odd address.
     #[test]
     fn misaligned_vault_state_parses() {
-        let mut buffer = vec![0u8];
-        buffer.extend(zeroed_vault_account());
-        let misaligned = buffer.get(1..).unwrap_or_default();
+        let mut padded_account = vec![0u8];
+        padded_account.extend(zeroed_vault_account());
+        let misaligned = padded_account.get(1..).unwrap_or_default();
         assert_eq!(vault_state(misaligned).ok(), Some(zeroed_view()));
     }
 
@@ -529,8 +529,8 @@ mod tests {
     /// and their lending markets read-only, in allocation order.
     #[test]
     fn deposit_appends_reserves_then_lending_markets() {
-        let (a, b) = (snapshot(), snapshot());
-        let state = two_reserve_state(a, b);
+        let (first_reserve, second_reserve) = (snapshot(), snapshot());
+        let state = two_reserve_state(first_reserve, second_reserve);
         let vault = Address::new_unique();
         let user = user_accounts();
         let instruction = deposit_instruction(&vault, &state, &user, 500);
@@ -555,10 +555,10 @@ mod tests {
                 .and_then(|accounts| accounts.get(13..))
                 .map(<[AccountMeta]>::to_vec),
             Some(vec![
-                AccountMeta::new(a.reserve, false),
-                AccountMeta::new(b.reserve, false),
-                AccountMeta::new_readonly(a.lending_market, false),
-                AccountMeta::new_readonly(b.lending_market, false),
+                AccountMeta::new(first_reserve.reserve, false),
+                AccountMeta::new(second_reserve.reserve, false),
+                AccountMeta::new_readonly(first_reserve.lending_market, false),
+                AccountMeta::new_readonly(second_reserve.lending_market, false),
             ])
         );
         assert!(accounts.is_ok_and(|accounts| accounts
@@ -566,23 +566,25 @@ mod tests {
             .any(|meta| meta.pubkey == state.token_program && !meta.is_writable)));
     }
 
-    /// A withdraw against reserve `b` names `b`'s cToken vault and lending
+    /// A withdraw against the second reserve names its cToken vault and lending
     /// market authority, and ends with the same refresh accounts.
     #[test]
     fn withdraw_against_a_reserve_names_its_accounts() {
-        let (a, b) = (snapshot(), snapshot());
-        let state = two_reserve_state(a, b);
+        let (first_reserve, second_reserve) = (snapshot(), snapshot());
+        let state = two_reserve_state(first_reserve, second_reserve);
         let vault = Address::new_unique();
         let user = user_accounts();
-        let accounts = withdraw_instruction(&vault, &state, &user, &b, 500)
+        let accounts = withdraw_instruction(&vault, &state, &user, &second_reserve, 500)
             .map(|instruction| instruction.accounts)
             .unwrap_or_default();
         let contains = |pubkey: Address| accounts.iter().any(|meta| meta.pubkey == pubkey);
-        assert!(contains(ctoken_vault(&vault, &b.reserve)));
-        assert!(contains(lending_market_authority(&b.lending_market)));
-        assert!(contains(b.liquidity_supply_vault));
-        assert!(contains(b.collateral_mint));
-        assert!(!contains(ctoken_vault(&vault, &a.reserve)));
+        assert!(contains(ctoken_vault(&vault, &second_reserve.reserve)));
+        assert!(contains(lending_market_authority(
+            &second_reserve.lending_market
+        )));
+        assert!(contains(second_reserve.liquidity_supply_vault));
+        assert!(contains(second_reserve.collateral_mint));
+        assert!(!contains(ctoken_vault(&vault, &first_reserve.reserve)));
         assert_eq!(
             accounts
                 .len()
@@ -590,10 +592,10 @@ mod tests {
                 .and_then(|tail| accounts.get(tail..)),
             Some(
                 [
-                    AccountMeta::new(a.reserve, false),
-                    AccountMeta::new(b.reserve, false),
-                    AccountMeta::new_readonly(a.lending_market, false),
-                    AccountMeta::new_readonly(b.lending_market, false),
+                    AccountMeta::new(first_reserve.reserve, false),
+                    AccountMeta::new(second_reserve.reserve, false),
+                    AccountMeta::new_readonly(first_reserve.lending_market, false),
+                    AccountMeta::new_readonly(second_reserve.lending_market, false),
                 ]
                 .as_slice()
             )
@@ -635,11 +637,11 @@ mod tests {
 
     /// A `VaultState` account of zeroes behind the real discriminator.
     fn zeroed_vault_account() -> Vec<u8> {
-        let mut data = vec![0u8; 8 + core::mem::size_of::<VaultState>()];
-        if let Some(discriminator) = data.get_mut(..8) {
+        let mut account_data = vec![0u8; 8 + core::mem::size_of::<VaultState>()];
+        if let Some(discriminator) = account_data.get_mut(..8) {
             discriminator.copy_from_slice(VaultState::SPL_DISCRIMINATOR_SLICE);
         }
-        data
+        account_data
     }
 
     /// The view `vault_state` parses from `zeroed_vault_account`.

@@ -22,7 +22,7 @@ use k_lend_rfq_sdk::{
 
 use crate::{
     config::{ConfigUpdate, IdentityConfig, MarketMakerConfig, Settings},
-    error::MakerError,
+    error::MarketMakerError,
     inventory::balance::{
         pending::PendingBalance,
         reservations::{InventoryUtxo, Reservations},
@@ -30,7 +30,7 @@ use crate::{
         sync::{spawn_sync, AccountSync},
     },
     inventory::{consolidate::ConsolidateReceipt, rebalance::RebalanceKind},
-    swap::{fill::MakerFill, orders::OpenOrders},
+    swap::{fill::MarketMakerFill, orders::OpenOrders},
     transactions::{
         budget::{BudgetError, SwapBudget},
         coordinator::{Coordinator, Runtime, Services},
@@ -42,15 +42,15 @@ use crate::{
 };
 
 /// A balance of both sides of a pair: `MarketMaker::holdings` returns the
-/// maker's tracked balance, reserved and unindexed UTXOs included; the range
-/// checks use the net balances (`PendingBalance::net_balance`).
+/// market maker's tracked balance, reserved and unindexed UTXOs included; the
+/// range checks use the net balances (`PendingBalance::net_balance`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Holdings {
     pub collateral: u64,
     pub shares: u64,
 }
 
-/// A landed public vault operation of the maker (seeding or rebalance).
+/// A landed public vault operation of the market maker (seeding or rebalance).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultOperation {
     /// The vault before, as previewed.
@@ -80,9 +80,9 @@ pub(crate) struct Inner {
     pub(crate) services: Services,
     /// The settings quotes read; the coordinator writes it on update.
     pub(crate) config: Arc<RwLock<Settings>>,
-    /// The widest maker transfer next to the narrowest user transfer,
+    /// The widest market maker transfer next to the narrowest user transfer,
     /// computed once at start.
-    pub(crate) max_maker_inputs: usize,
+    pub(crate) max_market_maker_inputs: usize,
     /// The rent minimum of an empty account, fetched once at start. Each fill
     /// funds its order marker account with it.
     pub(crate) marker_lamports: u64,
@@ -124,19 +124,19 @@ impl MarketMaker {
     /// The vault check (`check_vault`) reads each pair's vault once over the
     /// same pricing path a quote uses (vault, `GlobalConfig`, allocated
     /// reserves) and verifies that the vault's mint is `pair.token_mint` and
-    /// that `pair.shares_mint`, `pair.token_vault` and `pair.authority` are
-    /// the vault's PDAs. A missing or misconfigured vault therefore fails
-    /// here rather than at the first quote: with `MakerError::VaultMissing`
-    /// when the vault account does not exist (or the rpc does not show it
-    /// yet), `MakerError::VaultState` when a pricing account is missing or
-    /// does not parse, and `MakerError::Config(ConfigError::VaultMismatch)`
+    /// that `pair.shares_mint`, `pair.token_vault` and `pair.authority` are the
+    /// vault's PDAs. A missing or misconfigured vault therefore fails here
+    /// rather than at the first quote: with `MarketMakerError::VaultMissing`
+    /// when the vault account does not exist (or the rpc does not show it yet),
+    /// `MarketMakerError::VaultState` when a pricing account is missing or does
+    /// not parse, and `MarketMakerError::Config(ConfigError::VaultMismatch)`
     /// naming the first field that differs.
     ///
-    /// Errors with `MakerError::Config` on an invalid configuration, with
-    /// the vault check errors above, with the rpc, registry or sync error,
-    /// and with `MakerError::Budget` when not even the narrowest swap fits
+    /// Errors with `MarketMakerError::Config` on an invalid configuration, with
+    /// the vault check errors above, with the rpc, registry or sync error, and
+    /// with `MarketMakerError::Budget` when not even the narrowest swap fits
     /// one transaction.
-    pub async fn start(config: MarketMakerConfig) -> Result<Self, MakerError> {
+    pub async fn start(config: MarketMakerConfig) -> Result<Self, MarketMakerError> {
         let MarketMakerConfig {
             connection,
             identity:
@@ -184,17 +184,18 @@ impl MarketMaker {
         )?;
         account.run_once().await?;
 
-        // A consolidation pays one output back to the maker.
+        // A consolidation pays one output back to the market maker.
         let budget = Arc::new(SwapBudget::new(identity.payer, identity.tree, 1)?);
         // Fails start when not even the narrowest swap fits one transaction;
         // each quote sizes its own user width later.
-        budget.max_user_inputs(budget.narrowest_maker()?)?.ok_or(
-            BudgetError::NoSupportedShape {
+        budget
+            .max_user_inputs(budget.narrowest_market_maker()?)?
+            .ok_or(BudgetError::NoSupportedShape {
                 inputs: 1,
                 outputs: USER_OUTPUTS,
-            },
-        )?;
-        let max_maker_inputs = budget.max_maker_inputs(&budget.narrowest_user_transfer()?)?;
+            })?;
+        let max_market_maker_inputs =
+            budget.max_market_maker_inputs(&budget.narrowest_user_transfer()?)?;
 
         let proofs = Arc::new(ProofQueue::new(ProofQueueConfig {
             authority: identity.authority.clone(),
@@ -242,7 +243,7 @@ impl MarketMaker {
                 runtime,
                 services,
                 config: shared_config,
-                max_maker_inputs,
+                max_market_maker_inputs,
                 marker_lamports,
                 registry,
                 account,
@@ -277,10 +278,10 @@ impl MarketMaker {
         self.inner.runtime.tasks.wait().await;
     }
 
-    /// Operator-facing: the maker's balance of `asset` as quoting sees it, in
-    /// base units of `asset`. Reflects the `Reservations` balance plus user
-    /// payments of admitted fills not yet indexed minus payouts of fills not
-    /// yet landed; the number quotes are range-checked against.
+    /// Operator-facing: the market maker's balance of `asset` as quoting sees
+    /// it, in base units of `asset`. Reflects the `Reservations` balance plus
+    /// user payments of admitted fills not yet indexed minus payouts of fills
+    /// not yet landed; the number quotes are range-checked against.
     pub fn net_balance(&self, asset: &Address) -> u64 {
         self.inner.services.pending.net_balance(asset)
     }
@@ -296,8 +297,8 @@ impl MarketMaker {
     }
 
     /// Operator-facing: number of automatic rebalances triggered since start,
-    /// that is how many public kVault operations the maker has initiated on
-    /// its own. Counted when the rebalance is queued, so it includes
+    /// that is how many public kVault operations the market maker has initiated
+    /// on its own. Counted when the rebalance is queued, so it includes
     /// rebalances still in flight and ones that later fail; `rebalances` lists
     /// only the landed ones, so the difference is what is pending or failed.
     pub fn triggered_rebalances(&self) -> usize {
@@ -313,14 +314,14 @@ impl MarketMaker {
         self.inner.services.pending.range_refusals()
     }
 
-    /// Operator-facing: the maker's shielded address, which users pay in
-    /// their transfers and which receives every maker change output. Fixed at
-    /// start from `IdentityConfig::keys`.
+    /// Operator-facing: the market maker's shielded address, which users pay in
+    /// their transfers and which receives every market maker change output.
+    /// Fixed at start from `IdentityConfig::keys`.
     pub fn identity(&self) -> ShieldedAddress {
         self.inner.identity.own
     }
 
-    /// The maker's public key: fee payer of every swap and owner of its
+    /// The market maker's public key: fee payer of every swap and owner of its
     /// public token accounts.
     pub fn address(&self) -> Address {
         self.inner.identity.payer
@@ -345,15 +346,17 @@ impl MarketMaker {
             .runtime
             .events
             .send(crate::transactions::coordinator::Event::OpenFills { reply })
-            .map_err(|_| MakerError::ShuttingDown)?;
-        Ok(count.await.map_err(|_| MakerError::CoordinatorStopped)?)
+            .map_err(|_| MarketMakerError::ShuttingDown)?;
+        Ok(count
+            .await
+            .map_err(|_| MarketMakerError::CoordinatorStopped)?)
     }
 
-    /// Operator-facing: the maker's total holding of both sides of `pair`, in
-    /// base units of each mint. Reflects every tracked UTXO in `Reservations`,
-    /// reserved and not yet indexed ones included, so it is what the maker
-    /// owns, not what it can spend now or what quotes are checked against
-    /// (see `net_balance`).
+    /// Operator-facing: the market maker's total holding of both sides of
+    /// `pair`, in base units of each mint. Reflects every tracked UTXO in
+    /// `Reservations`, reserved and not yet indexed ones included, so it is
+    /// what the market maker owns, not what it can spend now or what quotes are
+    /// checked against (see `net_balance`).
     pub fn holdings(&self, pair: &Pair) -> Holdings {
         let reservations = &self.inner.services.pending.reservations;
         Holdings {
@@ -363,17 +366,17 @@ impl MarketMaker {
     }
 
     /// Operator-facing: every tracked UTXO of `asset`, largest first, with its
-    /// amount in base units and whether an in-flight step reserves it.
-    /// Reflects `Reservations`, not-yet-indexed maker outputs included; use it
-    /// to see how fragmented the inventory is before a `consolidate`.
+    /// amount in base units and whether an in-flight step reserves it. Reflects
+    /// `Reservations`, not-yet-indexed market maker outputs included; use it to
+    /// see how fragmented the inventory is before a `consolidate`.
     pub fn utxos(&self, asset: &Address) -> Vec<InventoryUtxo> {
         self.inner.services.pending.reservations.utxos(asset)
     }
 
     /// Operator-facing: the indexed UTXOs of `asset` as wallet UTXOs (leaf
     /// index and nullifier known), reserved ones included; amounts in base
-    /// units. Unlike `utxos` it leaves out maker outputs sync has not indexed
-    /// yet.
+    /// units. Unlike `utxos` it leaves out market maker outputs sync has not
+    /// indexed yet.
     pub fn spendable(&self, asset: &Address) -> Vec<WalletUtxo> {
         self.inner.services.pending.reservations.spendable(asset)
     }
@@ -389,7 +392,7 @@ impl MarketMaker {
     }
 
     /// Fills an open order; see `Inner::fill` for the checks.
-    pub async fn fill(&self, pair: &Pair, request: &SwapRequest) -> Result<MakerFill> {
+    pub async fn fill(&self, pair: &Pair, request: &SwapRequest) -> Result<MarketMakerFill> {
         self.inner.fill(pair, request).await
     }
 
@@ -402,14 +405,14 @@ impl MarketMaker {
     /// Operator-facing: merges the available UTXOs of `asset` into the
     /// profile's parts in one transfer and returns once it landed, with the
     /// signature and the number of UTXOs spent and created. Errors with
-    /// `MakerError::NothingToConsolidate` when fewer than two UTXOs are
+    /// `MarketMakerError::NothingToConsolidate` when fewer than two UTXOs are
     /// available; see `Inner::consolidate`.
     pub async fn consolidate(&self, asset: Address) -> Result<ConsolidateReceipt> {
         Ok(self.inner.consolidate(asset).await?)
     }
 
-    /// Funds the shielded inventory from the maker's public accounts; see
-    /// `Inner::seed_inventory`.
+    /// Funds the shielded inventory from the market maker's public accounts;
+    /// see `Inner::seed_inventory`.
     pub async fn seed_inventory(
         &self,
         pair: &Pair,

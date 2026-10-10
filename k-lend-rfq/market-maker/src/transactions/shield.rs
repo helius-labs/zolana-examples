@@ -1,4 +1,4 @@
-//! Shielding: moving tokens from the maker's public accounts into its
+//! Shielding: moving tokens from the market maker's public accounts into its
 //! shielded inventory, and the tail of a rebalance (kVault instruction plus
 //! shield of its proceeds). A tail shields what a simulation shows the
 //! vault paid, never the preview, so a vault price that drifted between
@@ -14,7 +14,7 @@ use k_lend_rfq_sdk::swap::FULL_BPS;
 
 use crate::{
     config::Settings,
-    error::MakerError,
+    error::MarketMakerError,
     inventory::balance::{profile::InventoryProfile, reservations::Reservations},
     transactions::{
         budget::MAX_COMPUTE_UNITS,
@@ -31,7 +31,7 @@ pub const REBALANCE_COMPUTE_BUDGET: ComputeBudgetConfig =
     ComputeBudgetConfig::new(MAX_COMPUTE_UNITS);
 
 /// Compute units of a transaction carrying a kVault deposit or withdraw on a
-/// vault without allocated reserves: the transact that pays the maker's
+/// vault without allocated reserves: the transact that pays the market maker's
 /// account (proof verification), the kVault instruction and the shield. On
 /// localnet such a rebalance simulates at about 240_000 units without the
 /// shield, and a seed's deposit plus shield at about 112_000; the base keeps
@@ -45,9 +45,9 @@ const VAULT_BASE_COMPUTE_UNITS: u32 = 700_000;
 /// consumed 129_812 units, of which the klend refresh CPI took 33_125 (about
 /// 11_000 per reserve), against about 72_000 for a deposit into a vault
 /// without reserves on localnet, so about 19_000 per reserve in total; 50_000
-/// keeps a margin over both (`market-maker/tests/mainnet_vault.rs`).
+/// keeps a margin over both (`market-market_maker/tests/mainnet_vault.rs`).
 /// `VAULT_BASE_COMPUTE_UNITS` plus this times the reserve count must stay
-/// under `MAX_COMPUTE_UNITS` for the vaults the maker serves: with these
+/// under `MAX_COMPUTE_UNITS` for the vaults the market maker serves: with these
 /// values `(1_400_000 - 700_000) / 50_000`, up to 14 reserves.
 const RESERVE_REFRESH_COMPUTE_UNITS: u32 = 50_000;
 
@@ -67,21 +67,21 @@ pub fn vault_compute_units(reserves: usize) -> u32 {
         .map_or(MAX_COMPUTE_UNITS, |units| units.min(MAX_COMPUTE_UNITS))
 }
 
-/// Basis points of a simulated kVault payout `delta` the tail does not
-/// shield, the shield margin `bps_of(delta, SHIELD_MARGIN_BPS)`. It covers
-/// the interest an invested vault accrues between the simulation and the
-/// execution, which lowers the shares a deposit mints; a shield of the full
-/// simulated amount would then exceed the account balance and fail the
-/// transaction. The residual stays in the maker's account and the next tail
-/// sweeps it (`TailShield::before`, read when that operation is scheduled).
+/// Basis points of a simulated kVault payout `delta` the tail does not shield,
+/// the shield margin `bps_of(delta, SHIELD_MARGIN_BPS)`. It covers the interest
+/// an invested vault accrues between the simulation and the execution, which
+/// lowers the shares a deposit mints; a shield of the full simulated amount
+/// would then exceed the account balance and fail the transaction. The residual
+/// stays in the market maker's account and the next tail sweeps it
+/// (`TailShield::before`, read when that operation is scheduled).
 pub const SHIELD_MARGIN_BPS: u64 = 1;
 /// Basis points of a tail's own payout `delta` up to which it sweeps the
-/// balance that was in the maker's account before the operation, the sweep
-/// cap `bps_of(delta, SWEEP_CAP_BPS)`. Ten times the margin a single tail
+/// balance that was in the market maker's account before the operation, the
+/// sweep cap `bps_of(delta, SWEEP_CAP_BPS)`. Ten times the margin a single tail
 /// leaves, so the residual of an earlier tail is cleared even after a few
-/// skipped sweeps. Anything above the cap is not dust but the operator's
-/// public float (for example the collateral a withdraw pays into) and stays
-/// in the account.
+/// skipped sweeps. Anything above the cap is not dust but the operator's public
+/// float (for example the collateral a withdraw pays into) and stays in the
+/// account.
 pub const SWEEP_CAP_BPS: u64 = 10;
 
 /// `max(1, floor(delta / FULL_BPS) * bps)`.
@@ -121,10 +121,11 @@ impl ShieldPlan {
 
 impl Identity {
     /// A zolana `deposit` of `utxos`, one per `(mint, amount)`, from the
-    /// maker's public accounts to new UTXOs of its own shielded address in
-    /// its tree, tagged with its viewing key so sync finds them. Errors with
-    /// `MakerError::ShieldInstruction` when the zolana builder rejects it.
-    pub fn shield(&self, utxos: Vec<(Address, u64)>) -> Result<Instruction, MakerError> {
+    /// market maker's public accounts to new UTXOs of its own shielded address
+    /// in its tree, tagged with its viewing key so sync finds them. Errors with
+    /// `MarketMakerError::ShieldInstruction` when the zolana builder rejects
+    /// it.
+    pub fn shield(&self, utxos: Vec<(Address, u64)>) -> Result<Instruction, MarketMakerError> {
         let owner = self.own.owner_hash()?;
         let view_tag = self.own.viewing_pubkey.x();
         Deposit {
@@ -146,7 +147,7 @@ impl Identity {
                 .collect(),
         }
         .instruction()
-        .map_err(|error| MakerError::ShieldInstruction(error.to_string()))
+        .map_err(|error| MarketMakerError::ShieldInstruction(error.to_string()))
     }
 }
 
@@ -157,7 +158,7 @@ impl TailShield {
         &self,
         identity: &Identity,
         amount: u64,
-    ) -> Result<Vec<Instruction>, MakerError> {
+    ) -> Result<Vec<Instruction>, MarketMakerError> {
         self.with_shield(identity, self.plan.amounts(amount))
     }
 
@@ -167,7 +168,10 @@ impl TailShield {
     /// transaction sized with it fits whatever amount the simulation
     /// resolves; the part amounts do not change the instruction's size, so
     /// placeholders of 1 stand in for them.
-    pub fn sizing_instructions(&self, identity: &Identity) -> Result<Vec<Instruction>, MakerError> {
+    pub fn sizing_instructions(
+        &self,
+        identity: &Identity,
+    ) -> Result<Vec<Instruction>, MarketMakerError> {
         self.with_shield(identity, vec![1; self.plan.max_utxos.max(1)])
     }
 
@@ -177,7 +181,7 @@ impl TailShield {
         &self,
         identity: &Identity,
         parts: Vec<u64>,
-    ) -> Result<Vec<Instruction>, MakerError> {
+    ) -> Result<Vec<Instruction>, MarketMakerError> {
         let shield = identity.shield(
             parts
                 .into_iter()
@@ -196,8 +200,8 @@ impl TailShield {
     /// balance stays in the account. Fails with `NothingToShield` if the
     /// simulation pays nothing into the account (`after <= before`) or the
     /// margin takes the whole amount.
-    pub fn amount(&self, after: u64) -> Result<u64, MakerError> {
-        let nothing = || MakerError::NothingToShield {
+    pub fn amount(&self, after: u64) -> Result<u64, MarketMakerError> {
+        let nothing = || MarketMakerError::NothingToShield {
             asset: self.asset,
             account: self.asset_account,
         };
@@ -206,7 +210,7 @@ impl TailShield {
             .filter(|delta| *delta > 0)
             .ok_or_else(nothing)?;
         let received = delta.checked_sub(bps_of(delta, SHIELD_MARGIN_BPS)).ok_or(
-            MakerError::AmountOverflow {
+            MarketMakerError::AmountOverflow {
                 context: "tail shield margin",
             },
         )?;
@@ -214,7 +218,7 @@ impl TailShield {
             .before
             .min(bps_of(delta, SWEEP_CAP_BPS))
             .checked_add(received)
-            .ok_or(MakerError::AmountOverflow {
+            .ok_or(MarketMakerError::AmountOverflow {
                 context: "tail shield amount",
             })?;
         if amount == 0 {
@@ -226,13 +230,13 @@ impl TailShield {
 
     /// Resolves the tail to the instructions that are sent:
     ///
-    /// 1. simulate `head` (the transact that pays the maker's account, if
-    ///    any), the kVault instruction and the `also_shield` shield, with the
-    ///    tail's compute units, so the simulation fails where the transaction
-    ///    would (`MakerError::SimulationFailed`);
+    /// 1. simulate `head` (the transact that pays the market maker's account,
+    ///    if any), the kVault instruction and the `also_shield` shield, with
+    ///    the tail's compute units, so the simulation fails where the
+    ///    transaction would (`MarketMakerError::SimulationFailed`);
     /// 2. read the simulated balance of `asset_account`; the shield amount
     ///    is derived from it by [`TailShield::amount`]
-    ///    (`MakerError::NothingToShield` when the vault paid nothing);
+    ///    (`MarketMakerError::NothingToShield` when the vault paid nothing);
     /// 3. return the kVault instruction and one shield of that amount split
     ///    by `plan`, plus `also_shield`.
     ///
@@ -243,7 +247,7 @@ impl TailShield {
         sender: &SendQueue,
         identity: &Identity,
         head: Option<&Instruction>,
-    ) -> Result<Vec<Instruction>, MakerError> {
+    ) -> Result<Vec<Instruction>, MarketMakerError> {
         let mut instructions: Vec<Instruction> = head
             .into_iter()
             .cloned()
@@ -376,7 +380,7 @@ mod tests {
         ] {
             let refused = tail(before).amount(after);
             assert!(
-                matches!(refused, Err(MakerError::NothingToShield { .. })),
+                matches!(refused, Err(MarketMakerError::NothingToShield { .. })),
                 "{label}: got {refused:?}, want NothingToShield"
             );
         }

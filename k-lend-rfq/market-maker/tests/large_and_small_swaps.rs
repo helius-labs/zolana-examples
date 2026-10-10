@@ -2,10 +2,11 @@
 //! 1. Upkeep splits the seeded shares into the configured profile: the three
 //!    largest UTXOs are `shares / 4`, `shares / 8` and `shares / 16`.
 //! 2. A large swap running alongside small ones is filled with
-//!    `LARGE_SWAP_INPUTS` maker inputs while each small swap spends one, and
-//!    no UTXO is spent by two swaps.
+//!    `LARGE_SWAP_INPUTS` market maker inputs while each small swap spends one,
+//!    and no UTXO is spent by two swaps.
 //! 3. Every swap lands; each user holds the quoted shares and the rest of its
-//!    collateral, and the maker's holdings move by exactly the swapped amounts.
+//!    collateral, and the market maker's holdings move by exactly the swapped
+//!    amounts.
 
 use std::{
     cmp::Reverse,
@@ -32,7 +33,7 @@ use k_lend_rfq_sdk::{
 use k_lend_rfq_test_utils::{
     chain::{blocking, compute_units, confirm_indexed},
     market_maker::share_account,
-    setup::{setup_with, SetupConfig, TestEnv, POLL, SEED_DEPOSIT},
+    setup::{setup_with, SetupConfig, TestEnv, POLL, SEED_DEPOSIT_COLLATERAL},
     sync::wait_or_timeout,
     user::User,
 };
@@ -50,8 +51,8 @@ const LARGE_SWAP_INPUTS: usize = 2;
 const BUILD_TIMEOUT: Duration = Duration::from_secs(240);
 
 /// Invariants 1-3: one large and four small deposits fill concurrently from
-/// disjoint UTXOs of the upkept profile, the large one with two maker inputs,
-/// and all of them land.
+/// disjoint UTXOs of the upkept profile, the large one with two market maker
+/// inputs, and all of them land.
 #[tokio::test(flavor = "multi_thread", worker_threads = 12)]
 async fn large_swap_fills_from_large_utxos_while_small_swaps_run() -> Result<()> {
     let concurrency = ConcurrencyConfig::default();
@@ -81,8 +82,11 @@ async fn large_swap_fills_from_large_utxos_while_small_swaps_run() -> Result<()>
         ..SetupConfig::new(TEST_NUMBER)
     })
     .await?;
-    let seeded = market_maker.seed_inventory(&pair, SEED_DEPOSIT, 0).await?;
-    // The seed's tail leaves a margin of the minted shares in the public share account.
+    let seeded = market_maker
+        .seed_inventory(&pair, SEED_DEPOSIT_COLLATERAL, 0)
+        .await?;
+    // The seed's tail leaves a margin of the minted shares in the public share
+    // account.
     let shielded = seeded.shares - share_account(localnet.client.rpc(), &market_maker, &pair)?;
     // Invariant 1: upkeep builds the configured profile.
     let built = Instant::now();
@@ -147,7 +151,7 @@ async fn large_swap_fills_from_large_utxos_while_small_swaps_run() -> Result<()>
     let rpc = localnet.client.rpc();
     let large_signature = large.signature;
     println!(
-        "large swap of {} USDC: {} maker inputs, {} of {} bytes, {} of {} addresses, user cap {} inputs, {} CU",
+        "large swap of {} USDC: {} market maker inputs, {} of {} bytes, {} of {} addresses, user cap {} inputs, {} CU",
         large.quote.amount_in,
         large.inputs,
         large.bytes,
@@ -201,8 +205,8 @@ struct Swapped {
     signature: Signature,
 }
 
-/// Syncs the maker until it holds `utxos` unreserved share UTXOs, or fails
-/// after `BUILD_TIMEOUT`.
+/// Syncs the market maker until it holds `utxos` unreserved share UTXOs, or
+/// fails after `BUILD_TIMEOUT`.
 async fn wait_for_utxos(market_maker: &MarketMaker, pair: &Pair, utxos: usize) -> Result<()> {
     let deadline = Instant::now() + BUILD_TIMEOUT;
     loop {

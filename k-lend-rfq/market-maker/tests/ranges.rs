@@ -1,27 +1,29 @@
 //! Tested invariants:
-//! 1. The maker refuses a quote whose fill would push an asset's net balance
-//!    outside its target range, with `OutsideTargetRange` naming that balance.
+//! 1. The market maker refuses a quote whose fill would push an asset's net
+//!    balance outside its target range, with `OutsideTargetRange` naming that
+//!    balance.
 //! 2. Of two concurrent fills that each fit the range alone but not together,
 //!    exactly one is admitted; the other is refused with `OutsideTargetRange`.
-//! 3. A landed swap moves the user's holdings and the maker's net balance by
-//!    exactly the quoted `amount_in` and `amount_out`, without a rebalance.
+//! 3. A landed swap moves the user's holdings and the market maker's net
+//!    balance by exactly the quoted `amount_in` and `amount_out`, without a
+//!    rebalance.
 //! 4. A net balance above the range triggers one automatic rebalance that
 //!    brings both assets back inside their ranges.
-//! 5. A kVault operation shields what it paid into the maker's share
+//! 5. A kVault operation shields what it paid into the market maker's share
 //!    account except a margin of `max(1, 1 bps)` (exact on the uninvested
 //!    localnet vault, whose simulation matches the execution), and the next
 //!    one sweeps that residual up to 10 bps of its own payout.
-//! 6. With both assets above their max at once, no rebalance fits both
-//!    ranges: after at least `REFUSED_CHECKS` range checks found the pair out
-//!    of range, the maker has triggered none and its public balances and the
-//!    vault are unchanged.
+//! 6. With both assets above their max at once, no rebalance fits both ranges:
+//!    after at least `REFUSED_CHECKS` range checks found the pair out of range,
+//!    the market maker has triggered none and its public balances and the vault
+//!    are unchanged.
 
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use zolana_client::{SolanaRpc, ZolanaClient};
 
-use k_lend_market_maker::{Holdings, MakerFill, MarketMaker, TargetRange, TokenConfig};
+use k_lend_market_maker::{Holdings, MarketMaker, MarketMakerFill, TargetRange, TokenConfig};
 use k_lend_rfq_sdk::{
     pair::Pair,
     swap::{Direction, Quote, SwapError},
@@ -31,7 +33,9 @@ use k_lend_rfq_test_utils::{
     assert::assert_swap_error,
     chain::{confirm_indexed, public_balances, read_vault},
     market_maker::{net_holdings, share_account, shield_margin, sweep_cap, wait_for_rebalance},
-    setup::{setup_with, SetupConfig, TestEnv, REBALANCE_TIMEOUT, SEED_DEPOSIT, SETTLE_GRACE},
+    setup::{
+        setup_with, SetupConfig, TestEnv, REBALANCE_TIMEOUT, SEED_DEPOSIT_COLLATERAL, SETTLE_GRACE,
+    },
     user::User,
 };
 
@@ -91,7 +95,7 @@ async fn target_ranges_bound_quotes_and_trigger_rebalances() -> Result<()> {
 
     // Invariant 5: the seed shields all it minted but the margin.
     let seeded = market_maker
-        .seed_inventory(&pair, SEED_DEPOSIT, SEED_COLLATERAL)
+        .seed_inventory(&pair, SEED_DEPOSIT_COLLATERAL, SEED_COLLATERAL)
         .await?;
     let share_account_after_seed = share_account(rpc, &market_maker, &pair)?;
     assert_eq!(share_account_after_seed, shield_margin(seeded.shares));
@@ -99,7 +103,7 @@ async fn target_ranges_bound_quotes_and_trigger_rebalances() -> Result<()> {
     let want_shares = seeded.shares - share_account_after_seed;
     assert_eq!(
         shares_after_seed, want_shares,
-        "maker shares after the seed: got {shares_after_seed}, want {want_shares}"
+        "market maker shares after the seed: got {shares_after_seed}, want {want_shares}"
     );
     let collateral_after_seed = market_maker.net_balance(&pair.token_mint);
     let vault_after_seed = read_vault(rpc, &pair)?;
@@ -154,11 +158,11 @@ async fn target_ranges_bound_quotes_and_trigger_rebalances() -> Result<()> {
         collateral_after_seed + deposit.amount_in + redeposit.amount_in - withdrawal.amount_out;
     assert_eq!(
         collateral, want,
-        "maker collateral after three swaps: got {collateral}, want {want}"
+        "market maker collateral after three swaps: got {collateral}, want {want}"
     );
     assert!(
         collateral_range.contains(collateral),
-        "maker collateral after three swaps: got {collateral}, want within {collateral_range:?}"
+        "market maker collateral after three swaps: got {collateral}, want within {collateral_range:?}"
     );
 
     // Invariant 2: of two concurrent fills only one fits the range.
@@ -170,7 +174,7 @@ async fn target_ranges_bound_quotes_and_trigger_rebalances() -> Result<()> {
             .quote(&pair, Direction::Deposit, SMALL_COLLATERAL)
             .await?,
     ];
-    let maker_before = net_holdings(&market_maker, &pair);
+    let market_maker_before = net_holdings(&market_maker, &pair);
     let third_before = third.holdings(&pair)?;
     let fourth_before = fourth.holdings(&pair)?;
     let [first_offer, second_offer] = quotes;
@@ -214,7 +218,7 @@ async fn target_ranges_bound_quotes_and_trigger_rebalances() -> Result<()> {
         min: collateral_range.min(),
         max: collateral_range.max(),
     };
-    assert_swap_error::<MakerFill>(Err(refused), &format!("{outside:?}"), |error| {
+    assert_swap_error::<MarketMakerFill>(Err(refused), &format!("{outside:?}"), |error| {
         *error == outside
     });
 
@@ -228,18 +232,18 @@ async fn target_ranges_bound_quotes_and_trigger_rebalances() -> Result<()> {
             shares: user_before.shares + offer.quote.amount_out,
         }
     );
-    let maker_after = net_holdings(&market_maker, &pair);
+    let market_maker_after = net_holdings(&market_maker, &pair);
     assert_eq!(
-        maker_after,
+        market_maker_after,
         Holdings {
-            collateral: maker_before.collateral + offer.quote.amount_in,
-            shares: maker_before.shares - offer.quote.amount_out,
+            collateral: market_maker_before.collateral + offer.quote.amount_in,
+            shares: market_maker_before.shares - offer.quote.amount_out,
         }
     );
     assert!(
-        collateral_range.contains(maker_after.collateral),
-        "maker collateral after the admitted fill: got {}, want within {collateral_range:?}",
-        maker_after.collateral
+        collateral_range.contains(market_maker_after.collateral),
+        "market maker collateral after the admitted fill: got {}, want within {collateral_range:?}",
+        market_maker_after.collateral
     );
     assert_eq!(market_maker.rebalances(), Vec::new());
 
@@ -247,7 +251,7 @@ async fn target_ranges_bound_quotes_and_trigger_rebalances() -> Result<()> {
     market_maker
         .seed_inventory(&pair, 0, OUTSIDE_COLLATERAL)
         .await?;
-    let accumulated = maker_after.collateral + OUTSIDE_COLLATERAL;
+    let accumulated = market_maker_after.collateral + OUTSIDE_COLLATERAL;
     assert!(
         accumulated > collateral_range.max(),
         "accumulated collateral: got {accumulated}, want above {}",
@@ -275,17 +279,18 @@ async fn target_ranges_bound_quotes_and_trigger_rebalances() -> Result<()> {
         holdings,
         Holdings {
             collateral: accumulated - deposited,
-            shares: maker_after.shares + share_account_after_seed + minted - share_account_after,
+            shares: market_maker_after.shares + share_account_after_seed + minted
+                - share_account_after,
         }
     );
     assert!(
         collateral_range.contains(holdings.collateral),
-        "maker collateral after the rebalance: got {}, want within {collateral_range:?}",
+        "market maker collateral after the rebalance: got {}, want within {collateral_range:?}",
         holdings.collateral
     );
     assert!(
         share_range.contains(holdings.shares),
-        "maker shares after the rebalance: got {}, want within {share_range:?}",
+        "market maker shares after the rebalance: got {}, want within {share_range:?}",
         holdings.shares
     );
     println!(
@@ -297,7 +302,7 @@ async fn target_ranges_bound_quotes_and_trigger_rebalances() -> Result<()> {
 }
 
 /// Invariant 6: incompatible ranges produce no rebalance instead of a
-/// deposit/withdraw oscillation, checked after the maker has refused a
+/// deposit/withdraw oscillation, checked after the market maker has refused a
 /// rebalance `REFUSED_CHECKS` times, so the range check provably ran.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn incompatible_ranges_trigger_no_rebalance() -> Result<()> {
@@ -323,7 +328,7 @@ async fn incompatible_ranges_trigger_no_rebalance() -> Result<()> {
     } = setup_with(config).await?;
     let rpc = localnet.client.rpc();
     let seeded = market_maker
-        .seed_inventory(&pair, SEED_DEPOSIT, SEED_COLLATERAL)
+        .seed_inventory(&pair, SEED_DEPOSIT_COLLATERAL, SEED_COLLATERAL)
         .await?;
     let public_before = public_balances(rpc, &market_maker.address(), &pair)?;
     let residual = share_account(rpc, &market_maker, &pair)?;

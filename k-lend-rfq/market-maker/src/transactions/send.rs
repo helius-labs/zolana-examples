@@ -39,7 +39,7 @@ use super::{
     steps::{Step, StepId, StepKind, StepState},
 };
 use crate::{
-    error::MakerError,
+    error::MarketMakerError,
     swap::fill::{ACCOUNT_ALREADY_IN_USE, MARKER_INSTRUCTION_INDEX},
     transactions::budget::BudgetError,
 };
@@ -51,7 +51,7 @@ const STATUS_BATCH: usize = 256;
 /// Trailing log lines a `SimulationFailed` error carries.
 const SIMULATION_LOG_LINES: usize = 8;
 
-/// An unsigned transaction to send with the maker as fee payer.
+/// An unsigned transaction to send with the market maker as fee payer.
 #[derive(Clone)]
 pub struct SendRequest {
     pub instructions: Vec<Instruction>,
@@ -84,7 +84,7 @@ pub enum SendOutcome {
     /// Refused for good; see `Rejection`.
     Rejected(Rejection),
     /// Nothing was forwarded and trying again may succeed.
-    NotSent(MakerError),
+    NotSent(MarketMakerError),
 }
 
 /// Why a transaction was refused before it reached the chain. A rejection is
@@ -102,7 +102,7 @@ pub enum Rejection {
     Rpc { code: i64, message: String },
     /// The transaction could not be built or failed a local check, so it was
     /// never handed to the rpc.
-    Invalid(MakerError),
+    Invalid(MarketMakerError),
 }
 
 impl Rejection {
@@ -119,14 +119,14 @@ impl Rejection {
     }
 }
 
-impl From<Rejection> for MakerError {
+impl From<Rejection> for MarketMakerError {
     fn from(rejection: Rejection) -> Self {
         match rejection {
-            Rejection::Program { index, code } => MakerError::TransactionRejected {
+            Rejection::Program { index, code } => MarketMakerError::TransactionRejected {
                 error: TransactionError::InstructionError(index, InstructionError::Custom(code)),
             },
-            Rejection::Transaction(error) => MakerError::TransactionRejected { error },
-            Rejection::Rpc { code, message } => MakerError::RpcRejected { code, message },
+            Rejection::Transaction(error) => MarketMakerError::TransactionRejected { error },
+            Rejection::Rpc { code, message } => MarketMakerError::RpcRejected { code, message },
             Rejection::Invalid(error) => error,
         }
     }
@@ -208,7 +208,7 @@ pub enum StepStatus {
     Pending,
 }
 
-/// Signs with the maker's signer and talks to the rpc for every send.
+/// Signs with the market maker's signer and talks to the rpc for every send.
 pub struct SendQueue {
     /// The concrete rpc: `simulate_token_balance` needs the underlying
     /// client, which `AsyncRpc` does not expose.
@@ -224,7 +224,7 @@ impl SendQueue {
         Self { rpc, signer, payer }
     }
 
-    /// Signs `message` with the maker's signer as fee payer.
+    /// Signs `message` with the market maker's signer as fee payer.
     fn sign(&self, message: VersionedMessage) -> Result<VersionedTransaction, ClientError> {
         sign_transaction(message, &[self.signer.as_ref() as &dyn Signer])
     }
@@ -237,7 +237,7 @@ impl SendQueue {
         &self,
         request: &SendRequest,
         account: Address,
-    ) -> Result<u64, MakerError> {
+    ) -> Result<u64, MarketMakerError> {
         let message = compile_message(
             &self.payer,
             &request.instructions,
@@ -260,7 +260,7 @@ impl SendQueue {
             .client()
             .simulate_transaction_with_config(&transaction, config)
             .await
-            .map_err(|error| MakerError::SimulationFailed {
+            .map_err(|error| MarketMakerError::SimulationFailed {
                 error: error.to_string(),
             })?
             .value;
@@ -272,7 +272,7 @@ impl SendQueue {
         if let Some(error) = simulated.err {
             let logs = simulated.logs.unwrap_or_default();
             let last_logs = logs.get(logs.len().saturating_sub(SIMULATION_LOG_LINES)..);
-            return Err(MakerError::SimulationFailed {
+            return Err(MarketMakerError::SimulationFailed {
                 error: format!("{error:?}; logs: {last_logs:?}"),
             });
         }
@@ -283,15 +283,18 @@ impl SendQueue {
         else {
             return Ok(0);
         };
-        let data = state.data.decode().ok_or(MakerError::SimulationFailed {
-            error: format!("account {account} data does not decode"),
-        })?;
-        token_account_amount(&data).ok_or(MakerError::TokenAccount { account })
+        let account_data = state
+            .data
+            .decode()
+            .ok_or(MarketMakerError::SimulationFailed {
+                error: format!("account {account} data does not decode"),
+            })?;
+        token_account_amount(&account_data).ok_or(MarketMakerError::TokenAccount { account })
     }
 
-    /// Errors with `MakerError::Budget(BudgetError::TransactionTooLarge)` when
-    /// `request` does not fit a v1 transaction.
-    pub fn check_size(&self, request: &SendRequest) -> Result<(), MakerError> {
+    /// Errors with `MarketMakerError::Budget(BudgetError::TransactionTooLarge)`
+    /// when `request` does not fit a v1 transaction.
+    pub fn check_size(&self, request: &SendRequest) -> Result<(), MarketMakerError> {
         let size = transaction_size(&self.payer, &request.instructions, request.budget())?;
         if size.fits() {
             Ok(())
@@ -305,11 +308,11 @@ impl SendQueue {
     }
 
     /// The rpc's latest blockhash and its last valid block height.
-    pub async fn latest_blockhash(&self) -> Result<(solana_hash::Hash, u64), MakerError> {
+    pub async fn latest_blockhash(&self) -> Result<(solana_hash::Hash, u64), MarketMakerError> {
         self.rpc
             .get_latest_blockhash()
             .await
-            .map_err(MakerError::Rpc)
+            .map_err(MarketMakerError::Rpc)
     }
 
     /// Compiles `request` on a fresh blockhash, signs it as fee payer and
@@ -345,7 +348,7 @@ impl SendQueue {
         last_valid_block_height: u64,
     ) -> SendOutcome {
         let Some(signature) = transaction.signatures.first().copied() else {
-            return SendOutcome::Rejected(Rejection::Invalid(MakerError::MissingSignature));
+            return SendOutcome::Rejected(Rejection::Invalid(MarketMakerError::MissingSignature));
         };
         let sent = Sent {
             signature,
@@ -365,7 +368,7 @@ impl SendQueue {
             Err(error) => match classify_send_error(&error) {
                 SendFailure::Rejected(rejection) => SendOutcome::Rejected(rejection),
                 SendFailure::Local => SendOutcome::Rejected(Rejection::Invalid(error.into())),
-                SendFailure::Transient => SendOutcome::NotSent(MakerError::Rpc(error)),
+                SendFailure::Transient => SendOutcome::NotSent(MarketMakerError::Rpc(error)),
                 SendFailure::Unknown => SendOutcome::OutcomeUnknown { sent, error },
             },
         }
@@ -375,22 +378,25 @@ impl SendQueue {
     pub async fn statuses(
         &self,
         signatures: &[Signature],
-    ) -> Result<Vec<Option<TransactionStatus>>, MakerError> {
+    ) -> Result<Vec<Option<TransactionStatus>>, MarketMakerError> {
         let mut statuses = Vec::with_capacity(signatures.len());
         for batch in signatures.chunks(STATUS_BATCH) {
             statuses.extend(
                 self.rpc
                     .get_signature_statuses(batch.to_vec())
                     .await
-                    .map_err(MakerError::Rpc)?,
+                    .map_err(MarketMakerError::Rpc)?,
             );
         }
         Ok(statuses)
     }
 
     /// The rpc's current block height.
-    pub async fn block_height(&self) -> Result<u64, MakerError> {
-        self.rpc.get_block_height().await.map_err(MakerError::Rpc)
+    pub async fn block_height(&self) -> Result<u64, MarketMakerError> {
+        self.rpc
+            .get_block_height()
+            .await
+            .map_err(MarketMakerError::Rpc)
     }
 }
 
@@ -585,7 +591,7 @@ impl Coordinator {
         if fill_deadline_passed(step, Instant::now()) {
             let _ = self.runtime.events.send(Event::Sent {
                 step: id,
-                outcome: SendOutcome::NotSent(MakerError::ReservationExpired { step: id }),
+                outcome: SendOutcome::NotSent(MarketMakerError::ReservationExpired { step: id }),
             });
             return;
         }
@@ -599,7 +605,7 @@ impl Coordinator {
     ///   is sent again after one `status_interval` of backoff, for every step
     ///   kind. After `SEND_ATTEMPTS` consecutive failures the step aborts,
     ///   failing a fill and requeueing any other operation. A fill is also
-    ///   failed at once, with `MakerError::ReservationExpired`, when its
+    ///   failed at once, with `MarketMakerError::ReservationExpired`, when its
     ///   deadline (`FillTransfer::expires_at`) has passed or passes before
     ///   the backoff retry would send it; `on_send_retry` checks the deadline
     ///   again. Shutdown cancels pending retries.
@@ -640,8 +646,12 @@ impl Coordinator {
                 let expired = retry_at.is_none_or(|retry_at| fill_deadline_passed(step, retry_at));
                 if step.kind == StepKind::Fill && expired {
                     tracing::warn!(step = id, %error, "fill was not sent before its deadline");
-                    self.abort(id, MakerError::ReservationExpired { step: id }, Retry::Fail)
-                        .await;
+                    self.abort(
+                        id,
+                        MarketMakerError::ReservationExpired { step: id },
+                        Retry::Fail,
+                    )
+                    .await;
                     return;
                 }
                 if step.send_failures >= SEND_ATTEMPTS {
@@ -662,7 +672,7 @@ impl Coordinator {
                 self.handle_failure(id, custom, rejection.into()).await;
             }
             SendOutcome::Rejected(rejection) => {
-                let error = MakerError::from(rejection);
+                let error = MarketMakerError::from(rejection);
                 tracing::warn!(step = id, %error, "resend rejected, polling earlier signatures");
                 step.resend_failed = true;
                 step.state = StepState::Sent;
@@ -698,11 +708,11 @@ mod tests {
         }
     }
 
-    fn response_error(code: i64, data: RpcResponseErrorData) -> ClientError {
+    fn response_error(code: i64, error_data: RpcResponseErrorData) -> ClientError {
         send_error(ErrorKind::RpcError(RpcError::RpcResponseError {
             code,
             message: String::new(),
-            data,
+            data: error_data,
         }))
     }
 
@@ -843,11 +853,11 @@ mod tests {
             Some(CustomError { index: 2, code: 0 }),
             "custom error"
         );
-        let converted = MakerError::from(rejection);
+        let converted = MarketMakerError::from(rejection);
         assert!(
             matches!(
                 converted,
-                MakerError::TransactionRejected {
+                MarketMakerError::TransactionRejected {
                     error: TransactionError::InstructionError(2, InstructionError::Custom(0))
                 }
             ),
@@ -864,11 +874,11 @@ mod tests {
             message: "signature verification failure".to_string(),
         };
         assert_eq!(rejection.custom_error(), None, "custom error");
-        let converted = MakerError::from(rejection);
+        let converted = MarketMakerError::from(rejection);
         assert!(
             matches!(
                 &converted,
-                MakerError::RpcRejected { code: -32003, message }
+                MarketMakerError::RpcRejected { code: -32003, message }
                     if message == "signature verification failure"
             ),
             "got {converted:?}, want RpcRejected(-32003)"

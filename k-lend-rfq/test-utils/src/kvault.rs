@@ -41,7 +41,7 @@ const INIT_VAULT_DISCRIMINATOR: [u8; 8] = [0x4d, 0x4f, 0x55, 0x96, 0x21, 0xd9, 0
 /// A `GlobalConfig` account with `admin` as global and pending admin.
 /// Errors if a field range lies outside `GLOBAL_CONFIG_SIZE` bytes.
 pub fn global_config_account(admin: &Address) -> Result<Account> {
-    let mut data = vec![0u8; GLOBAL_CONFIG_SIZE];
+    let mut account_data = vec![0u8; GLOBAL_CONFIG_SIZE];
     for (range, bytes) in [
         (0..8, GLOBAL_CONFIG_DISCRIMINATOR.as_slice()),
         (
@@ -53,7 +53,8 @@ pub fn global_config_account(admin: &Address) -> Result<Account> {
             admin.as_ref(),
         ),
     ] {
-        data.get_mut(range.clone())
+        account_data
+            .get_mut(range.clone())
             .ok_or_else(|| {
                 anyhow!("GlobalConfig field {range:?} outside {GLOBAL_CONFIG_SIZE} bytes")
             })?
@@ -61,7 +62,7 @@ pub fn global_config_account(admin: &Address) -> Result<Account> {
     }
     Ok(Account {
         lamports: GLOBAL_CONFIG_LAMPORTS,
-        data,
+        data: account_data,
         owner: KVAULT_PROGRAM_ID,
         executable: false,
         rent_epoch: 0,
@@ -99,11 +100,11 @@ impl InitVault {
 }
 
 pub fn token_balance(rpc: &SolanaRpc, account: &Address) -> Result<u64> {
-    let data = rpc
+    let account_data = rpc
         .get_account(*account)?
         .ok_or_else(|| anyhow!("account {account} missing"))?
         .data;
-    token_account_amount(&data).ok_or_else(|| anyhow!("token account {account} too short"))
+    token_account_amount(&account_data).ok_or_else(|| anyhow!("token account {account} too short"))
 }
 
 #[cfg(test)]
@@ -148,12 +149,13 @@ mod tests {
     /// proves `len` exact.
     #[test]
     fn vault_state_size_matches_kvault() {
-        let mut data = vec![0u8; VAULT_STATE_SIZE];
-        data.get_mut(..8)
+        let mut account_data = vec![0u8; VAULT_STATE_SIZE];
+        account_data
+            .get_mut(..8)
             .expect("discriminator slot")
             .copy_from_slice(&sha256_prefix("account:VaultState"));
-        kvault::vault_state(&data).expect("a VaultState of VAULT_STATE_SIZE bytes parses");
-        let shorter = data.get(..VAULT_STATE_SIZE - 1).expect("shorter");
+        kvault::vault_state(&account_data).expect("a VaultState of VAULT_STATE_SIZE bytes parses");
+        let shorter = account_data.get(..VAULT_STATE_SIZE - 1).expect("shorter");
         assert_too_short(kvault::vault_state(shorter), "VaultState", VAULT_STATE_SIZE);
     }
 

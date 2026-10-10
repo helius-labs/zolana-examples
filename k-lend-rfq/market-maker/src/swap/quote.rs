@@ -1,6 +1,6 @@
 //! Quoting: prices a request at the vault price minus the fee, checks the
-//! maker can and wants to take it, and registers it as an open order. Every
-//! amount a later fill pays comes from the order registered here.
+//! market maker can and wants to take it, and registers it as an open order.
+//! Every amount a later fill pays comes from the order registered here.
 
 use std::time::{Instant, SystemTime};
 
@@ -20,7 +20,7 @@ use crate::{
         select::width,
     },
     swap::orders::OpenOrder,
-    transactions::{budget::MAKER_MIN_OUTPUTS, kvault::read_vault},
+    transactions::{budget::MARKET_MAKER_MIN_OUTPUTS, kvault::read_vault},
 };
 
 impl Inner {
@@ -28,8 +28,8 @@ impl Inner {
     ///
     /// Expired orders are swept first. Checks, in order, before the order
     /// opens:
-    /// 1. the maker serves `pair` (configured, same PDAs, not retiring), else
-    ///    `MakerError::PairNotServed`;
+    /// 1. the market maker serves `pair` (configured, same PDAs, not retiring),
+    ///    else `MarketMakerError::PairNotServed`;
     /// 2. the vault reads and prices `amount_in` (`Quote::price`), else the
     ///    rpc error or the `VaultError` the program would fail with;
     /// 3. the priced `amount_out` is not zero, else `SwapError::QuoteZero`
@@ -40,15 +40,16 @@ impl Inner {
     /// 5. receiving `amount_in` keeps the incoming asset's net balance at or
     ///    below its range maximum, else `SwapError::OutsideTargetRange`;
     /// 6. the available inventory can pay `amount_out` within
-    ///    `max_maker_inputs` inputs and leaves room for at least one user
-    ///    input (`Inner::quoted_user_inputs`), else
-    ///    `SwapError::InsufficientInventory` or `SwapError::MakerTransferTooWide`.
+    ///    `max_market_maker_inputs` inputs and leaves room for at least one
+    ///    user input (`Inner::quoted_user_inputs`), else
+    ///    `SwapError::InsufficientInventory` or
+    ///    `SwapError::MarketMakerTransferTooWide`.
     ///
     /// The order records the pair, the quote, the user transfer width put in
     /// the offer, and its expiry instant (`order_ttl` from the settings at
     /// quote time; later config updates do not move it). The offer carries the
-    /// same expiry as unix seconds, and `marker_lamports`, the rent minimum
-    /// the fill locks in the order's marker account (`order_marker_instruction`).
+    /// same expiry as unix seconds, and `marker_lamports`, the rent minimum the
+    /// fill locks in the order's marker account (`order_marker_instruction`).
     /// `Inner::fill` takes the amounts from this record, never from the
     /// request.
     pub async fn quote(&self, pair: &Pair, direction: Direction, amount_in: u64) -> Result<Offer> {
@@ -85,7 +86,7 @@ impl Inner {
             id,
             expires_at,
             quote,
-            maker: self.identity.own,
+            market_maker: self.identity.own,
             fee_payer: self.identity.payer,
             max_user_inputs,
             user_outputs: USER_OUTPUTS,
@@ -103,24 +104,26 @@ impl Inner {
         )
     }
 
-    /// The widest user transfer that fits next to the maker transfer a fill
-    /// could build from the inventory available right now.
+    /// The widest user transfer that fits next to the market maker transfer a
+    /// fill could build from the inventory available right now.
     ///
     /// Errors, in order: `SwapError::AmountOverflow` if the available amounts
-    /// overflow; when no selection of at most `max_maker_inputs` UTXOs covers
-    /// `amount`, `SwapError::InsufficientInventory` if their total is short,
-    /// else `SwapError::MakerTransferTooWide`; `SwapError::NoSupportedShape`
-    /// if no shape fits the maker inputs; `SwapError::MakerTransferTooWide`
-    /// when no user input fits next to the maker transfer.
+    /// overflow; when no selection of at most `max_market_maker_inputs` UTXOs
+    /// covers `amount`, `SwapError::InsufficientInventory` if their total is
+    /// short, else `SwapError::MarketMakerTransferTooWide`;
+    /// `SwapError::NoSupportedShape` if no shape fits the market maker inputs;
+    /// `SwapError::MarketMakerTransferTooWide` when no user input fits next to
+    /// the market maker transfer.
     ///
-    /// The maker's inputs are sized from `reservations.available(asset)`, the
-    /// same list `Inner::fill` passes to `select`. It excludes UTXOs reserved
-    /// by an in-flight step (another fill, a consolidation or a rebalance may
-    /// spend them) and UTXOs whose leaf index is not yet known (they cannot be
-    /// proven). Counting either would let the quote assume a narrower maker
-    /// transfer than the fill can build, leaving the user too little room in
-    /// the shared transaction. The result is stored on the order, so the fill
-    /// enforces the width the quote promised.
+    /// The market maker's inputs are sized from
+    /// `reservations.available(asset)`, the same list `Inner::fill` passes to
+    /// `select`. It excludes UTXOs reserved by an in-flight step (another fill,
+    /// a consolidation or a rebalance may spend them) and UTXOs whose leaf
+    /// index is not yet known (they cannot be proven). Counting either would
+    /// let the quote assume a narrower market maker transfer than the fill can
+    /// build, leaving the user too little room in the shared transaction. The
+    /// result is stored on the order, so the fill enforces the width the quote
+    /// promised.
     fn quoted_user_inputs(&self, asset: Address, amount: u64) -> Result<usize> {
         let utxos: Vec<u64> = self
             .services
@@ -134,10 +137,10 @@ impl Inner {
             .iter()
             .try_fold(0u64, |total, amount| total.checked_add(*amount))
             .ok_or(SwapError::AmountOverflow {
-                context: "maker inventory",
+                context: "market maker inventory",
             })?;
-        let max_inputs = self.max_maker_inputs;
-        let too_wide = SwapError::MakerTransferTooWide {
+        let max_inputs = self.max_market_maker_inputs;
+        let too_wide = SwapError::MarketMakerTransferTooWide {
             asset,
             required: amount,
             max_inputs,
@@ -153,15 +156,16 @@ impl Inner {
             }
             return Err(too_wide.into());
         };
-        let maker =
-            smallest_shape(inputs, MAKER_MIN_OUTPUTS).ok_or(SwapError::NoSupportedShape {
+        let market_maker = smallest_shape(inputs, MARKET_MAKER_MIN_OUTPUTS).ok_or(
+            SwapError::NoSupportedShape {
                 inputs,
-                outputs: MAKER_MIN_OUTPUTS,
-            })?;
+                outputs: MARKET_MAKER_MIN_OUTPUTS,
+            },
+        )?;
         Ok(self
             .services
             .budget
-            .max_user_inputs(maker)?
+            .max_user_inputs(market_maker)?
             .ok_or(too_wide)?)
     }
 }

@@ -205,7 +205,8 @@ impl Reserves {
 /// - interest the reserves accrue between their last refresh and the
 ///   transaction, which the program's reserve refresh adds before pricing;
 /// - management and performance fees the program charges at execution
-///   (`charge_fees`, `vault_operations.rs:79`, `:157`) before it computes the AUM.
+///   (`charge_fees`, `vault_operations.rs:79`, `:157`) before it computes the
+///   AUM.
 ///
 /// So the price drifts from the executed one by the interest and fees of the
 /// time since the last refresh. That is why the market maker shields the
@@ -297,8 +298,8 @@ impl VaultState {
             .collect())
     }
 
-    /// Prices a vault from its account data, its `GlobalConfig` data and
-    /// its allocated reserves' `(address, data)` in allocation slot order,
+    /// Prices a vault from its account data, its `GlobalConfig` data and its
+    /// allocated reserves' `(address, reserve_data)` in allocation slot order,
     /// the order [`VaultState::pricing_accounts`] returns.
     ///
     /// Checks, in order: the vault and global config decode
@@ -324,7 +325,9 @@ impl VaultState {
             .into());
         }
         let mut snapshots = Reserves::EMPTY;
-        for (slot, (allocation, (address, data))) in allocations.iter().zip(reserves).enumerate() {
+        for (slot, (allocation, (address, reserve_data))) in
+            allocations.iter().zip(reserves).enumerate()
+        {
             if allocation.reserve != *address {
                 return Err(VaultError::ReserveMismatch {
                     slot,
@@ -333,7 +336,7 @@ impl VaultState {
                 }
                 .into());
             }
-            let reserve = kvault::reserve(data)?;
+            let reserve = kvault::reserve(reserve_data)?;
             snapshots.push(ReserveSnapshot {
                 reserve: *address,
                 lending_market: reserve.lending_market,
@@ -459,9 +462,10 @@ impl VaultState {
     /// The shares a deposit of `amount` tokens mints at the current AUM, with
     /// nothing the program applies around the share math: no crank funds, no
     /// deposit cap and no minimum deposit. This is the vault price a deposit
-    /// quote uses; the maker pays the shares from its shielded inventory, so
-    /// the vault's deposit limits do not apply to the user's swap (they apply
-    /// to the maker's rebalance, previewed by [`VaultState::deposit`]).
+    /// quote uses; the market maker pays the shares from its shielded
+    /// inventory, so the vault's deposit limits do not apply to the user's swap
+    /// (they apply to the market maker's rebalance, previewed by
+    /// [`VaultState::deposit`]).
     ///
     /// `floor(shares_issued * amount / ceil(aum))`, or `amount` for the first
     /// deposit (`get_shares_to_mint`, `vault_operations.rs:1069`). Errors with
@@ -613,9 +617,9 @@ impl VaultState {
     ///    `PenaltyExceedsWithdrawal` when `penalty >= tokens`. The user gets
     ///    `tokens - penalty`; the penalty stays in the vault.
     /// 3. That amount comes from `token_available` first, the rest from the
-    ///    reserve [`VaultState::withdraw_source`] picks (the one the maker's
-    ///    withdraw instruction names); error `WithdrawExceedsLiquidity` if
-    ///    the two cannot cover it.
+    ///    reserve [`VaultState::withdraw_source`] picks (the one the
+    ///    market maker's withdraw instruction names); error
+    ///    `WithdrawExceedsLiquidity` if the two cannot cover it.
     /// 4. Shares burned: `ceil(tokens * shares_issued / aum)`, at most
     ///    `shares` (`calculate_shares_to_burn`, `:1320`); error
     ///    `WithdrawBurnsNoShares`.
@@ -780,8 +784,8 @@ mod tests {
         state
     }
 
-    /// An uninvested, fee-free vault prices like the share math before
-    /// reserves were modelled: `get_shares_to_mint` (`vault_operations.rs:1069`),
+    /// An uninvested, fee-free vault prices like the share math before reserves
+    /// were modelled: `get_shares_to_mint` (`vault_operations.rs:1069`),
     /// `compute_amount_to_deposit_from_shares_to_mint` (`:1294`),
     /// `compute_user_total_received_on_withdraw` (`:1202`) and
     /// `calculate_shares_to_burn` (`:1320`) on `aum = token_available`.

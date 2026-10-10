@@ -1,18 +1,19 @@
 //! A private kVault deposit and withdrawal through the market maker.
 //!
-//! The user never touches the vault. Each swap runs: quote (the maker prices
-//! `amount_in` at the vault price minus its fee and opens an order), prove
-//! (the user proves a shielded transfer of `amount_in` to the maker), fill
-//! (the maker checks that transfer against its order and adds its own
-//! transfer paying `amount_out`), verify and sign (the user), settle (the
-//! maker co-signs and sends both transfers in one transaction). The maker
-//! keeps its inventory in range with its own public vault deposits and
-//! withdrawals (rebalance), unlinked from any user.
+//! The user never touches the vault. Each swap runs: quote (the market maker
+//! prices `amount_in` at the vault price minus its fee and opens an order),
+//! prove (the user proves a shielded transfer of `amount_in` to the
+//! market maker), fill (the market maker checks that transfer against its order
+//! and adds its own transfer paying `amount_out`), verify and sign (the user),
+//! settle (the market maker co-signs and sends both transfers in one
+//! transaction). The market maker keeps its inventory in range with its own
+//! public vault deposits and withdrawals (rebalance), unlinked from any user.
 //!
-//! Before signing, `QuoteCheck::verify` checks that the maker pays the fee,
-//! that the message holds exactly the user's unaltered transfer, one maker
-//! transfer and the order's marker, that neither transfer moves public
-//! funds, and that the maker pays at least the quoted `amount_out`.
+//! Before signing, `QuoteCheck::verify` checks that the market maker pays the
+//! fee, that the message holds exactly the user's unaltered transfer, one
+//! market maker transfer and the order's marker, that neither transfer moves
+//! public funds, and that the market maker pays at least the quoted
+//! `amount_out`.
 
 use anyhow::Result;
 use zolana_client::{SolanaRpc, ZolanaClient};
@@ -30,7 +31,7 @@ use k_lend_rfq_test_utils::{
     user::User,
 };
 
-const MARKET_MAKER_SEED_DEPOSIT: u64 = 200_000_000;
+const MARKET_MAKER_SEED_DEPOSIT_COLLATERAL: u64 = 200_000_000;
 const MARKET_MAKER_COLLATERAL: u64 = 50_000_000;
 const DEPOSIT_COLLATERAL: u64 = 40_000_000;
 const WITHDRAW_SHARES: u64 = 15_000_000;
@@ -51,7 +52,11 @@ async fn main() -> Result<()> {
     // Market maker setup: deposit USDC into kVault and keep the shares and some
     // USDC in its private balance, so it can serve both directions.
     market_maker
-        .seed_inventory(&pair, MARKET_MAKER_SEED_DEPOSIT, MARKET_MAKER_COLLATERAL)
+        .seed_inventory(
+            &pair,
+            MARKET_MAKER_SEED_DEPOSIT_COLLATERAL,
+            MARKET_MAKER_COLLATERAL,
+        )
         .await?;
 
     // Deposit: the user swaps private USDC for kVault shares.

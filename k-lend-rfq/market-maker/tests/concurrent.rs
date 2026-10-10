@@ -3,7 +3,7 @@
 //!    proven and wait for their user's signature at the same time.
 //! 2. Every concurrent swap lands; each user holds the quoted shares and the
 //!    rest of its collateral, and each fill leaves one change output.
-//! 3. The maker's holdings move by exactly the swapped amounts.
+//! 3. The market maker's holdings move by exactly the swapped amounts.
 //! 4. Consolidation merges the grown share UTXO set back to `UTXOS` without
 //!    changing the holdings.
 //! 5. A rebalance deposit of the received collateral spends every collateral
@@ -42,7 +42,7 @@ const TEST_NUMBER: u16 = 16;
 const UTXOS: usize = 4;
 const EXTRA_USERS: u8 = 7;
 const USERS: usize = 8;
-const SEED_DEPOSIT: u64 = 400_000_000;
+const SEED_DEPOSIT_COLLATERAL: u64 = 400_000_000;
 const DEPOSIT_COLLATERAL: u64 = 10_000_000;
 const USER_COLLATERAL: u64 = 40_000_000;
 
@@ -68,8 +68,11 @@ async fn concurrent_swaps_land_and_inventory_is_restored() -> Result<()> {
         ..SetupConfig::new(TEST_NUMBER)
     })
     .await?;
-    let seeded = market_maker.seed_inventory(&pair, SEED_DEPOSIT, 0).await?;
-    // The seed's tail leaves a margin of the minted shares in the public share account.
+    let seeded = market_maker
+        .seed_inventory(&pair, SEED_DEPOSIT_COLLATERAL, 0)
+        .await?;
+    // The seed's tail leaves a margin of the minted shares in the public share
+    // account.
     let seed_residual = share_account(localnet.client.rpc(), &market_maker, &pair)?;
     let shielded = seeded.shares - seed_residual;
     assert_eq!(market_maker.utxos(&pair.shares_mint).len(), UTXOS);
@@ -134,7 +137,7 @@ async fn concurrent_swaps_land_and_inventory_is_restored() -> Result<()> {
         shares_paid += fill.quote.amount_out;
     }
 
-    // Invariant 3: the maker's holdings move by the swapped amounts.
+    // Invariant 3: the market maker's holdings move by the swapped amounts.
     market_maker.sync().await?;
     let collateral_received = DEPOSIT_COLLATERAL * u64::try_from(USERS)?;
     assert_eq!(
@@ -191,7 +194,8 @@ async fn concurrent_swaps_land_and_inventory_is_restored() -> Result<()> {
         market_maker.holdings(&pair),
         Holdings {
             collateral: 0,
-            // The rebalance sweeps the seed's residual and leaves its own margin unshielded.
+            // The rebalance sweeps the seed's residual and leaves its own
+            // margin unshielded.
             shares: shielded - shares_paid + rebalance.shares + seed_residual
                 - share_account(rpc, &market_maker, &pair)?,
         }
@@ -217,7 +221,7 @@ struct Settled {
 }
 
 /// Holds the first `UTXOS` fills between proving and settling until the test
-/// has counted the maker's open fills.
+/// has counted the market maker's open fills.
 struct Gate {
     tickets: AtomicUsize,
     filled: Barrier,

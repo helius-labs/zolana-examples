@@ -24,7 +24,7 @@ use super::{
     steps::{ProofWork, StepId, StepKind, StepState, TailShield},
     Identity,
 };
-use crate::error::MakerError;
+use crate::error::MarketMakerError;
 
 /// Proof attempts per step before its operation is requeued with fresh
 /// inputs. A proof fails transiently when the prover or indexer is briefly
@@ -43,7 +43,7 @@ pub struct ProvenStep {
     /// task right after the proof so `offer_fill` compiles the swap message
     /// without an rpc call on the coordinator loop. Other steps fetch their
     /// blockhash in the send task.
-    pub blockhash: Option<Result<(Hash, u64), MakerError>>,
+    pub blockhash: Option<Result<(Hash, u64), MarketMakerError>>,
     /// Set exactly for steps with a `TailShield`: the kVault instruction and
     /// the shield resolved from a simulation of the proven transact, which
     /// replace the step's `tail`.
@@ -85,17 +85,17 @@ impl ProofQueue {
     }
 
     /// Waits for a worker, then proves `work` into a `transact` instruction.
-    /// Errors with `MakerError::CoordinatorStopped` once the queue is
-    /// closed, with `MakerError::Indexer` or `MakerError::Prover` on a
-    /// service failure, and with the client error when the proof does not
+    /// Errors with `MarketMakerError::CoordinatorStopped` once the queue is
+    /// closed, with `MarketMakerError::Indexer` or `MarketMakerError::Prover`
+    /// on a service failure, and with the client error when the proof does not
     /// verify locally.
-    pub async fn prove(&self, work: ProofWork) -> Result<Instruction, MakerError> {
+    pub async fn prove(&self, work: ProofWork) -> Result<Instruction, MarketMakerError> {
         // Held until the proof finishes.
         let _worker_permit = self
             .workers
             .acquire()
             .await
-            .map_err(|_| MakerError::CoordinatorStopped)?;
+            .map_err(|_| MarketMakerError::CoordinatorStopped)?;
         self.prove_transfer(work).await
     }
 
@@ -114,13 +114,13 @@ impl ProofQueue {
         tree_id: u16,
         commitments: &[&SppProofInputUtxo],
         dummy_nullifiers: Vec<[u8; 32]>,
-    ) -> Result<InputWitnesses, MakerError> {
+    ) -> Result<InputWitnesses, MarketMakerError> {
         if commitments.is_empty() {
             let dummy_nullifier_proofs = self
                 .indexer
                 .get_non_inclusion_proofs(pda::tree(tree_id), dummy_nullifiers, None)
                 .await
-                .map_err(MakerError::Indexer)?
+                .map_err(MarketMakerError::Indexer)?
                 .proofs;
             return Ok(InputWitnesses {
                 spend_proofs: Vec::new(),
@@ -134,12 +134,12 @@ impl ProofQueue {
             None,
         )
         .await
-        .map_err(MakerError::Indexer)
+        .map_err(MarketMakerError::Indexer)
     }
 
     /// Assembles, proves and locally verifies one transfer. The local
     /// verification catches a bad proof before it costs a transaction fee.
-    async fn prove_transfer(&self, work: ProofWork) -> Result<Instruction, MakerError> {
+    async fn prove_transfer(&self, work: ProofWork) -> Result<Instruction, MarketMakerError> {
         let ProofWork {
             inputs: proof_inputs,
             interface_accounts,
@@ -157,7 +157,7 @@ impl ProofQueue {
             )
             .await?;
         let owner_signers = proof_inputs.owner_signer_pubkeys()?;
-        let output_tree = pda::tree(proof_inputs.output_tree_id);
+        let output_tree_pda = pda::tree(proof_inputs.output_tree_id);
         let mut assembled = assemble(
             proof_inputs,
             &witnesses.spend_proofs,
@@ -170,7 +170,7 @@ impl ProofQueue {
             .prover
             .prove_transfer(inputs)
             .await
-            .map_err(MakerError::Prover)?;
+            .map_err(MarketMakerError::Prover)?;
         verify_confidential_transfer_inputs(inputs, assembled.public_input_hash, &proof)?;
         let input_trees = assembled
             .input_tree_ids
@@ -181,7 +181,7 @@ impl ProofQueue {
         Ok(Transact {
             payer: self.payer,
             input_trees,
-            output_tree,
+            output_tree: output_tree_pda,
             owner_signers,
             interface_transfer_accounts: interface_accounts,
             data: assembled.with_proof(ProofCompressed::try_from(proof)?.to_transact_proof()),
@@ -217,8 +217,8 @@ impl Coordinator {
                 fill,
                 tail_shield.as_ref().map(|tail| (tail, &identity)),
             );
-            if let Some(result) = cancel.run_until_cancelled(proven).await {
-                let _ = events.send(Event::Proven { step: id, result });
+            if let Some(outcome) = cancel.run_until_cancelled(proven).await {
+                let _ = events.send(Event::Proven { step: id, outcome });
             }
         });
     }
@@ -227,11 +227,11 @@ impl Coordinator {
     /// blockhash, goes to `offer_fill`; any other step is size-checked and
     /// sent. A failed proof is retried up to `PROVE_ATTEMPTS`, then the
     /// operation is requeued.
-    pub async fn on_proven(&mut self, id: StepId, result: Result<ProvenStep, MakerError>) {
+    pub async fn on_proven(&mut self, id: StepId, outcome: Result<ProvenStep, MarketMakerError>) {
         let Some(step) = self.steps.get_mut(id) else {
             return;
         };
-        let proven = match result {
+        let proven = match outcome {
             Ok(proven) => proven,
             Err(error) if step.prove_attempts < PROVE_ATTEMPTS => {
                 tracing::warn!(step = id, %error, "proof failed, retrying");
@@ -274,7 +274,7 @@ async fn prove_step(
     work: ProofWork,
     fill: bool,
     tail_shield: Option<(&TailShield, &Identity)>,
-) -> Result<ProvenStep, MakerError> {
+) -> Result<ProvenStep, MarketMakerError> {
     let instruction = proofs.prove(work).await?;
     let blockhash = if fill {
         Some(sender.latest_blockhash().await)

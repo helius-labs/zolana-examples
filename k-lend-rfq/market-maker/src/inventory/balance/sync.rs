@@ -1,5 +1,5 @@
 //! Indexer sync: decrypts the transactions and deposits addressed to the
-//! maker, verifies which outputs are spendable, and feeds them into
+//! market maker, verifies which outputs are spendable, and feeds them into
 //! `Reservations`, removing the ones whose nullifiers are spent. Sync is the
 //! only path by which a UTXO gains its leaf index.
 
@@ -21,15 +21,15 @@ use zolana_transaction::{
 };
 
 use super::{pending::PendingBalance, reservations::TrackedUtxo};
-use crate::{api::Inner, error::MakerError, transactions::coordinator::Event};
+use crate::{api::Inner, error::MarketMakerError, transactions::coordinator::Event};
 
 /// Page size asked of the indexer; a smaller page only costs round trips.
 const PAGE_LIMIT: u32 = 1_000;
 /// Nullifiers per spend query, to bound the request size.
 const NULLIFIER_CHUNK: usize = 64;
 
-/// Incremental scan state of the maker's account: the view tags it queries
-/// by, the indexer cursors, and everything decrypted so far.
+/// Incremental scan state of the market maker's account: the view tags it
+/// queries by, the indexer cursors, and everything decrypted so far.
 pub struct AccountSync {
     keys: Arc<dyn ShieldedKeys + Send + Sync>,
     indexer: Arc<AsyncZolanaIndexer>,
@@ -63,14 +63,14 @@ impl SyncOutcome {
 }
 
 impl AccountSync {
-    /// Scans by the maker's two tags: its confidential view tag and the x
-    /// coordinate of its viewing public key.
+    /// Scans by the market maker's two tags: its confidential view tag and the
+    /// x coordinate of its viewing public key.
     pub fn new(
         keys: Arc<dyn ShieldedKeys + Send + Sync>,
         indexer: Arc<AsyncZolanaIndexer>,
         pending: Arc<PendingBalance>,
         registry: Arc<RwLock<AssetRegistry>>,
-    ) -> Result<Self, MakerError> {
+    ) -> Result<Self, MarketMakerError> {
         let address = keys.address()?;
         let tags = vec![address.confidential_view_tag()?, address.viewing_pubkey.x()];
         Ok(Self {
@@ -92,11 +92,11 @@ impl AccountSync {
         self.decrypted = DecryptionResult::default();
     }
 
-    /// One pass: fetches new transactions and deposits past the cursors and
-    /// the transactions spending tracked nullifiers, decrypts them, and
-    /// updates `Reservations`. Zero-amount UTXOs are not tracked. Errors with
-    /// `MakerError::Sync` on an indexer failure, or with the decryption or
-    /// spendability check's error.
+    /// One pass: fetches new transactions and deposits past the cursors and the
+    /// transactions spending tracked nullifiers, decrypts them, and updates
+    /// `Reservations`. Zero-amount UTXOs are not tracked. Errors with
+    /// `MarketMakerError::Sync` on an indexer failure, or with the decryption
+    /// or spendability check's error.
     ///
     /// Invariant: a pass either advances every cursor and applies every page,
     /// or changes nothing. Every page is fetched against provisional cursors
@@ -106,7 +106,7 @@ impl AccountSync {
     /// UTXOs applied to `Reservations`. A failed or cancelled pass therefore
     /// leaves the cursors where they were, and the next pass refetches the
     /// same pages instead of skipping them.
-    pub async fn run_once(&mut self) -> Result<SyncOutcome, MakerError> {
+    pub async fn run_once(&mut self) -> Result<SyncOutcome, MarketMakerError> {
         let transactions = self.transactions().await?;
         let deposits = self.deposits().await?;
         let mut fetched = transactions.transactions;
@@ -139,9 +139,10 @@ impl AccountSync {
                 leaf_index: Some(utxo.leaf_index),
                 wallet: utxo,
             };
-            // Every indexed UTXO is offered to the pending inflows, also when it
-            // was already tracked: an inflow output stops counting once its
-            // UTXO is indexed, whichever sync pass (startup or periodic) sees it.
+            // Every indexed UTXO is offered to the pending inflows, also when
+            // it was already tracked: an inflow output stops counting once its
+            // UTXO is indexed, whichever sync pass (startup or periodic) sees
+            // it.
             self.pending.inflow_landed(&tracked.utxo_hash());
             if self.pending.reservations.insert(tracked) {
                 inserted += 1;
@@ -158,7 +159,7 @@ impl AccountSync {
     /// Every page of transactions past `transactions_cursor`, and the cursor
     /// after the last page. Leaves `self` unchanged; `run_once` commits the
     /// cursor.
-    async fn transactions(&self) -> Result<Scanned, MakerError> {
+    async fn transactions(&self) -> Result<Scanned, MarketMakerError> {
         let mut scanned = Scanned {
             transactions: Vec::new(),
             cursor: self.transactions_cursor.clone(),
@@ -173,13 +174,14 @@ impl AccountSync {
                     None,
                 )
                 .await
-                .map_err(MakerError::Sync)?;
-            scanned.transactions.extend(
-                response
-                    .transactions
-                    .into_iter()
-                    .filter(|tx| !tx.proofless && tx.tx_viewing_pk.is_some() && tx.salt.is_some()),
-            );
+                .map_err(MarketMakerError::Sync)?;
+            scanned
+                .transactions
+                .extend(response.transactions.into_iter().filter(|transaction| {
+                    !transaction.proofless
+                        && transaction.tx_viewing_pk.is_some()
+                        && transaction.salt.is_some()
+                }));
             if !advance(
                 &mut scanned.cursor,
                 response.next_cursor,
@@ -192,7 +194,7 @@ impl AccountSync {
 
     /// Every page of deposits past `deposits_cursor`, and the cursor after the
     /// last page. Leaves `self` unchanged; `run_once` commits the cursor.
-    async fn deposits(&self) -> Result<Scanned, MakerError> {
+    async fn deposits(&self) -> Result<Scanned, MarketMakerError> {
         let mut scanned = Scanned {
             transactions: Vec::new(),
             cursor: self.deposits_cursor.clone(),
@@ -207,12 +209,12 @@ impl AccountSync {
                     None,
                 )
                 .await
-                .map_err(MakerError::Sync)?;
+                .map_err(MarketMakerError::Sync)?;
             scanned.transactions.extend(
                 response
                     .matches
                     .into_iter()
-                    .filter_map(|item| item.into_proofless_transaction()),
+                    .filter_map(|matched| matched.into_proofless_transaction()),
             );
             if !advance(
                 &mut scanned.cursor,
@@ -224,7 +226,7 @@ impl AccountSync {
         }
     }
 
-    async fn spends(&self) -> Result<Vec<ShieldedTransaction>, MakerError> {
+    async fn spends(&self) -> Result<Vec<ShieldedTransaction>, MarketMakerError> {
         let unspent: Vec<[u8; 32]> = self.pending.reservations.nullifiers();
         let mut fetched = Vec::new();
         for chunk in unspent.chunks(NULLIFIER_CHUNK) {
@@ -239,8 +241,13 @@ impl AccountSync {
                         None,
                     )
                     .await
-                    .map_err(MakerError::Sync)?;
-                fetched.extend(response.transactions.into_iter().filter(|tx| !tx.proofless));
+                    .map_err(MarketMakerError::Sync)?;
+                fetched.extend(
+                    response
+                        .transactions
+                        .into_iter()
+                        .filter(|transaction| !transaction.proofless),
+                );
                 if !advance(&mut cursor, response.next_cursor, response.scanned_through) {
                     break;
                 }
@@ -269,20 +276,19 @@ fn advance(
 /// next tick.
 ///
 /// The first tick is one `interval` from now. Errors with
-/// `MakerError::DeadlineOverflow` when that instant overflows the clock
+/// `MarketMakerError::DeadlineOverflow` when that instant overflows the clock
 /// (`Settings::new` already rejects a zero interval).
 pub fn spawn_sync(
     account: Arc<Mutex<AccountSync>>,
     interval: Duration,
     events: mpsc::UnboundedSender<Event>,
     cancel: CancellationToken,
-) -> Result<JoinHandle<()>, MakerError> {
-    let first_tick =
-        tokio::time::Instant::now()
-            .checked_add(interval)
-            .ok_or(MakerError::DeadlineOverflow {
-                context: "first sync tick",
-            })?;
+) -> Result<JoinHandle<()>, MarketMakerError> {
+    let first_tick = tokio::time::Instant::now().checked_add(interval).ok_or(
+        MarketMakerError::DeadlineOverflow {
+            context: "first sync tick",
+        },
+    )?;
     Ok(tokio::spawn(async move {
         let mut tick = tokio::time::interval_at(first_tick, interval);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -303,27 +309,27 @@ pub fn spawn_sync(
 
 impl Inner {
     /// One sync pass now, then wakes the coordinator. Errors with the pass's
-    /// error or `MakerError::CoordinatorStopped`.
-    pub async fn sync(&self) -> Result<(), MakerError> {
+    /// error or `MarketMakerError::CoordinatorStopped`.
+    pub async fn sync(&self) -> Result<(), MarketMakerError> {
         self.account.lock().await.run_once().await?;
         self.runtime
             .events
             .send(Event::Synced)
-            .map_err(|_| MakerError::CoordinatorStopped)
+            .map_err(|_| MarketMakerError::CoordinatorStopped)
     }
 }
 
-/// The zolana asset id of `mint`, read from its `SplAssetRegistry` PDA.
-/// Errors with `MakerError::AssetNotRegistered` when the PDA does not exist.
-pub async fn registered_asset(rpc: &dyn AsyncRpc, mint: Address) -> Result<u64, MakerError> {
+/// The zolana asset id of `mint`, read from its `SplAssetRegistry` PDA. Errors
+/// with `MarketMakerError::AssetNotRegistered` when the PDA does not exist.
+pub async fn registered_asset(rpc: &dyn AsyncRpc, mint: Address) -> Result<u64, MarketMakerError> {
     let account = rpc
         .get_account(pda::spl_asset_registry(&mint))
         .await
-        .map_err(MakerError::Rpc)?
-        .ok_or(MakerError::AssetNotRegistered { mint })?;
+        .map_err(MarketMakerError::Rpc)?
+        .ok_or(MarketMakerError::AssetNotRegistered { mint })?;
     SplAssetRegistry::from_account_bytes(&account.data)
         .map(|registry| registry.asset_id)
-        .map_err(|error| MakerError::AssetRegistry {
+        .map_err(|error| MarketMakerError::AssetRegistry {
             mint,
             reason: format!("{error:?}"),
         })
@@ -333,7 +339,7 @@ pub async fn registered_asset(rpc: &dyn AsyncRpc, mint: Address) -> Result<u64, 
 pub async fn asset_registry(
     rpc: &dyn AsyncRpc,
     mints: impl IntoIterator<Item = Address>,
-) -> Result<AssetRegistry, MakerError> {
+) -> Result<AssetRegistry, MarketMakerError> {
     let mut registry = AssetRegistry::default();
     for mint in mints {
         registry.insert(registered_asset(rpc, mint).await?, mint)?;
