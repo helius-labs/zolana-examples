@@ -12,7 +12,6 @@ anyhow = { workspace = true }
 dashmap = { workspace = true }
 futures = { workspace = true }
 k-lend-rfq-sdk = { path = "../sdk" }
-sha2 = { workspace = true }
 solana-address = { workspace = true }
 solana-commitment-config = { workspace = true }
 solana-hash = { workspace = true }

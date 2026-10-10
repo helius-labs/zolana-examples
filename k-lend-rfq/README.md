@@ -37,6 +37,13 @@ programs, Photon, and a prover.
    scripts/dump-kamino.sh
    ```
 
+   The script skips a program whose `.so` is already in `target/deploy`, so
+   delete the file to dump a newer mainnet deployment locally. It dumps
+   through the public mainnet RPC unless `KAMINO_DUMP_RPC_URL` names another.
+   CI caches the dumped programs under `KAMINO_PROGRAMS_CACHE_VERSION` in
+   `.github/workflows/examples.yml`; bump it to pick up a new mainnet
+   deployment.
+
 3. Point the harness at the binaries and run, from `k-lend-rfq/`:
 
    ```bash
@@ -49,6 +56,14 @@ programs, Photon, and a prover.
    cargo run -p k-lend-rfq-example --example deposit_and_withdraw
    cargo test -p k-lend-market-maker --tests
    ```
+
+The `mainnet_vault` test snapshots a mainnet Kamino USDC vault into the
+localnet and needs mainnet access: set `KAMINO_MAINNET_RPC_URL` to a mainnet
+RPC URL, otherwise it skips.
+
+Each test boots its localnet on ports derived from its test number; set
+`ZOLANA_PORT_OFFSET` to shift all of them, for example when another checkout
+runs the tests at the same time or a port is taken.
 
 On first start the prover downloads the proving keys it is missing into
 `~/.config/zolana/proving-keys`, the directory `zolana test-env` uses. Set

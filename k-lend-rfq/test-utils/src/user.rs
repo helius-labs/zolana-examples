@@ -1,6 +1,6 @@
 use anyhow::Result;
 use k_lend_rfq_sdk::{
-    pair::{Pair, VaultState},
+    pair::Pair,
     swap::{Offer, Order},
     transfer::Receiver,
     user::{select_inputs, QuoteCheck, UserOrder},
@@ -8,27 +8,27 @@ use k_lend_rfq_sdk::{
 use solana_address::Address;
 use solana_message::VersionedMessage;
 use solana_signature::Signature;
-use solana_signer::Signer;
 use zolana_client::{SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedAddress;
 
-use k_lend_market_maker::Holdings;
+use k_lend_market_maker::{Holdings, MakerFill, MarketMaker};
 
-use crate::{chain::blocking, wallet::TestWallet};
+use crate::{
+    chain::{blocking, confirm_indexed},
+    wallet::TestWallet,
+};
 
 pub struct User {
     wallet: TestWallet,
-    fee_bps: u64,
     /// The tree the user's outputs go to, and its raw id.
     tree: Address,
     tree_id: u16,
 }
 
 impl User {
-    pub fn new(wallet: TestWallet, fee_bps: u64, tree: Address, tree_id: u16) -> Self {
+    pub fn new(wallet: TestWallet, tree: Address, tree_id: u16) -> Self {
         Self {
             wallet,
-            fee_bps,
             tree,
             tree_id,
         }
@@ -81,33 +81,63 @@ impl User {
                 tree: self.tree,
                 tree_id: self.tree_id,
             }
-            .prove(client, &self.wallet.keypair)
+            .prove(client, self.wallet.keys(), self.wallet.authority())
         })
     }
 
-    pub async fn verify_quote(
+    pub fn verify_quote(
         &self,
-        client: &ZolanaClient<SolanaRpc>,
         pair: &Pair,
         order: &Order,
         message: &VersionedMessage,
     ) -> Result<()> {
-        let rate = blocking(|| VaultState::read(client.rpc(), &pair.vault))?;
         QuoteCheck {
             order,
             message,
             pair,
-            rate: &rate,
-            fee_bps: self.fee_bps,
         }
         .verify(&Receiver {
-            keypair: &self.wallet.keypair,
+            keys: self.wallet.keys(),
             registry: &self.wallet.registry,
             tree_id: self.tree_id,
         })
     }
 
     pub fn sign(&self, message: &VersionedMessage) -> Result<Signature> {
-        Ok(self.wallet.keypair.try_sign_message(&message.serialize())?)
+        Ok(self
+            .wallet
+            .signer()
+            .try_sign_message(&message.serialize())?)
+    }
+
+    /// Verifies `fill` against `order`, signs it and has `market_maker`
+    /// settle it; returns the landed signature without waiting for the
+    /// indexer.
+    pub async fn settle(
+        &self,
+        market_maker: &MarketMaker,
+        pair: &Pair,
+        order: &Order,
+        fill: &MakerFill,
+    ) -> Result<Signature> {
+        self.verify_quote(pair, order, &fill.fill.message)?;
+        let user_signature = self.sign(&fill.fill.message)?;
+        market_maker.settle(&fill.fill, user_signature).await
+    }
+
+    /// [`Self::settle`], then waits until the swap is indexed and syncs this
+    /// user and `market_maker`.
+    pub async fn complete(
+        &mut self,
+        client: &ZolanaClient<SolanaRpc>,
+        market_maker: &MarketMaker,
+        pair: &Pair,
+        order: &Order,
+        fill: &MakerFill,
+    ) -> Result<()> {
+        let signature = self.settle(market_maker, pair, order, fill).await?;
+        confirm_indexed(client, signature, "swap")?;
+        self.sync(client).await?;
+        market_maker.sync().await
     }
 }

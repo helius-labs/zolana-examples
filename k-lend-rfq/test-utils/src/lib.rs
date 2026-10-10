@@ -1,5 +1,9 @@
+pub mod assert;
 pub mod chain;
 pub mod kvault;
+pub mod mainnet;
+pub mod market_maker;
 pub mod setup;
+pub mod sync;
 pub mod user;
 pub mod wallet;

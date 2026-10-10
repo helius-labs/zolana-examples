@@ -1,85 +1,114 @@
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+//! Proving: witnesses from the indexer, the proof from the prover, and a
+//! local verification of it before any transaction is built. At most
+//! `workers` proofs run at once; proving and the rpc work tied to it run off
+//! the coordinator loop.
+
+use std::sync::Arc;
 
 use solana_address::Address;
+use solana_hash::Hash;
 use solana_instruction::Instruction;
-use tokio::sync::{Semaphore, SemaphorePermit};
+use tokio::sync::Semaphore;
 use zolana_client::{
     assemble, verify_confidential_transfer_inputs, AsyncProverClient, AsyncRpc, AsyncWitnessReader,
     AsyncZolanaIndexer, ClientError, InputWitnesses, ProofAuthority, ProofCompressed,
 };
 use zolana_interface::pda;
-use zolana_keypair::ShieldedKeypair;
 use zolana_program::instruction::Transact;
 use zolana_transaction::utxo::SppProofInputUtxo;
 
 use super::{
     confirm::Retry,
     coordinator::{Coordinator, Event},
-    steps::{ProofWork, StepId, StepKind, StepState},
+    send::SendQueue,
+    steps::{ProofWork, StepId, StepKind, StepState, TailShield},
+    Identity,
 };
 use crate::error::MakerError;
 
+/// Proof attempts per step before its operation is requeued with fresh
+/// inputs. A proof fails transiently when the prover or indexer is briefly
+/// unavailable or behind; a third failure is treated as persistent. A
+/// re-prove after a stale-root rejection (`handle_failure`, any non-fill
+/// step including a rebalance with a kVault tail) counts against the same
+/// limit, so a stale root costs a prove attempt, not one of the operation's
+/// `OPERATION_ATTEMPTS`.
 pub const PROVE_ATTEMPTS: u32 = 3;
 
+/// A proven step, carried by `Event::Proven`.
+pub struct ProvenStep {
+    pub instruction: Instruction,
+    /// Set exactly for fill steps: the latest blockhash and its last valid
+    /// block height (or the error of fetching them), fetched in the prove
+    /// task right after the proof so `offer_fill` compiles the swap message
+    /// without an rpc call on the coordinator loop. Other steps fetch their
+    /// blockhash in the send task.
+    pub blockhash: Option<Result<(Hash, u64), MakerError>>,
+    /// Set exactly for steps with a `TailShield`: the kVault instruction and
+    /// the shield resolved from a simulation of the proven transact, which
+    /// replace the step's `tail`.
+    pub tail: Option<Vec<Instruction>>,
+}
+
+/// What `ProofQueue::new` needs.
 pub struct ProofQueueConfig {
-    pub authority: Arc<ShieldedKeypair>,
+    /// Completes the witness with the nullifier secret.
+    pub authority: Arc<dyn ProofAuthority>,
     pub indexer: Arc<AsyncZolanaIndexer>,
     pub prover: Arc<AsyncProverClient>,
-    pub base_workers: usize,
-    pub max_workers: usize,
+    /// Concurrent proofs; at least one is allowed.
+    pub workers: usize,
+    /// Fee payer named in every proven `transact`.
     pub payer: Address,
 }
 
+/// Bounded-concurrency prover front end.
 pub struct ProofQueue {
-    authority: Arc<ShieldedKeypair>,
+    authority: Arc<dyn ProofAuthority>,
     indexer: Arc<AsyncZolanaIndexer>,
     prover: Arc<AsyncProverClient>,
     workers: Semaphore,
-    worker_count: AtomicUsize,
-    max_workers: usize,
     payer: Address,
 }
 
 impl ProofQueue {
+    /// A queue with `config.workers` workers (`Settings::new` rejects zero
+    /// provers, so at least one).
     pub fn new(config: ProofQueueConfig) -> Self {
-        let base = config.base_workers.max(1);
         Self {
             authority: config.authority,
             indexer: config.indexer,
             prover: config.prover,
-            workers: Semaphore::new(base),
-            worker_count: AtomicUsize::new(base),
-            max_workers: config.max_workers.max(base),
+            workers: Semaphore::new(config.workers),
             payer: config.payer,
         }
     }
 
+    /// Waits for a worker, then proves `work` into a `transact` instruction.
+    /// Errors with `MakerError::CoordinatorStopped` once the queue is
+    /// closed, with `MakerError::Indexer` or `MakerError::Prover` on a
+    /// service failure, and with the client error when the proof does not
+    /// verify locally.
     pub async fn prove(&self, work: ProofWork) -> Result<Instruction, MakerError> {
-        let _worker = self.acquire_worker().await?;
+        // Held until the proof finishes.
+        let _worker_permit = self
+            .workers
+            .acquire()
+            .await
+            .map_err(|_| MakerError::CoordinatorStopped)?;
         self.prove_transfer(work).await
     }
 
-    async fn acquire_worker(&self) -> Result<SemaphorePermit<'_>, MakerError> {
-        if self.workers.available_permits() == 0 {
-            let current = self.worker_count.load(Ordering::Relaxed);
-            let grown = current < self.max_workers
-                && self
-                    .worker_count
-                    .compare_exchange(current, current + 1, Ordering::Relaxed, Ordering::Relaxed)
-                    .is_ok();
-            if grown {
-                self.workers.add_permits(1);
-            }
-        }
-        self.workers
-            .acquire()
-            .await
-            .map_err(|_| MakerError::CoordinatorStopped)
+    /// Closes the worker semaphore: proofs that have not acquired a worker
+    /// yet fail with `CoordinatorStopped`, running proofs finish.
+    pub fn close(&self) {
+        self.workers.close();
     }
 
+    /// Inclusion proofs of the real inputs and non-inclusion proofs of the
+    /// dummy nullifiers. With no real input there is nothing to read
+    /// inclusion for, so only the non-inclusion proofs are fetched, against
+    /// the tree of `tree_id`.
     async fn witnesses(
         &self,
         tree_id: u16,
@@ -108,6 +137,8 @@ impl ProofQueue {
         .map_err(MakerError::Indexer)
     }
 
+    /// Assembles, proves and locally verifies one transfer. The local
+    /// verification catches a bad proof before it costs a transaction fee.
     async fn prove_transfer(&self, work: ProofWork) -> Result<Instruction, MakerError> {
         let ProofWork {
             inputs: proof_inputs,
@@ -160,51 +191,103 @@ impl ProofQueue {
 }
 
 impl Coordinator {
+    /// Starts (or restarts) proving step `id`: resets it to
+    /// `StepState::Proving`, counts the attempt, and reports through
+    /// `Event::Proven` unless the coordinator is cancelled first.
     pub fn spawn_prove(&mut self, id: StepId) {
         let Some(step) = self.steps.get_mut(id) else {
             return;
         };
-        let Some(work) = step.proof.clone() else {
-            return;
-        };
+        let work = step.proof.clone();
         step.state = StepState::Proving;
         step.instruction = None;
         step.prove_attempts += 1;
+        let fill = step.kind == StepKind::Fill;
+        let tail_shield = step.tail_shield.clone();
+        let identity = self.identity.clone();
         let proofs = self.services.proofs.clone();
+        let sender = self.services.sender.clone();
         let events = self.runtime.events.clone();
         let cancel = self.runtime.cancel.clone();
         self.runtime.tasks.spawn(async move {
-            if let Some(result) = cancel.run_until_cancelled(proofs.prove(work)).await {
+            let proven = prove_step(
+                &proofs,
+                &sender,
+                work,
+                fill,
+                tail_shield.as_ref().map(|tail| (tail, &identity)),
+            );
+            if let Some(result) = cancel.run_until_cancelled(proven).await {
                 let _ = events.send(Event::Proven { step: id, result });
             }
         });
     }
 
-    pub async fn on_proven(&mut self, id: StepId, result: Result<Instruction, MakerError>) {
+    /// Handles a finished proof. A fill step, whose proof carries a
+    /// blockhash, goes to `offer_fill`; any other step is size-checked and
+    /// sent. A failed proof is retried up to `PROVE_ATTEMPTS`, then the
+    /// operation is requeued.
+    pub async fn on_proven(&mut self, id: StepId, result: Result<ProvenStep, MakerError>) {
         let Some(step) = self.steps.get_mut(id) else {
             return;
         };
-        match result {
-            Ok(instruction) => {
-                step.instruction = Some(instruction);
-                step.state = StepState::Proven;
-                if step.kind == StepKind::Fill {
-                    self.offer_fill(id).await;
-                    return;
-                }
-                let fits = self
-                    .send_request(id)
-                    .map(|request| self.services.sender.check_size(&request));
-                match fits {
-                    Some(Err(error)) => self.abort(id, error, Retry::Fail).await,
-                    _ => self.send_ready(),
-                }
-            }
+        let proven = match result {
+            Ok(proven) => proven,
             Err(error) if step.prove_attempts < PROVE_ATTEMPTS => {
                 tracing::warn!(step = id, %error, "proof failed, retrying");
                 self.spawn_prove(id);
+                return;
             }
-            Err(error) => self.abort(id, error, Retry::Requeue).await,
+            Err(error) => {
+                self.abort(id, error, Retry::Requeue).await;
+                return;
+            }
+        };
+        step.instruction = Some(proven.instruction);
+        if let Some(tail) = proven.tail {
+            step.tail = tail;
+        }
+        step.state = StepState::Proven;
+        if let Some(blockhash) = proven.blockhash {
+            self.offer_fill(id, blockhash).await;
+            return;
+        }
+        let too_large = self
+            .send_request(id)
+            .and_then(|request| self.services.sender.check_size(&request).err());
+        match too_large {
+            Some(error) => self.abort(id, error, Retry::Fail).await,
+            None => self.send_ready(),
         }
     }
+}
+
+/// Proves `work` and, for a fill, fetches the blockhash its swap message is
+/// compiled with. For a step with a `TailShield`, simulates the proven
+/// transact followed by the kVault instruction and resolves the shield
+/// amount from the simulated balance (`TailShield::resolve`); a failed
+/// simulation fails the step like a failed proof. Runs in the prove task,
+/// off the coordinator loop.
+async fn prove_step(
+    proofs: &ProofQueue,
+    sender: &SendQueue,
+    work: ProofWork,
+    fill: bool,
+    tail_shield: Option<(&TailShield, &Identity)>,
+) -> Result<ProvenStep, MakerError> {
+    let instruction = proofs.prove(work).await?;
+    let blockhash = if fill {
+        Some(sender.latest_blockhash().await)
+    } else {
+        None
+    };
+    let tail = match tail_shield {
+        Some((tail, identity)) => Some(tail.resolve(sender, identity, Some(&instruction)).await?),
+        None => None,
+    };
+    Ok(ProvenStep {
+        instruction,
+        blockhash,
+        tail,
+    })
 }

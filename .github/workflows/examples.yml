@@ -27,6 +27,8 @@ concurrency:
 env:
   AGAVE_VERSION: v4.0.2
   SBF_TOOLS_VERSION: v1.54
+  # bump to redump the Kamino programs from mainnet
+  KAMINO_PROGRAMS_CACHE_VERSION: 1
 
 jobs:
   rust-client:
@@ -148,6 +150,9 @@ jobs:
     env:
       ZOLANA_TAG: v0.4.0-alpha
       SURFPOOL_RELEASE_TAG: v1.6.0-light
+      # Mainnet RPC for the mainnet_vault test; empty without the secret,
+      # which skips it.
+      KAMINO_MAINNET_RPC_URL: ${{ secrets.KAMINO_MAINNET_RPC_URL }}
     steps:
       - uses: actions/checkout@v4
 
@@ -194,7 +199,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: k-lend-rfq/target/deploy/kamino_*.so
-          key: kamino-programs-v1
+          key: kamino-programs-${{ env.KAMINO_PROGRAMS_CACHE_VERSION }}
 
       - name: Dump Kamino programs from mainnet
         run: scripts/dump-kamino.sh
@@ -204,6 +209,11 @@ jobs:
 
       - name: Run clippy
         run: cargo clippy --all-targets --locked -- -D warnings
+
+      # Unit tests of the SDK, the market maker and the test utilities; they
+      # need no localnet.
+      - name: Run unit tests
+        run: cargo test --locked --workspace --lib
 
       # The prover downloads the proving keys it is missing on first start.
       - name: Cache proving keys
@@ -215,5 +225,12 @@ jobs:
       - name: Run deposit_and_withdraw example
         run: cargo run --locked -p k-lend-rfq-example --example deposit_and_withdraw
 
+      # mainnet_vault skips here and runs in its own step below.
       - name: Run market maker tests
+        env:
+          KAMINO_MAINNET_RPC_URL: ""
         run: cargo test --locked -p k-lend-market-maker --tests
+
+      - name: Run mainnet vault test
+        if: env.KAMINO_MAINNET_RPC_URL != ''
+        run: cargo test --locked -p k-lend-market-maker --test mainnet_vault

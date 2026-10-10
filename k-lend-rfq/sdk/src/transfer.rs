@@ -1,51 +1,79 @@
+//! A confidential zolana transfer as either party builds it for a swap, and
+//! the receiving side: decrypting the outputs addressed to a key and
+//! checking each against its on-chain commitment before it is trusted.
+
 use anyhow::{anyhow, Result};
 use borsh::BorshDeserialize;
 use solana_address::Address;
 use solana_instruction::Instruction;
-use zolana_client::{Rpc, ZolanaClient};
+use zolana_client::{ProofAuthority, Rpc, ZolanaClient};
 use zolana_event::OutputDataEncoding;
 use zolana_interface::instruction::TransactIxData;
-use zolana_keypair::{constants::P256_PUBKEY_LEN, P256Pubkey, ShieldedAddress, ShieldedKeypair};
+use zolana_keypair::{constants::P256_PUBKEY_LEN, P256Pubkey, ShieldedAddress};
 use zolana_program::instruction::Transact;
 use zolana_transaction::{
     instructions::transact::ConfidentialTransaction,
     serialization::confidential::{Confidential, ConfidentialOutputPlaintext},
-    AssetRegistry, EncryptedScheme, Utxo, WalletUtxo,
+    AssetRegistry, DecryptLabel, DecryptRequest, EncryptedScheme, ShieldedKeys, Utxo, WalletUtxo,
 };
 
 use zolana_client::{Shape, SPP_SUPPORTED_SHAPES};
 
 use crate::swap::SwapError;
 
-const USER_OUTPUTS: usize = 2;
+/// Outputs of a swap-side transfer: the payment to the recipient and the
+/// sender's change (`ConfidentialTransaction::transfer` adds both; padding
+/// fills the rest of the shape). The maker's fill rejects a user transfer
+/// with any other count (`SwapError::UserTransferOutputs`).
+pub const USER_OUTPUTS: usize = 2;
 
-fn smallest_shape(inputs: usize, outputs: usize) -> Option<Shape> {
+/// Picks the narrowest supported shape with at least `inputs` inputs and
+/// `outputs` outputs, `None` if none fits.
+pub fn smallest_shape(inputs: usize, outputs: usize) -> Option<Shape> {
     SPP_SUPPORTED_SHAPES
         .into_iter()
         .filter(|shape| shape.n_inputs() >= inputs && shape.n_outputs() >= outputs)
         .min_by_key(|shape| (shape.n_inputs(), shape.n_outputs()))
 }
 
+/// A confidential transfer of `amount` from `inputs` to `recipient`.
 pub struct Transfer {
+    /// UTXOs to spend, all of one asset; the first one's asset is sent.
     pub inputs: Vec<WalletUtxo>,
+    /// Minimum proof shape input count; the shape uses the larger of this
+    /// and `inputs.len()`.
     pub width: usize,
     pub amount: u64,
     pub recipient: ShieldedAddress,
+    /// The fee payer named in the `transact` instruction.
     pub payer: Address,
+    /// The state tree read for inputs and written for outputs.
     pub tree: Address,
+    /// The zolana id of `tree`.
     pub tree_id: u16,
 }
 
+/// A proven transfer.
 pub struct TransferInstruction {
+    /// The zolana `transact` instruction, ready to include in a transaction.
     pub instruction: Instruction,
+    /// Nullifiers of the real (non-padding) inputs, in input order.
     pub nullifiers: Vec<[u8; 32]>,
 }
 
 impl Transfer {
+    /// Builds, encrypts and proves the transfer: the narrowest supported
+    /// shape with at least `max(width, inputs.len())` inputs and
+    /// `USER_OUTPUTS` outputs, padded with dummy UTXOs of the sender.
+    ///
+    /// Errors when `inputs` is empty, with `SwapError::NoSupportedShape`
+    /// when no shape is wide enough, and with the transaction builder's or
+    /// the prover's error.
     pub fn prove<R: Rpc>(
         self,
         client: &ZolanaClient<R>,
-        keypair: &ShieldedKeypair,
+        keys: &dyn ShieldedKeys,
+        authority: &dyn ProofAuthority,
     ) -> Result<TransferInstruction> {
         let Transfer {
             inputs,
@@ -60,18 +88,18 @@ impl Transfer {
             .first()
             .map(|input| input.utxo.asset.asset)
             .ok_or_else(|| anyhow!("transfer without inputs"))?;
-        let shape = smallest_shape(width.max(inputs.len()), USER_OUTPUTS).ok_or(
-            SwapError::NoSupportedShape {
-                inputs: width,
+        let shape_inputs = width.max(inputs.len());
+        let shape =
+            smallest_shape(shape_inputs, USER_OUTPUTS).ok_or(SwapError::NoSupportedShape {
+                inputs: shape_inputs,
                 outputs: USER_OUTPUTS,
-            },
-        )?;
-        let identity = keypair.shielded_address()?;
+            })?;
+        let identity = keys.address()?;
         let mut transaction =
             ConfidentialTransaction::new(inputs, payer)?.with_output_tree_id(tree_id)?;
         transaction.transfer(&recipient, asset, amount)?;
         transaction.pad_utxos(shape, &identity)?;
-        let proof_inputs = transaction.encrypt(keypair)?;
+        let proof_inputs = transaction.encrypt(keys)?;
         let nullifiers = proof_inputs
             .input_utxos
             .iter()
@@ -80,7 +108,7 @@ impl Transfer {
             .collect();
         let owner_signers = proof_inputs.owner_signer_pubkeys()?;
         let data = client
-            .prove_transact(proof_inputs, None, keypair)
+            .prove_transact(proof_inputs, None, authority)
             .map_err(|e| anyhow!("prove transfer: {e:?}"))?;
         let instruction = Transact {
             payer,
@@ -98,23 +126,26 @@ impl Transfer {
     }
 }
 
+/// Decrypts the outputs of a `transact` addressed to `keys`.
 pub struct Receiver<'a> {
-    pub keypair: &'a ShieldedKeypair,
+    pub keys: &'a dyn ShieldedKeys,
+    /// Resolves the asset ids in a plaintext to mints.
     pub registry: &'a AssetRegistry,
+    /// The output tree's zolana id, part of each output's commitment.
     pub tree_id: u16,
 }
 
 impl Receiver<'_> {
-    pub fn received(&self, data: &TransactIxData) -> Result<Vec<Utxo>> {
-        Ok(self
-            .received_outputs(data)?
-            .into_iter()
-            .map(|(utxo, _)| utxo)
-            .collect())
-    }
-
+    /// The outputs of `data` encrypted to the receiver's viewing key, with
+    /// their commitments, in output order. Outputs that are plaintext,
+    /// another scheme or for another key are skipped.
+    ///
+    /// Every decrypted output is re-hashed and compared to the commitment
+    /// the transaction publishes for it; a mismatch errors with
+    /// `SwapError::CommitmentMismatch`, since the ciphertext alone does not
+    /// bind the amount the chain records.
     pub fn received_outputs(&self, data: &TransactIxData) -> Result<Vec<(Utxo, [u8; 32])>> {
-        let identity = self.keypair.shielded_address()?;
+        let identity = self.keys.address()?;
         let mut received = Vec::new();
         for (slot, output) in data.outputs.iter().enumerate() {
             let Some(plaintext) =
@@ -157,12 +188,19 @@ impl Receiver<'_> {
         let ciphertext = body
             .get(P256_PUBKEY_LEN..)
             .ok_or_else(|| anyhow!("output {slot} ciphertext is truncated"))?;
-        let bytes = self.keypair.decrypt_utxo(
-            ciphertext,
-            &P256Pubkey::from_bytes(data.tx_viewing_pk)?,
-            data.salt,
-            u32::try_from(slot)?,
-        )?;
+        let bytes = self
+            .keys
+            .decrypt(&[DecryptRequest {
+                ciphertext,
+                viewing_pubkey: identity.viewing_pubkey,
+                tx_viewing_pubkey: P256Pubkey::from_bytes(data.tx_viewing_pk)?,
+                salt: data.salt,
+                slot_index: u32::try_from(slot)?,
+                label: DecryptLabel::Utxo,
+            }])?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("output {slot} decrypted to no plaintext"))?;
         Ok(Some(ConfidentialOutputPlaintext::deserialize(&bytes)?))
     }
 }

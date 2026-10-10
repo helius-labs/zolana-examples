@@ -1,3 +1,6 @@
+//! The market maker's error type. Swap checks keep their `SwapError` inside
+//! `MakerError::Swap`, so callers can match the exact check that failed.
+
 use k_lend_rfq_sdk::swap::SwapError;
 use solana_address::Address;
 use solana_signature::Signature;
@@ -7,10 +10,16 @@ use zolana_client::ClientError;
 use zolana_keypair::KeypairError;
 use zolana_transaction::TransactionError;
 
-use crate::transactions::{budget::BudgetError, steps::StepId};
+use crate::{
+    config::ConfigError,
+    transactions::{budget::BudgetError, steps::StepId},
+};
 
+/// Every failure of a market maker operation.
 #[derive(Debug, Error)]
 pub enum MakerError {
+    /// Queuing an operation found its asset's unreserved balance, plus the
+    /// change of in-flight steps, minus queued amounts, short.
     #[error("{asset} balance {available} minus queued operations cannot cover {requested}")]
     InsufficientBalance {
         asset: Address,
@@ -18,6 +27,8 @@ pub enum MakerError {
         requested: u64,
     },
 
+    /// The balance covers the amount, but not within one transaction's
+    /// input count.
     #[error("{asset} utxos hold {available} but no {max_inputs} of them cover {requested}")]
     FragmentedInventory {
         asset: Address,
@@ -26,6 +37,7 @@ pub enum MakerError {
         max_inputs: usize,
     },
 
+    /// A transfer plan's change parts do not sum to the change it keeps.
     #[error("own outputs of {planned} do not add up to the {own_value} the transfer keeps")]
     OwnPartsMismatch { planned: u64, own_value: u64 },
 
@@ -38,17 +50,43 @@ pub enum MakerError {
     #[error("vault {vault} state does not parse: {reason}")]
     VaultState { vault: Address, reason: String },
 
+    #[error("vault {vault} instruction cannot be built: {reason}")]
+    VaultInstruction { vault: Address, reason: String },
+
     #[error("vault {vault} cannot price the rebalance: {reason}")]
     VaultMath { vault: Address, reason: String },
 
     #[error("shield instruction could not be built: {0}")]
     ShieldInstruction(String),
 
+    #[error("token account {account} does not parse")]
+    TokenAccount { account: Address },
+
+    #[error("the simulated kVault operation leaves no {asset} to shield in {account}")]
+    NothingToShield { asset: Address, account: Address },
+
+    #[error("simulation failed: {error}")]
+    SimulationFailed { error: String },
+
     #[error("operation amount is zero")]
     AmountZero,
 
+    #[error("amount overflow in {context}")]
+    AmountOverflow { context: &'static str },
+
+    /// An instant computed from a configured duration overflows the clock.
+    #[error("deadline overflow in {context}")]
+    DeadlineOverflow { context: &'static str },
+
+    /// A requeued operation hit its attempt limit; `reason` is the last error.
     #[error("operation failed after {attempts} attempts: {reason}")]
     OperationFailed { attempts: u32, reason: String },
+
+    /// Inputs of a failed step are spent on chain, so it is not retried.
+    #[error(
+        "{count} inputs of the operation were spent on-chain; the transaction or another spender consumed them"
+    )]
+    InputsSpent { count: usize },
 
     #[error("the market maker is shutting down")]
     ShuttingDown,
@@ -68,8 +106,17 @@ pub enum MakerError {
     #[error("message requires {required} signatures but names {accounts} accounts")]
     MalformedMessage { required: usize, accounts: usize },
 
-    #[error("message requires no signature")]
-    UnsignedMessage,
+    #[error("the market maker is not a signer of the message")]
+    MakerNotSigner,
+
+    #[error("the message has no user signer")]
+    MissingUserSigner,
+
+    #[error("signature does not verify for user {signer}")]
+    InvalidUserSignature { signer: Address },
+
+    #[error("transaction carries no signature")]
+    MissingSignature,
 
     #[error("rpc error: {0}")]
     Rpc(ClientError),
@@ -95,23 +142,27 @@ pub enum MakerError {
     #[error(transparent)]
     Budget(#[from] BudgetError),
 
-    #[error("the rpc rejected the transaction: {0}")]
-    SendRejected(String),
+    #[error("transaction rejected: {error}")]
+    TransactionRejected {
+        error: solana_transaction_error::TransactionError,
+    },
+
+    /// The rpc refused the transaction with a JSON-RPC error that carries no
+    /// transaction error and does not clear on a retry (for example -32003
+    /// signature verification or -32602 invalid params).
+    #[error("rpc rejected the transaction with error {code}: {message}")]
+    RpcRejected { code: i64, message: String },
 
     #[error("the transaction landed and failed: {0}")]
     TransactionFailed(String),
 
+    /// Every send's blockhash expired without the transaction landing.
     #[error("the transaction did not land before its blockhash expired")]
     NotLanded,
 
+    /// An unsent upkeep step was discarded to free UTXOs for a fill.
     #[error("a fill preempts this upkeep step")]
     Preempted,
-
-    #[error("no supported shape takes {inputs} inputs and {outputs} outputs")]
-    NoSupportedShape { inputs: usize, outputs: usize },
-
-    #[error("transaction of {bytes} bytes and {addresses} addresses does not fit transaction v1")]
-    TransactionTooLarge { bytes: usize, addresses: usize },
 
     #[error("output position {position} does not fit a slot index")]
     OutputPositionOutOfRange { position: usize },
@@ -122,9 +173,12 @@ pub enum MakerError {
     #[error("utxo {0:?} is not tracked")]
     UtxoNotTracked([u8; 32]),
 
+    /// No fill step awaits a signature for the submitted message.
     #[error("the fill is not reserved")]
     UnknownFill,
 
+    /// The fill's deadline passed, or its `fill` caller went away, before
+    /// the user signed; its reservations were released.
     #[error("fill {step} was released at its quote deadline")]
     ReservationExpired { step: StepId },
 
@@ -146,14 +200,8 @@ pub enum MakerError {
     #[error("pair of vault {vault} is not served")]
     PairNotServed { vault: Address },
 
-    #[error("pair of vault {vault} is already configured")]
-    PairExists { vault: Address },
-
-    #[error("no pair of vault {vault} is configured")]
-    UnknownPair { vault: Address },
-
-    #[error("mint {mint} belongs to no configured pair")]
-    UnknownAsset { mint: Address },
+    #[error(transparent)]
+    Config(#[from] ConfigError),
 
     #[error("a {expected} operation returned another outcome")]
     UnexpectedOutcome { expected: &'static str },
@@ -161,6 +209,8 @@ pub enum MakerError {
     #[error(transparent)]
     Swap(#[from] SwapError),
 
+    /// The `spawn_blocking` task that builds and encrypts a transfer panicked
+    /// or was cancelled.
     #[error("blocking task failed: {0}")]
     BlockingTask(String),
 }

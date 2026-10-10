@@ -1,4 +1,20 @@
-use anyhow::{anyhow, Result};
+//! A private kVault deposit and withdrawal through the market maker.
+//!
+//! The user never touches the vault. Each swap runs: quote (the maker prices
+//! `amount_in` at the vault price minus its fee and opens an order), prove
+//! (the user proves a shielded transfer of `amount_in` to the maker), fill
+//! (the maker checks that transfer against its order and adds its own
+//! transfer paying `amount_out`), verify and sign (the user), settle (the
+//! maker co-signs and sends both transfers in one transaction). The maker
+//! keeps its inventory in range with its own public vault deposits and
+//! withdrawals (rebalance), unlinked from any user.
+//!
+//! Before signing, `QuoteCheck::verify` checks that the maker pays the fee,
+//! that the message holds exactly the user's unaltered transfer, one maker
+//! transfer and the order's marker, that neither transfer moves public
+//! funds, and that the maker pays at least the quoted `amount_out`.
+
+use anyhow::Result;
 use zolana_client::{SolanaRpc, ZolanaClient};
 
 use k_lend_market_maker::Holdings;
@@ -9,7 +25,7 @@ use k_lend_rfq_sdk::{
 };
 
 use k_lend_rfq_test_utils::{
-    chain::blocking,
+    chain::confirm_indexed,
     setup::{setup, TestEnv, USER_SHIELD_COLLATERAL},
     user::User,
 };
@@ -18,6 +34,9 @@ const MARKET_MAKER_SEED_DEPOSIT: u64 = 200_000_000;
 const MARKET_MAKER_COLLATERAL: u64 = 50_000_000;
 const DEPOSIT_COLLATERAL: u64 = 40_000_000;
 const WITHDRAW_SHARES: u64 = 15_000_000;
+/// Index of this example's localnet; it picks the ports, so the example can
+/// run next to the tests.
+const EXAMPLE_LOCALNET: u16 = 12;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> Result<()> {
@@ -27,7 +46,7 @@ async fn main() -> Result<()> {
         market_maker,
         pair,
         ..
-    } = setup(12).await?;
+    } = setup(EXAMPLE_LOCALNET).await?;
 
     // Market maker setup: deposit USDC into kVault and keep the shares and some
     // USDC in its private balance, so it can serve both directions.
@@ -90,6 +109,7 @@ async fn swap(
         "{direction:?}: {amount_in} in, {} out",
         offer.quote.amount_out
     );
+    println!("order {}", offer.id);
 
     // 3. The user proves its transfer: its UTXOs in, `amount_in` to the
     // market maker and change back to itself.
@@ -99,17 +119,15 @@ async fn swap(
     // paying `amount_out` to the user, and builds the transaction.
     let fill = market_maker.fill(pair, &order.request).await?;
 
-    // 5. The user checks that the market maker's transfer pays the quoted
-    // amount, then signs.
-    user.verify_quote(client, pair, &order, &fill.fill.message)
-        .await?;
+    // 5. The user checks the whole message (`QuoteCheck::verify`), then
+    // signs.
+    user.verify_quote(pair, &order, &fill.fill.message)?;
     let user_signature = user.sign(&fill.fill.message)?;
 
     // 6. The market maker adds its signature and sends the transaction.
     let signature = market_maker.settle(&fill.fill, user_signature).await?;
 
-    blocking(|| client.confirm_private_transaction_sync(signature))
-        .map_err(|e| anyhow!("index swap {signature}: {e:?}"))?;
+    confirm_indexed(client, signature, "swap")?;
     user.sync(client).await?;
     market_maker.sync().await?;
     Ok(offer.quote)

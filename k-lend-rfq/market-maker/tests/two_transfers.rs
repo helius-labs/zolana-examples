@@ -1,28 +1,36 @@
+//! Tested invariants:
+//! 1. A user transfer and a maker transfer proved separately against the same
+//!    tree carry the same tree context, so one swap-budget message combines them into
+//!    one transaction.
+//! 2. That transaction lands with both signatures and creates the nullifier
+//!    PDA of each transfer's input.
+//! 3. Both sides' holdings move by exactly the two transferred amounts.
+
 use anyhow::{anyhow, Result};
 use zolana_client::{sign_transaction, Rpc};
 use zolana_interface::pda;
-use zolana_test_utils::wallet::Wallet;
-use zolana_transaction::WalletUtxo;
 
-use k_lend_market_maker::{swap_message, transfers, Holdings};
-use k_lend_rfq_sdk::transfer::Transfer;
+use k_lend_market_maker::Holdings;
+use k_lend_rfq_sdk::message::{instructions, transact_data};
 
 use k_lend_rfq_test_utils::{
-    chain::{blocking, compute_units},
+    chain::{blocking, compile_swap, compute_units, confirm_indexed},
     setup::{setup, TestEnv, USER_SHIELD_COLLATERAL},
-    wallet::TestWallet,
 };
 
 const MAKER_SHIELD_COLLATERAL: u64 = 50_000_000;
 const USER_PAYS: u64 = 7_000_000;
 const MAKER_PAYS: u64 = 3_000_000;
 
+/// Invariants 1-3: two 1x2 transacts, one per side, settle in one
+/// transaction and move both holdings by their amounts.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_transacts_against_one_tree_settle_in_one_transaction() -> Result<()> {
     let TestEnv {
         localnet,
         mut user,
         market_maker,
+        market_maker_wallet,
         collateral_mint,
         pair,
         ..
@@ -32,47 +40,27 @@ async fn two_transacts_against_one_tree_settle_in_one_transaction() -> Result<()
         .seed_inventory(&pair, 0, MAKER_SHIELD_COLLATERAL)
         .await?;
 
-    let first_utxo = |wallet: &Wallet| -> Result<WalletUtxo> {
-        wallet
-            .balance(collateral_mint, None)?
-            .utxos
-            .first()
-            .cloned()
-            .ok_or_else(|| anyhow!("no collateral utxo"))
-    };
-    let user_wallet: &TestWallet = user.wallet();
-    let user_transfer = blocking(|| {
-        Transfer {
-            inputs: vec![first_utxo(user_wallet)?],
-            width: 1,
-            amount: USER_PAYS,
-            recipient: market_maker.identity(),
-            payer: market_maker.address(),
-            tree: localnet.tree,
-            tree_id: localnet.tree_id,
-        }
-        .prove(&localnet.client, &user_wallet.keypair)
-    })?;
-    let user_identity = user.identity();
     let maker_address = market_maker.address();
+    let user_transfer = user.wallet().transfer(
+        &localnet,
+        vec![user.wallet().first_utxo(collateral_mint)?],
+        USER_PAYS,
+        market_maker.identity(),
+        maker_address,
+    )?;
     let maker_inputs = vec![market_maker
         .spendable(&collateral_mint)
         .first()
         .cloned()
         .ok_or_else(|| anyhow!("no maker collateral utxo"))?];
-    let maker_keypair = market_maker.keypair();
-    let maker_transfer = blocking(|| {
-        Transfer {
-            inputs: maker_inputs,
-            width: 1,
-            amount: MAKER_PAYS,
-            recipient: user_identity,
-            payer: maker_address,
-            tree: localnet.tree,
-            tree_id: localnet.tree_id,
-        }
-        .prove(&localnet.client, maker_keypair)
-    })?;
+    let maker_transfer = market_maker_wallet.transfer(
+        &localnet,
+        maker_inputs,
+        MAKER_PAYS,
+        user.identity(),
+        maker_address,
+    )?;
+    // Invariant 1: both transfers name the same tree context.
     let nullifiers = [
         *user_transfer
             .nullifiers
@@ -83,26 +71,31 @@ async fn two_transacts_against_one_tree_settle_in_one_transaction() -> Result<()
             .first()
             .ok_or_else(|| anyhow!("maker transfer spends nothing"))?,
     ];
-    let (blockhash, _) = blocking(|| rpc.get_latest_blockhash())?;
-    let message = swap_message(
+    let message = compile_swap(
+        rpc,
         &maker_address,
-        [user_transfer.instruction, maker_transfer.instruction],
-        blockhash,
+        &[user_transfer.instruction, maker_transfer.instruction],
     )?;
-    let roots: Vec<_> = transfers(&message)?
+    let roots: Vec<_> = instructions(&message)?
         .iter()
-        .map(|transfer| transfer.tree_contexts.clone())
-        .collect();
-    assert_eq!(roots.first(), roots.get(1));
+        .map(|instruction| transact_data(instruction).map(|transfer| transfer.tree_contexts))
+        .collect::<Result<_>>()?;
+    assert_eq!(roots.len(), 2, "transfers in the swap message");
+    assert_eq!(
+        roots.first(),
+        roots.get(1),
+        "tree contexts of the user and maker transfers"
+    );
+
+    // Invariant 2: the transaction lands and nullifies both inputs.
 
     let signature = blocking(|| {
         rpc.process_transaction(sign_transaction(
             message,
-            &[maker_keypair, &user.wallet().keypair],
+            &[market_maker_wallet.signer(), user.wallet().signer()],
         )?)
     })?;
-    blocking(|| localnet.client.confirm_private_transaction_sync(signature))
-        .map_err(|e| anyhow!("index two-transfer transaction {signature}: {e:?}"))?;
+    confirm_indexed(&localnet.client, signature, "two-transfer transaction")?;
     println!(
         "two 1x2 transacts in one transaction: {} CU",
         blocking(|| compute_units(rpc, &signature))?
@@ -112,10 +105,19 @@ async fn two_transacts_against_one_tree_settle_in_one_transaction() -> Result<()
         .iter()
         .map(|nullifier| pda::nullifier_pda(&localnet.tree, nullifier).0)
         .collect();
-    assert_ne!(nullifier_pdas.first(), nullifier_pdas.get(1));
+    assert_ne!(
+        nullifier_pdas.first(),
+        nullifier_pdas.get(1),
+        "the two transfers share a nullifier PDA"
+    );
     for nullifier_pda in &nullifier_pdas {
-        assert!(blocking(|| rpc.get_account(*nullifier_pda))?.is_some());
+        assert!(
+            blocking(|| rpc.get_account(*nullifier_pda))?.is_some(),
+            "nullifier PDA {nullifier_pda}: got no account, want one"
+        );
     }
+
+    // Invariant 3: both holdings move by the transferred amounts.
 
     user.sync(&localnet.client).await?;
     market_maker.sync().await?;

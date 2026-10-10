@@ -1,116 +1,93 @@
-use sha2::{Digest, Sha256};
+//! Async rpc reads of the maker's vault and token accounts.
+
 use solana_address::Address;
-use solana_instruction::{AccountMeta, Instruction};
 use zolana_client::AsyncRpc;
-use zolana_interface::pda::spl_token_program_id;
 
-use k_lend_rfq_sdk::pair::{Pair, VaultState, PROGRAM_ID};
+use k_lend_rfq_sdk::{
+    kvault::token_account_amount,
+    pair::{Pair, VaultState},
+};
 
-use crate::error::MakerError;
+use crate::{config::check_pair, error::MakerError};
 
-const KLEND_PROGRAM_ID: Address =
-    Address::from_str_const("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
-
-fn discriminator(preimage: &str) -> [u8; 8] {
-    let hash = Sha256::digest(preimage.as_bytes());
-    let mut out = [0u8; 8];
-    out.copy_from_slice(hash.get(..8).unwrap_or_default());
-    out
-}
-
-fn pda(seeds: &[&[u8]]) -> Address {
-    Address::find_program_address(seeds, &PROGRAM_ID).0
-}
-
-fn event_authority() -> Address {
-    pda(&[b"__event_authority"])
-}
-
-fn global_config() -> Address {
-    pda(&[b"global_config"])
-}
-
-pub struct UserAccounts {
-    pub user: Address,
-    pub token_account: Address,
-    pub shares_account: Address,
-}
-
-pub struct Deposit<'a> {
-    pub pair: &'a Pair,
-    pub user: &'a UserAccounts,
-    pub max_amount: u64,
-}
-
-impl Deposit<'_> {
-    pub fn instruction(&self) -> Instruction {
-        let token_program = spl_token_program_id();
-        let mut data = discriminator("global:deposit").to_vec();
-        data.extend_from_slice(&self.max_amount.to_le_bytes());
-        Instruction {
-            program_id: PROGRAM_ID,
-            accounts: vec![
-                AccountMeta::new(self.user.user, true),
-                AccountMeta::new(self.pair.vault, false),
-                AccountMeta::new(self.pair.token_vault, false),
-                AccountMeta::new_readonly(self.pair.token_mint, false),
-                AccountMeta::new_readonly(self.pair.authority, false),
-                AccountMeta::new(self.pair.shares_mint, false),
-                AccountMeta::new(self.user.token_account, false),
-                AccountMeta::new(self.user.shares_account, false),
-                AccountMeta::new_readonly(KLEND_PROGRAM_ID, false),
-                AccountMeta::new_readonly(token_program, false),
-                AccountMeta::new_readonly(token_program, false),
-                AccountMeta::new_readonly(event_authority(), false),
-                AccountMeta::new_readonly(PROGRAM_ID, false),
-            ],
-            data,
+/// The token balance of `account`; a missing account holds 0.
+pub async fn token_balance(rpc: &dyn AsyncRpc, account: Address) -> Result<u64, MakerError> {
+    match rpc.get_account(account).await.map_err(MakerError::Rpc)? {
+        None => Ok(0),
+        Some(found) => {
+            token_account_amount(&found.data).ok_or(MakerError::TokenAccount { account })
         }
     }
 }
 
-pub struct WithdrawFromAvailable<'a> {
-    pub pair: &'a Pair,
-    pub user: &'a UserAccounts,
-    pub shares: u64,
-}
-
-impl WithdrawFromAvailable<'_> {
-    pub fn instruction(&self) -> Instruction {
-        let token_program = spl_token_program_id();
-        let mut data = discriminator("global:withdraw_from_available").to_vec();
-        data.extend_from_slice(&self.shares.to_le_bytes());
-        Instruction {
-            program_id: PROGRAM_ID,
-            accounts: vec![
-                AccountMeta::new_readonly(self.user.user, true),
-                AccountMeta::new(self.pair.vault, false),
-                AccountMeta::new_readonly(global_config(), false),
-                AccountMeta::new(self.pair.token_vault, false),
-                AccountMeta::new_readonly(self.pair.authority, false),
-                AccountMeta::new(self.user.token_account, false),
-                AccountMeta::new(self.pair.token_mint, false),
-                AccountMeta::new(self.user.shares_account, false),
-                AccountMeta::new(self.pair.shares_mint, false),
-                AccountMeta::new_readonly(token_program, false),
-                AccountMeta::new_readonly(token_program, false),
-                AccountMeta::new_readonly(KLEND_PROGRAM_ID, false),
-                AccountMeta::new_readonly(event_authority(), false),
-                AccountMeta::new_readonly(PROGRAM_ID, false),
-            ],
-            data,
-        }
-    }
-}
-
+/// Reads and prices `vault` over the async rpc: the vault account first (its allocations name the reserves), then
+/// its `GlobalConfig` and every allocated reserve in one
+/// `get_multiple_accounts`, priced by `VaultState::from_accounts`.
+///
+/// Errors with `VaultMissing` when the vault does not exist and with
+/// `VaultState` when one of the other accounts is missing, an account does
+/// not parse or the reserves do not match the vault's allocations.
 pub async fn read_vault(rpc: &dyn AsyncRpc, vault: Address) -> Result<VaultState, MakerError> {
-    let account = rpc
+    let parse = |error: anyhow::Error| MakerError::VaultState {
+        vault,
+        reason: error.to_string(),
+    };
+    let vault_data = rpc
         .get_account(vault)
         .await
         .map_err(MakerError::Rpc)?
-        .ok_or(MakerError::VaultMissing { vault })?;
-    VaultState::from_data(&account.data).map_err(|error| MakerError::VaultState {
-        vault,
-        reason: error.to_string(),
-    })
+        .ok_or(MakerError::VaultMissing { vault })?
+        .data;
+    let addresses = VaultState::pricing_accounts(&vault_data).map_err(parse)?;
+    let fetched = rpc
+        .get_multiple_accounts(addresses.clone())
+        .await
+        .map_err(MakerError::Rpc)?;
+    if fetched.len() != addresses.len() {
+        return Err(MakerError::VaultState {
+            vault,
+            reason: format!(
+                "{} of {} pricing accounts returned",
+                fetched.len(),
+                addresses.len()
+            ),
+        });
+    }
+    let accounts = addresses
+        .into_iter()
+        .zip(fetched)
+        .map(|(address, account)| {
+            account
+                .map(|account| (address, account.data))
+                .ok_or_else(|| MakerError::VaultState {
+                    vault,
+                    reason: format!("pricing account {address} does not exist"),
+                })
+        })
+        .collect::<Result<Vec<_>, MakerError>>()?;
+    let Some(((_, global_config), reserves)) = accounts.split_first() else {
+        return Err(MakerError::VaultState {
+            vault,
+            reason: "vault global config not returned".to_string(),
+        });
+    };
+    let reserves: Vec<(Address, &[u8])> = reserves
+        .iter()
+        .map(|(address, data)| (*address, data.as_slice()))
+        .collect();
+    VaultState::from_accounts(&vault_data, global_config, &reserves).map_err(parse)
+}
+
+/// Reads `pair.vault` with [`read_vault`], the path every quote prices
+/// through, and checks the pair's addresses against it with `check_pair`.
+///
+/// Errors with `MakerError::VaultMissing` when the vault account does not
+/// exist (or the rpc does not show it yet), `MakerError::VaultState` when a
+/// pricing account is missing or does not parse, and
+/// `MakerError::Config(ConfigError::VaultMismatch)` when the pair's
+/// `token_mint`, `shares_mint`, `token_vault` or `authority` is not the
+/// vault's.
+pub async fn check_vault(rpc: &dyn AsyncRpc, pair: &Pair) -> Result<(), MakerError> {
+    let state = read_vault(rpc, pair.vault).await?;
+    Ok(check_pair(pair, &state)?)
 }

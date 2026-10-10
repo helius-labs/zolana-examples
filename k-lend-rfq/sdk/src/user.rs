@@ -1,23 +1,32 @@
-use std::{cmp::Reverse, collections::BTreeSet};
+//! The user's side of a swap: input selection, proving the transfer for an
+//! offer, and the checks on the maker's swap message before the user signs
+//! it. Nothing the maker returns is signed without `QuoteCheck::verify`.
 
-use anyhow::{anyhow, Result};
-use solana_address::Address;
-use solana_instruction::{AccountMeta, Instruction};
-use solana_message::VersionedMessage;
-use zolana_client::{Rpc, ZolanaClient};
-use zolana_interface::{
-    instruction::{tag, TransactIxData},
-    PROGRAM_ID_PUBKEY,
+use std::{
+    cmp::Reverse,
+    time::{SystemTime, UNIX_EPOCH},
 };
-use zolana_keypair::ShieldedKeypair;
-use zolana_transaction::{Utxo, WalletUtxo};
+
+use anyhow::Result;
+use solana_address::Address;
+use solana_instruction::Instruction;
+use solana_message::VersionedMessage;
+use zolana_client::{ProofAuthority, Rpc, ZolanaClient};
+use zolana_transaction::{ShieldedKeys, Utxo, WalletUtxo};
 
 use crate::{
-    pair::{Pair, VaultState},
-    swap::{Offer, Order, Quote, SwapError, SwapRequest},
+    message::{instructions, transact_data},
+    pair::Pair,
+    swap::{order_marker_instruction, Offer, Order, SwapError, SwapRequest},
     transfer::{Receiver, Transfer},
 };
 
+/// Picks the user's UTXOs of `asset` to pay `amount`, largest first, so the
+/// transfer spends as few inputs as possible.
+///
+/// Errors with `SwapError::InsufficientFunds` when all UTXOs of `asset` sum
+/// to less than `amount`, and with `SwapError::TooManyInputs` when covering
+/// it takes more than `max_inputs` of them.
 pub fn select_inputs(
     utxos: Vec<WalletUtxo>,
     asset: Address,
@@ -53,19 +62,39 @@ pub fn select_inputs(
     Ok(inputs)
 }
 
+/// An accepted offer with the inputs that will pay it, ready to prove.
 pub struct UserOrder {
     pub offer: Offer,
+    /// The UTXOs the transfer spends, from [`select_inputs`].
     pub inputs: Vec<WalletUtxo>,
+    /// Proof shape input count to pad to; `None` uses `inputs.len()`.
     pub width: Option<usize>,
+    /// The state tree the inputs live in and the outputs go to.
     pub tree: Address,
+    /// The zolana id of `tree`, part of each output's commitment.
     pub tree_id: u16,
 }
 
 impl UserOrder {
+    /// Proves the user's transfer of `quote.amount_in` to the maker and wraps
+    /// it in a fill request for `offer.id`.
+    ///
+    /// Checks, in order, before proving (a proof is expensive, and the maker
+    /// would reject the fill anyway):
+    /// 1. the current unix time in whole seconds is before
+    ///    `offer.expires_at`, else `SwapError::OrderExpired`. The maker
+    ///    floors the order's expiry to whole seconds when it fills in
+    ///    `expires_at`, so the user may treat an order as expired up to one
+    ///    second before the maker does, never later;
+    /// 2. `inputs` fit `offer.max_user_inputs`, else `SwapError::TooManyInputs`.
+    ///
+    /// Proving fails with `SwapError::NoSupportedShape` when no proof shape
+    /// fits the inputs, or with the prover's error.
     pub fn prove<R: Rpc>(
         self,
         client: &ZolanaClient<R>,
-        keypair: &ShieldedKeypair,
+        keys: &dyn ShieldedKeys,
+        authority: &dyn ProofAuthority,
     ) -> Result<Order> {
         let UserOrder {
             offer,
@@ -74,6 +103,9 @@ impl UserOrder {
             tree,
             tree_id,
         } = self;
+        if SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() >= offer.expires_at {
+            return Err(SwapError::OrderExpired { order: offer.id }.into());
+        }
         if inputs.len() > offer.max_user_inputs {
             return Err(SwapError::TooManyInputs {
                 needed: inputs.len(),
@@ -82,59 +114,108 @@ impl UserOrder {
             .into());
         }
         let quote = offer.quote;
+        let width = width.unwrap_or(inputs.len());
         let transfer = Transfer {
-            inputs: inputs.clone(),
-            width: width.unwrap_or(inputs.len()),
+            inputs,
+            width,
             amount: quote.amount_in,
             recipient: offer.maker,
             payer: offer.fee_payer,
             tree,
             tree_id,
         }
-        .prove(client, keypair)?;
+        .prove(client, keys, authority)?;
         Ok(Order {
             offer,
-            inputs,
             request: SwapRequest {
-                quote,
-                user: keypair.shielded_address()?,
+                order: offer.id,
+                user: keys.address()?,
                 transfer: transfer.instruction,
             },
         })
     }
 }
 
+/// The user's pre-signing check of a swap message against its order.
 pub struct QuoteCheck<'a> {
     pub order: &'a Order,
     pub message: &'a VersionedMessage,
     pub pair: &'a Pair,
-    pub rate: &'a VaultState,
-    pub fee_bps: u64,
 }
 
 impl QuoteCheck<'_> {
+    /// Checks the swap message the maker returns for `order` before the user
+    /// signs it. Checks, in order:
+    ///
+    /// 1. the first account key (the fee payer) is `offer.fee_payer`, else
+    ///    `SwapError::UnexpectedTransaction`;
+    /// 2. every instruction decodes against the static account keys and
+    ///    there are exactly three, else `SwapError::UnexpectedTransaction`;
+    /// 3. the first instruction equals `request.transfer` in program id,
+    ///    accounts (with their signer and writable flags) and data, else
+    ///    `SwapError::UserTransferAltered`;
+    /// 4. the third instruction equals
+    ///    `order_marker_instruction(offer.fee_payer, offer.id,
+    ///    offer.marker_lamports)` the same way, else
+    ///    `SwapError::OrderMarkerMismatch`;
+    /// 5. no instruction after the user's transfer names one of the user's
+    ///    signing keys (the signers of the user's transfer other than
+    ///    `offer.fee_payer`) as a signer, else `SwapError::UnexpectedSigner`;
+    /// 6. the signers of the maker's transfer are exactly
+    ///    `{offer.fee_payer}`: any other signer fails with
+    ///    `SwapError::UnexpectedSigner`, a missing fee payer with
+    ///    `SwapError::UnexpectedTransaction`;
+    /// 7. the first and second instructions are zolana `transact`s, else
+    ///    `SwapError::UnexpectedTransaction`;
+    /// 8. neither transfer carries an interface transfer, else
+    ///    `SwapError::PublicTransfer`;
+    /// 9. every output of the maker's transfer the user can decrypt opens to
+    ///    its commitment, else `SwapError::CommitmentMismatch`;
+    /// 10. exactly one of those outputs is of the quote's output asset, else
+    ///     `SwapError::UnexpectedOutputs`;
+    /// 11. that output holds at least `offer.quote.amount_out`, else
+    ///     `SwapError::BelowQuote`.
+    ///
+    /// The exact three-instruction shape and the signer checks are what keep
+    /// the user's signature from authorizing anything but the user's own
+    /// transfer: the user signs the whole message, so a key of the user's
+    /// listed in another instruction would be signed for there too. The
+    /// marker makes a second fill of the same order fail on-chain with
+    /// `SystemError::AccountAlreadyInUse`.
     pub fn verify(&self, receiver: &Receiver) -> Result<()> {
         let order = self.order;
         if self.message.static_account_keys().first() != Some(&order.offer.fee_payer) {
             return Err(SwapError::UnexpectedTransaction.into());
         }
         let instructions = instructions(self.message)?;
-        let [user_transfer, maker_transfer] = instructions.as_slice() else {
+        let [user_transfer, maker_transfer, marker] = instructions.as_slice() else {
             return Err(SwapError::UnexpectedTransaction.into());
         };
         if *user_transfer != order.request.transfer {
             return Err(SwapError::UserTransferAltered.into());
         }
+        let offer = &order.offer;
+        if *marker != order_marker_instruction(&offer.fee_payer, offer.id, offer.marker_lamports)? {
+            return Err(SwapError::OrderMarkerMismatch { order: offer.id }.into());
+        }
+        check_signers(&offer.fee_payer, user_transfer, maker_transfer, marker)?;
         let user_data = transact_data(user_transfer)?;
         let maker_data = transact_data(maker_transfer)?;
-        let count = user_data.interface_transfers.len() + maker_data.interface_transfers.len();
+        let count = user_data
+            .interface_transfers
+            .len()
+            .checked_add(maker_data.interface_transfers.len())
+            .ok_or(SwapError::AmountOverflow {
+                context: "interface transfer count",
+            })?;
         if count != 0 {
             return Err(SwapError::PublicTransfer { count }.into());
         }
         let (_, asset_out) = order.offer.quote.direction.assets(self.pair);
         let received: Vec<Utxo> = receiver
-            .received(&maker_data)?
+            .received_outputs(&maker_data)?
             .into_iter()
+            .map(|(utxo, _)| utxo)
             .filter(|utxo| utxo.asset.asset == asset_out)
             .collect();
         let [utxo] = received.as_slice() else {
@@ -143,15 +224,10 @@ impl QuoteCheck<'_> {
             }
             .into());
         };
-        let expected = Quote::price(
-            self.rate,
-            order.offer.quote.direction,
-            order.offer.quote.amount_in,
-            self.fee_bps,
-        )?;
-        if utxo.amount < expected.amount_out {
-            return Err(SwapError::BelowRate {
-                expected: expected.amount_out,
+        let quoted = order.offer.quote.amount_out;
+        if utxo.amount < quoted {
+            return Err(SwapError::BelowQuote {
+                quoted,
                 offered: utxo.amount,
             }
             .into());
@@ -160,46 +236,161 @@ impl QuoteCheck<'_> {
     }
 }
 
-fn instructions(message: &VersionedMessage) -> Result<Vec<Instruction>> {
-    let keys = message.static_account_keys();
-    let key = |index: u8| -> Result<Address> {
-        Ok(*keys
-            .get(usize::from(index))
-            .ok_or(SwapError::UnexpectedTransaction)?)
-    };
-    message
-        .instructions()
+/// The signer keys `instruction` names, in account order.
+fn signers(instruction: &Instruction) -> impl Iterator<Item = &Address> {
+    instruction
+        .accounts
         .iter()
-        .map(|compiled| {
-            let accounts = compiled
-                .accounts
-                .iter()
-                .map(|&index| {
-                    Ok(AccountMeta {
-                        pubkey: key(index)?,
-                        is_signer: message.is_signer(usize::from(index)),
-                        is_writable: message.is_maybe_writable_with_reserved_addresses(
-                            usize::from(index),
-                            None::<&BTreeSet<Address>>,
-                        ),
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
-            Ok(Instruction {
-                program_id: key(compiled.program_id_index)?,
-                accounts,
-                data: compiled.data.clone(),
-            })
-        })
-        .collect()
+        .filter(|meta| meta.is_signer)
+        .map(|meta| &meta.pubkey)
 }
 
-fn transact_data(instruction: &Instruction) -> Result<TransactIxData> {
-    if instruction.program_id != PROGRAM_ID_PUBKEY {
-        return Err(SwapError::UnexpectedTransaction.into());
+/// Steps 5 and 6 of [`QuoteCheck::verify`]. A decompiled instruction marks
+/// an account as a signer whenever the message requires its signature, so a
+/// user key listed anywhere in the maker's transfer or the marker shows up
+/// here as a signer.
+fn check_signers(
+    fee_payer: &Address,
+    user_transfer: &Instruction,
+    maker_transfer: &Instruction,
+    marker: &Instruction,
+) -> Result<(), SwapError> {
+    let user_keys: Vec<&Address> = signers(user_transfer)
+        .filter(|signer| *signer != fee_payer)
+        .collect();
+    if let Some(signer) = [maker_transfer, marker]
+        .into_iter()
+        .flat_map(signers)
+        .find(|signer| user_keys.contains(signer))
+    {
+        return Err(SwapError::UnexpectedSigner { signer: *signer });
     }
-    let Some((&tag::TRANSACT, payload)) = instruction.data.split_first() else {
-        return Err(SwapError::UnexpectedTransaction.into());
-    };
-    TransactIxData::deserialize(payload).map_err(|e| anyhow!("decode transact: {e}"))
+    if let Some(signer) = signers(maker_transfer).find(|signer| *signer != fee_payer) {
+        return Err(SwapError::UnexpectedSigner { signer: *signer });
+    }
+    if !signers(maker_transfer).any(|signer| signer == fee_payer) {
+        return Err(SwapError::UnexpectedTransaction);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use solana_instruction::AccountMeta;
+    use solana_message::{legacy::Message, VersionedMessage};
+    use zolana_interface::PROGRAM_ID_PUBKEY;
+    use zolana_keypair::ShieldedKeypair;
+    use zolana_transaction::AssetRegistry;
+
+    use super::*;
+    use crate::swap::{Direction, OrderId, Quote};
+
+    /// A zolana-addressed instruction naming `accounts`; its data is never
+    /// decoded because the signer checks run first.
+    fn transact(accounts: Vec<AccountMeta>) -> Instruction {
+        Instruction {
+            program_id: PROGRAM_ID_PUBKEY,
+            accounts,
+            data: vec![0],
+        }
+    }
+
+    /// `QuoteCheck::verify` on `[user_transfer, maker_transfer, marker]`
+    /// paid by `fee_payer`, with the error it returns as a `SwapError`.
+    fn verify_error(
+        fee_payer: Address,
+        user_transfer: Instruction,
+        maker_transfer: Instruction,
+    ) -> Option<SwapError> {
+        let keypair = ShieldedKeypair::new_p256().ok()?;
+        let address = keypair.shielded_address().ok()?;
+        let id = OrderId([7; 16]);
+        let marker = order_marker_instruction(&fee_payer, id, 890_880).ok()?;
+        let message = VersionedMessage::Legacy(Message::new(
+            &[user_transfer.clone(), maker_transfer, marker],
+            Some(&fee_payer),
+        ));
+        let offer = Offer {
+            id,
+            expires_at: u64::MAX,
+            quote: Quote {
+                direction: Direction::Deposit,
+                amount_in: 100,
+                amount_out: 100,
+            },
+            maker: address,
+            fee_payer,
+            max_user_inputs: 1,
+            user_outputs: 2,
+            marker_lamports: 890_880,
+        };
+        let order = Order {
+            offer,
+            request: SwapRequest {
+                order: id,
+                user: address,
+                transfer: user_transfer,
+            },
+        };
+        let pair = Pair::new(Address::new_unique(), Address::new_unique());
+        let registry = AssetRegistry::default();
+        let receiver = Receiver {
+            keys: &keypair,
+            registry: &registry,
+            tree_id: 0,
+        };
+        QuoteCheck {
+            order: &order,
+            message: &message,
+            pair: &pair,
+        }
+        .verify(&receiver)
+        .err()?
+        .downcast_ref::<SwapError>()
+        .cloned()
+    }
+
+    /// A maker transfer that names the user's signing key, or any signer
+    /// but the fee payer, fails with `UnexpectedSigner` before anything is
+    /// decoded.
+    #[test]
+    fn verify_rejects_signers_outside_the_user_transfer() {
+        let fee_payer = Address::new_unique();
+        let user_key = Address::new_unique();
+        let stranger = Address::new_unique();
+        let user_transfer = transact(vec![
+            AccountMeta::new(fee_payer, true),
+            AccountMeta::new_readonly(user_key, true),
+        ]);
+        for (label, maker_accounts, want) in [
+            (
+                "maker transfer names the user's key",
+                vec![
+                    AccountMeta::new(fee_payer, true),
+                    AccountMeta::new_readonly(user_key, true),
+                ],
+                SwapError::UnexpectedSigner { signer: user_key },
+            ),
+            (
+                "maker transfer names another signer",
+                vec![
+                    AccountMeta::new(fee_payer, true),
+                    AccountMeta::new_readonly(stranger, true),
+                ],
+                SwapError::UnexpectedSigner { signer: stranger },
+            ),
+            (
+                "maker transfer without the fee payer as signer",
+                vec![AccountMeta::new_readonly(stranger, false)],
+                SwapError::UnexpectedTransaction,
+            ),
+        ] {
+            let got = verify_error(fee_payer, user_transfer.clone(), transact(maker_accounts));
+            assert_eq!(
+                got,
+                Some(want.clone()),
+                "{label}: got {got:?}, want {want:?}"
+            );
+        }
+    }
 }

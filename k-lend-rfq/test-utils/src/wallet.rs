@@ -1,20 +1,29 @@
+use std::sync::Arc;
+
 use anyhow::{anyhow, Result};
 use solana_address::Address;
 use solana_signer::Signer;
-use zolana_client::Rpc;
-use zolana_keypair::{ShieldedKeypair, SigningKey};
-use zolana_program_test::fixture;
+use zolana_client::{ProofAuthority, Rpc};
+use zolana_keypair::{ShieldedAddress, ShieldedKeypair, SigningKey};
+use zolana_program_test::{fixture, localnet::FixtureLocalnet};
 use zolana_test_utils::wallet::{sync_wallet, Wallet};
-use zolana_transaction::{verify_spendable, AssetRegistry, DecryptionResult};
+use zolana_transaction::{
+    verify_spendable, AssetRegistry, DecryptionResult, ShieldedKeys, WalletUtxo,
+};
 
-use k_lend_market_maker::Holdings;
-use k_lend_rfq_sdk::pair::Pair;
+use k_lend_market_maker::{Holdings, IdentityConfig};
+use k_lend_rfq_sdk::{
+    pair::Pair,
+    transfer::{Transfer, TransferInstruction},
+};
+
+use crate::chain::blocking;
 
 const PAGE_LIMIT: u32 = 1_000;
 
 pub struct TestWallet {
     pub wallet: Wallet,
-    pub keypair: ShieldedKeypair,
+    keypair: Arc<ShieldedKeypair>,
 }
 
 impl std::ops::Deref for TestWallet {
@@ -35,7 +44,27 @@ impl TestWallet {
         let keypair = ShieldedKeypair::from_keypair(SigningKey::from_ed25519_bytes(&seed))?;
         let wallet = Wallet::new(keypair.shielded_address()?, assets.clone())
             .map_err(|e| anyhow!("wallet of actor {actor}: {e:?}"))?;
-        Ok(Self { wallet, keypair })
+        Ok(Self {
+            wallet,
+            keypair: Arc::new(keypair),
+        })
+    }
+
+    pub fn keys(&self) -> &dyn ShieldedKeys {
+        self.keypair.as_ref()
+    }
+
+    pub fn authority(&self) -> &dyn ProofAuthority {
+        self.keypair.as_ref()
+    }
+
+    pub fn signer(&self) -> &dyn Signer {
+        self.keypair.as_ref()
+    }
+
+    /// The market maker's identity backed by this wallet's keypair.
+    pub fn identity_config(&self) -> IdentityConfig {
+        IdentityConfig::from_keypair(self.keypair.clone())
     }
 
     pub fn address(&self) -> Address {
@@ -43,7 +72,7 @@ impl TestWallet {
     }
 
     pub fn sync(&mut self, indexer: &(impl Rpc + Sync)) -> Result<()> {
-        sync_wallet(&mut self.wallet, &self.keypair, indexer)
+        sync_wallet(&mut self.wallet, self.keypair.as_ref(), indexer)
             .map_err(|e| anyhow!("sync wallet {}: {e:?}", self.keypair.pubkey()))?;
         self.sync_every_event(indexer)
     }
@@ -54,10 +83,8 @@ impl TestWallet {
     /// wallet's tags and add the UTXOs and nullifiers the sync dropped.
     /// Proofless deposits need no second pass: the sync keys them by leaf.
     fn sync_every_event(&mut self, indexer: &impl Rpc) -> Result<()> {
-        let tags = vec![
-            self.keypair.shielded_address()?.confidential_view_tag()?,
-            self.keypair.recipient_bootstrap_view_tag(),
-        ];
+        let address = self.keys().address()?;
+        let tags = vec![address.confidential_view_tag()?, address.viewing_pubkey.x()];
         let mut transactions = Vec::new();
         let mut cursor = None;
         loop {
@@ -80,8 +107,8 @@ impl TestWallet {
         }
 
         let mut decrypted = DecryptionResult::default();
-        decrypted.extend(&self.keypair, &transactions, &self.wallet.registry)?;
-        let spendable = verify_spendable(&self.keypair, &decrypted)?;
+        decrypted.extend(self.keys(), &transactions, &self.wallet.registry)?;
+        let spendable = verify_spendable(self.keys(), &decrypted)?;
         for utxo in spendable
             .balances
             .assets
@@ -99,6 +126,40 @@ impl TestWallet {
         }
         self.wallet.nullifiers.extend(decrypted.spent_nullifiers);
         Ok(())
+    }
+
+    /// The first UTXO of `asset` this wallet holds.
+    pub fn first_utxo(&self, asset: Address) -> Result<WalletUtxo> {
+        self.balance(asset, None)?
+            .utxos
+            .first()
+            .cloned()
+            .ok_or_else(|| anyhow!("wallet {} holds no utxo of {asset}", self.address()))
+    }
+
+    /// Proves, with this wallet's keys and outside the market maker, a
+    /// transfer of `amount` from `inputs` to `recipient` naming `payer` as fee
+    /// payer, as wide as `inputs`, on `localnet`'s tree.
+    pub fn transfer(
+        &self,
+        localnet: &FixtureLocalnet,
+        inputs: Vec<WalletUtxo>,
+        amount: u64,
+        recipient: ShieldedAddress,
+        payer: Address,
+    ) -> Result<TransferInstruction> {
+        blocking(|| {
+            Transfer {
+                width: inputs.len(),
+                inputs,
+                amount,
+                recipient,
+                payer,
+                tree: localnet.tree,
+                tree_id: localnet.tree_id,
+            }
+            .prove(&localnet.client, self.keys(), self.authority())
+        })
     }
 
     pub fn holdings(&self, pair: &Pair) -> Result<Holdings> {

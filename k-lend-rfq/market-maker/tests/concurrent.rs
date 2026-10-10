@@ -1,3 +1,14 @@
+//! Tested invariants:
+//! 1. Fills are not serialised: with `UTXOS` share UTXOs, `UTXOS` fills are
+//!    proven and wait for their user's signature at the same time.
+//! 2. Every concurrent swap lands; each user holds the quoted shares and the
+//!    rest of its collateral, and each fill leaves one change output.
+//! 3. The maker's holdings move by exactly the swapped amounts.
+//! 4. Consolidation merges the grown share UTXO set back to `UTXOS` without
+//!    changing the holdings.
+//! 5. A rebalance deposit of the received collateral spends every collateral
+//!    UTXO and mints the shares `VaultState::deposit` predicts.
+
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -6,7 +17,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use solana_signature::Signature;
 use tokio::{sync::Barrier, task::JoinSet};
 use zolana_program_test::localnet::FixtureLocalnet;
@@ -15,13 +26,15 @@ use k_lend_market_maker::{
     ConcurrencyConfig, ConsolidateReceipt, Holdings, InventoryProfile, MarketMaker, VaultOperation,
 };
 use k_lend_rfq_sdk::{
-    pair::{Pair, VaultState},
+    pair::Pair,
     swap::{Direction, Quote},
 };
 
 use k_lend_rfq_test_utils::{
-    chain::{blocking, compute_units},
-    setup::{setup_with, SetupConfig, TestEnv},
+    chain::{blocking, compute_units, confirm_indexed, read_vault},
+    market_maker::share_account,
+    setup::{setup_with, SetupConfig, TestEnv, MIN_UTXO_VALUE},
+    sync::wait_or_timeout,
     user::User,
 };
 
@@ -32,24 +45,12 @@ const USERS: usize = 8;
 const SEED_DEPOSIT: u64 = 400_000_000;
 const DEPOSIT_COLLATERAL: u64 = 10_000_000;
 const USER_COLLATERAL: u64 = 40_000_000;
-const MIN_UTXO_VALUE: u64 = 1_000_000;
 
-struct Settled {
-    user: User,
-    quote: Quote,
-    signature: Signature,
-    change_outputs: usize,
-    proved: Instant,
-    confirmed: Instant,
-}
-
-struct Gate {
-    tickets: AtomicUsize,
-    first_utxos: Barrier,
-}
-
+/// Invariants 1-5: eight users swap at once against four share UTXOs; four
+/// fills are open together, all swaps land, and consolidation and rebalance
+/// restore the inventory.
 #[tokio::test(flavor = "multi_thread", worker_threads = 12)]
-async fn serves_many_rfqs_at_once() -> Result<()> {
+async fn concurrent_swaps_land_and_inventory_is_restored() -> Result<()> {
     let TestEnv {
         localnet,
         user,
@@ -68,12 +69,17 @@ async fn serves_many_rfqs_at_once() -> Result<()> {
     })
     .await?;
     let seeded = market_maker.seed_inventory(&pair, SEED_DEPOSIT, 0).await?;
+    // The seed's tail leaves a margin of the minted shares in the public share account.
+    let seed_residual = share_account(localnet.client.rpc(), &market_maker, &pair)?;
+    let shielded = seeded.shares - seed_residual;
     assert_eq!(market_maker.utxos(&pair.shares_mint).len(), UTXOS);
 
+    // Invariant 1: `UTXOS` fills are open at the same time.
     let localnet = Arc::new(localnet);
     let gate = Arc::new(Gate {
         tickets: AtomicUsize::new(0),
-        first_utxos: Barrier::new(UTXOS),
+        filled: Barrier::new(UTXOS + 1),
+        checked: Barrier::new(UTXOS + 1),
     });
     let ordered = Arc::new(Barrier::new(USERS));
     let started = Instant::now();
@@ -88,35 +94,32 @@ async fn serves_many_rfqs_at_once() -> Result<()> {
             gate.clone(),
         ));
     }
+    wait_or_timeout(&gate.filled, "the first fills").await?;
+    assert_eq!(market_maker.open_fills().await?, UTXOS);
+    wait_or_timeout(&gate.checked, "the open fill count").await?;
     let mut settled = Vec::with_capacity(USERS);
     while let Some(joined) = tasks.join_next().await {
         settled.push(joined??);
     }
     let elapsed = started.elapsed();
+
+    // Invariant 2: every swap lands with one change output each.
     assert_eq!(settled.len(), USERS);
 
-    let first_confirmed = settled
-        .iter()
-        .map(|fill| fill.confirmed)
-        .min()
-        .ok_or_else(|| anyhow!("no fill confirmed"))?;
-    let proved_before_first_confirmation = settled
-        .iter()
-        .filter(|fill| fill.proved < first_confirmed)
-        .count();
-    assert!(proved_before_first_confirmation >= UTXOS);
-    let change_outputs: usize = settled.iter().map(|fill| fill.change_outputs).sum();
-    assert_eq!(change_outputs, USERS);
+    let change_outputs: Vec<usize> = settled.iter().map(|fill| fill.change_outputs).collect();
+    assert_eq!(
+        change_outputs,
+        vec![1; USERS],
+        "change outputs per fill: got {change_outputs:?}, want one each"
+    );
     println!(
         "{USERS} concurrent deposits on {UTXOS} utxos in {elapsed:?}: \
-         {proved_before_first_confirmation} proved before the first confirmed, \
-         {change_outputs} change outputs"
+         {UTXOS} open at once, one change output each"
     );
 
     for fill in &settled {
         let signature = fill.signature;
-        blocking(|| localnet.client.confirm_private_transaction_sync(signature))
-            .map_err(|e| anyhow!("index swap {signature}: {e:?}"))?;
+        confirm_indexed(&localnet.client, signature, "swap")?;
     }
     let mut shares_paid = 0;
     for fill in &mut settled {
@@ -130,21 +133,22 @@ async fn serves_many_rfqs_at_once() -> Result<()> {
         );
         shares_paid += fill.quote.amount_out;
     }
+
+    // Invariant 3: the maker's holdings move by the swapped amounts.
     market_maker.sync().await?;
     let collateral_received = DEPOSIT_COLLATERAL * u64::try_from(USERS)?;
     assert_eq!(
         market_maker.holdings(&pair),
         Holdings {
             collateral: collateral_received,
-            shares: seeded.shares - shares_paid,
+            shares: shielded - shares_paid,
         }
     );
-    assert_eq!(
-        market_maker.utxos(&pair.shares_mint).len(),
-        UTXOS + change_outputs - USERS
-    );
+    // Each fill spent one share UTXO and left one change output.
+    assert_eq!(market_maker.utxos(&pair.shares_mint).len(), UTXOS);
     assert_eq!(market_maker.utxos(&pair.token_mint).len(), USERS);
 
+    // Invariant 4: consolidation restores `UTXOS` share UTXOs.
     let grown = market_maker.utxos(&pair.shares_mint).len();
     let consolidation = market_maker.consolidate(pair.shares_mint).await?;
     assert_eq!(
@@ -161,12 +165,13 @@ async fn serves_many_rfqs_at_once() -> Result<()> {
         market_maker.holdings(&pair),
         Holdings {
             collateral: collateral_received,
-            shares: seeded.shares - shares_paid,
+            shares: shielded - shares_paid,
         }
     );
 
+    // Invariant 5: the rebalance deposit spends every collateral UTXO.
     let rpc = localnet.client.rpc();
-    let before_rebalance = blocking(|| VaultState::read(rpc, &pair.vault))?;
+    let before_rebalance = read_vault(rpc, &pair)?;
     let predicted = before_rebalance.deposit(collateral_received)?;
     let rebalance = market_maker
         .rebalance_shares(&pair, collateral_received)
@@ -186,7 +191,9 @@ async fn serves_many_rfqs_at_once() -> Result<()> {
         market_maker.holdings(&pair),
         Holdings {
             collateral: 0,
-            shares: seeded.shares - shares_paid + rebalance.shares,
+            // The rebalance sweeps the seed's residual and leaves its own margin unshielded.
+            shares: shielded - shares_paid + rebalance.shares + seed_residual
+                - share_account(rpc, &market_maker, &pair)?,
         }
     );
     assert_eq!(market_maker.utxos(&pair.token_mint), Vec::new());
@@ -199,6 +206,27 @@ async fn serves_many_rfqs_at_once() -> Result<()> {
     Ok(())
 }
 
+// Test fixtures and shared helpers.
+
+/// One user's landed deposit swap.
+struct Settled {
+    user: User,
+    quote: Quote,
+    signature: Signature,
+    change_outputs: usize,
+}
+
+/// Holds the first `UTXOS` fills between proving and settling until the test
+/// has counted the maker's open fills.
+struct Gate {
+    tickets: AtomicUsize,
+    filled: Barrier,
+    checked: Barrier,
+}
+
+/// One user's deposit of `DEPOSIT_COLLATERAL`: quotes and orders, fills once
+/// every user has ordered, holds at `gate` if among the first `UTXOS` fills,
+/// then verifies, signs and settles.
 async fn deposit(
     localnet: Arc<FixtureLocalnet>,
     pair: Pair,
@@ -211,23 +239,17 @@ async fn deposit(
         .quote(&pair, Direction::Deposit, DEPOSIT_COLLATERAL)
         .await?;
     let order = user.order(&localnet.client, &pair, &offer).await?;
-    ordered.wait().await;
+    wait_or_timeout(&ordered, "all orders").await?;
     let fill = market_maker.fill(&pair, &order.request).await?;
-    let proved = Instant::now();
     if gate.tickets.fetch_add(1, Ordering::SeqCst) < UTXOS {
-        gate.first_utxos.wait().await;
+        wait_or_timeout(&gate.filled, "the first fills").await?;
+        wait_or_timeout(&gate.checked, "the open fill count").await?;
     }
-    user.verify_quote(&localnet.client, &pair, &order, &fill.fill.message)
-        .await?;
-    let user_signature = user.sign(&fill.fill.message)?;
-    let change_outputs = fill.change.len();
-    let signature = market_maker.settle(&fill.fill, user_signature).await?;
+    let signature = user.settle(&market_maker, &pair, &order, &fill).await?;
     Ok(Settled {
         user,
         quote: offer.quote,
         signature,
-        change_outputs,
-        proved,
-        confirmed: Instant::now(),
+        change_outputs: fill.change.len(),
     })
 }
