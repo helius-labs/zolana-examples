@@ -11,11 +11,16 @@ use solana_instruction::Instruction;
 use tokio::sync::Semaphore;
 use zolana_client::{
     assemble, verify_confidential_transfer_inputs, AsyncProverClient, AsyncRpc, AsyncWitnessReader,
-    AsyncZolanaIndexer, ClientError, InputWitnesses, ProofAuthority, ProofCompressed,
+    AsyncZolanaIndexer, ClientError, InputWitnesses, NonInclusionProof, ProofAuthority,
+    ProofCompressed,
 };
 use zolana_interface::pda;
 use zolana_program::instruction::Transact;
 use zolana_transaction::utxo::SppProofInputUtxo;
+
+use k_lend_rfq_sdk::address::{
+    add_order_address, OrderAddress, WitnessRequest, ORDER_ADDRESS_TREE,
+};
 
 use super::{
     confirm::Retry,
@@ -106,19 +111,20 @@ impl ProofQueue {
     }
 
     /// Inclusion proofs of the real inputs and non-inclusion proofs of the
-    /// dummy nullifiers. With no real input there is nothing to read
-    /// inclusion for, so only the non-inclusion proofs are fetched, against
-    /// the tree of `tree_id`.
+    /// dummy nullifiers (followed by the order address when it shares their
+    /// tree, see `WitnessRequest`). With no real input there is nothing to
+    /// read inclusion for, so only the non-inclusion proofs are fetched,
+    /// against the tree of `tree_id`.
     async fn witnesses(
         &self,
         tree_id: u16,
         commitments: &[&SppProofInputUtxo],
-        dummy_nullifiers: Vec<[u8; 32]>,
+        dummy_nullifiers: &[[u8; 32]],
     ) -> Result<InputWitnesses, MarketMakerError> {
         if commitments.is_empty() {
             let dummy_nullifier_proofs = self
                 .indexer
-                .get_non_inclusion_proofs(pda::tree(tree_id), dummy_nullifiers, None)
+                .get_non_inclusion_proofs(pda::tree(tree_id), dummy_nullifiers.to_vec(), None)
                 .await
                 .map_err(MarketMakerError::Indexer)?
                 .proofs;
@@ -130,39 +136,91 @@ impl ProofQueue {
         AsyncWitnessReader::input_witnesses(
             self.indexer.as_ref(),
             commitments,
-            &dummy_nullifiers,
+            dummy_nullifiers,
             None,
         )
         .await
         .map_err(MarketMakerError::Indexer)
     }
 
-    /// Assembles, proves and locally verifies one transfer. The local
-    /// verification catches a bad proof before it costs a transaction fee.
+    /// The non-inclusion proof of the order address of `request`, from the
+    /// fetched padding proofs or, when the address tree is not the
+    /// transfer's padding tree, from its own request to the order address
+    /// tree.
+    async fn address_proof(
+        &self,
+        request: &WitnessRequest,
+        dummy_proofs: &mut Vec<NonInclusionProof>,
+    ) -> Result<NonInclusionProof, MarketMakerError> {
+        let separate = match request.separate_address() {
+            Some(address) => self
+                .indexer
+                .get_non_inclusion_proofs(pda::tree(ORDER_ADDRESS_TREE), vec![address], None)
+                .await
+                .map_err(MarketMakerError::Indexer)?
+                .proofs
+                .into_iter()
+                .next(),
+            None => None,
+        };
+        request
+            .address_proof(dummy_proofs, separate)
+            .map_err(|error| MarketMakerError::AddressSlot(error.to_string()))
+    }
+
+    /// Assembles, proves and locally verifies one transfer. A fill's transfer
+    /// carries its order address slot, owned by the fee payer and added by
+    /// `add_order_address`. The local verification catches a bad proof before
+    /// it costs a transaction fee.
     async fn prove_transfer(&self, work: ProofWork) -> Result<Instruction, MarketMakerError> {
         let ProofWork {
             inputs: proof_inputs,
             interface_accounts,
+            address,
         } = work;
+        let order = address
+            .map(|id| OrderAddress::new(&self.payer, id))
+            .transpose()
+            .map_err(|error| MarketMakerError::AddressSlot(error.to_string()))?;
         let tree_id = proof_inputs
             .input_utxos
             .first()
             .map(|input| input.tree_id)
             .ok_or(ClientError::NoInputs)?;
-        let witnesses = self
+        let request = WitnessRequest::new(&proof_inputs, tree_id, order.as_ref());
+        let mut witnesses = self
             .witnesses(
                 tree_id,
                 &proof_inputs.input_utxo_hashes()?,
-                proof_inputs.dummy_nullifiers(),
+                &request.dummy_nullifiers,
             )
             .await?;
         let owner_signers = proof_inputs.owner_signer_pubkeys()?;
         let output_tree_pda = pda::tree(proof_inputs.output_tree_id);
-        let mut assembled = assemble(
-            proof_inputs,
-            &witnesses.spend_proofs,
-            &witnesses.dummy_nullifier_proofs,
-        )?;
+        let (mut assembled, patch) = match &order {
+            None => (
+                assemble(
+                    proof_inputs,
+                    &witnesses.spend_proofs,
+                    &witnesses.dummy_nullifier_proofs,
+                )?,
+                None,
+            ),
+            Some(order) => {
+                let non_inclusion = self
+                    .address_proof(&request, &mut witnesses.dummy_nullifier_proofs)
+                    .await?;
+                let (assembled, patch) = add_order_address(
+                    proof_inputs,
+                    &witnesses.spend_proofs,
+                    &witnesses.dummy_nullifier_proofs,
+                    order,
+                    &non_inclusion,
+                )
+                .map_err(|error| MarketMakerError::AddressSlot(error.to_string()))?;
+                (assembled, Some(patch))
+            }
+        };
         self.authority
             .complete_inputs(&mut assembled.prover_inputs.inputs)?;
         let inputs = &assembled.prover_inputs;
@@ -178,13 +236,17 @@ impl ProofQueue {
             .copied()
             .map(pda::tree)
             .collect();
+        let mut data = assembled.with_proof(ProofCompressed::try_from(proof)?.to_transact_proof());
+        if let Some(patch) = patch {
+            patch.apply(&mut data);
+        }
         Ok(Transact {
             payer: self.payer,
             input_trees,
             output_tree: output_tree_pda,
             owner_signers,
             interface_transfer_accounts: interface_accounts,
-            data: assembled.with_proof(ProofCompressed::try_from(proof)?.to_transact_proof()),
+            data,
         }
         .instruction())
     }

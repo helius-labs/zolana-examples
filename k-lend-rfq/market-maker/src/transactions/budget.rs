@@ -28,7 +28,8 @@ use zolana_transaction::{
 };
 
 use k_lend_rfq_sdk::{
-    swap::{order_marker_instruction, OrderId, SwapError, ORDER_ID_BYTES},
+    address::{ORDER_ADDRESS_SLOTS, ORDER_ADDRESS_TREE},
+    swap::SwapError,
     transfer::{smallest_shape, USER_OUTPUTS},
 };
 
@@ -48,9 +49,6 @@ const PLACEHOLDER_USER: Address = Address::new_from_array([7; 32]);
 const PLACEHOLDER_USER_TREE: Address = Address::new_from_array([10; 32]);
 const PLACEHOLDER_MINT: Address = Address::new_from_array([8; 32]);
 const PLACEHOLDER_TOKEN_ACCOUNT: Address = Address::new_from_array([9; 32]);
-/// Every order id gives a 32 character seed and every lamport amount 8 bytes,
-/// so any id and amount size the marker instruction exactly.
-const PLACEHOLDER_ORDER: OrderId = OrderId([11; ORDER_ID_BYTES]);
 
 /// Why a transaction or a transfer width does not fit.
 #[derive(Debug, Error)]
@@ -91,17 +89,19 @@ struct TransferTemplate {
 
 /// Sizes the market maker's transactions against the transaction v1 limits.
 ///
-/// A swap transaction holds exactly three instructions: the user's transfer,
-/// the market maker's transfer and the order marker
-/// (`order_marker_instruction`). Every swap size computed here
+/// A swap transaction holds exactly two instructions: the user's transfer and
+/// the market maker's transfer. The market maker's transfer carries the order
+/// address slot (`k_lend_rfq_sdk::address`, which also states its cost): it
+/// takes `ORDER_ADDRESS_SLOTS` input slots of the shape and one nullifier PDA
+/// account and, when the market maker's tree is not the order address tree,
+/// that tree's account and tree context. Every swap size computed here
 /// (`max_user_inputs`, `max_market_maker_inputs`, `max_market_maker_outputs`)
-/// includes a placeholder marker, so the user transfer width advertised in an
-/// offer leaves room for it.
+/// sizes the market maker placeholder with them, so the user transfer width
+/// advertised in an offer leaves room for the slot.
 pub struct SwapBudget {
     market_maker: Address,
     tree: Address,
     data_len: usize,
-    marker: Instruction,
     /// Widest consolidation with the outputs passed to `new` and a public
     /// withdrawal; computed once at start.
     pub max_consolidate_inputs: usize,
@@ -125,7 +125,6 @@ impl SwapBudget {
             market_maker,
             tree,
             data_len: output_data_len()?,
-            marker: order_marker_instruction(&market_maker, PLACEHOLDER_ORDER, 0)?,
             max_consolidate_inputs: 0,
         };
         budget.max_consolidate_inputs = budget.max_consolidate_inputs_with(
@@ -183,8 +182,8 @@ impl SwapBudget {
     }
 
     /// The most inputs a user transfer with `USER_OUTPUTS` outputs can take
-    /// next to a market maker transfer of shape `market_maker` and the order
-    /// marker, or `None` if not even the narrowest fits.
+    /// next to a market maker transfer of shape `market_maker` (its order
+    /// address slot included), or `None` if not even the narrowest fits.
     ///
     /// Assumes the user's inputs come from at most two trees; a wider user
     /// transfer is rejected at fill time with `UserTransferTooWide` or
@@ -211,11 +210,12 @@ impl SwapBudget {
         Ok(None)
     }
 
-    /// The narrowest shape a market maker swap transfer can have: one input and
-    /// `MARKET_MAKER_MIN_OUTPUTS` outputs.
+    /// The narrowest shape a market maker swap transfer can have: one input,
+    /// the order address slot and `MARKET_MAKER_MIN_OUTPUTS` outputs.
     pub fn narrowest_market_maker(&self) -> Result<Shape, BudgetError> {
-        smallest_shape(1, MARKET_MAKER_MIN_OUTPUTS).ok_or(BudgetError::NoSupportedShape {
-            inputs: 1,
+        let inputs = 1 + ORDER_ADDRESS_SLOTS;
+        smallest_shape(inputs, MARKET_MAKER_MIN_OUTPUTS).ok_or(BudgetError::NoSupportedShape {
+            inputs,
             outputs: MARKET_MAKER_MIN_OUTPUTS,
         })
     }
@@ -236,9 +236,11 @@ impl SwapBudget {
         }))
     }
 
-    /// The most inputs a market maker transfer with `MARKET_MAKER_MIN_OUTPUTS`
-    /// outputs can take next to `user_transfer` and the order marker. Errors
-    /// with `BudgetError::NoSupportedShape` when none fits.
+    /// The most UTXO inputs a market maker transfer with
+    /// `MARKET_MAKER_MIN_OUTPUTS` outputs can take next to `user_transfer`:
+    /// the widest fitting shape's inputs less the order address slot. Errors
+    /// with `BudgetError::NoSupportedShape` when none leaves room for one
+    /// UTXO input.
     pub fn max_market_maker_inputs(
         &self,
         user_transfer: &Instruction,
@@ -248,12 +250,13 @@ impl SwapBudget {
             .into_iter()
             .filter(|shape| shape.n_outputs() >= MARKET_MAKER_MIN_OUTPUTS)
         {
-            if shape.n_inputs() <= widest {
+            let inputs = shape.n_inputs().saturating_sub(ORDER_ADDRESS_SLOTS);
+            if inputs <= widest {
                 continue;
             }
             let market_maker = self.placeholder(self.market_maker_template(shape));
             if self.swap_size(user_transfer.clone(), market_maker)?.fits() {
-                widest = shape.n_inputs();
+                widest = inputs;
             }
         }
         if widest == 0 {
@@ -265,9 +268,9 @@ impl SwapBudget {
         Ok(widest)
     }
 
-    /// The most outputs a market maker transfer of at least `inputs` inputs can
-    /// have next to `user_transfer` and the order marker. Errors with
-    /// `BudgetError::NoSupportedShape` when fewer than
+    /// The most outputs a market maker transfer of at least `inputs` UTXO
+    /// inputs and the order address slot can have next to `user_transfer`.
+    /// Errors with `BudgetError::NoSupportedShape` when fewer than
     /// `MARKET_MAKER_MIN_OUTPUTS` fit.
     pub fn max_market_maker_outputs(
         &self,
@@ -275,9 +278,10 @@ impl SwapBudget {
         inputs: usize,
     ) -> Result<usize, BudgetError> {
         let mut fitting = 0;
+        let slots = inputs.saturating_add(ORDER_ADDRESS_SLOTS);
         for shape in SPP_SUPPORTED_SHAPES
             .into_iter()
-            .filter(|shape| shape.n_inputs() >= inputs)
+            .filter(|shape| shape.n_inputs() >= slots)
         {
             if shape.n_outputs() <= fitting {
                 continue;
@@ -315,7 +319,7 @@ impl SwapBudget {
         user: Instruction,
         market_maker: Instruction,
     ) -> Result<TransactionSize, BudgetError> {
-        self.size(&[user, market_maker, self.marker.clone()])
+        self.size(&[user, market_maker])
     }
 
     fn size(&self, transfers: &[Instruction]) -> Result<TransactionSize, BudgetError> {
@@ -326,12 +330,17 @@ impl SwapBudget {
         )?)
     }
 
+    /// A market maker swap transfer of `shape`. The placeholder publishes a
+    /// nullifier, with its PDA account, for every input slot, so the order
+    /// address slot is sized like any input; the order address tree is an
+    /// extra input tree unless it is the market maker's.
     fn market_maker_template(&self, shape: Shape) -> TransferTemplate {
+        let address_tree = pda::tree(ORDER_ADDRESS_TREE);
         TransferTemplate {
             shape,
             owner_signer: None,
             withdrawal: None,
-            extra_input_tree: None,
+            extra_input_tree: (self.tree != address_tree).then_some(address_tree),
             seed: 2,
         }
     }

@@ -4,8 +4,10 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
+use solana_address::Address;
 use solana_signature::Signature;
 use zolana_client::SolanaRpc;
+use zolana_transaction::WalletUtxo;
 
 use k_lend_market_maker::{Holdings, MarketMaker, SHIELD_MARGIN_BPS, SWEEP_CAP_BPS};
 use k_lend_rfq_sdk::{
@@ -22,6 +24,17 @@ pub fn net_holdings(market_maker: &MarketMaker, pair: &Pair) -> Holdings {
         collateral: market_maker.net_balance(&pair.token_mint),
         shares: market_maker.net_balance(&pair.shares_mint),
     }
+}
+
+/// The market maker's largest spendable UTXO of `asset` as an input list:
+/// one UTXO, or none when it holds none.
+pub fn largest_utxo(market_maker: &MarketMaker, asset: &Address) -> Vec<WalletUtxo> {
+    market_maker
+        .spendable(asset)
+        .into_iter()
+        .max_by_key(|utxo| utxo.utxo.amount)
+        .into_iter()
+        .collect()
 }
 
 /// The balance of the market maker's public share account: the margin a kVault

@@ -10,9 +10,10 @@
 //! public vault deposits and withdrawals (rebalance), unlinked from any user.
 //!
 //! Before signing, `QuoteCheck::verify` checks that the market maker pays the
-//! fee, that the message holds exactly the user's unaltered transfer, one
-//! market maker transfer and the order's marker, that neither transfer moves
-//! public funds, and that the market maker pays at least the quoted
+//! fee, that the message holds exactly the user's unaltered transfer and one
+//! market maker transfer, that neither transfer moves public funds, that the
+//! market maker transfer carries the order address (so the order is filled at
+//! most once on chain), and that the market maker pays at least the quoted
 //! `amount_out`.
 
 use anyhow::Result;

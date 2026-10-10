@@ -343,10 +343,10 @@ impl Coordinator {
     /// Handles a transaction that landed and failed or was rejected at
     /// preflight; `custom` is the failing instruction and its custom program
     /// error, if any. In order:
-    /// - a fill whose marker instruction failed with `AccountAlreadyInUse`
-    ///   (`CustomError::is_order_already_filled`) fails with
-    ///   `SwapError::OrderAlreadyFilled`: the order's marker account exists,
-    ///   so another transaction already filled it;
+    /// - a fill whose market maker transfer failed with
+    ///   `NullifierAlreadyQueued` (`CustomError::is_order_already_filled`)
+    ///   fails with `SwapError::OrderAlreadyFilled`: the order address's
+    ///   nullifier PDA exists, so another transaction already filled it;
     /// - a non-fill step re-proves when the code is in `REPROVE_CODES` and
     ///   prove attempts remain (`PROVE_ATTEMPTS`). This includes a rebalance
     ///   with a kVault tail: `spawn_prove` resolves its `TailShield` again

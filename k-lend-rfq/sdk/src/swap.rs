@@ -1,6 +1,6 @@
-//! The swap protocol's wire types (offer, request, fill), the order id and
-//! its on-chain marker, and `SwapError`, the one error type both parties use
-//! for every check of the swap.
+//! The swap protocol's wire types (offer, request, fill), the order id, and
+//! `SwapError`, the one error type both parties use for every check of the
+//! swap. The order id's on-chain fill record is in `crate::address`.
 
 use std::{fmt, time::Instant};
 
@@ -8,7 +8,6 @@ use anyhow::Result;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_message::VersionedMessage;
-use solana_system_interface::{instruction::create_account_with_seed, program as system_program};
 use zolana_keypair::ShieldedAddress;
 
 use crate::pair::{Pair, VaultState};
@@ -106,19 +105,23 @@ pub enum SwapError {
     /// proving (user).
     #[error("order {order} expired before the fill")]
     OrderExpired { order: OrderId },
-    /// The order's marker account already exists on chain.
+    /// The order address of the order already exists on chain: SPP
+    /// rejected the market maker's transfer with `NullifierAlreadyQueued`
+    /// because another transaction already filled the order.
     #[error("order {order} is already filled")]
     OrderAlreadyFilled { order: OrderId },
     /// The fill names a different pair than the order was quoted for.
     #[error("order {order} was quoted for a different pair")]
     OrderPairMismatch { order: OrderId },
-    /// `create_with_seed` rejected the order's marker derivation.
-    #[error("order {order} gives no valid marker address")]
-    InvalidOrderMarker { order: OrderId },
-    /// The swap message's last instruction is not the order's marker
-    /// creation as the user rebuilds it.
-    #[error("the transaction does not create the marker of order {order}")]
-    OrderMarkerMismatch { order: OrderId },
+    /// Hashing the order address of `order` failed
+    /// (`crate::address::order_address`).
+    #[error("order {order} gives no order address")]
+    OrderAddressDerivation { order: OrderId },
+    /// The market maker's transfer in the swap message does not spend the
+    /// address slot of `order` in the order address tree, so the swap would
+    /// not record the order as filled.
+    #[error("the market maker's transfer does not carry the address of order {order}")]
+    OrderAddressMissing { order: OrderId },
     /// A sum of amounts overflows `u64`; `context` names it.
     #[error("amount overflow in {context}")]
     AmountOverflow { context: &'static str },
@@ -141,9 +144,8 @@ pub enum SwapError {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct OrderId(pub [u8; ORDER_ID_BYTES]);
 
-/// Length of an order id: its hex form, two characters per byte, is the
-/// marker seed and must fit the `create_with_seed` seed limit.
-pub const ORDER_ID_BYTES: usize = solana_address::MAX_SEED_LEN / 2;
+/// Length of an order id: 128 random bits.
+pub const ORDER_ID_BYTES: usize = 16;
 
 impl OrderId {
     /// A fresh id from the thread RNG; 128 random bits make a collision
@@ -153,48 +155,11 @@ impl OrderId {
     }
 }
 
-/// The id as lowercase hex, `2 * ORDER_ID_BYTES` = 32 characters, the
-/// maximum `create_with_seed` seed length. Used as the marker seed.
+/// The id as lowercase hex, `2 * ORDER_ID_BYTES` = 32 characters.
 impl fmt::Display for OrderId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.iter().try_for_each(|byte| write!(f, "{byte:02x}"))
     }
-}
-
-/// The instruction that marks order `id` as filled: a system
-/// `create_account_with_seed` from `fee_payer` to the marker address
-/// `Address::create_with_seed(fee_payer, &id.to_string(), &system_program::ID)`,
-/// with `fee_payer` as the seed base, `id.to_string()` as the seed, `lamports`
-/// funding, zero space and the system program as owner.
-///
-/// Every swap transaction ends with this instruction, so each fill locks the
-/// rent minimum of an empty account (`lamports`, paid by the market maker as
-/// fee payer) at the marker address. The system program rejects the creation of
-/// an account that already exists with `SystemError::AccountAlreadyInUse`
-/// (custom code 0), so a second transaction filling the same order fails
-/// on-chain. Reclaiming the locked lamports after the order expires
-/// (`transfer_with_seed`) is a follow-up and not done here.
-///
-/// Fails with `SwapError::InvalidOrderMarker` if the marker derivation
-/// rejects the seed, which a 32 character hex seed and the system program
-/// owner never trigger.
-pub fn order_marker_instruction(
-    fee_payer: &Address,
-    id: OrderId,
-    lamports: u64,
-) -> Result<Instruction, SwapError> {
-    let seed = id.to_string();
-    let marker = Address::create_with_seed(fee_payer, &seed, &system_program::ID)
-        .map_err(|_| SwapError::InvalidOrderMarker { order: id })?;
-    Ok(create_account_with_seed(
-        fee_payer,
-        &marker,
-        fee_payer,
-        &seed,
-        lamports,
-        0,
-        &system_program::ID,
-    ))
 }
 
 /// Which way the user swaps through the vault.
@@ -269,6 +234,10 @@ impl Quote {
 }
 
 /// The market maker's answer to a quote request, binding until `expires_at`.
+///
+/// The offer carries everything the user needs to check that the fill
+/// records the order on chain: `id` and `fee_payer` give the order address
+/// (`crate::address::order_address`) the market maker's transfer must carry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Offer {
     /// The order this offer opens. The user names it in its `SwapRequest`; the
@@ -288,10 +257,6 @@ pub struct Offer {
     pub max_user_inputs: usize,
     /// Outputs the user's transfer must have (payment and change).
     pub user_outputs: usize,
-    /// The rent minimum of an empty account. The market maker funds the order's
-    /// marker account (`order_marker_instruction`) with it, and the user
-    /// rebuilds the marker instruction from it when checking the swap message.
-    pub marker_lamports: u64,
 }
 
 /// The user's fill request: the order and the proven transfer that pays it.
@@ -318,7 +283,8 @@ pub struct Order {
 
 /// The swap message the market maker returns for the user to verify and sign.
 pub struct Fill {
-    /// Unsigned message: user transfer, market maker transfer, order marker.
+    /// Unsigned message: the user's transfer, then the market maker's transfer
+    /// carrying the order address.
     pub message: VersionedMessage,
     /// The market maker refuses to co-sign at or after this instant.
     pub expires_at: Instant,

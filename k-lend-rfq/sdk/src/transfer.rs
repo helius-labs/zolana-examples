@@ -6,20 +6,26 @@ use anyhow::{anyhow, Result};
 use borsh::BorshDeserialize;
 use solana_address::Address;
 use solana_instruction::Instruction;
-use zolana_client::{ProofAuthority, Rpc, ZolanaClient};
+use zolana_client::{
+    verify_confidential_transfer_inputs, ProofAuthority, ProofCompressed, Prover, ProverExt, Rpc,
+    WitnessReader, ZolanaClient,
+};
 use zolana_event::OutputDataEncoding;
-use zolana_interface::instruction::TransactIxData;
+use zolana_interface::{instruction::TransactIxData, pda};
 use zolana_keypair::{constants::P256_PUBKEY_LEN, P256Pubkey, ShieldedAddress};
 use zolana_program::instruction::Transact;
 use zolana_transaction::{
-    instructions::transact::ConfidentialTransaction,
+    instructions::transact::{ConfidentialTransaction, SppProofInputs},
     serialization::confidential::{Confidential, ConfidentialOutputPlaintext},
     AssetRegistry, DecryptLabel, DecryptRequest, EncryptedScheme, ShieldedKeys, Utxo, WalletUtxo,
 };
 
 use zolana_client::{Shape, SPP_SUPPORTED_SHAPES};
 
-use crate::swap::SwapError;
+use crate::{
+    address::{add_order_address, OrderAddress, WitnessRequest, ORDER_ADDRESS_TREE},
+    swap::{OrderId, SwapError},
+};
 
 /// Outputs of a swap-side transfer: the payment to the recipient and the
 /// sender's change (`ConfidentialTransaction::transfer` adds both; padding
@@ -75,29 +81,98 @@ impl Transfer {
         keys: &dyn ShieldedKeys,
         authority: &dyn ProofAuthority,
     ) -> Result<TransferInstruction> {
-        let Transfer {
-            inputs,
-            width,
-            amount,
-            recipient,
-            payer,
-            tree,
-            tree_id,
-        } = self;
-        let asset = inputs
+        let (proof_inputs, nullifiers) = self.encrypt(keys)?;
+        let owner_signers = proof_inputs.owner_signer_pubkeys()?;
+        let ix_data = client
+            .prove_transact(proof_inputs, None, authority)
+            .map_err(|error| anyhow!("prove transfer: {error:?}"))?;
+        Ok(self.finish(vec![self.tree], owner_signers, ix_data, nullifiers))
+    }
+
+    /// Like [`Self::prove`], with the address slot of order `order`, owned by
+    /// `payer`, in the input slot after the real inputs: the market maker's
+    /// fill transfer, which records the order as filled (`crate::address`).
+    /// `width` must leave the slot room: `inputs.len() +
+    /// ORDER_ADDRESS_SLOTS` pads to a shape with a spare input.
+    ///
+    /// Witnesses come from `client`'s indexer, the address's non-inclusion
+    /// proof from the nullifier tree of `ORDER_ADDRESS_TREE`, and `prover`
+    /// proves the hand-assembled witness (`add_order_address`); the proof is
+    /// verified locally before the instruction is built.
+    ///
+    /// Errors like [`Self::prove`], with `SwapError::OrderAddressDerivation`
+    /// and with `add_order_address`'s errors.
+    pub fn prove_with_order_address<R: Rpc>(
+        self,
+        client: &ZolanaClient<R>,
+        prover: &dyn Prover,
+        keys: &dyn ShieldedKeys,
+        authority: &dyn ProofAuthority,
+        order: OrderId,
+    ) -> Result<TransferInstruction> {
+        let order = OrderAddress::new(&self.payer, order)?;
+        let (proof_inputs, nullifiers) = self.encrypt(keys)?;
+        let owner_signers = proof_inputs.owner_signer_pubkeys()?;
+        let indexer = client.indexer();
+        let request = WitnessRequest::new(&proof_inputs, self.tree_id, Some(&order));
+        let mut witnesses = indexer.input_witnesses(
+            &proof_inputs.input_utxo_hashes()?,
+            &request.dummy_nullifiers,
+            None,
+        )?;
+        let separate = request
+            .separate_address()
+            .map(|leaf| {
+                indexer.get_non_inclusion_proofs(pda::tree(ORDER_ADDRESS_TREE), vec![leaf], None)
+            })
+            .transpose()?
+            .and_then(|response| response.proofs.into_iter().next());
+        let non_inclusion =
+            request.address_proof(&mut witnesses.dummy_nullifier_proofs, separate)?;
+        let (mut assembled, patch) = add_order_address(
+            proof_inputs,
+            &witnesses.spend_proofs,
+            &witnesses.dummy_nullifier_proofs,
+            &order,
+            &non_inclusion,
+        )?;
+        authority.complete_inputs(&mut assembled.prover_inputs.inputs)?;
+        let proof = prover.prove_transfer(&assembled.prover_inputs)?;
+        verify_confidential_transfer_inputs(
+            &assembled.prover_inputs,
+            assembled.public_input_hash,
+            &proof,
+        )?;
+        let input_trees = assembled
+            .input_tree_ids
+            .iter()
+            .copied()
+            .map(pda::tree)
+            .collect();
+        let mut data = assembled.with_proof(ProofCompressed::try_from(proof)?.to_transact_proof());
+        patch.apply(&mut data);
+        Ok(self.finish(input_trees, owner_signers, data, nullifiers))
+    }
+
+    /// The encrypted transfer padded to the narrowest shape with
+    /// `max(width, inputs.len())` inputs, and the nullifiers of its real
+    /// inputs.
+    fn encrypt(&self, keys: &dyn ShieldedKeys) -> Result<(SppProofInputs, Vec<[u8; 32]>)> {
+        let asset = self
+            .inputs
             .first()
             .map(|input| input.utxo.asset.asset)
             .ok_or_else(|| anyhow!("transfer without inputs"))?;
-        let shape_inputs = width.max(inputs.len());
+        let shape_inputs = self.width.max(self.inputs.len());
         let shape =
             smallest_shape(shape_inputs, USER_OUTPUTS).ok_or(SwapError::NoSupportedShape {
                 inputs: shape_inputs,
                 outputs: USER_OUTPUTS,
             })?;
         let identity = keys.address()?;
-        let mut transaction =
-            ConfidentialTransaction::new(inputs, payer)?.with_output_tree_id(tree_id)?;
-        transaction.transfer(&recipient, asset, amount)?;
+        let mut transaction = ConfidentialTransaction::new(self.inputs.clone(), self.payer)?
+            .with_output_tree_id(self.tree_id)?;
+        transaction.transfer(&self.recipient, asset, self.amount)?;
         transaction.pad_utxos(shape, &identity)?;
         let proof_inputs = transaction.encrypt(keys)?;
         let nullifiers = proof_inputs
@@ -106,23 +181,31 @@ impl Transfer {
             .filter(|input| !input.is_dummy())
             .map(|input| input.nullifier)
             .collect();
-        let owner_signers = proof_inputs.owner_signer_pubkeys()?;
-        let ix_data = client
-            .prove_transact(proof_inputs, None, authority)
-            .map_err(|error| anyhow!("prove transfer: {error:?}"))?;
+        Ok((proof_inputs, nullifiers))
+    }
+
+    /// The `transact` of this transfer paid by `payer` with outputs in
+    /// `tree`, naming `input_trees` and carrying `data`.
+    fn finish(
+        &self,
+        input_trees: Vec<Address>,
+        owner_signers: Vec<Address>,
+        data: TransactIxData,
+        nullifiers: Vec<[u8; 32]>,
+    ) -> TransferInstruction {
         let instruction = Transact {
-            payer,
-            input_trees: vec![tree],
-            output_tree: tree,
+            payer: self.payer,
+            input_trees,
+            output_tree: self.tree,
             owner_signers,
             interface_transfer_accounts: Vec::new(),
-            data: ix_data,
+            data,
         }
         .instruction();
-        Ok(TransferInstruction {
+        TransferInstruction {
             instruction,
             nullifiers,
-        })
+        }
     }
 }
 

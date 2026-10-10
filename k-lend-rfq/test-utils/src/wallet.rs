@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use solana_address::Address;
+use solana_instruction::Instruction;
 use solana_signer::Signer;
-use zolana_client::{ProofAuthority, Rpc};
+use zolana_client::{ProofAuthority, ProverClient, Rpc};
 use zolana_keypair::{ShieldedAddress, ShieldedKeypair, SigningKey};
 use zolana_program_test::{fixture, localnet::FixtureLocalnet};
 use zolana_test_utils::wallet::{sync_wallet, Wallet};
@@ -13,7 +14,9 @@ use zolana_transaction::{
 
 use k_lend_market_maker::{Holdings, IdentityConfig};
 use k_lend_rfq_sdk::{
+    address::ORDER_ADDRESS_SLOTS,
     pair::Pair,
+    swap::OrderId,
     transfer::{Transfer, TransferInstruction},
 };
 
@@ -147,18 +150,36 @@ impl TestWallet {
         recipient: ShieldedAddress,
         payer: Address,
     ) -> Result<TransferInstruction> {
+        let width = inputs.len();
+        let transfer = local_transfer(localnet, inputs, width, amount, recipient, payer);
+        blocking(|| transfer.prove(&localnet.client, self.keys(), self.authority()))
+    }
+
+    /// Proves, with this wallet's keys and outside the market maker, a
+    /// transfer of `amount` from `inputs` to `recipient` that carries the
+    /// order address of `order` owned by this wallet's signer, which is also
+    /// the fee payer: a market maker fill transfer for `order`, proved by the
+    /// local prover the market maker uses. Returns its `transact`.
+    pub fn order_transfer(
+        &self,
+        localnet: &FixtureLocalnet,
+        inputs: Vec<WalletUtxo>,
+        amount: u64,
+        recipient: ShieldedAddress,
+        order: OrderId,
+    ) -> Result<Instruction> {
+        let width = inputs.len() + ORDER_ADDRESS_SLOTS;
+        let transfer = local_transfer(localnet, inputs, width, amount, recipient, self.address());
         blocking(|| {
-            Transfer {
-                width: inputs.len(),
-                inputs,
-                amount,
-                recipient,
-                payer,
-                tree: localnet.tree,
-                tree_id: localnet.tree_id,
-            }
-            .prove(&localnet.client, self.keys(), self.authority())
+            transfer.prove_with_order_address(
+                &localnet.client,
+                &ProverClient::local(),
+                self.keys(),
+                self.authority(),
+                order,
+            )
         })
+        .map(|proved| proved.instruction)
     }
 
     pub fn holdings(&self, pair: &Pair) -> Result<Holdings> {
@@ -166,5 +187,26 @@ impl TestWallet {
             collateral: self.balance(pair.token_mint, None)?.amount,
             shares: self.balance(pair.shares_mint, None)?.amount,
         })
+    }
+}
+
+/// A transfer of `amount` from `inputs` to `recipient` paid by `payer`, at
+/// least `width` inputs wide, on `localnet`'s tree.
+fn local_transfer(
+    localnet: &FixtureLocalnet,
+    inputs: Vec<WalletUtxo>,
+    width: usize,
+    amount: u64,
+    recipient: ShieldedAddress,
+    payer: Address,
+) -> Transfer {
+    Transfer {
+        inputs,
+        width,
+        amount,
+        recipient,
+        payer,
+        tree: localnet.tree,
+        tree_id: localnet.tree_id,
     }
 }

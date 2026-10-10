@@ -19,7 +19,9 @@ use zolana_transaction::{
     SppProofOutputUtxo, TransactionError, Utxo, WalletUtxo,
 };
 
-use k_lend_rfq_sdk::{pair::VaultState, transfer::smallest_shape};
+use k_lend_rfq_sdk::{
+    address::ORDER_ADDRESS_SLOTS, pair::VaultState, swap::OrderId, transfer::smallest_shape,
+};
 
 use super::{
     coordinator::Coordinator,
@@ -67,7 +69,8 @@ pub struct TransferPlan {
     pub withdrawal: u64,
     /// The market maker's own outputs.
     pub own_parts: Vec<u64>,
-    /// The narrowest supported shape for the inputs and outputs.
+    /// The narrowest supported shape for the inputs, the order address slot
+    /// of a fill (`ORDER_ADDRESS_SLOTS`) and the outputs.
     pub shape: Shape,
 }
 
@@ -77,12 +80,13 @@ impl TransferPlan {
     /// cover payment plus withdrawal, `MarketMakerError::OwnPartsMismatch` when
     /// `own_parts` do not sum to the rest, and
     /// `MarketMakerError::Budget(BudgetError::NoSupportedShape)` when no shape
-    /// fits.
+    /// with `address_slots` inputs beyond the selection fits.
     fn new(
         selection: Selection,
         recipient: Option<(ShieldedAddress, u64)>,
         withdrawal: u64,
         own_parts: Vec<u64>,
+        address_slots: usize,
     ) -> Result<Self, MarketMakerError> {
         let spent = recipient
             .map(|(_, amount)| amount)
@@ -102,7 +106,7 @@ impl TransferPlan {
             return Err(MarketMakerError::OwnPartsMismatch { planned, own_value });
         }
         let outputs = usize::from(recipient.is_some()) + own_parts.len();
-        let inputs = selection.inputs.len();
+        let inputs = selection.inputs.len() + address_slots;
         let shape = smallest_shape(inputs, outputs)
             .ok_or(BudgetError::NoSupportedShape { inputs, outputs })?;
         Ok(Self {
@@ -132,14 +136,21 @@ pub fn own_value(selection: &Selection, spent: u64) -> Result<u64, MarketMakerEr
         })
 }
 
-/// A plan paying `amount` to `recipient`, the rest as `own_parts`.
-pub fn plan_transfer(
+/// A fill's plan paying `amount` to `recipient`, the rest as `own_parts`,
+/// with one spare input slot for the order address (`ORDER_ADDRESS_SLOTS`).
+pub fn plan_fill(
     selection: Selection,
     recipient: ShieldedAddress,
     amount: u64,
     own_parts: Vec<u64>,
 ) -> Result<TransferPlan, MarketMakerError> {
-    TransferPlan::new(selection, Some((recipient, amount)), 0, own_parts)
+    TransferPlan::new(
+        selection,
+        Some((recipient, amount)),
+        0,
+        own_parts,
+        ORDER_ADDRESS_SLOTS,
+    )
 }
 
 /// A plan withdrawing `withdrawal` publicly (0 for none), the rest as
@@ -149,7 +160,7 @@ pub fn plan_consolidate(
     withdrawal: u64,
     own_parts: Vec<u64>,
 ) -> Result<TransferPlan, MarketMakerError> {
-    TransferPlan::new(selection, None, withdrawal, own_parts)
+    TransferPlan::new(selection, None, withdrawal, own_parts, 0)
 }
 
 /// An encrypted transfer ready to prove.
@@ -169,6 +180,11 @@ pub struct TransferBuild {
     pub payer: Address,
     pub tree_id: u16,
     pub withdrawal: Option<WithdrawalTarget>,
+    /// The order of a fill, whose address slot, owned by `payer`, the
+    /// transfer carries. The plan's shape has a spare input slot for it;
+    /// padding fills that slot here and the prover puts the address slot into
+    /// it (`add_order_address`). For its cost see `k_lend_rfq_sdk::address`.
+    pub address: Option<OrderId>,
 }
 
 impl TransferBuild {
@@ -239,6 +255,7 @@ impl TransferBuild {
             proof: ProofWork {
                 inputs: proof_inputs,
                 interface_accounts,
+                address: self.address,
             },
             expected_outputs,
         })
@@ -337,7 +354,9 @@ pub struct TransferStep {
 
 impl Coordinator {
     /// Builds `transfer`, admits it as a new step (reserving its inputs and
-    /// recording its own outputs as incoming) and starts proving it.
+    /// recording its own outputs as incoming) and starts proving it. A fill
+    /// step's transfer carries the order address of `fill.order`, owned by
+    /// the fee payer.
     /// Errors with the build error, or with `MarketMakerError::UtxoReserved` /
     /// `MarketMakerError::UtxoNotTracked` when its inputs cannot be reserved.
     pub async fn schedule_transfer(
@@ -355,12 +374,14 @@ impl Coordinator {
             fill,
         } = transfer;
         let inputs = plan.selection.hashes();
+        let address = fill.as_ref().map(|fill| fill.order);
         let built = TransferBuild {
             plan,
             own: self.identity.own,
             payer: self.identity.payer,
             tree_id: self.identity.tree_id,
             withdrawal,
+            address,
         }
         .run(self.identity.keys.clone())
         .await?;

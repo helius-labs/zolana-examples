@@ -127,6 +127,13 @@ pub enum MarketMakerError {
     #[error("prover error: {0}")]
     Prover(ClientError),
 
+    /// Assembling a fill's order address slot failed
+    /// (`k_lend_rfq_sdk::address::add_order_address`): the address does not
+    /// derive, no padding slot, a missing or mismatched address proof, or
+    /// zolana's assembly error.
+    #[error("order address slot: {0}")]
+    AddressSlot(String),
+
     #[error("wallet sync failed: {0}")]
     Sync(ClientError),
 

@@ -13,16 +13,17 @@ borsh = { workspace = true }
 bytemuck = { workspace = true }
 klend-interface = { workspace = true }
 kvault-interface = { workspace = true }
+num-bigint = { workspace = true }
 solana-address = { workspace = true }
 solana-instruction = { workspace = true }
 solana-instruction-v2 = { workspace = true }
 solana-message = { workspace = true }
 solana-pubkey-v2 = { workspace = true }
-solana-system-interface = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
 zolana-client = { workspace = true, features = ["indexer-api", "solana-rpc"] }
 zolana-event = { workspace = true }
+zolana-hasher = { workspace = true }
 zolana-interface = { workspace = true }
 zolana-keypair = { workspace = true }
 zolana-program = { workspace = true }

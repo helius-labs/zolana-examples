@@ -83,9 +83,6 @@ pub(crate) struct Inner {
     /// The widest market maker transfer next to the narrowest user transfer,
     /// computed once at start.
     pub(crate) max_market_maker_inputs: usize,
-    /// The rent minimum of an empty account, fetched once at start. Each fill
-    /// funds its order marker account with it.
-    pub(crate) marker_lamports: u64,
     pub(crate) registry: Arc<RwLock<AssetRegistry>>,
     pub(crate) account: Arc<tokio::sync::Mutex<AccountSync>>,
     /// Orders issued by `quote` and not yet consumed by `fill`.
@@ -118,7 +115,7 @@ impl Inner {
 
 impl MarketMaker {
     /// Validates `config`, checks every pair against its vault, reads the
-    /// rent minimum and the asset registry, runs a first sync, sizes the
+    /// asset registry, runs a first sync, sizes the
     /// transaction budget and starts the sync and coordinator tasks.
     ///
     /// The vault check (`check_vault`) reads each pair's vault once over the
@@ -171,7 +168,6 @@ impl MarketMaker {
         for pair in &config.pairs {
             check_vault(rpc.as_ref(), pair).await?;
         }
-        let marker_lamports = rpc.get_minimum_balance_for_rent_exemption(0).await?;
         let registry = Arc::new(RwLock::new(
             asset_registry(rpc.as_ref(), config.assets()).await?,
         ));
@@ -244,7 +240,6 @@ impl MarketMaker {
                 services,
                 config: shared_config,
                 max_market_maker_inputs,
-                marker_lamports,
                 registry,
                 account,
                 orders: OpenOrders::default(),

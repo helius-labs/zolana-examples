@@ -28,12 +28,12 @@
 //! 11. The market maker refuses a settle carrying a signature that does not
 //!     verify, with `InvalidUserSignature`, and the fill stays open for the
 //!     real signature, which lands the swap.
-//! 12. The user refuses a swap message of any other shape than its transfer,
-//!     the market maker's transfer and the marker, paid by the offer's fee
-//!     payer: a fourth (system transfer) instruction and another fee payer with
-//!     `UnexpectedTransaction`, a market maker transfer naming the user's
-//!     signer with `UnexpectedSigner`, and a user transfer altered in one byte
-//!     with `UserTransferAltered`.
+//! 12. The user refuses a swap message of any other shape than its transfer
+//!     and the market maker's transfer carrying the order address, paid by
+//!     the offer's fee payer: a third (system transfer) instruction and
+//!     another fee payer with `UnexpectedTransaction`, a market maker
+//!     transfer naming the user's signer with `UnexpectedSigner`, and a user
+//!     transfer altered in one byte with `UserTransferAltered`.
 //! 13. With the fee raised to `FULL_BPS`, a quote pays nothing and is refused
 //!     with `QuoteZero` before an order opens.
 
@@ -51,14 +51,14 @@ use k_lend_market_maker::{
     SWAP_COMPUTE_BUDGET,
 };
 use k_lend_rfq_sdk::{
-    swap::{order_marker_instruction, Direction, Offer, OrderId, SwapError, SwapRequest, FULL_BPS},
+    swap::{Direction, Offer, OrderId, SwapError, SwapRequest, FULL_BPS},
     transfer::{smallest_shape, USER_OUTPUTS},
 };
 
 use k_lend_rfq_test_utils::{
     assert::{assert_market_maker_error, assert_swap_error},
     chain::{blocking, compile_swap, confirm_indexed, read_vault},
-    market_maker::plain_deposit_out,
+    market_maker::{largest_utxo, plain_deposit_out},
     setup::{
         setup, setup_with, SetupConfig, TestEnv, FEE_BPS, SEED_DEPOSIT_COLLATERAL,
         USER_SHIELD_COLLATERAL,
@@ -75,12 +75,13 @@ const LONG_ORDER_TTL: Duration = Duration::from_secs(600);
 /// CI runner, where parallel tests share the CPU with their provers.
 const QUOTE_TTL: Duration = Duration::from_secs(45);
 /// Shares seeded for the width test, shielded as `FRAGMENTS` equal UTXOs.
-const FRAGMENTS: usize = 5;
-/// Collateral of the width test's deposits: its shares need four of the
-/// `FRAGMENTS` share UTXOs (three hold `3 / 5` of `SEED_DEPOSIT_COLLATERAL`,
-/// less than the quote), so the market maker transfer is four inputs wide at
-/// quote time.
-const FRAGMENTED_COLLATERAL: u64 = 130_000_000;
+const FRAGMENTS: usize = 6;
+/// Collateral of the width test's deposits: its shares need five of the
+/// `FRAGMENTS` share UTXOs (four hold `4 / 6` of `SEED_DEPOSIT_COLLATERAL`,
+/// less than the quote), so the market maker transfer is five inputs and the
+/// order address slot wide at quote time, a 6x2 shape that leaves the user 24
+/// inputs; after consolidation one input and the slot (2x2) leave it 32.
+const FRAGMENTED_COLLATERAL: u64 = 145_000_000;
 /// User collateral of the width test: two UTXOs, each above
 /// `FRAGMENTED_COLLATERAL`.
 const WIDE_USER_COLLATERAL: u64 = 300_000_000;
@@ -260,7 +261,7 @@ async fn fill_rejects_already_filled_order() -> Result<()> {
 }
 
 /// Invariant 5: two orders are quoted while the shares are split into
-/// `FRAGMENTS` UTXOs (a four-input market maker transfer); a consolidation into
+/// `FRAGMENTS` UTXOs (a five-input market maker transfer); a consolidation into
 /// one UTXO then makes a new quote offer a wider user transfer. The first
 /// order's fill one shape above its stored width fails with
 /// `UserTransferTooWide` naming the stored width, which a fill-time
@@ -390,12 +391,11 @@ async fn verify_rejects_fill_below_quote() -> Result<()> {
         .await?;
     let order = user.order(&localnet.client, pair, &offer).await?;
     let quoted = offer.quote.amount_out;
-    let short = market_maker_transfer(&env, user.identity(), quoted - 1)?;
-    let marker = order_marker_instruction(&offer.fee_payer, offer.id, offer.marker_lamports)?;
+    let short = market_maker_transfer(&env, user.identity(), quoted - 1, offer.id)?;
     let message = compile_swap(
         localnet.client.rpc(),
         &offer.fee_payer,
-        &[order.request.transfer.clone(), short, marker],
+        &[order.request.transfer.clone(), short],
     )?;
 
     assert_swap_error(
@@ -430,12 +430,16 @@ async fn verify_rejects_misdirected_fill() -> Result<()> {
         .quote(pair, Direction::Deposit, SWAP_COLLATERAL)
         .await?;
     let order = user.order(&localnet.client, pair, &offer).await?;
-    let misdirected = market_maker_transfer(&env, market_maker.identity(), offer.quote.amount_out)?;
-    let marker = order_marker_instruction(&offer.fee_payer, offer.id, offer.marker_lamports)?;
+    let misdirected = market_maker_transfer(
+        &env,
+        market_maker.identity(),
+        offer.quote.amount_out,
+        offer.id,
+    )?;
     let message = compile_swap(
         localnet.client.rpc(),
         &offer.fee_payer,
-        &[order.request.transfer.clone(), misdirected, marker],
+        &[order.request.transfer.clone(), misdirected],
     )?;
 
     assert_swap_error(
@@ -587,37 +591,31 @@ async fn verify_rejects_unexpected_message_shape() -> Result<()> {
     let order = user.order(&localnet.client, pair, &offer).await?;
     let user_transfer = order.request.transfer.clone();
     let market_maker_instruction =
-        market_maker_transfer(&env, user.identity(), offer.quote.amount_out)?;
-    let marker = order_marker_instruction(&offer.fee_payer, offer.id, offer.marker_lamports)?;
+        market_maker_transfer(&env, user.identity(), offer.quote.amount_out, offer.id)?;
     let (blockhash, _) = blocking(|| localnet.client.rpc().get_latest_blockhash())?;
     let compile = |payer: &Address, instructions: &[Instruction]| {
         compile_message(payer, instructions, blockhash, SWAP_COMPUTE_BUDGET)
     };
 
     let extra = system_transfer(&offer.fee_payer, &market_maker.address());
-    let four = compile(
+    let three = compile(
         &offer.fee_payer,
         &[
             user_transfer.clone(),
             market_maker_instruction.clone(),
-            marker.clone(),
             extra,
         ],
     )?;
     assert_swap_error(
-        user.verify_quote(pair, &order, &four),
-        "UnexpectedTransaction for a fourth instruction",
+        user.verify_quote(pair, &order, &three),
+        "UnexpectedTransaction for a third instruction",
         |error| matches!(error, SwapError::UnexpectedTransaction),
     );
 
     let other_payer = Address::new_unique();
     let wrong_payer = compile(
         &other_payer,
-        &[
-            user_transfer.clone(),
-            market_maker_instruction.clone(),
-            marker.clone(),
-        ],
+        &[user_transfer.clone(), market_maker_instruction.clone()],
     )?;
     assert_swap_error(
         user.verify_quote(pair, &order, &wrong_payer),
@@ -632,7 +630,7 @@ async fn verify_rejects_unexpected_message_shape() -> Result<()> {
         .push(AccountMeta::new_readonly(user_signer, true));
     let user_signs_market_maker = compile(
         &offer.fee_payer,
-        &[user_transfer.clone(), signing_market_maker, marker.clone()],
+        &[user_transfer.clone(), signing_market_maker],
     )?;
     assert_swap_error(
         user.verify_quote(pair, &order, &user_signs_market_maker),
@@ -646,10 +644,7 @@ async fn verify_rejects_unexpected_message_shape() -> Result<()> {
         .last_mut()
         .ok_or_else(|| anyhow!("the user transfer has no data"))?;
     *last ^= 1;
-    let altered = compile(
-        &offer.fee_payer,
-        &[altered, market_maker_instruction, marker],
-    )?;
+    let altered = compile(&offer.fee_payer, &[altered, market_maker_instruction])?;
     assert_swap_error(
         user.verify_quote(pair, &order, &altered),
         "UserTransferAltered",
@@ -719,13 +714,14 @@ async fn funded(config: SetupConfig) -> Result<TestEnv> {
     Ok(env)
 }
 
-/// A market maker transfer of `amount` shares from the market maker's largest
-/// share UTXO to `recipient`, proved with the market maker's wallet outside the
-/// market maker.
+/// A market maker fill transfer for order `order`: `amount` shares from the
+/// market maker's largest share UTXO to `recipient`, carrying the order's
+/// address, proved with the market maker's wallet outside the market maker.
 fn market_maker_transfer(
     env: &TestEnv,
     recipient: ShieldedAddress,
     amount: u64,
+    order: OrderId,
 ) -> Result<Instruction> {
     let TestEnv {
         localnet,
@@ -734,15 +730,8 @@ fn market_maker_transfer(
         pair,
         ..
     } = env;
-    let inputs: Vec<_> = market_maker
-        .spendable(&pair.shares_mint)
-        .into_iter()
-        .max_by_key(|utxo| utxo.utxo.amount)
-        .into_iter()
-        .collect();
-    Ok(market_maker_wallet
-        .transfer(localnet, inputs, amount, recipient, market_maker.address())?
-        .instruction)
+    let inputs = largest_utxo(market_maker, &pair.shares_mint);
+    market_maker_wallet.order_transfer(localnet, inputs, amount, recipient, order)
 }
 
 /// A system program transfer of `EXTRA_TRANSFER_LAMPORTS` from `from` to

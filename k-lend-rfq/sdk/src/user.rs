@@ -15,12 +15,22 @@ use solana_message::VersionedMessage;
 use zolana_client::{ProofAuthority, Rpc, ZolanaClient};
 use zolana_transaction::{ShieldedKeys, Utxo, WalletUtxo};
 
+use zolana_interface::{instruction::TransactIxData, pda};
+
 use crate::{
+    address::{order_address, ORDER_ADDRESS_TREE},
     message::{instructions, transact_data},
     pair::Pair,
-    swap::{order_marker_instruction, Offer, Order, SwapError, SwapRequest},
+    swap::{Offer, Order, SwapError, SwapRequest},
     transfer::{Receiver, Transfer},
 };
+
+/// Index of the first input tree account of a `transact` instruction, after
+/// the payer, the output tree, the shielded pool program and the system
+/// program (zolana's `Transact::instruction` and SPP's
+/// `TransactAccounts::validate_and_parse`). Input tree `tree_index` is the
+/// account at `TRANSACT_INPUT_TREES_OFFSET + tree_index`.
+const TRANSACT_INPUT_TREES_OFFSET: usize = 4;
 
 /// Picks the user's UTXOs of `asset` to pay `amount`, largest first, so the
 /// transfer spends as few inputs as possible.
@@ -152,25 +162,28 @@ impl QuoteCheck<'_> {
     /// 1. the first account key (the fee payer) is `offer.fee_payer`, else
     ///    `SwapError::UnexpectedTransaction`;
     /// 2. every instruction decodes against the static account keys and
-    ///    there are exactly three, else `SwapError::UnexpectedTransaction`;
+    ///    there are exactly two, else `SwapError::UnexpectedTransaction`;
     /// 3. the first instruction equals `request.transfer` in program id,
     ///    accounts (with their signer and writable flags) and data, else
     ///    `SwapError::UserTransferAltered`;
-    /// 4. the third instruction equals
-    ///    `order_marker_instruction(offer.fee_payer, offer.id,
-    ///    offer.marker_lamports)` the same way, else
-    ///    `SwapError::OrderMarkerMismatch`;
-    /// 5. no instruction after the user's transfer names one of the user's
-    ///    signing keys (the signers of the user's transfer other than
-    ///    `offer.fee_payer`) as a signer, else `SwapError::UnexpectedSigner`;
-    /// 6. the signers of the market maker's transfer are exactly
+    /// 4. the market maker's transfer (the second instruction) names none of
+    ///    the user's signing keys (the signers of the user's transfer other
+    ///    than `offer.fee_payer`) as a signer, else
+    ///    `SwapError::UnexpectedSigner`;
+    /// 5. the signers of the market maker's transfer are exactly
     ///    `{offer.fee_payer}`: any other signer fails with
     ///    `SwapError::UnexpectedSigner`, a missing fee payer with
+    ///    `SwapError::UnexpectedTransaction`. The order address slot adds no
+    ///    signer: its owner is the fee payer;
+    /// 6. both instructions are zolana `transact`s, else
     ///    `SwapError::UnexpectedTransaction`;
-    /// 7. the first and second instructions are zolana `transact`s, else
-    ///    `SwapError::UnexpectedTransaction`;
-    /// 8. neither transfer carries an interface transfer, else
+    /// 7. neither transfer carries an interface transfer, else
     ///    `SwapError::PublicTransfer`;
+    /// 8. the market maker's transfer spends the order address
+    ///    `order_address(offer.fee_payer, offer.id)`: one of its inputs has
+    ///    that nullifier and a `tree_index` whose tree account in the
+    ///    instruction is `pda::tree(ORDER_ADDRESS_TREE)`, else
+    ///    `SwapError::OrderAddressMissing`;
     /// 9. every output of the market maker's transfer the user can decrypt
     ///    opens to its commitment, else `SwapError::CommitmentMismatch`;
     /// 10. exactly one of those outputs is of the quote's output asset, else
@@ -178,34 +191,28 @@ impl QuoteCheck<'_> {
     /// 11. that output holds at least `offer.quote.amount_out`, else
     ///     `SwapError::BelowQuote`.
     ///
-    /// The exact three-instruction shape and the signer checks are what keep
+    /// The exact two-instruction shape and the signer checks are what keep
     /// the user's signature from authorizing anything but the user's own
     /// transfer: the user signs the whole message, so a key of the user's
     /// listed in another instruction would be signed for there too. The
-    /// marker makes a second fill of the same order fail on-chain with
-    /// `SystemError::AccountAlreadyInUse`.
+    /// order address makes a second fill of the same order fail on-chain:
+    /// SPP rejects a nullifier whose PDA exists with `NullifierAlreadyQueued`
+    /// (custom code 7043), and a nullifier already in the tree fails the
+    /// slot's non-inclusion proof.
     pub fn verify(&self, receiver: &Receiver) -> Result<()> {
         let order = self.order;
         if self.message.static_account_keys().first() != Some(&order.offer.fee_payer) {
             return Err(SwapError::UnexpectedTransaction.into());
         }
         let instructions = instructions(self.message)?;
-        let [user_transfer, market_maker_transfer, marker] = instructions.as_slice() else {
+        let [user_transfer, market_maker_transfer] = instructions.as_slice() else {
             return Err(SwapError::UnexpectedTransaction.into());
         };
         if *user_transfer != order.request.transfer {
             return Err(SwapError::UserTransferAltered.into());
         }
         let offer = &order.offer;
-        if *marker != order_marker_instruction(&offer.fee_payer, offer.id, offer.marker_lamports)? {
-            return Err(SwapError::OrderMarkerMismatch { order: offer.id }.into());
-        }
-        check_signers(
-            &offer.fee_payer,
-            user_transfer,
-            market_maker_transfer,
-            marker,
-        )?;
+        check_signers(&offer.fee_payer, user_transfer, market_maker_transfer)?;
         let user_transact = transact_data(user_transfer)?;
         let market_maker_transact = transact_data(market_maker_transfer)?;
         let count = user_transact
@@ -218,6 +225,7 @@ impl QuoteCheck<'_> {
         if count != 0 {
             return Err(SwapError::PublicTransfer { count }.into());
         }
+        check_order_address(offer, market_maker_transfer, &market_maker_transact)?;
         let (_, asset_out) = order.offer.quote.direction.assets(self.pair);
         let received: Vec<Utxo> = receiver
             .received_outputs(&market_maker_transact)?
@@ -243,6 +251,35 @@ impl QuoteCheck<'_> {
     }
 }
 
+/// Step 8 of [`QuoteCheck::verify`]: some input of `transact`, the decoded
+/// data of `instruction`, publishes the order address of `offer` and names
+/// the order address tree. The tree is resolved through the instruction's
+/// accounts: input tree `tree_index` is account
+/// `TRANSACT_INPUT_TREES_OFFSET + tree_index`, which SPP checks is the tree
+/// the input's nullifier is inserted into. Errors with
+/// `SwapError::OrderAddressMissing`, or `SwapError::OrderAddressDerivation`
+/// if the address does not derive.
+fn check_order_address(
+    offer: &Offer,
+    instruction: &Instruction,
+    transact: &TransactIxData,
+) -> Result<(), SwapError> {
+    let address = order_address(&offer.fee_payer, offer.id)?;
+    let address_tree = pda::tree(ORDER_ADDRESS_TREE);
+    let carried = transact.inputs.iter().any(|input| {
+        input.nullifier_hash == address
+            && instruction
+                .accounts
+                .iter()
+                .skip(TRANSACT_INPUT_TREES_OFFSET)
+                .nth(usize::from(input.tree_index))
+                .is_some_and(|account| account.pubkey == address_tree)
+    });
+    carried
+        .then_some(())
+        .ok_or(SwapError::OrderAddressMissing { order: offer.id })
+}
+
 /// The signer keys `instruction` names, in account order.
 fn signers(instruction: &Instruction) -> impl Iterator<Item = &Address> {
     instruction
@@ -252,24 +289,19 @@ fn signers(instruction: &Instruction) -> impl Iterator<Item = &Address> {
         .map(|meta| &meta.pubkey)
 }
 
-/// Steps 5 and 6 of [`QuoteCheck::verify`]. A decompiled instruction marks an
+/// Steps 4 and 5 of [`QuoteCheck::verify`]. A decompiled instruction marks an
 /// account as a signer whenever the message requires its signature, so a user
-/// key listed anywhere in the market maker's transfer or the marker shows up
-/// here as a signer.
+/// key listed anywhere in the market maker's transfer shows up here as a
+/// signer.
 fn check_signers(
     fee_payer: &Address,
     user_transfer: &Instruction,
     market_maker_transfer: &Instruction,
-    marker: &Instruction,
 ) -> Result<(), SwapError> {
     let user_keys: Vec<&Address> = signers(user_transfer)
         .filter(|signer| *signer != fee_payer)
         .collect();
-    if let Some(signer) = [market_maker_transfer, marker]
-        .into_iter()
-        .flat_map(signers)
-        .find(|signer| user_keys.contains(signer))
-    {
+    if let Some(signer) = signers(market_maker_transfer).find(|signer| user_keys.contains(signer)) {
         return Err(SwapError::UnexpectedSigner { signer: *signer });
     }
     if let Some(signer) = signers(market_maker_transfer).find(|signer| *signer != fee_payer) {
@@ -302,8 +334,8 @@ mod tests {
         }
     }
 
-    /// `QuoteCheck::verify` on `[user_transfer, market_maker_transfer, marker]`
-    /// paid by `fee_payer`, with the error it returns as a `SwapError`.
+    /// `QuoteCheck::verify` on `[user_transfer, market_maker_transfer]` paid
+    /// by `fee_payer`, with the error it returns as a `SwapError`.
     fn verify_error(
         fee_payer: Address,
         user_transfer: Instruction,
@@ -312,9 +344,8 @@ mod tests {
         let keypair = ShieldedKeypair::new_p256().ok()?;
         let address = keypair.shielded_address().ok()?;
         let id = OrderId([7; 16]);
-        let marker = order_marker_instruction(&fee_payer, id, 890_880).ok()?;
         let message = VersionedMessage::Legacy(Message::new(
-            &[user_transfer.clone(), market_maker_transfer, marker],
+            &[user_transfer.clone(), market_maker_transfer],
             Some(&fee_payer),
         ));
         let offer = Offer {
@@ -329,7 +360,6 @@ mod tests {
             fee_payer,
             max_user_inputs: 1,
             user_outputs: 2,
-            marker_lamports: 890_880,
         };
         let order = Order {
             offer,

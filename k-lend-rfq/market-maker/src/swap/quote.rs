@@ -8,6 +8,7 @@ use anyhow::{anyhow, Result};
 use solana_address::Address;
 
 use k_lend_rfq_sdk::{
+    address::ORDER_ADDRESS_SLOTS,
     pair::Pair,
     swap::{Direction, Offer, OrderId, Quote, SwapError},
     transfer::{smallest_shape, USER_OUTPUTS},
@@ -48,10 +49,10 @@ impl Inner {
     /// The order records the pair, the quote, the user transfer width put in
     /// the offer, and its expiry instant (`order_ttl` from the settings at
     /// quote time; later config updates do not move it). The offer carries the
-    /// same expiry as unix seconds, and `marker_lamports`, the rent minimum the
-    /// fill locks in the order's marker account (`order_marker_instruction`).
-    /// `Inner::fill` takes the amounts from this record, never from the
-    /// request.
+    /// same expiry as unix seconds, and the fee payer and id from which the
+    /// user derives the order address the fill must carry
+    /// (`k_lend_rfq_sdk::address::order_address`). `Inner::fill` takes the
+    /// amounts from this record, never from the request.
     pub async fn quote(&self, pair: &Pair, direction: Direction, amount_in: u64) -> Result<Offer> {
         self.orders.sweep();
         let (fee_bps, order_ttl) = {
@@ -90,7 +91,6 @@ impl Inner {
             fee_payer: self.identity.payer,
             max_user_inputs,
             user_outputs: USER_OUTPUTS,
-            marker_lamports: self.marker_lamports,
         })
     }
 
@@ -111,7 +111,8 @@ impl Inner {
     /// overflow; when no selection of at most `max_market_maker_inputs` UTXOs
     /// covers `amount`, `SwapError::InsufficientInventory` if their total is
     /// short, else `SwapError::MarketMakerTransferTooWide`;
-    /// `SwapError::NoSupportedShape` if no shape fits the market maker inputs;
+    /// `SwapError::NoSupportedShape` if no shape fits the market maker inputs
+    /// and the order address slot (`ORDER_ADDRESS_SLOTS`);
     /// `SwapError::MarketMakerTransferTooWide` when no user input fits next to
     /// the market maker transfer.
     ///
@@ -156,12 +157,12 @@ impl Inner {
             }
             return Err(too_wide.into());
         };
-        let market_maker = smallest_shape(inputs, MARKET_MAKER_MIN_OUTPUTS).ok_or(
-            SwapError::NoSupportedShape {
-                inputs,
+        let slots = inputs.saturating_add(ORDER_ADDRESS_SLOTS);
+        let market_maker =
+            smallest_shape(slots, MARKET_MAKER_MIN_OUTPUTS).ok_or(SwapError::NoSupportedShape {
+                inputs: slots,
                 outputs: MARKET_MAKER_MIN_OUTPUTS,
-            },
-        )?;
+            })?;
         Ok(self
             .services
             .budget

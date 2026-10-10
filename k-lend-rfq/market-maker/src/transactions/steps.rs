@@ -43,6 +43,11 @@ pub enum StepKind {
 pub struct ProofWork {
     pub inputs: SppProofInputs,
     pub interface_accounts: Vec<TransactInterfaceTransferAccounts>,
+    /// The order whose address slot a fill's transfer carries in the input
+    /// slot after its real inputs, owned by the fee payer
+    /// (`k_lend_rfq_sdk::address`); `None` for every other step. It is not a
+    /// market maker UTXO: nothing tracks, reserves or syncs its nullifier.
+    pub address: Option<OrderId>,
 }
 
 /// Where a step is. A send that never reached the rpc returns the step to
@@ -76,18 +81,18 @@ impl StepState {
 
 /// The fill-specific state of a `StepKind::Fill` step.
 pub struct FillTransfer {
-    /// The order being filled; its marker instruction ends the swap message,
-    /// and a rejected marker reports `SwapError::OrderAlreadyFilled` for it.
+    /// The order being filled. The market maker's transfer carries its order
+    /// address, and a transfer SPP rejects because that address exists
+    /// reports `SwapError::OrderAlreadyFilled` for it.
     pub order: OrderId,
-    /// The rent minimum the marker account is funded with.
-    pub marker_lamports: u64,
     /// The user's proven transfer, first in the swap message.
     pub user_transfer: Instruction,
     /// The order's expiry (`OpenOrder::expires_at`), carried as an absolute
     /// instant so that backlog, proving and requeues cannot push it out.
     /// No proof is started and no message offered once it has passed.
     pub deadline: Instant,
-    /// Nullifiers of the market maker inputs, reported to the user.
+    /// Nullifiers of the market maker inputs, reported to the user. The order
+    /// address is not among them.
     pub spends: Vec<[u8; 32]>,
     /// The unsigned swap message, set by `offer_fill`.
     pub message: Option<VersionedMessage>,

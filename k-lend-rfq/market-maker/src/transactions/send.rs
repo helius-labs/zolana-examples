@@ -30,6 +30,7 @@ use zolana_client::{
     compile_message, sign_transaction, transaction_size, AsyncRpc, AsyncSolanaRpc, ClientError,
     ComputeBudgetConfig,
 };
+use zolana_interface::error::ShieldedPoolError;
 
 use k_lend_rfq_sdk::kvault::token_account_amount;
 
@@ -39,8 +40,7 @@ use super::{
     steps::{Step, StepId, StepKind, StepState},
 };
 use crate::{
-    error::MarketMakerError,
-    swap::fill::{ACCOUNT_ALREADY_IN_USE, MARKER_INSTRUCTION_INDEX},
+    error::MarketMakerError, swap::fill::MARKET_MAKER_TRANSFER_INDEX,
     transactions::budget::BudgetError,
 };
 
@@ -154,15 +154,17 @@ impl CustomError {
         }
     }
 
-    /// For a fill step, the fill's marker instruction
-    /// (`MARKER_INSTRUCTION_INDEX`) failed with `AccountAlreadyInUse`: the
-    /// order's marker account exists, so another transaction already filled
-    /// the order. The single definition shared by the preflight and the
-    /// landed failure path.
+    /// For a fill step, the market maker's transfer
+    /// (`MARKET_MAKER_TRANSFER_INDEX`) failed with
+    /// `ShieldedPoolError::NullifierAlreadyQueued` (7043): SPP found the
+    /// nullifier PDA of one of its nullifiers already created. The transfer's
+    /// own inputs are reserved for this fill, so the nullifier is the order
+    /// address, and another transaction already filled the order. The single
+    /// definition shared by the preflight and the landed failure path.
     pub fn is_order_already_filled(self, kind: StepKind) -> bool {
         kind == StepKind::Fill
-            && self.index == MARKER_INSTRUCTION_INDEX
-            && self.code == ACCOUNT_ALREADY_IN_USE
+            && self.index == MARKET_MAKER_TRANSFER_INDEX
+            && self.code == ShieldedPoolError::NullifierAlreadyQueued as u32
     }
 }
 
@@ -611,7 +613,7 @@ impl Coordinator {
     ///   again. Shutdown cancels pending retries.
     /// - `Rejected` with no earlier sends goes through `handle_failure`, the
     ///   same path as a transaction that landed and failed: a fill whose
-    ///   marker instruction failed with `AccountAlreadyInUse`
+    ///   market maker transfer failed with `NullifierAlreadyQueued`
     ///   (`CustomError::is_order_already_filled`) fails with
     ///   `SwapError::OrderAlreadyFilled`; a non-fill step re-proves on a
     ///   stale-root or proof-verification code (preflight runs against the
@@ -905,55 +907,60 @@ mod tests {
         }
     }
 
-    /// A duplicate fill that lands and fails reports the marker
-    /// instruction's custom error, which maps to an already filled order for
-    /// a fill step only, exactly like the preflight rejection.
+    /// A duplicate fill that lands and fails reports the market maker
+    /// transfer's `NullifierAlreadyQueued`, which maps to an already filled
+    /// order for a fill step only, exactly like the preflight rejection.
     #[test]
-    fn landed_marker_failure_is_order_already_filled() {
-        let marker_failure = TransactionError::InstructionError(
-            MARKER_INSTRUCTION_INDEX,
-            InstructionError::Custom(ACCOUNT_ALREADY_IN_USE),
+    fn landed_duplicate_address_is_order_already_filled() {
+        let queued = ShieldedPoolError::NullifierAlreadyQueued as u32;
+        let duplicate = TransactionError::InstructionError(
+            MARKET_MAKER_TRANSFER_INDEX,
+            InstructionError::Custom(queued),
         );
         let sends = [sent(100)];
         let statuses = [Some(status(
-            Some(marker_failure.clone()),
+            Some(duplicate.clone()),
             TransactionConfirmationStatus::Confirmed,
         ))];
         let classified = classify(&sends, &statuses, 50);
         let want_custom = CustomError {
-            index: MARKER_INSTRUCTION_INDEX,
-            code: ACCOUNT_ALREADY_IN_USE,
+            index: MARKET_MAKER_TRANSFER_INDEX,
+            code: queued,
         };
         assert_eq!(
             classified,
             StepStatus::Failed {
-                reason: marker_failure.to_string(),
+                reason: duplicate.to_string(),
                 custom: Some(want_custom),
             },
-            "landed marker failure"
+            "landed duplicate order address"
         );
         let preflight = Rejection::Program {
-            index: MARKER_INSTRUCTION_INDEX,
-            code: ACCOUNT_ALREADY_IN_USE,
+            index: MARKET_MAKER_TRANSFER_INDEX,
+            code: queued,
         }
         .custom_error();
-        assert_eq!(preflight, Some(want_custom), "preflight marker failure");
+        assert_eq!(
+            preflight,
+            Some(want_custom),
+            "preflight duplicate order address"
+        );
         let cases = [
             (want_custom, StepKind::Fill, true),
             (want_custom, StepKind::Consolidate, false),
             (want_custom, StepKind::Rebalance, false),
             (
                 CustomError {
-                    index: MARKER_INSTRUCTION_INDEX.wrapping_sub(1),
-                    code: ACCOUNT_ALREADY_IN_USE,
+                    index: MARKET_MAKER_TRANSFER_INDEX.wrapping_sub(1),
+                    code: queued,
                 },
                 StepKind::Fill,
                 false,
             ),
             (
                 CustomError {
-                    index: MARKER_INSTRUCTION_INDEX,
-                    code: ACCOUNT_ALREADY_IN_USE.wrapping_add(1),
+                    index: MARKET_MAKER_TRANSFER_INDEX,
+                    code: queued.wrapping_add(1),
                 },
                 StepKind::Fill,
                 false,
