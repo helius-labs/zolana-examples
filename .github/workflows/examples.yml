@@ -150,9 +150,9 @@ jobs:
     env:
       ZOLANA_TAG: v0.4.0-alpha
       SURFPOOL_RELEASE_TAG: v1.6.0-light
-      # Mainnet RPC for the mainnet_vault test; empty without the secret,
-      # which skips it.
-      KAMINO_MAINNET_RPC_URL: ${{ secrets.KAMINO_MAINNET_RPC_URL }}
+      # Mainnet RPC for the mainnet_vault test. The public endpoint serves
+      # the three requests the snapshot needs; a repo secret overrides it.
+      KAMINO_MAINNET_RPC_URL: ${{ secrets.KAMINO_MAINNET_RPC_URL || 'https://api.mainnet-beta.solana.com' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -232,5 +232,4 @@ jobs:
         run: cargo test --locked -p k-lend-market-maker --tests
 
       - name: Run mainnet vault test
-        if: env.KAMINO_MAINNET_RPC_URL != ''
         run: cargo test --locked -p k-lend-market-maker --test mainnet_vault

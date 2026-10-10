@@ -59,7 +59,8 @@ programs, Photon, and a prover.
 
 The `mainnet_vault` test snapshots a mainnet Kamino USDC vault into the
 localnet and needs mainnet access: set `KAMINO_MAINNET_RPC_URL` to a mainnet
-RPC URL, otherwise it skips.
+RPC URL, otherwise it skips. CI runs it on every push, against the public
+mainnet endpoint unless a `KAMINO_MAINNET_RPC_URL` repository secret is set.
 
 Each test boots its localnet on ports derived from its test number; set
 `ZOLANA_PORT_OFFSET` to shift all of them, for example when another checkout
