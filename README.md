@@ -28,6 +28,7 @@
 | [`escrow-program/`](escrow-program/) | A timelock escrow on SPP: lock a private balance until a deadline, then release or reclaim. |
 
 ## Documentation
+- [Stake Pool Intents](staking-program/spec.md) (draft specification).
 - [Demo](https://helius-privacy-demo.fly.dev/)
 - [Documentation](https://helius.dev/docs/privacy)
 - [Source Code](https://github.com/helius-labs/zolana)
