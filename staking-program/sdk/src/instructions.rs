@@ -1,5 +1,6 @@
 use anyhow::Result;
 use private_staking_program::{
+    instructions::execute::{stake_history, stake_program, ExecuteBatchIxData},
     instructions::intent::CreateIntentIxData,
     instructions::management::{
         CreateBatchIxData, CreateConfigIxData, CreateEpochIxData, FillBatchIxData, ResetBatchIxData,
@@ -9,6 +10,12 @@ use private_staking_program::{
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use wincode::SchemaWrite;
+use zolana_interface::{
+    PROGRAM_ID_PUBKEY, SHIELDED_POOL_CPI_AUTHORITY_PUBKEY, SOL_INTERFACE_PUBKEY,
+};
+
+const CLOCK_SYSVAR: Address =
+    Address::from_str_const("SysvarC1ock11111111111111111111111111111111");
 
 fn instruction<T: SchemaWrite<wincode::config::DefaultConfig, Src = T>>(
     tag: u8,
@@ -204,4 +211,106 @@ pub fn close_epoch(
         ]);
     }
     empty_instruction(tag::CLOSE_EPOCH, accounts)
+}
+
+/// The stake pool accounts `execute_batch` always takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PoolAccounts {
+    pub stake_pool_program: Address,
+    pub stake_pool: Address,
+    pub withdraw_authority: Address,
+    pub reserve_stake: Address,
+    pub manager_fee_account: Address,
+}
+
+/// The SPP section, passed only when at least one entry settles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExecuteSppAccounts {
+    /// `zolana_interface::pda::cache(payer, hash_chain_index)`.
+    pub cache: Address,
+    pub cached_nullifier_pda: Address,
+    pub spl_interface: Address,
+    pub pool_mint: Address,
+    pub token_program: Address,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecuteBatchAccounts {
+    pub payer: Address,
+    pub config: Address,
+    pub epoch: Address,
+    pub batch: Address,
+    pub token_vault: Address,
+    pub crank: Address,
+    /// The batch's recorded rent payer.
+    pub rent_payer: Address,
+    pub escrow_tree: Address,
+    /// One nullifier PDA per stored entry, in entry order, flagged active
+    /// (settled, writable) or cancelled (read only).
+    pub nullifier_pdas: Vec<(Address, bool)>,
+    pub spp: Option<ExecuteSppAccounts>,
+}
+
+/// Account order of `process_execute_batch`. No PDA is marked signer: the
+/// program signs for `escrow_authority` and `sol_vault` in its CPIs.
+pub fn execute_batch(
+    accounts: ExecuteBatchAccounts,
+    pool: &PoolAccounts,
+    data: &ExecuteBatchIxData,
+) -> Result<Instruction> {
+    let ExecuteBatchAccounts {
+        payer,
+        config,
+        epoch,
+        batch,
+        token_vault,
+        crank,
+        rent_payer,
+        escrow_tree,
+        nullifier_pdas,
+        spp,
+    } = accounts;
+    let mut metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new_readonly(config, false),
+        AccountMeta::new(epoch, false),
+        AccountMeta::new(batch, false),
+        AccountMeta::new_readonly(pda::escrow_authority(&config).0, false),
+        AccountMeta::new(pda::sol_vault(&config).0, false),
+        AccountMeta::new(token_vault, false),
+        AccountMeta::new(crank, false),
+        AccountMeta::new(rent_payer, false),
+        AccountMeta::new(escrow_tree, false),
+    ];
+    metas.extend(nullifier_pdas.into_iter().map(|(address, active)| {
+        if active {
+            AccountMeta::new(address, false)
+        } else {
+            AccountMeta::new_readonly(address, false)
+        }
+    }));
+    if let Some(spp) = spp {
+        metas.extend([
+            AccountMeta::new(spp.cache, false),
+            AccountMeta::new(spp.cached_nullifier_pda, false),
+            AccountMeta::new_readonly(PROGRAM_ID_PUBKEY, false),
+            AccountMeta::new_readonly(Address::default(), false),
+            AccountMeta::new(SOL_INTERFACE_PUBKEY, false),
+            AccountMeta::new(spp.spl_interface, false),
+            AccountMeta::new_readonly(SHIELDED_POOL_CPI_AUTHORITY_PUBKEY, false),
+            AccountMeta::new(spp.pool_mint, false),
+            AccountMeta::new_readonly(spp.token_program, false),
+        ]);
+    }
+    metas.extend([
+        AccountMeta::new_readonly(pool.stake_pool_program, false),
+        AccountMeta::new(pool.stake_pool, false),
+        AccountMeta::new_readonly(pool.withdraw_authority, false),
+        AccountMeta::new(pool.reserve_stake, false),
+        AccountMeta::new(pool.manager_fee_account, false),
+        AccountMeta::new_readonly(CLOCK_SYSVAR, false),
+        AccountMeta::new_readonly(stake_history::ID, false),
+        AccountMeta::new_readonly(stake_program::ID, false),
+    ]);
+    instruction(tag::EXECUTE_BATCH, metas, data)
 }

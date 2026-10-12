@@ -134,12 +134,12 @@ fn creates_and_cancels_an_encrypted_intent_through_real_spp() {
     let tree_fixture = h.tree(tree, &[source.utxo_hash]);
     let spend_proof = tree_fixture.spend_proof(tree, 0, source_nullifier);
     let padding_proofs = dummy_proofs(&proof_inputs);
-    let transaction = SppProofRequest {
-        inputs: proof_inputs,
-        spend_proofs: vec![spend_proof],
+    let transaction = SppProofRequest::new(
+        proof_inputs,
+        vec![spend_proof],
         padding_proofs,
-        additional_signers: vec![authority],
-    }
+        vec![authority],
+    )
     .prove(&ProverClient::local(), &ProofKeys(&[&user.nullifier_key]))
     .unwrap();
     let intent_proof = IntentProofInputs::new(IntentProofParams {
@@ -354,14 +354,9 @@ fn exercise_cancellation(
         cache_accounts: Default::default(),
     };
     let padding_proofs = dummy_proofs(&proof_inputs);
-    let transaction = SppProofRequest {
-        inputs: proof_inputs,
-        spend_proofs: vec![spend],
-        padding_proofs,
-        additional_signers: vec![],
-    }
-    .prove(&ProverClient::local(), &ProofKeys(&[&key]))
-    .unwrap();
+    let transaction = SppProofRequest::new(proof_inputs, vec![spend], padding_proofs, vec![])
+        .prove(&ProverClient::local(), &ProofKeys(&[&key]))
+        .unwrap();
     let inputs = CancelProofInputs::new(CancelProofParams {
         config_key,
         config,
