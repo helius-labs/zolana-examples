@@ -174,6 +174,8 @@ fn creates_and_cancels_an_encrypted_intent_through_real_spp() {
         crank: crank_address(&crank.shielded_address().unwrap()).unwrap(),
         intent_fee_lamports: 50_000,
         settlement_window_seconds: 600,
+        min_deposit_lamports: 1_000,
+        min_withdrawal_pool_tokens: 1_000,
     };
     let source: SppProofInputUtxo = wallet(
         Utxo {

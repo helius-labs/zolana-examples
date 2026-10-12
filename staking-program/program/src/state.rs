@@ -10,13 +10,13 @@ use crate::{error::StakingError, pda, M, N};
 pub const CONFIG_DISCRIMINATOR: u8 = 1;
 pub const EPOCH_DISCRIMINATOR: u8 = 2;
 pub const BATCH_DISCRIMINATOR: u8 = 3;
-pub const CONFIG_SIZE: usize = 302;
+pub const CONFIG_SIZE: usize = 318;
 pub const EPOCH_HEADER_SIZE: usize = 82;
 pub const CHAIN_SIZE: usize = 36;
 pub const EPOCH_SIZE: usize = EPOCH_HEADER_SIZE + M * CHAIN_SIZE;
 pub const BATCH_HEADER_SIZE: usize = 249;
-pub const MAX_CIPHERTEXT_BYTES: usize = 384;
-pub const ENTRY_SIZE: usize = 2 + 33 + 1 + 32 + 33 + 1 + 2 + MAX_CIPHERTEXT_BYTES;
+pub use crate::settlement::PAYOUT_CIPHERTEXT_BYTES;
+pub const ENTRY_SIZE: usize = 2 + 33 + 1 + 32 + 33 + 1 + 2 + PAYOUT_CIPHERTEXT_BYTES;
 pub const BATCH_SIZE: usize = BATCH_HEADER_SIZE + N * ENTRY_SIZE;
 pub type BatchEntry = (InputUtxo, Option<TransactOutput>);
 
@@ -67,6 +67,8 @@ pub struct Config {
     pub crank: ShieldedAddress,
     pub intent_fee_lamports: u64,
     pub settlement_window_seconds: u32,
+    pub min_deposit_lamports: u64,
+    pub min_withdrawal_pool_tokens: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
@@ -339,7 +341,7 @@ pub fn append_entries(data: &mut [u8], entries: &[BatchEntry]) -> Result<(), Pro
                 .data
                 .as_ref()
                 .ok_or(StakingError::InvalidCiphertext)?;
-            if ciphertext.len() > MAX_CIPHERTEXT_BYTES {
+            if ciphertext.len() != PAYOUT_CIPHERTEXT_BYTES || ciphertext.first() != Some(&1) {
                 return Err(StakingError::InvalidCiphertext.into());
             }
         }
@@ -425,6 +427,12 @@ mod tests {
         data
     }
 
+    fn ciphertext(byte: u8) -> Vec<u8> {
+        core::iter::once(1)
+            .chain(core::iter::repeat_n(byte, PAYOUT_CIPHERTEXT_BYTES - 1))
+            .collect()
+    }
+
     fn entry(byte: u8, cancelled: bool) -> BatchEntry {
         (
             InputUtxo {
@@ -437,7 +445,7 @@ mod tests {
                 Some(TransactOutput {
                     utxo_hash: [byte; 32],
                     owner_tag: OwnerTag::Inline([byte; 32]),
-                    data: Some(vec![byte; MAX_CIPHERTEXT_BYTES]),
+                    data: Some(ciphertext(byte)),
                 })
             },
         )
@@ -456,6 +464,8 @@ mod tests {
             crank: crank(),
             intent_fee_lamports: 10,
             settlement_window_seconds: 600,
+            min_deposit_lamports: 1_000,
+            min_withdrawal_pool_tokens: 1_000,
         };
         let sizes = (
             wincode::serialize(&config).unwrap().len(),
@@ -477,7 +487,7 @@ mod tests {
             )
         );
         const { assert!(EPOCH_SIZE <= 10_240 && EPOCH_SIZE + CHAIN_SIZE > 10_240) };
-        const { assert!(BATCH_SIZE <= 10_240) };
+        const { assert!(ENTRY_SIZE == 193 && BATCH_SIZE == 3_337) };
     }
 
     #[test]
@@ -500,7 +510,7 @@ mod tests {
     }
 
     #[test]
-    fn account_capacity_remains_fixed_while_appending_maximum_ciphertexts() {
+    fn account_capacity_remains_fixed_while_appending_payout_ciphertexts() {
         let mut data = batch_data(16);
         let expected: Vec<_> = (1..=16).map(|byte| entry(byte, false)).collect();
         append_entries(&mut data, expected.get(..5).unwrap()).unwrap();
@@ -542,11 +552,21 @@ mod tests {
     fn invalid_output_does_not_partially_append_an_earlier_valid_entry() {
         let mut data = batch_data(2);
         let mut oversized = entry(2, false);
-        oversized.1.as_mut().unwrap().data = Some(vec![0; MAX_CIPHERTEXT_BYTES + 1]);
+        let mut long = ciphertext(2);
+        long.push(2);
+        oversized.1.as_mut().unwrap().data = Some(long);
+        let mut unversioned = entry(3, false);
+        unversioned.1.as_mut().unwrap().data = Some(vec![0; PAYOUT_CIPHERTEXT_BYTES]);
         let before = data.clone();
         assert_eq!(
-            append_entries(&mut data, &[entry(1, false), oversized]),
-            Err(StakingError::InvalidCiphertext.into())
+            (
+                append_entries(&mut data, &[entry(1, false), oversized]),
+                append_entries(&mut data, &[entry(1, false), unversioned]),
+            ),
+            (
+                Err(StakingError::InvalidCiphertext.into()),
+                Err(StakingError::InvalidCiphertext.into())
+            )
         );
         assert_eq!(data, before);
     }

@@ -60,6 +60,8 @@ fn fixture(
         },
         intent_fee_lamports: 50_000,
         settlement_window_seconds: 600,
+        min_deposit_lamports: 1_000,
+        min_withdrawal_pool_tokens: 1_000,
     };
     let note = Note {
         version: 1,
@@ -220,4 +222,13 @@ fn intent_proof_verifies_and_rejects_authority_funding_and_unregistered_escrows(
         fixture(false, true).0.prove().is_err(),
         "create_intent must not authorize spending an existing escrow"
     );
+    let (mut below_minimum, ..) = fixture(false, false);
+    below_minimum.context.min_deposit_lamports = below_minimum.escrow.amount + 1;
+    assert!(
+        below_minimum.prove().is_err(),
+        "a deposit below the configured minimum must not prove"
+    );
+    let (mut other_asset, ..) = fixture(false, false);
+    other_asset.context.min_withdrawal_pool_tokens = u64::MAX;
+    other_asset.prove().unwrap();
 }

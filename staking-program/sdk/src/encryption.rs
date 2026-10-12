@@ -307,9 +307,14 @@ mod tests {
                 decrypt(&ciphertext, &crank, Recipient::Crank, &context).unwrap(),
                 note
             );
-            if !is_intent {
-                assert!(ciphertext.len() <= private_staking_program::state::MAX_CIPHERTEXT_BYTES);
-            }
+            assert_eq!(
+                ciphertext.len(),
+                if is_intent {
+                    INTENT_CIPHERTEXT_BYTES
+                } else {
+                    REFUND_CIPHERTEXT_BYTES
+                }
+            );
         }
     }
 

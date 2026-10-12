@@ -32,7 +32,6 @@ pub struct CreateIntentIxData {
 pub struct IntentProofContext {
     pub private_tx_hash: [u8; 32],
     pub escrow_hash: [u8; 32],
-    pub escrow_owner_hash: [u8; 32],
     pub escrow_owner_identity: [u8; 32],
     pub epoch_hash: [u8; 32],
     pub pool_mint_hash: [u8; 32],
@@ -41,6 +40,8 @@ pub struct IntentProofContext {
     pub input_count: u8,
     pub output_count: u8,
     pub ciphertext_context_hash: [u8; 32],
+    pub min_deposit_lamports: u64,
+    pub min_withdrawal_pool_tokens: u64,
 }
 
 impl IntentProofContext {
@@ -48,7 +49,6 @@ impl IntentProofContext {
         Poseidon::hashv(&[
             &self.private_tx_hash,
             &self.escrow_hash,
-            &self.escrow_owner_hash,
             &self.escrow_owner_identity,
             &self.epoch_hash,
             &self.pool_mint_hash,
@@ -57,6 +57,8 @@ impl IntentProofContext {
             &right_align(&[self.input_count]),
             &right_align(&[self.output_count]),
             &self.ciphertext_context_hash,
+            &right_align(&self.min_deposit_lamports.to_be_bytes()),
+            &right_align(&self.min_withdrawal_pool_tokens.to_be_bytes()),
         ])
         .map_err(|_| StakingError::HashingFailed.into())
     }
@@ -92,8 +94,6 @@ pub fn proof_context(
         .ok_or(StakingError::InvalidCiphertext)?;
     let hashing = |_| StakingError::HashingFailed;
     let identity = solana_owner_identity(authority.as_array()).map_err(hashing)?;
-    let zero_pk = Poseidon::hashv(&[&[0; 32]]).map_err(hashing)?;
-    let owner = Poseidon::hashv(&[&identity, &zero_pk]).map_err(hashing)?;
     let ciphertext_context_hash = proof::ciphertext_context_hash::<INTENT_CIPHERTEXT_BYTES>(
         ciphertext,
         &spp.tx_viewing_pk,
@@ -102,7 +102,6 @@ pub fn proof_context(
     Ok(IntentProofContext {
         private_tx_hash: spp.private_tx_hash,
         escrow_hash: output.utxo_hash,
-        escrow_owner_hash: owner,
         escrow_owner_identity: identity,
         epoch_hash: hash_bytes(epoch.as_array()).map_err(hashing)?,
         pool_mint_hash: hash_bytes(config.pool_mint.as_array()).map_err(hashing)?,
@@ -111,6 +110,8 @@ pub fn proof_context(
         input_count: spp.inputs.len() as u8,
         output_count: spp.outputs.len() as u8,
         ciphertext_context_hash,
+        min_deposit_lamports: config.min_deposit_lamports,
+        min_withdrawal_pool_tokens: config.min_withdrawal_pool_tokens,
     })
 }
 

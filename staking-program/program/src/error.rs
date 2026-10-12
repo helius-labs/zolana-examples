@@ -32,6 +32,9 @@ pub enum StakingError {
     InvalidPool,
     InvalidTree,
     InvalidRecipient,
+    IncompleteBatch,
+    InvalidCancellation,
+    VaultBalanceMismatch,
 }
 
 impl From<StakingError> for ProgramError {

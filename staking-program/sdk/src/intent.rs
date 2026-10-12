@@ -183,6 +183,14 @@ impl IntentProofInputs {
             ("InputCount", right_align(&[c.input_count])),
             ("OutputCount", right_align(&[c.output_count])),
             ("CiphertextContextHash", c.ciphertext_context_hash),
+            (
+                "MinDepositLamports",
+                right_align(&c.min_deposit_lamports.to_be_bytes()),
+            ),
+            (
+                "MinWithdrawalPoolTokens",
+                right_align(&c.min_withdrawal_pool_tokens.to_be_bytes()),
+            ),
         ] {
             scalar(&mut map, name, &value);
         }

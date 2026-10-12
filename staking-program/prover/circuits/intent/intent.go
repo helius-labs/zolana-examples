@@ -1,9 +1,12 @@
 package intent
 
 import (
+	"math/big"
+
 	"stakingcircuits/shared"
 
 	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/std/math/cmp"
 	"zolana/gnarksdk"
 	spp "zolana/prover/circuits/spp_transaction/shared"
 	"zolana/prover/circuits/verifiable-encryption/aes"
@@ -13,26 +16,28 @@ import (
 // Fixed 2x2 funding transaction: the intent is output zero, followed by one
 // data-free change output or compact padding. There are no address inputs.
 type Circuit struct {
-	PublicInputHash       frontend.Variable `gnark:",public"`
-	PrivateTxHash         frontend.Variable
-	PrivateTxBlinding     frontend.Variable
-	EscrowHash            frontend.Variable
-	EscrowOwnerIdentity   frontend.Variable
-	EpochHash             frontend.Variable
-	PoolMintHash          frontend.Variable
-	CrankViewingHash      frontend.Variable
-	TreeID                frontend.Variable
-	InputCount            frontend.Variable
-	OutputCount           frontend.Variable
-	CiphertextContextHash frontend.Variable
-	Input0                gnarksdk.Utxo
-	Input1                gnarksdk.Utxo
-	InputOwnerIdentity    [2]frontend.Variable
-	InputNullifierPK      [2]frontend.Variable
-	Escrow                shared.Note
-	Intent                shared.IntentData
-	Change                gnarksdk.Utxo
-	Encryption            shared.Encryption
+	PublicInputHash         frontend.Variable `gnark:",public"`
+	PrivateTxHash           frontend.Variable
+	PrivateTxBlinding       frontend.Variable
+	EscrowHash              frontend.Variable
+	EscrowOwnerIdentity     frontend.Variable
+	EpochHash               frontend.Variable
+	PoolMintHash            frontend.Variable
+	CrankViewingHash        frontend.Variable
+	TreeID                  frontend.Variable
+	InputCount              frontend.Variable
+	OutputCount             frontend.Variable
+	CiphertextContextHash   frontend.Variable
+	MinDepositLamports      frontend.Variable
+	MinWithdrawalPoolTokens frontend.Variable
+	Input0                  gnarksdk.Utxo
+	Input1                  gnarksdk.Utxo
+	InputOwnerIdentity      [2]frontend.Variable
+	InputNullifierPK        [2]frontend.Variable
+	Escrow                  shared.Note
+	Intent                  shared.IntentData
+	Change                  gnarksdk.Utxo
+	Encryption              shared.Encryption
 }
 
 func (c *Circuit) Define(api frontend.API) error {
@@ -48,7 +53,12 @@ func (c *Circuit) Define(api frontend.API) error {
 	api.AssertIsDifferent(c.Intent.SigningPK[0], 0)
 	escrow := c.Escrow.Utxo(api, dataHash)
 	solAsset := gnarksdk.Poseidon(api, 0, 0)
-	api.AssertIsEqual(api.Mul(api.Sub(escrow.Asset, solAsset), api.Sub(escrow.Asset, c.PoolMintHash)), 0)
+	isSol := api.IsZero(api.Sub(escrow.Asset, solAsset))
+	api.AssertIsEqual(api.Mul(api.Sub(1, isSol), api.Sub(escrow.Asset, c.PoolMintHash)), 0)
+	api.ToBinary(c.MinDepositLamports, 64)
+	api.ToBinary(c.MinWithdrawalPoolTokens, 64)
+	minimum := api.Select(isSol, c.MinDepositLamports, c.MinWithdrawalPoolTokens)
+	cmp.NewBoundedComparator(api, new(big.Int).Lsh(big.NewInt(1), 64), false).AssertIsLessEq(minimum, c.Escrow.Amount)
 	escrowHash := escrow.Hash(api)
 	api.AssertIsEqual(c.EscrowHash, escrowHash)
 	api.AssertIsEqual(gnarksdk.HashBytes(api, c.Intent.Epoch[:]), c.EpochHash)
@@ -80,10 +90,10 @@ func (c *Circuit) Define(api frontend.API) error {
 	changeHash := api.Select(api.IsZero(api.Sub(c.OutputCount, 2)), c.Change.Hash(api), 0)
 	api.AssertIsEqual(c.PrivateTxHash, gnarksdk.PrivateTxHash(api, inputHashes,
 		[]frontend.Variable{escrowHash, changeHash}, c.PrivateTxBlinding))
-	escrowOwner := gnarksdk.Poseidon(api, c.EscrowOwnerIdentity, escrowNullifierPK)
 	api.AssertIsEqual(c.PublicInputHash, gnarksdk.Poseidon(api, c.PrivateTxHash, c.EscrowHash,
-		escrowOwner, c.EscrowOwnerIdentity, c.EpochHash, c.PoolMintHash, c.CrankViewingHash,
-		c.TreeID, c.InputCount, c.OutputCount, c.CiphertextContextHash))
+		c.EscrowOwnerIdentity, c.EpochHash, c.PoolMintHash, c.CrankViewingHash,
+		c.TreeID, c.InputCount, c.OutputCount, c.CiphertextContextHash,
+		c.MinDepositLamports, c.MinWithdrawalPoolTokens))
 	return nil
 }
 

@@ -157,6 +157,8 @@ impl Harness {
                     },
                     intent_fee_lamports: 50_000,
                     settlement_window_seconds: 600,
+                    min_deposit_lamports: 1_000,
+                    min_withdrawal_pool_tokens: 1_000,
                 },
             )
             .unwrap(),
@@ -327,7 +329,11 @@ fn entry(index: u8, active: bool) -> state::BatchEntry {
         active.then_some(TransactOutput {
             utxo_hash: [index; 32],
             owner_tag: OwnerTag::Inline([index; 32]),
-            data: Some(vec![index; state::MAX_CIPHERTEXT_BYTES]),
+            data: Some(
+                core::iter::once(1)
+                    .chain(core::iter::repeat_n(index, state::PAYOUT_CIPHERTEXT_BYTES - 1))
+                    .collect(),
+            ),
         }),
     )
 }

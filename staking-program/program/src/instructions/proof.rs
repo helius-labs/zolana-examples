@@ -12,6 +12,17 @@ pub fn ciphertext_context_hash<const LEN: usize>(
     pk: &[u8; 33],
     salt: &[u8; 16],
 ) -> Result<[u8; 32], pinocchio::error::ProgramError> {
+    let pk_hash =
+        zolana_hasher::primitives::hash_bytes(pk).map_err(|_| StakingError::HashingFailed)?;
+    ciphertext_context_hash_with_pk_hash::<LEN>(data, &pk_hash, salt)
+}
+
+/// [`ciphertext_context_hash`] with `hash_bytes(pk)` computed once per batch.
+pub fn ciphertext_context_hash_with_pk_hash<const LEN: usize>(
+    data: &[u8],
+    pk_hash: &[u8; 32],
+    salt: &[u8; 16],
+) -> Result<[u8; 32], pinocchio::error::ProgramError> {
     use zolana_hasher::{
         primitives::{hash_bytes, right_align},
         Hasher, Poseidon,
@@ -22,10 +33,9 @@ pub fn ciphertext_context_hash<const LEN: usize>(
     if ciphertext.first() != Some(&1) {
         return Err(StakingError::InvalidCiphertext.into());
     }
-    let error = |_| StakingError::HashingFailed;
     Poseidon::hashv(&[
-        &hash_bytes(ciphertext).map_err(error)?,
-        &hash_bytes(pk).map_err(error)?,
+        &hash_bytes(ciphertext).map_err(|_| StakingError::HashingFailed)?,
+        pk_hash,
         &right_align(salt),
     ])
     .map_err(|_| StakingError::HashingFailed.into())

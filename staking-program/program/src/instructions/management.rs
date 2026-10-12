@@ -21,6 +21,8 @@ pub struct CreateConfigIxData {
     pub crank: ShieldedAddress,
     pub intent_fee_lamports: u64,
     pub settlement_window_seconds: u32,
+    pub min_deposit_lamports: u64,
+    pub min_withdrawal_pool_tokens: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
@@ -157,6 +159,8 @@ pub fn process_create_config(accounts: &mut [AccountView], data: &[u8]) -> Progr
         crank: ix.crank,
         intent_fee_lamports: ix.intent_fee_lamports,
         settlement_window_seconds: ix.settlement_window_seconds,
+        min_deposit_lamports: ix.min_deposit_lamports,
+        min_withdrawal_pool_tokens: ix.min_withdrawal_pool_tokens,
     };
     state::write_config(&mut config_account.try_borrow_mut()?, &config)
 }
