@@ -21,7 +21,7 @@ Flow:
 3. A failed chain transaction leaves its escrow UTXOs unspent.
 4. Each hash chain settles independently and can perform one net pool operation.
 5. Proof generation and transaction submission can run in parallel. Solana serializes transactions that write to the same stake pool or epoch accounts.
-6. Already-nullified escrows remain in the ordered proof but are excluded from SPP inputs, settlement totals, and payouts. The proof derives each nullifier from its escrow UTXO and checks inclusion against an authenticated SPP nullifier-tree root, or the program verifies its canonical, SPP-owned nullifier PDA and account layout for a queued spend. Fees retained for cancelled intents are paid to the configured crank when the epoch PDA closes.
+6. Already-nullified escrows remain in the ordered proof but are excluded from SPP inputs, settlement totals, and payouts. The proof derives each nullifier from its escrow UTXO, and the program verifies its canonical, SPP-owned nullifier PDA for a queued spend. Fees retained for cancelled intents are paid to the configured crank when the epoch PDA closes.
 7. Each Solana epoch can have multiple epoch PDAs, each with `M` hash chains of up to `N` intents. Pages share the epoch's deadlines and settle independently.
 8. Cancellations before locking can invalidate a prepared settlement proof. The crank regenerates it with the cancelled escrow skipped.
 9. The two SPP calls require separate proofs and reveal aggregate amounts. A single contributing intent reveals its amount.
@@ -77,6 +77,8 @@ struct Config {
     crank: ShieldedAddress,
     intent_fee_lamports: u64,
     settlement_window_seconds: u32,
+    min_deposit_lamports: u64,
+    min_withdrawal_pool_tokens: u64,
 }
 ```
 
@@ -134,15 +136,15 @@ struct Batch {
 }
 ```
 
-   `InputUtxo` contains `nullifier_hash` and `tree_index`. `Some(output)` means settle; `None` means cancelled. The program packs the logical `utxos` vector into `N` fixed-capacity slots with a stored filled count. Stored owner tags are inline. Ciphertexts use the [canonical staking note format](sdk/src/encryption.rs) for both user and crank; `tx_viewing_pk` and `salt` supply their encryption parameters. Execution builds SPP instructions from the batch, supplied proofs, root indexes, and amounts, and checks its hash and count against the epoch.
+   `InputUtxo` contains `nullifier_hash` and `tree_index`. `Some(output)` means settle; `None` means cancelled. The program packs the logical `utxos` vector into `N` fixed-capacity slots with a stored filled count. Stored owner tags are inline. Payout ciphertexts encrypt the [compact payout note](sdk/src/note.rs) (`version`, `tree_id`, asset flag, `amount`, `blinding`; 44 bytes) for both user and crank in 89 bytes; `tx_viewing_pk` and `salt` supply their encryption parameters, and the output index is the payout's position among the batch's outputs. Execution builds SPP instructions from the batch, supplied proofs, root indexes, and amounts, and checks its hash and count against the epoch.
 
-User escrow and payout UTXOs are stored in SPP trees. Their encrypted data is published through SPP for both the user and the crank, so they can retrieve and decrypt the UTXOs after the epoch and batch accounts close. The proofs check the encryption for both recipients. Settlement proofs check that each payout is owned by the escrow's recorded recipient and that its user ciphertext encrypts the complete payout UTXO using `recipient.viewing_pubkey`. Settlement and refund outputs have `data_hash = 0`; only `create_intent` creates epoch-linked escrow UTXOs.
+User escrow and payout UTXOs are stored in SPP trees. Their encrypted data is published through SPP for both the user and the crank, so they can retrieve and decrypt the UTXOs after the epoch and batch accounts close. The proofs check the encryption for both recipients. Escrow and refund ciphertexts use the [full staking note](sdk/src/encryption.rs); payouts use the compact note, since the recipient already knows its keys. Settlement proofs check that each payout is owned by the escrow's recorded recipient and that its user ciphertext encrypts the payout note using `recipient.viewing_pubkey`. Settlement and refund outputs have `data_hash = 0`; only `create_intent` creates epoch-linked escrow UTXOs.
 
 ## Instructions
 
 | Instruction | Description | Access |
 | --- | --- | --- |
-| `create_config` | Registers the stake pool, liquid staking token mint, escrow output tree, crank shielded address, fixed `intent_fee_lamports`, `settlement_window_seconds` (initially 600), and a `rent_payer` PDA. | Authority |
+| `create_config` | Registers the stake pool, liquid staking token mint, escrow output tree, crank shielded address, fixed `intent_fee_lamports`, `settlement_window_seconds` (initially 600), and the minimum deposit and withdrawal amounts. | Authority |
 | `create_epoch` | During the current Solana epoch's submission window, creates page `0`, or the next page after verifying that the preceding page for the same config and epoch is full. Initializes `M` hash-chain slots, intent and resolved intent counts, execution status, the epoch's shared deadlines, and SOL fee balance. The `rent_payer` PDA funds its rent. | Anyone; program signs for `rent_payer` |
 | `create_intent` | Receives an epoch PDA and selects an available hash chain in the program. The intent proof requires the escrow at a fixed SPP output slot; its asset determines deposit or withdrawal, and its `data_hash` includes the epoch PDA and recipient. Checks encryption to the user and crank, locks SOL or liquid staking tokens, appends `escrow_utxo_hash`, and pays the fixed SOL fee atomically. | User |
 | `lock_epoch` | After submissions close and before the shared settlement deadline, sets `locked = true` on the selected epoch PDA, preventing cancellations during settlement. | Configured crank signs |
@@ -208,7 +210,7 @@ Recipients use Solana signing keys, matching SPP's default-ring owner tags.
 The intent proof checks:
 
 1. The fixed output slot is the only epoch-linked escrow: a nonzero UTXO owned by `escrow_authority`, with `nullifier_secret = 0`, in `config.escrow_tree`.
-2. Its asset is SOL or the configured pool mint.
+2. Its asset is SOL or the configured pool mint, and its amount is at least that asset's configured minimum.
 3. Its `data_hash` matches `IntentUtxoData`, and `epoch` matches the supplied epoch PDA.
 4. The user and crank ciphertexts encrypt the same complete escrow UTXO and intent data, using `recipient.viewing_pubkey` and `config.crank.viewing_pubkey`.
 5. The escrow output hash and ciphertexts match the submitted SPP transaction. The proof checks the same `private_tx_hash` passed to SPP.
@@ -332,13 +334,18 @@ Settles one complete hash chain with a settlement proof and two SPP proofs. Read
 7. `token_vault` — writable; the SOL vault's configured pool-token account.
 8. `crank` — writable; must match the batch's recorded crank signing address; receives intent fees.
 9. `rent_payer` — writable; must match `batch.rent_payer`; receives batch rent.
-10. `input_trees` — one SPP tree per `tree_contexts` entry, selected by each stored input's `tree_index`; writable when used for an active spend.
+10. `escrow_tree` — writable; `config.escrow_tree`, the input tree of every escrow and the output tree of the cached UTXO and user payouts.
 11. `input_nullifier_pdas` — one canonical nullifier PDA per stored entry; writable for active spends, read for cancellation checks.
-12. `output_tree` — writable; must be `config.escrow_tree`; receives the cached UTXO and user payout outputs.
-13. `cache` — writable; SPP cache at `[CACHE_SEED, payer, hash_chain_index]`, created and closed within the instruction.
-14. `cached_utxo_nullifier_pda` — writable; canonical nullifier PDA for the cached UTXO.
-15. `spp_accounts` — the SPP program, System Program, SOL/token interfaces, pool mint, and token program needed to construct the CPI account lists.
-16. `stake_pool_accounts` — the configured program and pool, reserve, withdraw authority, fee accounts, and remaining accounts required by `DepositSol` or `WithdrawSol`.
+12. `cache` — writable; SPP cache at `[b"cache", payer, hash_chain_index as u64]`, created and closed within the instruction. Present only when an entry is active, as are 13–19.
+13. `cached_utxo_nullifier_pda` — writable; canonical nullifier PDA for the cached UTXO.
+14. `spp_program`, `system_program` — read.
+15. `sol_interface`, `spl_interface` — writable; SPP's SOL vault and the pool mint's SPL vault.
+16. `spp_cpi_authority` — read; signs SPP's SPL withdrawals.
+17. `pool_mint` — writable; `config.pool_mint`.
+18. `token_program` — read; `config.token_program_id`.
+19. `stake_pool_program`, `stake_pool`, `pool_withdraw_authority`, `reserve_stake`, `manager_fee_account`, `sysvar_clock`, `sysvar_stake_history`, `stake_program` — the accounts `DepositSol` or `WithdrawSol` require; `stake_pool`, `reserve_stake`, and `manager_fee_account` writable. Always present.
+
+The program builds each CPI's account list from these accounts.
 
 **Instruction data**
 
@@ -346,13 +353,24 @@ Settles one complete hash chain with a settlement proof and two SPP proofs. Read
 struct ExecuteBatchIxData {
     /// Checks intent coverage, cancellations, balances, and payout encryption.
     settlement_proof: SettlementProof,
-    tree_contexts: Vec<TreeContext>,
+    /// `None` when every entry is cancelled.
+    legs: Option<SettlementLegs>,
+}
+
+struct SettlementLegs {
+    amounts: SettlementAmounts,
+    /// Authenticated roots for the active escrow inputs.
+    escrow_tree_context: TreeContext,
+    /// Nullifier root for the cached UTXO; its UTXO root is `NO_UTXO_ROOT`.
+    payout_nullifier_root_index: u16,
+    /// Output blinding seed of the withdrawal leg, disclosed so the program
+    /// derives the cached UTXO.
+    withdrawal_output_seed: [u8; 32],
     /// SPP withdraws escrow funds before the pool CPI.
-    spend_proof: Option<SppProofData>,
+    spend: SppProofData,
     /// SPP deposits payouts after the pool CPI. These are separate SPP calls,
     /// so each needs a proof: the pool CPI cannot run inside SPP's transact.
-    payout_proof: Option<SppProofData>,
-    amounts: SettlementAmounts,
+    payout: SppProofData,
 }
 
 struct SppProofData {
@@ -370,9 +388,9 @@ struct SettlementAmounts {
 
 The program builds both `SppTransactIxData` values from entries with `Some(output)`, the batch's `tx_viewing_pk` and `salt`, the epoch's settlement deadline as expiry, and the supplied SPP proof data. It selects the supported cached circuits and compact padding. Default-ring transaction data hashes are unset and `messages` is empty.
 
-`tree_contexts` supplies authenticated roots for active spends and cancellation checks. The program selects trees used by active entries and remaps their input indexes for the withdrawal CPI. The withdrawal CPI also creates a zero-value UTXO owned by `sol_vault` and writes it to cache slot `0`. The payout CPI spends this cached UTXO as its only input, read from the cache without a root. The cache has `escrow_authority` as write authority and expires at the settlement deadline. `payer` funds its rent.
+Every stored input has `tree_index = 0`. The withdrawal CPI also creates a zero-value SOL UTXO owned by `sol_vault` with `data_hash = 0` and writes it to cache slot `0`. Its blinding is SPP's derivation from the first active escrow nullifier and `withdrawal_output_seed`, so the program computes its hash and nullifier; the payout blindings derive from that nullifier in turn. The payout CPI spends this cached UTXO as its only input, read from the cache without a root. The cache has `escrow_authority` as write authority and expires at the settlement deadline. `payer` funds its rent.
 
-Each `SppProofData` supplies an SPP proof and its `private_tx_hash`. Both are required when any entry has an output. If every entry is cancelled, both are absent and `amounts` is zero.
+Each `SppProofData` supplies an SPP proof and its `private_tx_hash`. The proof's public input also binds the batch entries, the cached UTXO hash, the pool state, and the amounts.
 
 The program derives the withdrawal and deposit legs from `amounts` and directs them through the public vaults. It derives `DepositSol` from the SOL surplus or `WithdrawSol` from the pool-token surplus between escrow and payout totals. The other asset's deficit must match the pool operation's result. When both assets balance, the pool CPI is skipped. SOL deposits use the pool's manager fee account as the referral fee destination.
 
@@ -381,20 +399,20 @@ The program derives the withdrawal and deposit legs from `amounts` and directs t
 The settlement proof checks:
 
 1. The original escrows reproduce the epoch's complete ordered hash chain and exact intent count. Each escrow has the expected owner, asset, and epoch-linked `IntentUtxoData`.
-2. The stored entries cover those escrows exactly once and in order. Each input nullifier is derived from its escrow. An entry with `None` satisfies the authenticated spent check; an entry with `Some(output)` is included in the withdrawal CPI.
+2. The stored entries cover those escrows exactly once and in order. Each input nullifier is derived from its escrow. The program checks a queued nullifier PDA for an entry with `None`; an entry with `Some(output)` is included in the withdrawal CPI.
 3. Each `Some(output)` has the opposite asset, the [cumulative weighted payout after net pool fees](sdk/src/allocation.rs), `data_hash = 0`, and the escrow recipient's `owner_hash`.
 4. Each stored output's ciphertexts encrypt the same complete payout UTXO to the escrow recipient and configured crank.
 5. `amounts` equals the aggregate input and output amounts of active entries. These totals balance with the derived net pool operation using the current pool state, fixed fees, and the pool program's integer rounding. The cached UTXO and compact-padding slots contribute zero value.
-6. Both constructed SPP transactions match their supplied `private_tx_hash` values, public settlement legs, output hashes, ciphertexts, and cached UTXO.
+6. Both constructed SPP transactions match their supplied `private_tx_hash` values, public settlement legs, output hashes, ciphertexts, and cached UTXO. The single public input hashes both `private_tx_hash` values, the cached UTXO hash, the chain hash and intent count, the epoch, pool mint, crank viewing key, escrow owner, tree id, the pool snapshot, the amounts, and a hash chain over the stored entries.
 
 **Execution**
 
-1. Require a locked epoch within its settlement window and an unexecuted chain. Check the batch's hash, intent count, and `utxos.len()` against the epoch entry, validate the configured pool and vault accounts, and verify the settlement proof and cancellation markers.
+1. Require a locked epoch within its settlement window and an unexecuted chain. Check the batch's hash and intent count against the epoch entry and require `utxos.len()` to equal the intent count, verify the cancellation markers' nullifier PDAs, validate the configured pool and vault accounts, and verify the settlement proof.
 2. Record the vault balances and create the cache. Build the SPP withdrawal instruction from active escrow inputs and the cached UTXO output. Invoke it with `escrow_authority` to withdraw aggregate SOL and pool tokens into the public vaults.
 3. Derive and invoke the net `DepositSol` or `WithdrawSol` operation, signing with `sol_vault`. Skip the pool CPI when both assets balance.
 4. Build the SPP payout instruction from the stored outputs and the cached UTXO input. Invoke it with `sol_vault` to deposit the user payouts, close the cache to `payer`, then require both vault balances to equal their balances before execution.
 5. Increment `resolved_intent_count` by the number of entries with outputs, set `executed = true` and `batch_exists = false`, pay that count times `intent_fee_lamports` to the recorded crank, subtract the payment from the epoch fee balance, and close the batch to its recorded rent payer.
 
-When every entry is cancelled, steps 2–4 are skipped. Those cancellations were already counted in the epoch; execution closes the batch without incrementing the count or paying settlement fees.
+When every entry is cancelled, `legs` is `None` and steps 2–4 are skipped. Those cancellations were already counted in the epoch; execution closes the batch without incrementing the count or paying settlement fees.
 
 The CPI account lists follow the [SPP interface](https://github.com/helius-labs/zolana/blob/92858c801026d78dde7b3203444050ca7a8adb34/program-libs/interface/src/instruction/instruction_data/transact.rs) and the stake pool's [instruction builders](https://github.com/solana-program/stake-pool/blob/8abfd17428728bc4c1ce181c238a3357bab82ad5/program/src/instruction.rs). A failed step rolls back the escrow spends, pool operation, payouts, fees, counters, and batch closure.
