@@ -93,3 +93,29 @@ func (n *Note) Bytes(api frontend.API, intent *IntentData) []frontend.Variable {
 	result = append(result, 1)
 	return append(result, intent.Bytes(api)...)
 }
+
+// IntentDataHash equals IntentData.Hash with the epoch and viewing key hashes
+// supplied by the caller, so a batch hashes them once.
+func IntentDataHash(api frontend.API, epochHash frontend.Variable, signingPK [34]frontend.Variable, nullifierPK, viewingKeyHash frontend.Variable) frontend.Variable {
+	OwnerIdentity(api, signingPK)
+	return gnarksdk.Poseidon(api, new(big.Int).SetBytes([]byte("stake_pool_intent")),
+		epochHash, gnarksdk.HashBytes(api, signingPK[:]), nullifierPK, viewingKeyHash)
+}
+
+func TreeIDBytesLE(api frontend.API, treeID frontend.Variable) []frontend.Variable {
+	return littleEndian(api, treeID, 2)
+}
+
+// PayoutBytes mirrors SDK PayoutNote's 44-byte wincode layout. The caller
+// constrains asset to a bit; the byte decompositions bound amount to 64 bits
+// and blinding to 32 bytes.
+func PayoutBytes(api frontend.API, treeLE []frontend.Variable, asset, amount, blinding frontend.Variable) []frontend.Variable {
+	if len(treeLE) != 2 {
+		panic("tree id must be 2 bytes")
+	}
+	result := []frontend.Variable{1}
+	result = append(result, treeLE...)
+	result = append(result, asset)
+	result = append(result, littleEndian(api, amount, 8)...)
+	return append(result, ve.FieldToBytesBE(api, blinding, 32)...)
+}

@@ -95,6 +95,97 @@ func (e *Encryption) Encrypt(api frontend.API, g *aes.AESGadget, plaintext []fro
 	return result
 }
 
+// BatchEncryption is one transaction's encryption key material shared by every
+// output it encrypts; the user point varies per output.
+type BatchEncryption struct {
+	EphemeralSecret [32]frontend.Variable
+	CrankPoint      [65]frontend.Variable
+	TxViewingPK     [33]frontend.Variable
+	Salt            [16]frontend.Variable
+}
+
+// Recipient holds the per-recipient hashes the KDF consumes.
+type Recipient struct {
+	Compressed [33]frontend.Variable
+	KeyHash    frontend.Variable
+	DHHash     frontend.Variable
+}
+
+// BatchEncryptor computes the ephemeral base multiplication, crank ECDH, and
+// fixed hashes once, then encrypts any number of outputs.
+type BatchEncryptor struct {
+	api           frontend.API
+	g             *aes.AESGadget
+	secret        [32]frontend.Variable
+	txViewingHash frontend.Variable
+	salt          frontend.Variable
+	crank         Recipient
+	info          []frontend.Variable
+}
+
+func (e *BatchEncryption) Prepare(api frontend.API, g *aes.AESGadget) *BatchEncryptor {
+	lessThanBytes(api, e.EphemeralSecret[:], p256.GroupOrder().FillBytes(make([]byte, 32)))
+	var scalarSum frontend.Variable = 0
+	for _, b := range e.EphemeralSecret {
+		scalarSum = api.Add(scalarSum, b)
+	}
+	api.AssertIsDifferent(scalarSum, 0)
+	ephemeral := p256.CompressPubkey(api, p256.ScalarMulGenerator(api, e.EphemeralSecret))
+	for i, b := range e.TxViewingPK {
+		api.AssertIsEqual(b, ephemeral[i])
+	}
+	info := make([]frontend.Variable, 10)
+	for i, b := range []byte("STAKING001") {
+		info[i] = b
+	}
+	b := &BatchEncryptor{
+		api: api, g: g, secret: e.EphemeralSecret, info: info,
+		txViewingHash: gnarksdk.HashBytes(api, e.TxViewingPK[:]), salt: Pack(api, e.Salt[:]),
+	}
+	b.crank = b.Recipient(e.CrankPoint)
+	return b
+}
+
+// Recipient validates an uncompressed P-256 point and derives its hashes.
+func (b *BatchEncryptor) Recipient(point [65]frontend.Variable) Recipient {
+	validatePoint(b.api, point)
+	compressed := p256.CompressPubkey(b.api, point)
+	dh := p256.ECDH(b.api, b.secret, point)
+	return Recipient{
+		Compressed: compressed,
+		KeyHash:    gnarksdk.HashBytes(b.api, compressed[:]),
+		DHHash:     gnarksdk.HashBytes(b.api, dh[:]),
+	}
+}
+
+// Encrypt returns 1 || ct_user || ct_crank, byte-identical to Encryption.Encrypt
+// for the same keys and context.
+func (b *BatchEncryptor) Encrypt(user Recipient, plaintext []frontend.Variable, outputIndex, utxoHash frontend.Variable) []frontend.Variable {
+	api := b.api
+	api.ToBinary(outputIndex, 32)
+	for _, v := range plaintext {
+		api.ToBinary(v, 8)
+	}
+	result := []frontend.Variable{1}
+	domain := new(big.Int).SetBytes([]byte("stake_pool_encryption"))
+	for role, recipient := range []Recipient{user, b.crank} {
+		shared := gnarksdk.Poseidon(api, domain, recipient.DHHash, b.txViewingHash,
+			recipient.KeyHash, b.salt, outputIndex, role, utxoHash)
+		key, nonce := ve.KeySchedule(api, shared, b.info, 10)
+		result = append(result, ctrEncryptExpanded(api, b.g, key, nonce, plaintext)...)
+	}
+	return result
+}
+
+// ContextHash mirrors the program's ciphertext_context_hash.
+func (b *BatchEncryptor) ContextHash(ciphertext []frontend.Variable) frontend.Variable {
+	return gnarksdk.Poseidon(b.api, gnarksdk.HashBytes(b.api, ciphertext), b.txViewingHash, b.salt)
+}
+
+func (b *BatchEncryptor) CrankKeyHash() frontend.Variable {
+	return b.crank.KeyHash
+}
+
 func (e *Encryption) Commitment(api frontend.API, plaintext []frontend.Variable, utxoHash frontend.Variable) frontend.Variable {
 	g := aes.NewAESGadget(api)
 	ciphertext := e.Encrypt(api, g, plaintext, utxoHash)
