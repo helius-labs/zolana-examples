@@ -26,9 +26,10 @@
 |---------|-------------|
 | [`swap-program/`](swap-program/) | A confidential swap between a maker and a taker. |
 | [`escrow-program/`](escrow-program/) | A timelock escrow on SPP: lock a private balance until a deadline, then release or reclaim. |
+| [`staking-program/`](staking-program/) | Private stake pool intents: epoch-batched deposits and withdrawals settled against an SPL stake pool. |
 
 ## Documentation
-- [Stake Pool Intents](staking-program/spec.md) (draft specification).
+- [Stake Pool Intents](staking-program/spec.md) (specification).
 - [Demo](https://helius-privacy-demo.fly.dev/)
 - [Documentation](https://helius.dev/docs/privacy)
 - [Source Code](https://github.com/helius-labs/zolana)
