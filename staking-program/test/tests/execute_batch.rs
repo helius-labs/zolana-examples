@@ -36,7 +36,7 @@ use private_staking_sdk::{
 };
 use solana_account::Account;
 use solana_address::Address;
-use solana_instruction::Instruction;
+use solana_instruction::{AccountMeta, Instruction};
 use spl_stake_pool::state::Fee;
 use zolana_client::{ProverClient, STATE_TREE_HEIGHT};
 use zolana_hasher::{primitives::right_align, Poseidon};
@@ -224,6 +224,7 @@ fn scenario(intents: &[Intent]) -> Scenario {
         hash_chain_index: HASH_CHAIN_INDEX,
         tree_id: TREE_ID,
         payer: PAYER,
+        rent_payer: RENT_PAYER,
         escrows,
         allocation: &allocation,
         pool: pool.snapshot,
@@ -282,9 +283,7 @@ fn scenario(intents: &[Intent]) -> Scenario {
         reserve_stake: pool.reserve,
         manager_fee_account: pool.manager_fee,
     };
-    let mut ix = prove(&builder, &config, tree, &tree_fixture, &pool_accounts);
-    // The batch rent payer differs from the fee payer, so its refund is exact.
-    ix.accounts.get_mut(8).unwrap().pubkey = RENT_PAYER;
+    let ix = prove(&builder, &config, tree, &tree_fixture, &pool_accounts);
     Scenario {
         h,
         intents: intents.to_vec(),
@@ -619,6 +618,23 @@ fn with_data(ix: &Instruction, edit: impl FnOnce(&mut ExecuteBatchIxData)) -> In
     }
 }
 
+/// `ix` with `edit` applied to its one account meta keyed `key`.
+fn with_meta(ix: &Instruction, key: Address, edit: impl FnOnce(&mut AccountMeta)) -> Instruction {
+    let mut ix = ix.clone();
+    let mut metas = ix.accounts.iter_mut().filter(|meta| meta.pubkey == key);
+    let meta = metas
+        .next()
+        .unwrap_or_else(|| panic!("{key} is not an account of the instruction"));
+    assert!(metas.next().is_none(), "{key} appears more than once");
+    edit(meta);
+    ix
+}
+
+/// `ix` with the account `from` replaced by `to`.
+fn with_key(ix: &Instruction, from: Address, to: Address) -> Instruction {
+    with_meta(ix, from, |meta| meta.pubkey = to)
+}
+
 fn legs_mut(data: &mut ExecuteBatchIxData) -> &mut SettlementLegs {
     data.legs.as_mut().unwrap()
 }
@@ -677,13 +693,57 @@ fn net_deposit_settles_through_deposit_sol() {
     write_header(&mut s.h, header);
 
     // Fees go to the batch's crank only.
-    let mut wrong_crank = ix.clone();
-    wrong_crank.accounts.get_mut(7).unwrap().pubkey = ATTACKER;
-    s.reject(wrong_crank, StakingError::InvalidCrank);
+    let crank_key = s.config.crank.signing_pubkey;
+    s.reject(
+        with_key(&ix, crank_key, ATTACKER),
+        StakingError::InvalidCrank,
+    );
+
+    // Fixed account identities.
+    let config_key = s.h.config;
+    let token_vault = private_staking_program::pool::token_vault(&config_key, &s.config);
+    for (expected, error) in [
+        (RENT_PAYER, StakingError::InvalidAccount),
+        (s.tree, StakingError::InvalidTree),
+        (pda::sol_vault(&config_key).0, StakingError::InvalidAccount),
+        (token_vault, StakingError::InvalidAccount),
+        (
+            pda::escrow_authority(&config_key).0,
+            StakingError::InvalidAccount,
+        ),
+    ] {
+        s.reject(with_key(&ix, expected, ATTACKER), error);
+    }
+
+    // An epoch of a different config.
+    let header = s.h.epoch_state();
+    let foreign_config = Address::new_from_array([0x74; 32]);
+    let foreign_epoch = pda::epoch(&foreign_config, header.epoch_id, header.page_index).0;
+    let mut foreign = s.h.account(&s.h.epoch).clone();
+    state::write_epoch(
+        &mut foreign.data,
+        &EpochHeader {
+            config: foreign_config,
+            ..header
+        },
+    )
+    .unwrap();
+    s.h.accounts.insert(foreign_epoch, foreign);
+    s.reject(
+        with_key(&ix, s.h.epoch, foreign_epoch),
+        StakingError::InvalidConfig,
+    );
+    s.h.accounts.remove(&foreign_epoch);
+
+    // An active entry's nullifier PDA must be writable for SPP to create it.
+    let active_pda = s.nullifier_pdas().into_iter().next().unwrap();
+    s.reject(
+        with_meta(&ix, active_pda, |meta| meta.is_writable = false),
+        StakingError::InvalidAccount,
+    );
 
     // A batch holding fewer entries than the chain.
     let filled = std::mem::replace(&mut s.h.accounts, s.unfilled.clone());
-    let crank_key = s.config.crank.signing_pubkey;
     let partial: Vec<_> = s.builder.batch_entries().into_iter().take(2).collect();
     s.h.run(
         instructions::fill_batch(
@@ -698,7 +758,14 @@ fn net_deposit_settles_through_deposit_sol() {
     s.reject(ix.clone(), StakingError::IncompleteBatch);
     s.h.accounts = filled;
 
+    let batch_account = s.h.account(&s.batch).clone();
     s.execute("net deposit");
+
+    // An executed chain does not settle again: its batch is closed, and a
+    // batch account restored at the same address hits the executed flag.
+    s.reject(ix.clone(), StakingError::InvalidAccount);
+    s.h.accounts.insert(s.batch, batch_account);
+    s.reject(ix, StakingError::ChainExecuted);
     println!("net deposit test in {:?}", start.elapsed());
 }
 

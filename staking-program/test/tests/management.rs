@@ -7,7 +7,8 @@ use private_staking_program::{
         CreateBatchIxData, CreateConfigIxData, FillBatchIxData, ResetBatchIxData,
     },
     pda,
-    state::{self, ShieldedAddress},
+    settlement::PAYOUT_CIPHERTEXT_BYTES,
+    state::{self, BatchHeader, EpochHeader, HashChain, ShieldedAddress},
     M, N,
 };
 use private_staking_sdk::instructions;
@@ -85,8 +86,24 @@ fn create_batch(h: &mut Harness) {
     );
 }
 
-fn lamports(h: &Harness, key: &Address) -> u64 {
-    h.account(key).lamports
+/// The header `create_epoch` writes for page `page_index` of `EPOCH`.
+fn fresh_epoch(h: &Harness, page_index: u64) -> EpochHeader {
+    EpochHeader {
+        discriminator: state::EPOCH_DISCRIMINATOR,
+        config: h.config,
+        epoch_id: EPOCH,
+        page_index,
+        submission_end_slot: h
+            .svm
+            .sysvars
+            .epoch_schedule
+            .get_first_slot_in_epoch(EPOCH + 1),
+        settlement_deadline: 0,
+        locked: false,
+        intent_count: 0,
+        resolved_intent_count: 0,
+        fee_balance_lamports: 0,
+    }
 }
 
 fn data<'a>(h: &'a Harness, key: &Address) -> &'a [u8] {
@@ -101,21 +118,17 @@ fn prefunded_pdas_do_not_block_config_or_epoch_creation() {
     register(&mut h);
     let config = state::config_from_bytes(data(&h, &h.config)).unwrap();
     assert_eq!(config.escrow_tree, TREE);
-    let rent_before = lamports(&h, &pda::rent_payer(&h.config).0);
+    let rent_payer = pda::rent_payer(&h.config).0;
+    let rent_before = h.lamports(&rent_payer);
     h.create_epoch(EPOCH, 0);
     assert_eq!(data(&h, &h.epoch).len(), state::EPOCH_SIZE);
-    let header = state::epoch_from_bytes(data(&h, &h.epoch)).unwrap();
     assert_eq!(
-        header.submission_end_slot,
-        h.svm
-            .sysvars
-            .epoch_schedule
-            .get_first_slot_in_epoch(EPOCH + 1)
+        state::epoch_from_bytes(data(&h, &h.epoch)).unwrap(),
+        fresh_epoch(&h, 0)
     );
-    assert_eq!(header.settlement_deadline, 0);
     assert_eq!(
-        rent_before - lamports(&h, &pda::rent_payer(&h.config).0),
-        lamports(&h, &h.epoch) - 1
+        rent_before - h.lamports(&rent_payer),
+        h.lamports(&h.epoch) - 1
     );
 }
 
@@ -181,9 +194,10 @@ fn next_page_requires_the_previous_page_to_be_full() {
         Ok(()),
     );
     let next = pda::epoch(&h.config, EPOCH, 1).0;
-    let header = state::epoch_from_bytes(data(&h, &next)).unwrap();
-    assert_eq!(header.page_index, 1);
-    assert_eq!(header.intent_count, 0);
+    assert_eq!(
+        state::epoch_from_bytes(data(&h, &next)).unwrap(),
+        fresh_epoch(&h, 1)
+    );
 }
 
 fn entry(index: u8, active: bool) -> state::BatchEntry {
@@ -197,10 +211,7 @@ fn entry(index: u8, active: bool) -> state::BatchEntry {
             owner_tag: OwnerTag::Inline([index; 32]),
             data: Some(
                 core::iter::once(1)
-                    .chain(core::iter::repeat_n(
-                        index,
-                        state::PAYOUT_CIPHERTEXT_BYTES - 1,
-                    ))
+                    .chain(core::iter::repeat_n(index, PAYOUT_CIPHERTEXT_BYTES - 1))
                     .collect(),
             ),
         }),
@@ -218,7 +229,7 @@ fn batch_fill_is_bounded_and_reset_requires_fresh_encryption_salt() {
     h.accounts.insert(h.batch(0), wallet(1));
     create_batch(&mut h);
     let batch = h.batch(0);
-    let rent = lamports(&h, &batch);
+    let rent = h.lamports(&batch);
     let fill = FillBatchIxData {
         utxos: vec![entry(1, true), entry(2, false)],
     };
@@ -260,6 +271,7 @@ fn batch_fill_is_bounded_and_reset_requires_fresh_encryption_salt() {
         .unwrap(),
         StakingError::InvalidReset,
     );
+    let filled = state::batch_from_bytes(data(&h, &batch)).unwrap();
     h.run(
         instructions::reset_batch(
             CRANK,
@@ -274,12 +286,15 @@ fn batch_fill_is_bounded_and_reset_requires_fresh_encryption_salt() {
         Ok(()),
     );
     assert_eq!(
-        state::batch_from_bytes(data(&h, &batch))
-            .unwrap()
-            .filled_count,
-        0
+        state::batch_from_bytes(data(&h, &batch)).unwrap(),
+        BatchHeader {
+            tx_viewing_pk: [3; 33],
+            salt: [2; 16],
+            filled_count: 0,
+            ..filled
+        }
     );
-    assert_eq!(lamports(&h, &batch), rent);
+    assert_eq!(h.lamports(&batch), rent);
     h.run(
         instructions::fill_batch(
             CRANK,
@@ -321,34 +336,46 @@ fn abandoned_batches_can_be_cleaned_up_before_the_last_intent_is_resolved() {
     h.run(instructions::lock_epoch(CRANK, h.config, h.epoch), Ok(()));
     create_batch(&mut h);
     let batch = h.batch(0);
-    let batch_rent = lamports(&h, &batch);
-    let payer_before = lamports(&h, &PAYER);
+    let batch_rent = h.lamports(&batch);
+    let payer_before = h.lamports(&PAYER);
+    let chain_before = state::read_chain(data(&h, &h.epoch), 0).unwrap();
     let cleanup = instructions::close_epoch(h.config, h.epoch, CRANK, &[(batch, PAYER)]);
     h.error(cleanup.clone(), StakingError::SettlementNotExpired);
     h.settlement_time(1_600);
     h.run(cleanup, Ok(()));
-    assert_eq!(lamports(&h, &PAYER), payer_before + batch_rent);
-    assert_eq!(lamports(&h, &batch), 0);
+    assert_eq!(
+        [h.lamports(&PAYER), h.lamports(&batch)],
+        [payer_before + batch_rent, 0]
+    );
     assert_eq!(data(&h, &h.epoch).len(), state::EPOCH_SIZE);
-    assert!(
-        !state::read_chain(data(&h, &h.epoch), 0)
-            .unwrap()
-            .batch_exists
+    assert_eq!(
+        state::read_chain(data(&h, &h.epoch), 0).unwrap(),
+        HashChain {
+            batch_exists: false,
+            ..chain_before
+        }
     );
     let mut header = state::epoch_from_bytes(data(&h, &h.epoch)).unwrap();
     header.resolve(2).unwrap();
     state::write_epoch(&mut h.accounts.get_mut(&h.epoch).unwrap().data, &header).unwrap();
-    let epoch_balance = lamports(&h, &h.epoch);
-    let rent_before = lamports(&h, &pda::rent_payer(&h.config).0);
-    let crank_before = lamports(&h, &CRANK);
+    let rent_payer = pda::rent_payer(&h.config).0;
+    let epoch_balance = h.lamports(&h.epoch);
+    let rent_before = h.lamports(&rent_payer);
+    let crank_before = h.lamports(&CRANK);
     h.run(
         instructions::close_epoch(h.config, h.epoch, CRANK, &[]),
         Ok(()),
     );
-    assert_eq!(lamports(&h, &CRANK) - crank_before, 100_000);
     assert_eq!(
-        lamports(&h, &pda::rent_payer(&h.config).0) - rent_before,
-        epoch_balance - 100_000
+        [
+            h.lamports(&CRANK),
+            h.lamports(&rent_payer),
+            h.lamports(&h.epoch)
+        ],
+        [
+            crank_before + 100_000,
+            rent_before + epoch_balance - 100_000,
+            0
+        ]
     );
-    assert_eq!(lamports(&h, &h.epoch), 0);
 }

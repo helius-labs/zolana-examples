@@ -20,15 +20,39 @@ mod associated_token {
 }
 
 pub fn token_vault(config_key: &Address, config: &Config) -> Address {
+    token_vault_of(&pda::sol_vault(config_key).0, config)
+}
+
+/// The `sol_vault`'s pool-mint ATA.
+fn token_vault_of(sol_vault: &Address, config: &Config) -> Address {
     Address::find_program_address(
         &[
-            pda::sol_vault(config_key).0.as_ref(),
+            sol_vault.as_ref(),
             config.token_program_id.as_ref(),
             config.pool_mint.as_ref(),
         ],
         &associated_token::ID,
     )
     .0
+}
+
+/// The config's vault addresses, derived once per instruction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Vaults {
+    pub sol_vault: Address,
+    pub sol_vault_bump: u8,
+    pub token_vault: Address,
+}
+
+impl Vaults {
+    pub fn derive(config_key: &Address, config: &Config) -> Self {
+        let (sol_vault, sol_vault_bump) = pda::sol_vault(config_key);
+        Self {
+            token_vault: token_vault_of(&sol_vault, config),
+            sol_vault,
+            sol_vault_bump,
+        }
+    }
 }
 
 pub fn load_pool(account: &AccountView, config: &Config) -> Result<StakePool, ProgramError> {
@@ -60,18 +84,16 @@ pub fn snapshot(pool: &StakePool) -> PoolSnapshot {
 
 pub fn vault_tokens(
     vault: &AccountView,
-    config_key: &Address,
+    vaults: &Vaults,
     config: &Config,
 ) -> Result<u64, ProgramError> {
-    if vault.address() != &token_vault(config_key, config)
-        || !vault.owned_by(&config.token_program_id)
-    {
+    if vault.address() != &vaults.token_vault || !vault.owned_by(&config.token_program_id) {
         return Err(StakingError::InvalidAccount.into());
     }
     let data = vault.try_borrow()?;
     let token = StateWithExtensions::<TokenAccount>::unpack(&data)
         .map_err(|_| StakingError::InvalidAccount)?;
-    if token.base.mint != config.pool_mint || token.base.owner != pda::sol_vault(config_key).0 {
+    if token.base.mint != config.pool_mint || token.base.owner != vaults.sol_vault {
         return Err(StakingError::InvalidAccount.into());
     }
     Ok(token.base.amount)
@@ -80,7 +102,7 @@ pub fn vault_tokens(
 /// Validate the public pool accounts before reading a quote or invoking the
 /// unmodified program. The manager fee destination must not alias our vault.
 pub fn validate_pool_accounts(
-    config_key: &Address,
+    vaults: &Vaults,
     config: &Config,
     pool: &StakePool,
     reserve: &AccountView,
@@ -95,7 +117,7 @@ pub fn validate_pool_accounts(
     if reserve.address() != &pool.reserve_stake
         || withdraw_authority.address() != &authority
         || fee_account.address() != &pool.manager_fee_account
-        || pool.manager_fee_account == token_vault(config_key, config)
+        || pool.manager_fee_account == vaults.token_vault
     {
         return Err(StakingError::InvalidPool.into());
     }
@@ -116,7 +138,7 @@ pub fn validate_pool_accounts(
     {
         return Err(StakingError::InvalidPool.into());
     }
-    let vault = pda::sol_vault(config_key).0;
+    let vault = vaults.sol_vault;
     if pool
         .sol_deposit_authority
         .is_some_and(|address| address != vault)
@@ -130,13 +152,13 @@ pub fn validate_pool_accounts(
 }
 
 pub fn operation_instruction(
-    config_key: &Address,
+    vaults: &Vaults,
     config: &Config,
     pool: &StakePool,
     operation: PoolOperation,
 ) -> Result<Option<solana_instruction::Instruction>, ProgramError> {
-    let vault = pda::sol_vault(config_key).0;
-    let tokens = token_vault(config_key, config);
+    let vault = vaults.sol_vault;
+    let tokens = vaults.token_vault;
     let withdraw = spl_stake_pool::find_withdraw_authority_program_address(
         &config.stake_pool_program_id,
         &config.stake_pool,
@@ -214,12 +236,13 @@ pub fn operation_instruction(
 
 pub fn invoke_operation(
     config_key: &Address,
+    vaults: &Vaults,
     config: &Config,
     pool: &StakePool,
     operation: PoolOperation,
     accounts: &[AccountView],
 ) -> ProgramResult {
-    let Some(ix) = operation_instruction(config_key, config, pool, operation)? else {
+    let Some(ix) = operation_instruction(vaults, config, pool, operation)? else {
         return Ok(());
     };
     if !accounts
@@ -249,7 +272,7 @@ pub fn invoke_operation(
         accounts: &metas,
         data: &ix.data,
     };
-    let bump = [pda::sol_vault(config_key).1];
+    let bump = [vaults.sol_vault_bump];
     let seeds = [
         Seed::from(pda::SOL_VAULT_SEED),
         Seed::from(config_key.as_ref()),

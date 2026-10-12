@@ -70,8 +70,10 @@ pub struct SettlementParams<'a> {
     pub hash_chain_index: u16,
     /// Raw id of the escrow tree, which also receives the cached UTXO and payouts.
     pub tree_id: u16,
-    /// Pays `create_batch`, `execute_batch` and SPP fees, and sponsors the cache.
+    /// Pays `execute_batch` and SPP fees, and sponsors the cache.
     pub payer: Address,
+    /// Paid the batch rent in `create_batch` and receives it back.
+    pub rent_payer: Address,
     /// Every chain entry in chain order, each carrying its intent data.
     pub escrows: Vec<Escrow>,
     pub allocation: &'a Allocation,
@@ -120,6 +122,7 @@ pub struct SettlementBuilder {
     hash_chain_index: u16,
     tree_id: u16,
     payer: Address,
+    rent_payer: Address,
     entries: Vec<Entry>,
     amounts: SettlementAmounts,
     pool: PoolSnapshot,
@@ -201,6 +204,7 @@ impl SettlementBuilder {
             hash_chain_index,
             tree_id,
             payer,
+            rent_payer,
             escrows,
             allocation,
             pool,
@@ -379,6 +383,7 @@ impl SettlementBuilder {
             hash_chain_index,
             tree_id,
             payer,
+            rent_payer,
             entries,
             amounts: allocation.amounts,
             pool,
@@ -645,7 +650,6 @@ impl SettlementBuilder {
             spend_proofs,
             padding_proofs: padding,
             additional_signers: vec![self.escrow_authority()],
-            allow_dummy_inputs: true,
             expected_cache_access: Some(cache_access(WITHDRAWAL_CIRCUIT)?),
         })
     }
@@ -752,7 +756,6 @@ impl SettlementBuilder {
             spend_proofs: vec![],
             padding_proofs: vec![cached_non_inclusion],
             additional_signers: vec![sol_vault],
-            allow_dummy_inputs: true,
             expected_cache_access: Some(cache_access(PAYOUT_CIRCUIT)?),
         })
     }
@@ -926,7 +929,6 @@ impl SettlementBuilder {
 
     /// `execute_batch` with its full account list. `legs` are the proven
     /// withdrawal and payout transactions, `None` iff every entry is cancelled.
-    /// The batch's rent payer is taken to be `payer`.
     pub fn execute_batch(
         &self,
         proof: LogicProof,
@@ -979,7 +981,7 @@ impl SettlementBuilder {
                 batch: pda::batch(&self.epoch, self.hash_chain_index).0,
                 token_vault: self.token_vault(),
                 crank: self.config.crank.signing_pubkey,
-                rent_payer: self.payer,
+                rent_payer: self.rent_payer,
                 escrow_tree,
                 nullifier_pdas,
                 spp,
@@ -1032,6 +1034,11 @@ fn compare_ix(leg: &str, expected: &TransactIxData, actual: &TransactIxData) -> 
     field!(proof);
     field!(inputs);
     field!(tree_contexts);
+    // Catches any field added to `TransactIxData` but not listed above.
+    ensure!(
+        expected == actual,
+        "{leg} leg: instruction data differs from the program's"
+    );
     Ok(())
 }
 

@@ -2,10 +2,6 @@ use pinocchio::{
     cpi::{invoke_signed_with_bounds, Seed, Signer},
     error::ProgramError,
     instruction::{InstructionAccount, InstructionView},
-    sysvars::{
-        clock::{Clock, CLOCK_ID},
-        Sysvar,
-    },
     AccountView, Address, ProgramResult,
 };
 use wincode::{SchemaRead, SchemaWrite};
@@ -21,7 +17,7 @@ use zolana_interface::{
 use zolana_program::cpi::SppTransactAccounts;
 
 use super::{
-    management::check_batch_epoch,
+    management::check_batch_chain,
     proof::{self, LogicProof},
     shared::{check_key, check_system, close_to, no_more, parse},
 };
@@ -35,6 +31,8 @@ use crate::{
 use spl_stake_pool::state::StakePool;
 
 /// Sysvar and program ids the stake pool's `WithdrawSol` reads.
+pub use pinocchio::sysvars::clock::CLOCK_ID;
+
 pub mod stake_history {
     pinocchio::address::declare_id!("SysvarStakeHistory1111111111111111111111111");
 }
@@ -43,12 +41,13 @@ pub mod stake_program {
     pinocchio::address::declare_id!("Stake11111111111111111111111111111111111111");
 }
 
-/// Account bound for the withdrawal transact CPI: 4 fixed, 1 input tree, up
-/// to 16 nullifier PDAs, 1 owner, 7 interface-transfer accounts, 2 cache.
-const WITHDRAWAL_MAX_ACCOUNTS: usize = 32;
-/// Payout transact CPI: 4 fixed, 1 input tree, 1 nullifier PDA, 1 owner,
-/// 7 interface-transfer accounts, 1 cache.
-const PAYOUT_MAX_ACCOUNTS: usize = 16;
+/// Account bound for the withdrawal transact CPI: 4 fixed + 1 input tree +
+/// up to 16 nullifier PDAs + 1 owner + 7 interface-transfer accounts + 2 cache
+/// = 31.
+const WITHDRAWAL_MAX_ACCOUNTS: usize = 31;
+/// Payout transact CPI: 4 fixed + 1 input tree + 1 nullifier PDA + 1 owner +
+/// 7 interface-transfer accounts + 1 cache = 15.
+const PAYOUT_MAX_ACCOUNTS: usize = 15;
 
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct ExecuteBatchIxData {
@@ -58,9 +57,9 @@ pub struct ExecuteBatchIxData {
 }
 
 /// The outer accounts both SPP legs forward, generic over the account type so
-/// the CPI layouts are testable off-chain and reusable by clients.
+/// the CPI layouts are testable off-chain.
 #[derive(Clone, Debug)]
-pub struct SppLegAccounts<T> {
+pub(crate) struct SppLegAccounts<T> {
     pub payer: T,
     pub escrow_tree: T,
     pub spp_program: T,
@@ -224,8 +223,7 @@ struct SettleContext<'a> {
     tree_id: u16,
     authority_key: &'a Address,
     authority_bump: u8,
-    vault_key: &'a Address,
-    vault_bump: u8,
+    vaults: &'a pool::Vaults,
 }
 
 pub fn process_execute_batch(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -251,8 +249,7 @@ pub fn process_execute_batch(accounts: &mut [AccountView], data: &[u8]) -> Progr
     }
     let batch = load_batch_boxed(batch_account)?;
     check_key(epoch_account, &batch.epoch)?;
-    header.check_settlement(Clock::get()?.unix_timestamp)?;
-    check_batch_epoch(epoch_account, &batch)?;
+    check_batch_chain(epoch_account, &header, &batch)?;
     if batch.filled_count != batch.intent_count {
         return Err(StakingError::IncompleteBatch.into());
     }
@@ -260,9 +257,9 @@ pub fn process_execute_batch(accounts: &mut [AccountView], data: &[u8]) -> Progr
     // Fixed account identities.
     let (authority_key, authority_bump) = pda::escrow_authority(&config_key);
     check_key(escrow_authority, &authority_key)?;
-    let (vault_key, vault_bump) = pda::sol_vault(&config_key);
-    check_key(sol_vault, &vault_key)?;
-    let tokens_before = pool::vault_tokens(token_vault, &config_key, &config)?;
+    let vaults = pool::Vaults::derive(&config_key, &config);
+    check_key(sol_vault, &vaults.sol_vault)?;
+    let tokens_before = pool::vault_tokens(token_vault, &vaults, &config)?;
     if crank.address() != &batch.crank.signing_pubkey
         || crank.address() == epoch_account.address()
         || crank.address() == batch_account.address()
@@ -331,7 +328,7 @@ pub fn process_execute_batch(accounts: &mut [AccountView], data: &[u8]) -> Progr
         stake_program: iter.next_account("stake_program")?,
     };
     no_more(&iter)?;
-    let pool = load_pool_section(&config_key, &config, &pool_section)?;
+    let pool = load_pool_section(&vaults, &config, &pool_section)?;
     let snapshot = pool::snapshot(&pool);
     let operation = match &ix.legs {
         Some(legs) => legs
@@ -347,7 +344,7 @@ pub fn process_execute_batch(accounts: &mut [AccountView], data: &[u8]) -> Progr
         entries.iter().find(|(_, output)| output.is_some()),
     ) {
         (Some(legs), Some((first, _))) => Some(settlement::cached_utxo(
-            &vault_key,
+            &vaults.sol_vault,
             &first.nullifier_hash,
             &legs.withdrawal_output_seed,
             tree_id,
@@ -384,8 +381,7 @@ pub fn process_execute_batch(accounts: &mut [AccountView], data: &[u8]) -> Progr
             tree_id,
             authority_key: &authority_key,
             authority_bump,
-            vault_key: &vault_key,
-            vault_bump,
+            vaults: &vaults,
         };
         let sol_before = sol_vault.lamports();
         settle(
@@ -401,7 +397,7 @@ pub fn process_execute_batch(accounts: &mut [AccountView], data: &[u8]) -> Progr
             &pool_section,
         )?;
         if sol_vault.lamports() != sol_before
-            || pool::vault_tokens(token_vault, &config_key, &config)? != tokens_before
+            || pool::vault_tokens(token_vault, &vaults, &config)? != tokens_before
         {
             return Err(StakingError::VaultBalanceMismatch.into());
         }
@@ -532,7 +528,7 @@ fn parse_spp_section(
 
 #[inline(never)]
 fn load_pool_section(
-    config_key: &Address,
+    vaults: &pool::Vaults,
     config: &Config,
     section: &PoolSection,
 ) -> Result<Box<StakePool>, ProgramError> {
@@ -544,7 +540,7 @@ fn load_pool_section(
     check_key(section.stake_program, &stake_program::ID)?;
     let pool = Box::new(pool::load_pool(section.stake_pool, config)?);
     pool::validate_pool_accounts(
-        config_key,
+        vaults,
         config,
         &pool,
         section.reserve_stake,
@@ -616,7 +612,7 @@ fn settle(
         tx_viewing_pk: context.batch.tx_viewing_pk,
         salt: context.batch.salt,
         spl_interface_bump,
-        sol_vault: context.vault_key,
+        sol_vault: &context.vaults.sol_vault,
     };
     let authority_bump = [context.authority_bump];
     let authority_seeds = [
@@ -651,12 +647,13 @@ fn settle(
     ];
     pool::invoke_operation(
         context.config_key,
+        context.vaults,
         context.config,
         pool,
         operation,
         &pool_accounts,
     )?;
-    let vault_bump = [context.vault_bump];
+    let vault_bump = [context.vaults.sol_vault_bump];
     let vault_seeds = [
         Seed::from(pda::SOL_VAULT_SEED),
         Seed::from(context.config_key.as_ref()),
@@ -668,7 +665,7 @@ fn settle(
         cached,
         accounts,
         entries,
-        context.vault_key,
+        &context.vaults.sol_vault,
         Signer::from(&vault_seeds),
     )?;
     invoke_close_cache(
@@ -828,7 +825,7 @@ mod tests {
         let full = [""; crate::N];
         assert_eq!(
             accounts.withdrawal(&full, &amounts(1, 1, 0, 0)).len(),
-            WITHDRAWAL_MAX_ACCOUNTS - 1
+            WITHDRAWAL_MAX_ACCOUNTS
         );
     }
 
@@ -870,7 +867,10 @@ mod tests {
                 "cache",
             ]
         );
-        assert!(accounts.payout(&amounts(0, 0, 3, 4)).len() <= PAYOUT_MAX_ACCOUNTS);
+        assert_eq!(
+            accounts.payout(&amounts(0, 0, 3, 4)).len(),
+            PAYOUT_MAX_ACCOUNTS
+        );
     }
 
     #[test]
@@ -916,17 +916,40 @@ mod tests {
 
     #[test]
     fn execute_batch_ix_data_round_trips() {
-        let ix = ExecuteBatchIxData {
-            settlement_proof: LogicProof {
-                a: [1; 32],
-                b: [2; 64],
-                c: [3; 32],
-                commitment: [4; 32],
-                commitment_pok: [5; 32],
-            },
-            legs: None,
+        let settlement_proof = LogicProof {
+            a: [1; 32],
+            b: [2; 64],
+            c: [3; 32],
+            commitment: [4; 32],
+            commitment_pok: [5; 32],
         };
-        let bytes = wincode::serialize(&ix).map_err(|_| ()).unwrap_or_default();
-        assert_eq!(parse::<ExecuteBatchIxData>(&bytes), Ok(ix));
+        let spp_proof = |byte: u8| settlement::SppProofData {
+            proof: zolana_interface::instruction::instruction_data::transact::TransactProof {
+                a: [byte; 32],
+                b: [byte; 128],
+                c: [byte; 32],
+            },
+            private_tx_hash: [byte.wrapping_add(1); 32],
+        };
+        let legs = SettlementLegs {
+            amounts: amounts(6, 7, 8, 9),
+            escrow_tree_context:
+                zolana_interface::instruction::instruction_data::transact::TreeContext {
+                    utxo_tree_root_index: 10,
+                    nullifier_tree_root_index: 11,
+                },
+            payout_nullifier_root_index: 12,
+            withdrawal_output_seed: [13; 32],
+            spend: spp_proof(14),
+            payout: spp_proof(16),
+        };
+        for legs in [None, Some(legs)] {
+            let ix = ExecuteBatchIxData {
+                settlement_proof,
+                legs,
+            };
+            let bytes = wincode::serialize(&ix).unwrap();
+            assert_eq!(parse::<ExecuteBatchIxData>(&bytes), Ok(ix));
+        }
     }
 }

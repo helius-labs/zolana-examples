@@ -183,10 +183,14 @@ func TestSettlementRejectsInvalidWitnesses(t *testing.T) {
 		{"cancelled absent slot", func(t *testing.T, f fixture) {
 			f.set(t, "Escrow5_Cancelled", 0, one)
 		}},
-		{"flipped pool asset", func(t *testing.T, f fixture) {
+		// The next three change values the escrow and payout UTXO hashes
+		// commit to. The test cannot recompute those hashes natively, so the
+		// witness fails at the escrow totals, the hash chain, or the payout
+		// hashes, and the names say so instead of claiming one constraint.
+		{"flipped pool asset breaks the escrow totals and chain", func(t *testing.T, f fixture) {
 			f.set(t, "Escrow0_PoolAsset", 0, one)
 		}},
-		{"zero amount", func(t *testing.T, f fixture) {
+		{"zero amount breaks the escrow totals and chain", func(t *testing.T, f fixture) {
 			f.set(t, "Escrow0_Amount", 0, big.NewInt(0))
 		}},
 		{"wrong escrow owner identity", func(t *testing.T, f fixture) {
@@ -196,7 +200,7 @@ func TestSettlementRejectsInvalidWitnesses(t *testing.T) {
 		{"user point replaced by the crank point", func(t *testing.T, f fixture) {
 			f["Escrow0_UserPoint"] = append([]string(nil), f["Encryption_CrankPoint"]...)
 		}},
-		{"changed payout blinding", func(t *testing.T, f fixture) {
+		{"changed payout blinding breaks the payout hashes", func(t *testing.T, f fixture) {
 			f.add(t, "Escrow0_PayoutBlinding", 1)
 		}},
 		{"payout pool tokens plus one", func(t *testing.T, f fixture) {

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use private_staking_program::{
-    instructions::execute::{stake_history, stake_program, ExecuteBatchIxData},
+    instructions::execute::{stake_history, stake_program, ExecuteBatchIxData, CLOCK_ID},
     instructions::intent::CreateIntentIxData,
     instructions::management::{
         CreateBatchIxData, CreateConfigIxData, CreateEpochIxData, FillBatchIxData, ResetBatchIxData,
@@ -13,9 +13,6 @@ use wincode::SchemaWrite;
 use zolana_interface::{
     PROGRAM_ID_PUBKEY, SHIELDED_POOL_CPI_AUTHORITY_PUBKEY, SOL_INTERFACE_PUBKEY,
 };
-
-const CLOCK_SYSVAR: Address =
-    Address::from_str_const("SysvarC1ock11111111111111111111111111111111");
 
 fn instruction<T: SchemaWrite<wincode::config::DefaultConfig, Src = T>>(
     tag: u8,
@@ -308,7 +305,7 @@ pub fn execute_batch(
         AccountMeta::new_readonly(pool.withdraw_authority, false),
         AccountMeta::new(pool.reserve_stake, false),
         AccountMeta::new(pool.manager_fee_account, false),
-        AccountMeta::new_readonly(CLOCK_SYSVAR, false),
+        AccountMeta::new_readonly(CLOCK_ID, false),
         AccountMeta::new_readonly(stake_history::ID, false),
         AccountMeta::new_readonly(stake_program::ID, false),
     ]);

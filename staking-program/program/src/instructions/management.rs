@@ -326,7 +326,19 @@ pub fn process_create_batch(accounts: &mut [AccountView], data: &[u8]) -> Progra
 
 pub(crate) fn check_batch_epoch(epoch_account: &AccountView, batch: &BatchHeader) -> ProgramResult {
     check_key(epoch_account, &batch.epoch)?;
-    state::load_epoch(epoch_account)?.check_settlement(Clock::get()?.unix_timestamp)?;
+    let header = state::load_epoch(epoch_account)?;
+    check_batch_chain(epoch_account, &header, batch)
+}
+
+/// `check_batch_epoch` for a caller that already loaded the epoch header and
+/// checked `epoch_account` against `batch.epoch`: the settlement window, then
+/// the batch's chain.
+pub(crate) fn check_batch_chain(
+    epoch_account: &AccountView,
+    header: &EpochHeader,
+    batch: &BatchHeader,
+) -> ProgramResult {
+    header.check_settlement(Clock::get()?.unix_timestamp)?;
     let chain = state::read_chain(&epoch_account.try_borrow()?, batch.hash_chain_index)?;
     if chain.executed {
         return Err(StakingError::ChainExecuted.into());

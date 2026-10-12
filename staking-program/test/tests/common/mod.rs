@@ -14,7 +14,10 @@ use mollusk_svm::{result::InstructionResult, Mollusk};
 use num_bigint::BigUint;
 use private_staking_program::{
     error::StakingError,
-    instructions::management::{CreateBatchIxData, CreateConfigIxData},
+    instructions::{
+        execute::stake_program,
+        management::{CreateBatchIxData, CreateConfigIxData},
+    },
     math::PoolSnapshot,
     pda, pool,
     state::{self, Config, EpochHeader},
@@ -51,8 +54,6 @@ pub const EPOCH: u64 = 42;
 pub const SPP: Address = Address::new_from_array(SHIELDED_POOL_PROGRAM_ID);
 pub const TOKEN_PROGRAM: Address =
     Address::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-pub const STAKE_PROGRAM: Address =
-    Address::from_str_const("Stake11111111111111111111111111111111111111");
 pub const SYSTEM_PROGRAM: Address = Address::new_from_array([0; 32]);
 pub const SOL_INTERFACE_KEY: Address = Address::new_from_array(SOL_INTERFACE);
 pub const SPP_CPI_AUTHORITY: Address = Address::new_from_array(SHIELDED_POOL_CPI_AUTHORITY);
@@ -281,12 +282,18 @@ impl Harness {
     /// unix time 500.
     pub fn new() -> Self {
         let mut svm = Mollusk::new(&ID, &binary("target/deploy/private_staking_program"));
-        let programs = vec![ID, SPP, spl_stake_pool::id(), TOKEN_PROGRAM, STAKE_PROGRAM];
+        let programs = vec![
+            ID,
+            SPP,
+            spl_stake_pool::id(),
+            TOKEN_PROGRAM,
+            stake_program::ID,
+        ];
         for (program, path) in [
             (SPP, ".deps/zolana/target/deploy/shielded_pool_program"),
             (spl_stake_pool::id(), "target/deploy/spl_stake_pool"),
             (TOKEN_PROGRAM, "target/deploy/spl_token"),
-            (STAKE_PROGRAM, "target/deploy/solana_stake_program"),
+            (stake_program::ID, "target/deploy/solana_stake_program"),
         ] {
             svm.add_program(&program, &binary(path));
         }
@@ -584,7 +591,7 @@ impl Harness {
             Account {
                 lamports: reserve_rent + params.reserve_extra_lamports,
                 data: reserve_data,
-                owner: STAKE_PROGRAM,
+                owner: stake_program::ID,
                 ..Account::default()
             },
         );

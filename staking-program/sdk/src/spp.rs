@@ -20,9 +20,6 @@ pub struct SppProofRequest {
     pub padding_proofs: Vec<NonInclusionProof>,
     /// PDA owners authorizing program data outputs, beyond the funding owners.
     pub additional_signers: Vec<Address>,
-    /// Published dummy-input policy; SPP derives it from the input trees'
-    /// headroom, which is `true` for every tree with spare capacity.
-    pub allow_dummy_inputs: bool,
     /// The cache access the transaction must prove: `None` for plain
     /// transfers, the settlement legs' fixed access otherwise.
     pub expected_cache_access: Option<CacheAccess>,
@@ -36,7 +33,7 @@ pub struct SppTransaction {
 }
 
 impl SppProofRequest {
-    /// An uncached request with dummy inputs allowed.
+    /// An uncached request.
     pub fn new(
         inputs: SppProofInputs,
         spend_proofs: Vec<SpendProof>,
@@ -48,7 +45,6 @@ impl SppProofRequest {
             spend_proofs,
             padding_proofs,
             additional_signers,
-            allow_dummy_inputs: true,
             expected_cache_access: None,
         }
     }
@@ -69,7 +65,6 @@ impl SppProofRequest {
             spend_proofs,
             padding_proofs,
             additional_signers,
-            allow_dummy_inputs,
             expected_cache_access,
         } = self;
         let shape = inputs.check_shape()?;
@@ -98,7 +93,9 @@ impl SppProofRequest {
             external_data: inputs.external_data,
             public_transfers,
             signer_pk_hashes,
-            allow_dummy_inputs,
+            // SPP derives the dummy-input flag from the input trees' headroom,
+            // which is `true` for every tree with spare capacity.
+            allow_dummy_inputs: true,
             shape,
             cache_accounts: inputs.cache_accounts,
         }

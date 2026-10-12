@@ -5,7 +5,7 @@ use zolana_interface::instruction::instruction_data::transact::{
     InputUtxo, OwnerTag, TransactOutput,
 };
 
-use crate::{error::StakingError, pda, M, N};
+use crate::{error::StakingError, pda, settlement::PAYOUT_CIPHERTEXT_BYTES, M, N};
 
 pub const CONFIG_DISCRIMINATOR: u8 = 1;
 pub const EPOCH_DISCRIMINATOR: u8 = 2;
@@ -15,7 +15,6 @@ pub const EPOCH_HEADER_SIZE: usize = 82;
 pub const CHAIN_SIZE: usize = 36;
 pub const EPOCH_SIZE: usize = EPOCH_HEADER_SIZE + M * CHAIN_SIZE;
 pub const BATCH_HEADER_SIZE: usize = 249;
-pub use crate::settlement::PAYOUT_CIPHERTEXT_BYTES;
 pub const ENTRY_SIZE: usize = 2 + 33 + 1 + 32 + 33 + 1 + 2 + PAYOUT_CIPHERTEXT_BYTES;
 pub const BATCH_SIZE: usize = BATCH_HEADER_SIZE + N * ENTRY_SIZE;
 pub type BatchEntry = (InputUtxo, Option<TransactOutput>);

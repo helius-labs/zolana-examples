@@ -106,29 +106,6 @@ pub struct PayoutNote {
 }
 
 impl PayoutNote {
-    pub fn from_note(note: &Note, pool_mint: &Address) -> Result<Self> {
-        ensure!(
-            note.intent.is_none(),
-            "payout note must not carry intent data"
-        );
-        let asset = if Mint::new(note.asset, note.asset_id) == Mint::SOL {
-            PAYOUT_ASSET_SOL
-        } else if note.asset == *pool_mint {
-            PAYOUT_ASSET_POOL
-        } else {
-            anyhow::bail!("payout asset must be SOL or the pool mint");
-        };
-        let payout = Self {
-            version: note.version,
-            tree_id: note.tree_id,
-            asset,
-            amount: note.amount,
-            blinding: note.blinding,
-        };
-        payout.validate()?;
-        Ok(payout)
-    }
-
     pub fn validate(&self) -> Result<()> {
         ensure!(self.version == 1, "unsupported payout note version");
         ensure!(self.asset <= PAYOUT_ASSET_POOL, "invalid payout asset");
@@ -235,9 +212,20 @@ mod tests {
                 blinding: [4; 32],
             };
             let note = payout.note(&recipient(), pool_mint, 5).unwrap();
-            assert_eq!(Mint::new(note.asset, note.asset_id), mint);
-            assert_eq!(note.intent, None);
-            assert_eq!(PayoutNote::from_note(&note, &pool_mint).unwrap(), payout);
+            assert_eq!(
+                note,
+                Note {
+                    version: 1,
+                    tree_id: 7,
+                    asset: mint.asset,
+                    asset_id: mint.asset_id,
+                    amount: 42,
+                    blinding: [4; 32],
+                    signing_pubkey: recipient().signing_pubkey,
+                    nullifier_pubkey: recipient().nullifier_pubkey,
+                    intent: None,
+                }
+            );
             assert_eq!(
                 payout.hash(&recipient(), pool_mint, 5).unwrap(),
                 note.hash().unwrap()
@@ -262,15 +250,8 @@ mod tests {
         .validate()
         .is_err());
         assert!(PayoutNote { asset: 2, ..valid }.validate().is_err());
-        let mut note = valid.note(&recipient(), pool_mint, 5).unwrap();
-        note.asset = Address::new_from_array([8; 32]);
-        note.asset_id = 6;
-        assert!(PayoutNote::from_note(&note, &pool_mint).is_err());
-        let mut note = valid.note(&recipient(), pool_mint, 5).unwrap();
-        note.intent = Some(IntentUtxoData {
-            epoch: Address::new_from_array([1; 32]),
-            recipient: recipient(),
-        });
-        assert!(PayoutNote::from_note(&note, &pool_mint).is_err());
+        assert!(PayoutNote { asset: 2, ..valid }
+            .note(&recipient(), pool_mint, 5)
+            .is_err());
     }
 }

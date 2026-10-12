@@ -15,8 +15,9 @@ use crate::note::{
 
 pub const ENCRYPTION_INFO: [u8; 10] = *b"STAKING001";
 pub const REFUND_CIPHERTEXT_BYTES: usize = 1 + 2 * REFUND_PLAINTEXT_BYTES;
-pub const PAYOUT_CIPHERTEXT_BYTES: usize = 1 + 2 * PAYOUT_PLAINTEXT_BYTES;
+pub use private_staking_program::settlement::PAYOUT_CIPHERTEXT_BYTES;
 pub const INTENT_CIPHERTEXT_BYTES: usize = 1 + 2 * INTENT_PLAINTEXT_BYTES;
+const _: () = assert!(PAYOUT_CIPHERTEXT_BYTES == 1 + 2 * PAYOUT_PLAINTEXT_BYTES);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Recipient {

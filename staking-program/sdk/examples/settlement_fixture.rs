@@ -133,6 +133,7 @@ pub fn fixture(intents: &[IntentAmount]) -> Result<Fixture> {
         hash_chain_index: 3,
         tree_id: TREE_ID,
         payer,
+        rent_payer: payer,
         escrows,
         allocation: &allocation,
         pool,

@@ -208,6 +208,13 @@ jobs:
       - name: Check code
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      - name: Check committed circuit fixtures
+        run: |
+          cargo run --locked -p private-staking-sdk --example settlement_fixture
+          cargo run --locked -p private-staking-sdk --example encryption_fixture -- refund > prover/circuits/testdata/refund-encryption.json
+          cargo run --locked -p private-staking-sdk --example encryption_fixture -- payout > prover/circuits/testdata/payout-encryption.json
+          git diff --exit-code prover/circuits/testdata
+
       - name: Test circuits
         working-directory: staking-program/prover/circuits
         run: go test -timeout 30m ./...
@@ -220,13 +227,6 @@ jobs:
             fi
           done
           git diff --exit-code program/src/verifying_keys
-
-      - name: Check committed circuit fixtures
-        run: |
-          cargo run --locked -p private-staking-sdk --example settlement_fixture
-          cargo run --locked -p private-staking-sdk --example encryption_fixture -- refund > prover/circuits/testdata/refund-encryption.json
-          cargo run --locked -p private-staking-sdk --example encryption_fixture -- payout > prover/circuits/testdata/payout-encryption.json
-          git diff --exit-code prover/circuits/testdata
 
       - name: Build programs and SPP prover
         run: bash scripts/build-tests.sh
