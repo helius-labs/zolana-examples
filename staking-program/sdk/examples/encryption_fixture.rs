@@ -1,8 +1,10 @@
-//! Regenerate the Rust/Go encryption test vector with `cargo run --example encryption_fixture`.
+//! Regenerate the Rust/Go encryption test vectors with
+//! `cargo run -p private-staking-sdk --example encryption_fixture -- refund|payout`.
 use p256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
+use private_staking_program::state::RecipientAddress;
 use private_staking_sdk::{
     encryption::{self, Context},
-    note::Note,
+    note::{Note, PayoutNote},
 };
 use solana_address::Address;
 use zolana_hasher::primitives::right_align;
@@ -22,34 +24,78 @@ fn main() -> anyhow::Result<()> {
         .to_encoded_point(true)
         .as_bytes()
         .try_into()?;
-    let note = Note {
-        version: 1,
-        tree_id: 7,
-        asset: Address::default(),
-        asset_id: 1,
-        amount: 10_000_000,
-        blinding: right_align(&[19]),
-        signing_pubkey: *PublicKey::from_ed25519(&[9; 32]).as_bytes(),
-        nullifier_pubkey: right_align(&[3]),
-        intent: None,
+    let kind = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "refund".to_string());
+    let tx_viewing_pk: [u8; 33] = ephemeral
+        .public_key()
+        .to_encoded_point(true)
+        .as_bytes()
+        .try_into()?;
+    let signing_pubkey = *PublicKey::from_ed25519(&[9; 32]).as_bytes();
+    let nullifier_pubkey = right_align(&[3]);
+    let (plaintext, context, ciphertext) = match kind.as_str() {
+        "refund" => {
+            let note = Note {
+                version: 1,
+                tree_id: 7,
+                asset: Address::default(),
+                asset_id: 1,
+                amount: 10_000_000,
+                blinding: right_align(&[19]),
+                signing_pubkey,
+                nullifier_pubkey,
+                intent: None,
+            };
+            let context = Context {
+                tx_viewing_pk,
+                salt: [5; 16],
+                output_index: 3,
+                utxo_hash: note.hash()?,
+            };
+            let ciphertext = encryption::encrypt(
+                &note,
+                &ephemeral,
+                &user_compressed,
+                &crank_compressed,
+                &context,
+            )?;
+            (wincode::serialize(&note)?, context, ciphertext)
+        }
+        "payout" => {
+            let recipient = RecipientAddress {
+                signing_pubkey,
+                nullifier_pubkey,
+                viewing_pubkey: user_compressed,
+            };
+            let pool_mint = Address::new_from_array([8; 32]);
+            let pool_asset_id = 2;
+            let payout = PayoutNote {
+                version: 1,
+                tree_id: 7,
+                asset: 1,
+                amount: 9_500_000,
+                blinding: right_align(&[21]),
+            };
+            let context = Context {
+                tx_viewing_pk,
+                salt: [5; 16],
+                output_index: 3,
+                utxo_hash: payout.hash(&recipient, pool_mint, pool_asset_id)?,
+            };
+            let ciphertext = encryption::encrypt_payout(
+                &payout,
+                &recipient,
+                pool_mint,
+                pool_asset_id,
+                &ephemeral,
+                &crank_compressed,
+                &context,
+            )?;
+            (wincode::serialize(&payout)?, context, ciphertext)
+        }
+        other => anyhow::bail!("unknown fixture kind {other}, expected refund|payout"),
     };
-    let context = Context {
-        tx_viewing_pk: ephemeral
-            .public_key()
-            .to_encoded_point(true)
-            .as_bytes()
-            .try_into()?,
-        salt: [5; 16],
-        output_index: 3,
-        utxo_hash: note.hash()?,
-    };
-    let ciphertext = encryption::encrypt(
-        &note,
-        &ephemeral,
-        &user_compressed,
-        &crank_compressed,
-        &context,
-    )?;
     let commitment =
         encryption::commitment(&ciphertext, &user_compressed, &crank_compressed, &context)?;
     println!(
@@ -60,7 +106,7 @@ fn main() -> anyhow::Result<()> {
             "crank_point": crank.public_key().to_encoded_point(false).as_bytes(),
             "tx_viewing_pk": &context.tx_viewing_pk[..],
             "salt": &context.salt[..], "output_index": context.output_index,
-            "utxo_hash": &context.utxo_hash[..], "plaintext": wincode::serialize(&note)?,
+            "utxo_hash": &context.utxo_hash[..], "plaintext": plaintext,
             "ciphertext": ciphertext, "commitment": &commitment[..],
         }))?
     );

@@ -1,5 +1,7 @@
 use anyhow::{ensure, Result};
 use p256::{ecdh::diffie_hellman, elliptic_curve::sec1::ToEncodedPoint, PublicKey, SecretKey};
+use private_staking_program::state::RecipientAddress;
+use solana_address::Address;
 use zeroize::Zeroizing;
 use zolana_hasher::{
     primitives::{hash_bytes, right_align},
@@ -7,9 +9,12 @@ use zolana_hasher::{
 };
 use zolana_keypair::symmetric_apply;
 
-use crate::note::{Note, INTENT_PLAINTEXT_BYTES, PAYOUT_PLAINTEXT_BYTES};
+use crate::note::{
+    Note, PayoutNote, INTENT_PLAINTEXT_BYTES, PAYOUT_PLAINTEXT_BYTES, REFUND_PLAINTEXT_BYTES,
+};
 
 pub const ENCRYPTION_INFO: [u8; 10] = *b"STAKING001";
+pub const REFUND_CIPHERTEXT_BYTES: usize = 1 + 2 * REFUND_PLAINTEXT_BYTES;
 pub const PAYOUT_CIPHERTEXT_BYTES: usize = 1 + 2 * PAYOUT_PLAINTEXT_BYTES;
 pub const INTENT_CIPHERTEXT_BYTES: usize = 1 + 2 * INTENT_PLAINTEXT_BYTES;
 
@@ -36,6 +41,7 @@ pub fn commitment(
 ) -> Result<[u8; 32]> {
     let ciphertext_hash = match data.len() {
         PAYOUT_CIPHERTEXT_BYTES => hash_bytes::<PAYOUT_CIPHERTEXT_BYTES>(data.try_into()?)?,
+        REFUND_CIPHERTEXT_BYTES => hash_bytes::<REFUND_CIPHERTEXT_BYTES>(data.try_into()?)?,
         INTENT_CIPHERTEXT_BYTES => hash_bytes::<INTENT_CIPHERTEXT_BYTES>(data.try_into()?)?,
         _ => anyhow::bail!("invalid staking ciphertext length"),
     };
@@ -82,6 +88,55 @@ fn shared_secret(
     ])?))
 }
 
+/// Encrypt one plaintext to the user and the crank: `1 || user || crank`.
+fn encrypt_plaintext(
+    plaintext: &[u8],
+    ephemeral: &SecretKey,
+    user: &[u8; 33],
+    crank: &[u8; 33],
+    context: &Context,
+) -> Result<Vec<u8>> {
+    ensure!(
+        public_key(ephemeral)? == context.tx_viewing_pk,
+        "ephemeral key does not match transaction"
+    );
+    let mut data = Vec::with_capacity(1 + 2 * plaintext.len());
+    data.push(1);
+    for (role, recipient_key) in [(Recipient::User, user), (Recipient::Crank, crank)] {
+        let shared = shared_secret(ephemeral, recipient_key, recipient_key, role, context)?;
+        let mut ciphertext = plaintext.to_vec();
+        symmetric_apply(&shared, &ENCRYPTION_INFO, &mut ciphertext)?;
+        data.extend(ciphertext);
+    }
+    Ok(data)
+}
+
+/// Decrypt the `role` half of a `1 || user || crank` ciphertext.
+fn decrypt_plaintext(
+    data: &[u8],
+    len: usize,
+    viewing_secret: &SecretKey,
+    role: Recipient,
+    context: &Context,
+) -> Result<Zeroizing<Vec<u8>>> {
+    ensure!(data.first() == Some(&1), "unsupported ciphertext version");
+    ensure!(
+        data.len() == 1 + 2 * len,
+        "invalid staking ciphertext length"
+    );
+    let key = public_key(viewing_secret)?;
+    let shared = shared_secret(viewing_secret, &context.tx_viewing_pk, &key, role, context)?;
+    let start = 1 + role as usize * len;
+    let mut plaintext = Zeroizing::new(
+        data.get(start..start + len)
+            .ok_or_else(|| anyhow::anyhow!("invalid ciphertext range"))?
+            .to_vec(),
+    );
+    symmetric_apply(&shared, &ENCRYPTION_INFO, &mut plaintext)?;
+    Ok(plaintext)
+}
+
+/// Encrypt a refund or intent note (full `Note` plaintext).
 pub fn encrypt(
     note: &Note,
     ephemeral: &SecretKey,
@@ -90,10 +145,6 @@ pub fn encrypt(
     context: &Context,
 ) -> Result<Vec<u8>> {
     note.validate()?;
-    ensure!(
-        public_key(ephemeral)? == context.tx_viewing_pk,
-        "ephemeral key does not match transaction"
-    );
     ensure!(
         note.hash()? == context.utxo_hash,
         "note does not match output hash"
@@ -108,41 +159,74 @@ pub fn encrypt(
     let expected_len = if note.intent.is_some() {
         INTENT_PLAINTEXT_BYTES
     } else {
-        PAYOUT_PLAINTEXT_BYTES
+        REFUND_PLAINTEXT_BYTES
     };
     ensure!(plaintext.len() == expected_len, "invalid note length");
-    let mut data = Vec::with_capacity(1 + 2 * plaintext.len());
-    data.push(1);
-    for (role, recipient_key) in [(Recipient::User, user), (Recipient::Crank, crank)] {
-        let shared = shared_secret(ephemeral, recipient_key, recipient_key, role, context)?;
-        let mut ciphertext = plaintext.to_vec();
-        symmetric_apply(&shared, &ENCRYPTION_INFO, &mut ciphertext)?;
-        data.extend(ciphertext);
-    }
-    Ok(data)
+    encrypt_plaintext(&plaintext, ephemeral, user, crank, context)
 }
 
+/// Encrypt a compact settlement payout note to the recipient's viewing key and the crank.
+pub fn encrypt_payout(
+    payout: &PayoutNote,
+    recipient: &RecipientAddress,
+    pool_mint: Address,
+    pool_asset_id: u64,
+    ephemeral: &SecretKey,
+    crank: &[u8; 33],
+    context: &Context,
+) -> Result<Vec<u8>> {
+    ensure!(
+        payout.hash(recipient, pool_mint, pool_asset_id)? == context.utxo_hash,
+        "payout note does not match output hash"
+    );
+    let plaintext = Zeroizing::new(wincode::serialize(payout)?);
+    ensure!(
+        plaintext.len() == PAYOUT_PLAINTEXT_BYTES,
+        "invalid payout note length"
+    );
+    encrypt_plaintext(
+        &plaintext,
+        ephemeral,
+        &recipient.viewing_pubkey,
+        crank,
+        context,
+    )
+}
+
+/// Decrypt a compact settlement payout note and check it against the SPP commitment.
+pub fn decrypt_payout(
+    data: &[u8],
+    viewing_secret: &SecretKey,
+    role: Recipient,
+    context: &Context,
+    recipient: &RecipientAddress,
+    pool_mint: Address,
+    pool_asset_id: u64,
+) -> Result<PayoutNote> {
+    let plaintext = decrypt_plaintext(data, PAYOUT_PLAINTEXT_BYTES, viewing_secret, role, context)?;
+    let payout: PayoutNote = wincode::deserialize_exact(&plaintext)?;
+    payout.validate()?;
+    ensure!(
+        payout.hash(recipient, pool_mint, pool_asset_id)? == context.utxo_hash,
+        "decrypted payout does not match SPP commitment"
+    );
+    Ok(payout)
+}
+
+/// Decrypt a refund or intent note. Compact payouts use [`decrypt_payout`].
 pub fn decrypt(
     data: &[u8],
     viewing_secret: &SecretKey,
     role: Recipient,
     context: &Context,
 ) -> Result<Note> {
-    ensure!(data.first() == Some(&1), "unsupported ciphertext version");
     let len = match data.len() {
-        PAYOUT_CIPHERTEXT_BYTES => PAYOUT_PLAINTEXT_BYTES,
+        REFUND_CIPHERTEXT_BYTES => REFUND_PLAINTEXT_BYTES,
         INTENT_CIPHERTEXT_BYTES => INTENT_PLAINTEXT_BYTES,
+        PAYOUT_CIPHERTEXT_BYTES => anyhow::bail!("payout ciphertext: use decrypt_payout"),
         _ => anyhow::bail!("invalid staking ciphertext length"),
     };
-    let key = public_key(viewing_secret)?;
-    let shared = shared_secret(viewing_secret, &context.tx_viewing_pk, &key, role, context)?;
-    let start = 1 + role as usize * len;
-    let mut plaintext = Zeroizing::new(
-        data.get(start..start + len)
-            .ok_or_else(|| anyhow::anyhow!("invalid ciphertext range"))?
-            .to_vec(),
-    );
-    symmetric_apply(&shared, &ENCRYPTION_INFO, &mut plaintext)?;
+    let plaintext = decrypt_plaintext(data, len, viewing_secret, role, context)?;
     let note: Note = wincode::deserialize_exact(&plaintext)?;
     note.validate()?;
     ensure!(
@@ -257,7 +341,9 @@ mod tests {
         ] {
             assert!(decrypt(&ciphertext, &user, Recipient::User, &changed).is_err());
         }
-        ciphertext[20] ^= 1;
+        if let Some(byte) = ciphertext.get_mut(20) {
+            *byte ^= 1;
+        }
         assert!(decrypt(&ciphertext, &user, Recipient::User, &context).is_err());
     }
 
@@ -287,5 +373,126 @@ mod tests {
         )
         .unwrap();
         assert_ne!(&a[1..20], &b[1..20]);
+    }
+
+    fn payout_fixture() -> (
+        PayoutNote,
+        RecipientAddress,
+        Address,
+        SecretKey,
+        SecretKey,
+        SecretKey,
+        Context,
+    ) {
+        let user = secret(2);
+        let crank = secret(3);
+        let ephemeral = secret(4);
+        let signer = ShieldedKeypair::new_p256().unwrap();
+        let recipient = RecipientAddress {
+            signing_pubkey: *signer.signing_pubkey().as_bytes(),
+            nullifier_pubkey: signer.nullifier_key.pubkey().unwrap(),
+            viewing_pubkey: public_key(&user).unwrap(),
+        };
+        let pool_mint = Address::new_from_array([8; 32]);
+        let payout = PayoutNote {
+            version: 1,
+            tree_id: 7,
+            asset: 1,
+            amount: 9_500_000,
+            blinding: right_align(&[21]),
+        };
+        let context = Context {
+            tx_viewing_pk: public_key(&ephemeral).unwrap(),
+            salt: [5; 16],
+            output_index: 3,
+            utxo_hash: payout.hash(&recipient, pool_mint, 2).unwrap(),
+        };
+        (
+            payout, recipient, pool_mint, user, crank, ephemeral, context,
+        )
+    }
+
+    #[test]
+    fn user_and_crank_recover_the_same_payout() {
+        let (payout, recipient, pool_mint, user, crank, ephemeral, context) = payout_fixture();
+        let crank_key = public_key(&crank).unwrap();
+        let ciphertext = encrypt_payout(
+            &payout, &recipient, pool_mint, 2, &ephemeral, &crank_key, &context,
+        )
+        .unwrap();
+        assert_eq!(ciphertext.len(), PAYOUT_CIPHERTEXT_BYTES);
+        for (key, role) in [(&user, Recipient::User), (&crank, Recipient::Crank)] {
+            assert_eq!(
+                decrypt_payout(&ciphertext, key, role, &context, &recipient, pool_mint, 2).unwrap(),
+                payout
+            );
+        }
+        commitment(&ciphertext, &recipient.viewing_pubkey, &crank_key, &context).unwrap();
+        assert!(decrypt(&ciphertext, &user, Recipient::User, &context).is_err());
+    }
+
+    #[test]
+    fn payout_rejects_tampering_wrong_context_and_wrong_recipient() {
+        let (payout, recipient, pool_mint, user, crank, ephemeral, context) = payout_fixture();
+        let crank_key = public_key(&crank).unwrap();
+        let wrong_context = Context {
+            utxo_hash: right_align(&[20]),
+            ..context
+        };
+        assert!(encrypt_payout(
+            &payout,
+            &recipient,
+            pool_mint,
+            2,
+            &ephemeral,
+            &crank_key,
+            &wrong_context,
+        )
+        .is_err());
+        let mut ciphertext = encrypt_payout(
+            &payout, &recipient, pool_mint, 2, &ephemeral, &crank_key, &context,
+        )
+        .unwrap();
+        let open = |data: &[u8], key: &SecretKey, ctx: &Context, to: &RecipientAddress| {
+            decrypt_payout(data, key, Recipient::User, ctx, to, pool_mint, 2)
+        };
+        assert!(open(&ciphertext, &crank, &context, &recipient).is_err());
+        for changed in [
+            Context {
+                output_index: 4,
+                ..context
+            },
+            Context {
+                salt: [6; 16],
+                ..context
+            },
+            wrong_context,
+        ] {
+            assert!(open(&ciphertext, &user, &changed, &recipient).is_err());
+        }
+        let other = RecipientAddress {
+            nullifier_pubkey: right_align(&[1]),
+            ..recipient
+        };
+        assert!(open(&ciphertext, &user, &context, &other).is_err());
+        assert!(decrypt_payout(
+            &ciphertext,
+            &user,
+            Recipient::User,
+            &context,
+            &recipient,
+            Address::new_from_array([9; 32]),
+            2
+        )
+        .is_err());
+        let truncated = ciphertext
+            .get(..PAYOUT_CIPHERTEXT_BYTES - 1)
+            .unwrap()
+            .to_vec();
+        assert!(open(&truncated, &user, &context, &recipient).is_err());
+        if let Some(byte) = ciphertext.get_mut(20) {
+            *byte ^= 1;
+        }
+        assert!(open(&ciphertext, &user, &context, &recipient).is_err());
     }
 }
