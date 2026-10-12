@@ -1,5 +1,6 @@
 use private_staking_program::{
     math::{mul_div, MathError, PoolSnapshot},
+    settlement::{PoolOperation, SettlementAmounts},
     N,
 };
 
@@ -8,21 +9,6 @@ pub enum IntentAmount {
     Deposit(u64),
     Withdrawal(u64),
     Cancelled,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PoolOperation {
-    None,
-    DepositSol { lamports: u64, pool_tokens: u64 },
-    WithdrawSol { pool_tokens: u64, lamports: u64 },
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SettlementAmounts {
-    pub escrow_sol: u64,
-    pub escrow_pool_tokens: u64,
-    pub payout_sol: u64,
-    pub payout_pool_tokens: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

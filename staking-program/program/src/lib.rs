@@ -2,6 +2,8 @@ pub mod error;
 pub mod instructions;
 pub mod math;
 pub mod pda;
+pub mod pool;
+pub mod settlement;
 pub mod state;
 pub mod verifying_keys;
 

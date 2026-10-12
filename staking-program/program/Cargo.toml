@@ -27,6 +27,8 @@ profile-program = ["light-program-profiler/profile-program"]
 [dependencies]
 borsh = { workspace = true }
 spl-stake-pool = { workspace = true }
+spl-token-2022-interface.workspace = true
+solana-instruction.workspace = true
 zolana-tree = { workspace = true, features = ["account-view"] }
 groth16-solana = { workspace = true, features = ["bsb22"] }
 light-program-profiler = { workspace = true }
