@@ -8,6 +8,7 @@ on:
       - "typescript-client/**"
       - "swap-program/**"
       - "escrow-program/**"
+      - "staking-program/**"
       - ".github/workflows/examples.yml"
   pull_request:
     paths:
@@ -15,6 +16,7 @@ on:
       - "typescript-client/**"
       - "swap-program/**"
       - "escrow-program/**"
+      - "staking-program/**"
       - ".github/workflows/examples.yml"
   workflow_dispatch:
 
@@ -135,3 +137,54 @@ jobs:
       - name: Build escrow program (SBF)
         working-directory: escrow-program/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --features bpf-entrypoint
+
+  staking-test:
+    name: test / staking-program
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: staking-program
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+          cache-dependency-path: staking-program/prover/circuits/go.sum
+
+      - name: Prepare pinned Zolana checkout
+        run: bash scripts/prepare-deps.sh
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            staking-program
+            staking-program/.deps/zolana
+
+      - name: Install Anza (Solana) CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check code
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test circuits
+        working-directory: staking-program/prover/circuits
+        run: go test ./...
+
+      - name: Build programs and SPP prover
+        run: bash scripts/build-tests.sh
+
+      - name: Run program and SDK tests
+        run: cargo test --workspace --locked

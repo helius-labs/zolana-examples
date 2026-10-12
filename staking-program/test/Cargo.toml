@@ -1,0 +1,29 @@
+[package]
+name = "private-staking-test"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dev-dependencies]
+private-staking-program = { path = "../program" }
+private-staking-sdk = { path = "../sdk" }
+mollusk-svm.workspace = true
+solana-account.workspace = true
+solana-address.workspace = true
+solana-instruction.workspace = true
+solana-epoch-schedule.workspace = true
+zolana-interface.workspace = true
+zolana-tree.workspace = true
+spl-stake-pool.workspace = true
+borsh.workspace = true
+private-staking-prover = { path = "../prover" }
+zolana-client.workspace = true
+zolana-hasher.workspace = true
+zolana-keypair.workspace = true
+zolana-merkle-tree.workspace = true
+zolana-program.workspace = true
+zolana-test-utils.workspace = true
+zolana-transaction.workspace = true
+p256 = { version = "0.13", features = ["ecdh"] }
+num-bigint.workspace = true
+wincode.workspace = true

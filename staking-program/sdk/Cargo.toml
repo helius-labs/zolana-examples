@@ -1,0 +1,30 @@
+[package]
+name = "private-staking-sdk"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+zolana-client = { workspace = true }
+anyhow = { workspace = true }
+private-staking-program = { path = "../program" }
+private-staking-prover = { path = "../prover" }
+zolana-gnark-ffi-prover.workspace = true
+solana-address = { workspace = true }
+solana-instruction = { workspace = true }
+solana-pubkey = { workspace = true }
+wincode = { workspace = true }
+zolana-interface = { workspace = true }
+zolana-program = { workspace = true }
+zolana-hasher = { workspace = true }
+zolana-keypair = { workspace = true }
+zolana-transaction = { workspace = true }
+p256 = { version = "0.13", features = ["ecdh"] }
+zeroize = "1.8"
+
+[dev-dependencies]
+serde_json = "1.0"
+spl-stake-pool.workspace = true
+groth16-solana = { workspace = true, features = ["bsb22"] }
+solana-keypair = { workspace = true }
+solana-signature = { workspace = true }
