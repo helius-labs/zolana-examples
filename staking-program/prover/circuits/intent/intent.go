@@ -44,6 +44,8 @@ func (c *Circuit) Define(api frontend.API) error {
 	api.AssertIsEqual(c.Escrow.TreeID, c.TreeID)
 	api.AssertIsDifferent(c.Escrow.Amount, 0)
 	dataHash := c.Intent.Hash(api)
+	// Default-ring SPP outputs bind Solana owner tags.
+	api.AssertIsDifferent(c.Intent.SigningPK[0], 0)
 	escrow := c.Escrow.Utxo(api, dataHash)
 	solAsset := gnarksdk.Poseidon(api, 0, 0)
 	api.AssertIsEqual(api.Mul(api.Sub(escrow.Asset, solAsset), api.Sub(escrow.Asset, c.PoolMintHash)), 0)

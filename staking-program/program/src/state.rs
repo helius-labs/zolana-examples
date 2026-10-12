@@ -27,7 +27,7 @@ pub struct ShieldedAddress {
     pub viewing_pubkey: [u8; 33],
 }
 
-/// Full owner encoding, including P-256 signing keys, for intent recipients.
+/// SPP owner encoding; intent recipients use Solana signing keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct RecipientAddress {
     pub signing_pubkey: [u8; 34],

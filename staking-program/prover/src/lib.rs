@@ -3,14 +3,16 @@ pub use zolana_gnark_ffi_prover::{CompressedProof, ProofInputMap};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CircuitId {
     Intent,
+    Cancel,
 }
 
 impl zolana_gnark_ffi_prover::Circuit for CircuitId {
-    const ALL: &'static [Self] = &[Self::Intent];
+    const ALL: &'static [Self] = &[Self::Intent, Self::Cancel];
 
     fn name(self) -> &'static str {
         match self {
             Self::Intent => "intent",
+            Self::Cancel => "cancel",
         }
     }
 }

@@ -48,6 +48,31 @@ pub fn create_intent(
     instruction(tag::CREATE_INTENT, accounts, &data)
 }
 
+pub fn cancel_intent(
+    payer: Address,
+    recipient: Address,
+    config: Address,
+    epoch: Address,
+    data: private_staking_program::instructions::cancel::CancelIntentIxData,
+    spp_accounts: &[AccountMeta],
+) -> Result<Instruction> {
+    let authority = pda::escrow_authority(&config).0;
+    let mut accounts = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new_readonly(config, false),
+        AccountMeta::new(epoch, false),
+        AccountMeta::new_readonly(authority, false),
+        AccountMeta::new_readonly(recipient, true),
+    ];
+    accounts.extend(spp_accounts.iter().cloned().map(|mut meta| {
+        if meta.pubkey == authority {
+            meta.is_signer = false;
+        }
+        meta
+    }));
+    instruction(tag::CANCEL_INTENT, accounts, &data)
+}
+
 fn empty_instruction(tag: u8, accounts: Vec<AccountMeta>) -> Instruction {
     Instruction {
         program_id: ID,

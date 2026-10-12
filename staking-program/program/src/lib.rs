@@ -46,6 +46,7 @@ pub fn process_instruction(
         tag::RESET_BATCH => process_reset_batch(accounts, data),
         tag::CLOSE_EPOCH => process_close_epoch(accounts, data),
         tag::CREATE_INTENT => instructions::intent::process_create_intent(accounts, data),
+        tag::CANCEL_INTENT => instructions::cancel::process_cancel_intent(accounts, data),
         _ => Err(error::StakingError::InvalidInstructionData.into()),
     }
 }

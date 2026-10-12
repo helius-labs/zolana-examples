@@ -201,6 +201,8 @@ struct RecipientAddress {
 
 `data_hash` is the Poseidon hash of the canonical field encodings of `epoch` and `recipient`, including the recipient's signing, nullifier, and viewing public keys, with the `stake_pool_intent` domain tag. Amount, asset, and blinding remain in the standard UTXO fields. The asset determines deposit or withdrawal. The program selects the hash chain after proof generation.
 
+Recipients use Solana signing keys, matching SPP's default-ring owner tags.
+
 **Proof**
 
 The intent proof checks:
@@ -218,7 +220,7 @@ Creation requires an unlocked epoch PDA before its submission deadline and an av
 
 ### cancel_intent
 
-Requires `epoch.locked == false` and refunds one unspent escrow to destinations authorized by its recorded recipient. Increments the epoch's resolved intent count. The SOL intent fee stays in the epoch PDA for the crank.
+Requires `epoch.locked == false` and returns one unspent escrow as a confidential UTXO to its recorded recipient. Increments the epoch's resolved intent count. The SOL intent fee stays in the epoch PDA for the crank.
 
 **Accounts**
 
@@ -226,7 +228,8 @@ Requires `epoch.locked == false` and refunds one unspent escrow to destinations 
 2. `config` — read; supplies the escrow authority and crank address.
 3. `epoch` — writable; checks the escrow's epoch link and lock flag, and increments `resolved_intent_count`.
 4. `escrow_authority` — signs the SPP CPI through the program.
-5. `spp_accounts` — the SPP `transact` account list.
+5. `recipient` — the recorded recipient's Solana signing key; signer.
+6. `spp_accounts` — the SPP `transact` account list.
 
 **Instruction data**
 
@@ -242,9 +245,9 @@ struct CancelIntentIxData {
 The cancellation proof checks:
 
 1. The escrow is owned by `escrow_authority`, has SOL or the configured pool mint as its asset, and its `data_hash` matches `IntentUtxoData`. Its `epoch` matches the supplied epoch PDA.
-2. The recipient authorizes cancellation, covering the epoch PDA, escrow hash, and SPP transaction, including its refund destinations.
-3. The escrow is the only real SPP input. Its complete amount and asset are returned as confidential outputs to the authorized refund recipients, with `data_hash = 0`.
-4. The refund ciphertexts encrypt the complete output UTXOs to the authorized recipients' viewing keys and the configured crank. Output hashes and ciphertexts match the submitted SPP transaction, using the same `private_tx_hash`.
+2. The recipient's signing identity matches the transaction signer.
+3. A `2 × 2` SPP transaction has one escrow input, one refund output, and compact padding. The refund has the same amount and asset, the recorded recipient's owner hash, and `data_hash = 0`.
+4. The ciphertexts encrypt the complete refund UTXO to the recorded recipient and configured crank. Its hash and ciphertexts match the submitted SPP transaction and `private_tx_hash`.
 
 The program checks `epoch.locked == false`, invokes SPP to spend the escrow and create the authorized refund outputs, and increments `resolved_intent_count` by one atomically. Cancellation has no deadline check and leaves `fee_balance_lamports` unchanged. SPP rejects an already-spent escrow. The user needs the epoch PDA from the escrow data, without a hash-chain index or membership proof.
 

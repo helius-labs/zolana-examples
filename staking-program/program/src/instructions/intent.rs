@@ -86,25 +86,19 @@ pub fn proof_context(
     if output.owner_tag != OwnerTag::Inline(authority.to_bytes()) {
         return Err(StakingError::InvalidOutput.into());
     }
-    let ciphertext: &[u8; INTENT_CIPHERTEXT_BYTES] = output
+    let ciphertext = output
         .data
         .as_deref()
-        .ok_or(StakingError::InvalidCiphertext)?
-        .try_into()
-        .map_err(|_| StakingError::InvalidCiphertext)?;
-    if ciphertext[0] != 1 {
-        return Err(StakingError::InvalidCiphertext.into());
-    }
+        .ok_or(StakingError::InvalidCiphertext)?;
     let hashing = |_| StakingError::HashingFailed;
     let identity = solana_owner_identity(authority.as_array()).map_err(hashing)?;
     let zero_pk = Poseidon::hashv(&[&[0; 32]]).map_err(hashing)?;
     let owner = Poseidon::hashv(&[&identity, &zero_pk]).map_err(hashing)?;
-    let ciphertext_context_hash = Poseidon::hashv(&[
-        &hash_bytes(ciphertext).map_err(hashing)?,
-        &hash_bytes(&spp.tx_viewing_pk).map_err(hashing)?,
-        &right_align(&spp.salt),
-    ])
-    .map_err(hashing)?;
+    let ciphertext_context_hash = proof::ciphertext_context_hash::<INTENT_CIPHERTEXT_BYTES>(
+        ciphertext,
+        &spp.tx_viewing_pk,
+        &spp.salt,
+    )?;
     Ok(IntentProofContext {
         private_tx_hash: spp.private_tx_hash,
         escrow_hash: output.utxo_hash,

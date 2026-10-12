@@ -27,3 +27,4 @@ zolana-transaction.workspace = true
 p256 = { version = "0.13", features = ["ecdh"] }
 num-bigint.workspace = true
 wincode.workspace = true
+zolana-gnark-ffi-prover.workspace = true

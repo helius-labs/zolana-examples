@@ -7,6 +7,30 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::error::StakingError;
 
+pub fn ciphertext_context_hash<const LEN: usize>(
+    data: &[u8],
+    pk: &[u8; 33],
+    salt: &[u8; 16],
+) -> Result<[u8; 32], pinocchio::error::ProgramError> {
+    use zolana_hasher::{
+        primitives::{hash_bytes, right_align},
+        Hasher, Poseidon,
+    };
+    let ciphertext: &[u8; LEN] = data
+        .try_into()
+        .map_err(|_| StakingError::InvalidCiphertext)?;
+    if ciphertext.first() != Some(&1) {
+        return Err(StakingError::InvalidCiphertext.into());
+    }
+    let error = |_| StakingError::HashingFailed;
+    Poseidon::hashv(&[
+        &hash_bytes(ciphertext).map_err(error)?,
+        &hash_bytes(pk).map_err(error)?,
+        &right_align(salt),
+    ])
+    .map_err(|_| StakingError::HashingFailed.into())
+}
+
 /// AES lookup arguments use one BSB22 commitment and its proof of knowledge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct LogicProof {

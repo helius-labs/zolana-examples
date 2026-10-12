@@ -49,12 +49,66 @@ pub struct IntentProofParams<'a> {
     pub ephemeral: SecretKey,
 }
 
-fn scalar(map: &mut ProofInputMap, name: &str, value: &[u8; 32]) {
+pub(crate) fn scalar(map: &mut ProofInputMap, name: &str, value: &[u8; 32]) {
     map.insert(name.into(), vec![decimal(value)]);
 }
 
-fn bytes(map: &mut ProofInputMap, name: &str, value: &[u8]) {
+pub(crate) fn bytes(map: &mut ProofInputMap, name: &str, value: &[u8]) {
     map.insert(name.into(), value.iter().map(u8::to_string).collect());
+}
+
+pub(crate) fn write_note(map: &mut ProofInputMap, prefix: &str, note: &Note) {
+    for (name, value) in [
+        ("TreeID", right_align(&note.tree_id.to_be_bytes())),
+        ("AssetID", right_align(&note.asset_id.to_be_bytes())),
+        ("Amount", right_align(&note.amount.to_be_bytes())),
+        ("Blinding", note.blinding),
+        ("NullifierPK", note.nullifier_pubkey),
+    ] {
+        scalar(map, &format!("{prefix}_{name}"), &value);
+    }
+    bytes(map, &format!("{prefix}_Asset"), note.asset.as_ref());
+    bytes(map, &format!("{prefix}_SigningPK"), &note.signing_pubkey);
+}
+
+pub(crate) fn write_intent(
+    map: &mut ProofInputMap,
+    data: &private_staking_program::state::IntentUtxoData,
+) {
+    bytes(map, "Intent_Epoch", data.epoch.as_ref());
+    bytes(map, "Intent_SigningPK", &data.recipient.signing_pubkey);
+    scalar(map, "Intent_NullifierPK", &data.recipient.nullifier_pubkey);
+    bytes(map, "Intent_ViewingPK", &data.recipient.viewing_pubkey);
+}
+
+pub(crate) fn write_encryption(
+    map: &mut ProofInputMap,
+    ephemeral: &SecretKey,
+    user: &[u8; 33],
+    crank: &[u8; 33],
+    salt: &[u8; 16],
+) -> Result<()> {
+    bytes(map, "Encryption_EphemeralSecret", &ephemeral.to_bytes());
+    let user = PublicKey::from_sec1_bytes(user)?;
+    let crank = PublicKey::from_sec1_bytes(crank)?;
+    bytes(
+        map,
+        "Encryption_UserPoint",
+        user.to_encoded_point(false).as_bytes(),
+    );
+    bytes(
+        map,
+        "Encryption_CrankPoint",
+        crank.to_encoded_point(false).as_bytes(),
+    );
+    bytes(
+        map,
+        "Encryption_TxViewingPK",
+        ephemeral.public_key().to_encoded_point(true).as_bytes(),
+    );
+    bytes(map, "Encryption_Salt", salt);
+    scalar(map, "Encryption_OutputIndex", &[0; 32]);
+    Ok(())
 }
 
 impl IntentProofInputs {
@@ -73,6 +127,10 @@ impl IntentProofInputs {
         let intent = escrow
             .intent
             .ok_or_else(|| anyhow::anyhow!("missing intent data"))?;
+        ensure!(
+            matches!(intent.recipient.signing_pubkey.first(), Some(1 | 2)),
+            "staking recipients need a Solana signing key"
+        );
         ensure!(intent.epoch == epoch, "wrong intent epoch");
         let context = proof_context(&config_key, config, &epoch, escrow.tree_id, spp)?;
         let cipher_context = Context {
@@ -146,64 +204,19 @@ impl IntentProofInputs {
                 .collect(),
         );
         map.extend(utxo_proof_inputs(&self.change, "Change"));
-        let n = &self.escrow;
-        for (name, value) in [
-            ("Escrow_TreeID", right_align(&n.tree_id.to_be_bytes())),
-            ("Escrow_AssetID", right_align(&n.asset_id.to_be_bytes())),
-            ("Escrow_Amount", right_align(&n.amount.to_be_bytes())),
-            ("Escrow_Blinding", n.blinding),
-            ("Escrow_NullifierPK", n.nullifier_pubkey),
-        ] {
-            scalar(&mut map, name, &value);
-        }
-        bytes(&mut map, "Escrow_Asset", n.asset.as_ref());
-        bytes(&mut map, "Escrow_SigningPK", &n.signing_pubkey);
-        let intent = n
+        write_note(&mut map, "Escrow", &self.escrow);
+        let intent = self
+            .escrow
             .intent
             .ok_or_else(|| anyhow::anyhow!("missing intent data"))?;
-        bytes(&mut map, "Intent_Epoch", intent.epoch.as_ref());
-        bytes(
+        write_intent(&mut map, &intent);
+        write_encryption(
             &mut map,
-            "Intent_SigningPK",
-            &intent.recipient.signing_pubkey,
-        );
-        scalar(
-            &mut map,
-            "Intent_NullifierPK",
-            &intent.recipient.nullifier_pubkey,
-        );
-        bytes(
-            &mut map,
-            "Intent_ViewingPK",
+            &self.ephemeral,
             &intent.recipient.viewing_pubkey,
-        );
-        bytes(
-            &mut map,
-            "Encryption_EphemeralSecret",
-            &self.ephemeral.to_bytes(),
-        );
-        let user = PublicKey::from_sec1_bytes(&intent.recipient.viewing_pubkey)?;
-        let crank = PublicKey::from_sec1_bytes(&self.crank_viewing_pk)?;
-        bytes(
-            &mut map,
-            "Encryption_UserPoint",
-            user.to_encoded_point(false).as_bytes(),
-        );
-        bytes(
-            &mut map,
-            "Encryption_CrankPoint",
-            crank.to_encoded_point(false).as_bytes(),
-        );
-        bytes(
-            &mut map,
-            "Encryption_TxViewingPK",
-            self.ephemeral
-                .public_key()
-                .to_encoded_point(true)
-                .as_bytes(),
-        );
-        bytes(&mut map, "Encryption_Salt", &self.salt);
-        scalar(&mut map, "Encryption_OutputIndex", &[0; 32]);
+            &self.crank_viewing_pk,
+            &self.salt,
+        )?;
         Ok(map)
     }
 
