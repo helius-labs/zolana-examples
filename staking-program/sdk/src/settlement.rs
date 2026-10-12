@@ -18,8 +18,8 @@ use private_staking_program::{
     math::PoolSnapshot,
     pda, pool,
     settlement::{
-        self, CachedUtxo, LegContext, SettlementAmounts, SettlementLegs, SettlementProofContext,
-        SppProofData, PAYOUT_CIRCUIT, WITHDRAWAL_CIRCUIT,
+        self, CachedUtxo, EntryKind, LegContext, SettlementAmounts, SettlementLegs,
+        SettlementProofContext, SppProofData, PAYOUT_CIRCUIT, WITHDRAWAL_CIRCUIT,
     },
     state::{BatchEntry, Config, RecipientAddress},
     N,
@@ -27,7 +27,7 @@ use private_staking_program::{
 use private_staking_prover::{CircuitId as LogicCircuit, ProofInputMap, PROVER};
 use solana_address::Address;
 use solana_instruction::Instruction;
-use zolana_client::{NonInclusionProof, SpendProof};
+use zolana_client::{NonInclusionProof, SpendProof, NULLIFIER_TREE_HEIGHT};
 use zolana_hasher::{
     primitives::{hash_bytes, right_align, solana_owner_identity},
     Hasher, Poseidon,
@@ -60,6 +60,60 @@ use crate::{
 pub struct Escrow {
     pub note: Note,
     pub leaf_index: u64,
+    /// `Some` iff the escrow was cancelled (its allocation is
+    /// [`IntentAmount::Cancelled`]); says how its spend is proven.
+    pub cancelled: Option<CancelledProof>,
+}
+
+/// How a cancelled escrow's spend is shown to `execute_batch`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CancelledProof {
+    /// The nullifier PDA still exists; the program checks it.
+    Queued,
+    /// The nullifier was absorbed into the SPP nullifier tree (its PDA is
+    /// closed); the settlement proof shows the inclusion of its indexed leaf
+    /// under [`SettlementParams::nullifier_root`].
+    InTree {
+        /// The leaf's next value in the indexed nullifier tree.
+        next_value: [u8; 32],
+        /// `NULLIFIER_TREE_HEIGHT` siblings, leaf to root.
+        path: Vec<[u8; 32]>,
+        leaf_index: u64,
+    },
+}
+
+/// Inclusion of a cancelled escrow's nullifier in the nullifier tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NullifierInclusion {
+    pub next_value: [u8; 32],
+    pub path: [[u8; 32]; NULLIFIER_TREE_HEIGHT],
+    pub leaf_index: u64,
+}
+
+impl CancelledProof {
+    fn kind(&self) -> EntryKind {
+        match self {
+            Self::Queued => EntryKind::QueuedCancellation,
+            Self::InTree { .. } => EntryKind::AbsorbedCancellation,
+        }
+    }
+
+    fn inclusion(&self) -> Result<Option<NullifierInclusion>> {
+        match self {
+            Self::Queued => Ok(None),
+            Self::InTree {
+                next_value,
+                path,
+                leaf_index,
+            } => Ok(Some(NullifierInclusion {
+                next_value: *next_value,
+                path: path.as_slice().try_into().map_err(|_| {
+                    anyhow!("a nullifier path has {NULLIFIER_TREE_HEIGHT} siblings")
+                })?,
+                leaf_index: *leaf_index,
+            })),
+        }
+    }
 }
 
 pub struct SettlementParams<'a> {
@@ -79,6 +133,11 @@ pub struct SettlementParams<'a> {
     pub allocation: &'a Allocation,
     pub pool: PoolSnapshot,
     pub pool_asset_id: u64,
+    /// Root of the escrow tree's nullifier tree that every
+    /// [`CancelledProof::InTree`] path leads to; bound into the batch hash.
+    pub nullifier_root: [u8; 32],
+    /// Index of `nullifier_root` in the escrow tree's nullifier root history.
+    pub nullifier_root_index: u16,
     pub ephemeral: SecretKey,
     pub salt: [u8; 16],
     /// Root seed of the withdrawal leg (escrows -> cached UTXO).
@@ -101,7 +160,20 @@ struct Entry {
     recipient: RecipientAddress,
     hash: [u8; 32],
     nullifier: [u8; 32],
+    /// `Some` iff cancelled and absorbed into the nullifier tree.
+    inclusion: Option<NullifierInclusion>,
     payout: Option<Payout>,
+}
+
+impl Entry {
+    fn kind(&self) -> EntryKind {
+        match (&self.payout, &self.escrow.cancelled) {
+            (Some(_), _) => EntryKind::Active,
+            (None, Some(cancelled)) => cancelled.kind(),
+            // `new` rejects a cancelled escrow without a proof kind.
+            (None, None) => EntryKind::QueuedCancellation,
+        }
+    }
 }
 
 /// The cached UTXO with the seeds that fixed its blinding.
@@ -127,6 +199,8 @@ pub struct SettlementBuilder {
     amounts: SettlementAmounts,
     pool: PoolSnapshot,
     pool_asset_id: u64,
+    nullifier_root: [u8; 32],
+    nullifier_root_index: u16,
     ephemeral: SecretKey,
     tx_viewing_pk: [u8; 33],
     salt: [u8; 16],
@@ -140,6 +214,8 @@ pub struct SettlementBuilder {
 pub struct SettlementSlot {
     pub present: bool,
     pub cancelled: bool,
+    /// `Some` for a cancellation absorbed into the nullifier tree.
+    pub nullifier_inclusion: Option<NullifierInclusion>,
     pub pool_asset: bool,
     pub amount: u64,
     pub blinding: [u8; 32],
@@ -154,6 +230,8 @@ pub struct SettlementProofInputs {
     pub context: SettlementProofContext,
     pub pool: PoolSnapshot,
     pub amounts: SettlementAmounts,
+    /// The nullifier root `context.batch_hash` binds.
+    pub nullifier_root: [u8; 32],
     /// The stored entries in chain order (at most `N`); the witness pads the
     /// rest with copies of the first.
     pub slots: Vec<SettlementSlot>,
@@ -209,6 +287,8 @@ impl SettlementBuilder {
             allocation,
             pool,
             pool_asset_id,
+            nullifier_root,
+            nullifier_root_index,
             ephemeral,
             salt,
             withdrawal_blinding_seed,
@@ -247,6 +327,16 @@ impl SettlementBuilder {
                 "escrow {index}: recipient needs a Solana signing key"
             );
             let asset = Mint::new(note.asset, note.asset_id);
+            ensure!(
+                (*intent == IntentAmount::Cancelled) == escrow.cancelled.is_some(),
+                "escrow {index}: a cancelled proof is required exactly for cancelled allocations"
+            );
+            let inclusion = match &escrow.cancelled {
+                Some(cancelled) => cancelled
+                    .inclusion()
+                    .map_err(|error| anyhow!("escrow {index}: {error}"))?,
+                None => None,
+            };
             match *intent {
                 IntentAmount::Deposit(amount) => ensure!(
                     asset == Mint::SOL && note.amount == amount,
@@ -268,6 +358,7 @@ impl SettlementBuilder {
                 escrow,
                 hash,
                 nullifier,
+                inclusion,
                 payout: None,
             });
         }
@@ -388,6 +479,8 @@ impl SettlementBuilder {
             amounts: allocation.amounts,
             pool,
             pool_asset_id,
+            nullifier_root,
+            nullifier_root_index,
             ephemeral,
             tx_viewing_pk,
             salt,
@@ -488,6 +581,16 @@ impl SettlementBuilder {
             tx_viewing_pk: self.tx_viewing_pk,
             salt: self.salt,
         }
+    }
+
+    /// How each entry resolves, in chain order; aligned with
+    /// [`batch_entries`](Self::batch_entries).
+    pub fn entry_kinds(&self) -> Vec<EntryKind> {
+        self.entries.iter().map(Entry::kind).collect()
+    }
+
+    pub fn nullifier_root(&self) -> [u8; 32] {
+        self.nullifier_root
     }
 
     /// `fill_batch` entries in chain order.
@@ -873,9 +976,13 @@ impl SettlementBuilder {
     /// The settlement witness; needs no SPP proof (both private transaction
     /// hashes are computed locally).
     pub fn proof_inputs(&self) -> Result<SettlementProofInputs> {
-        let entries_hash =
-            settlement::entries_hash(&self.batch_entries(), &self.tx_viewing_pk, &self.salt)
-                .map_err(hashing)?;
+        let entries_hash = settlement::entries_hash(
+            &self.batch_entries(),
+            &self.entry_kinds(),
+            &self.tx_viewing_pk,
+            &self.salt,
+        )
+        .map_err(hashing)?;
         let authority = self.escrow_authority();
         let context = SettlementProofContext {
             spend_private_tx_hash: self.spend_private_tx_hash()?,
@@ -889,7 +996,8 @@ impl SettlementBuilder {
             escrow_owner_identity: solana_owner_identity(authority.as_array())?,
             tree_id: self.tree_id,
             pool_hash: settlement::pool_hash(&self.pool).map_err(hashing)?,
-            batch_hash: settlement::batch_hash(&self.amounts, &entries_hash).map_err(hashing)?,
+            batch_hash: settlement::batch_hash(&self.amounts, &entries_hash, &self.nullifier_root)
+                .map_err(hashing)?,
         };
         let slots = self
             .entries
@@ -899,6 +1007,7 @@ impl SettlementBuilder {
                 SettlementSlot {
                     present: true,
                     cancelled: entry.payout.is_none(),
+                    nullifier_inclusion: entry.inclusion,
                     pool_asset: note.asset == self.config.pool_mint,
                     amount: note.amount,
                     blinding: note.blinding,
@@ -916,6 +1025,7 @@ impl SettlementBuilder {
             context,
             pool: self.pool,
             amounts: self.amounts,
+            nullifier_root: self.nullifier_root,
             slots,
             ephemeral: self.ephemeral.clone(),
             crank_viewing_pk: self.config.crank.viewing_pubkey,
@@ -952,6 +1062,8 @@ impl SettlementBuilder {
             None => None,
         };
         let escrow_tree = self.config.escrow_tree;
+        // Cancelled entries, queued or absorbed, pass the canonical nullifier
+        // PDA read-only; the program tells them apart by the account's owner.
         let nullifier_pdas = self
             .entries
             .iter()
@@ -990,6 +1102,7 @@ impl SettlementBuilder {
             &ExecuteBatchIxData {
                 settlement_proof: proof,
                 legs: settlement_legs,
+                nullifier_root_index: self.nullifier_root_index,
             },
         )
     }
@@ -1062,6 +1175,7 @@ impl SettlementProofInputs {
             ("Context_CrankViewingHash", c.crank_viewing_hash),
             ("Context_EscrowOwnerIdentity", c.escrow_owner_identity),
             ("Context_TreeID", right_align(&c.tree_id.to_be_bytes())),
+            ("Context_NullifierRoot", self.nullifier_root),
             ("Context_Pool_Lamports", u64_field(self.pool.total_lamports)),
             (
                 "Context_Pool_Supply",
@@ -1132,6 +1246,7 @@ impl SettlementProofInputs {
         let absent = SettlementSlot {
             present: false,
             cancelled: false,
+            nullifier_inclusion: None,
             ..first
         };
         let padded = self
@@ -1142,9 +1257,25 @@ impl SettlementProofInputs {
             .take(N);
         for (index, slot) in padded.enumerate() {
             let prefix = format!("Escrow{index}");
+            ensure!(
+                slot.cancelled || slot.nullifier_inclusion.is_none(),
+                "slot {index}: only a cancelled entry has a nullifier inclusion"
+            );
+            // Queued and absent slots pass zeros; the circuit ignores them.
+            let inclusion = slot.nullifier_inclusion.unwrap_or(NullifierInclusion {
+                next_value: [0; 32],
+                path: [[0; 32]; NULLIFIER_TREE_HEIGHT],
+                leaf_index: 0,
+            });
             for (name, value) in [
                 ("Present", right_align(&[u8::from(slot.present)])),
                 ("Cancelled", right_align(&[u8::from(slot.cancelled)])),
+                (
+                    "CancelledInTree",
+                    right_align(&[u8::from(slot.nullifier_inclusion.is_some())]),
+                ),
+                ("NullifierNextValue", inclusion.next_value),
+                ("NullifierPathIndex", u64_field(inclusion.leaf_index)),
                 ("PoolAsset", right_align(&[u8::from(slot.pool_asset)])),
                 ("Amount", u64_field(slot.amount)),
                 ("Blinding", slot.blinding),
@@ -1153,6 +1284,14 @@ impl SettlementProofInputs {
             ] {
                 scalar(&mut map, &format!("{prefix}_{name}"), &value);
             }
+            map.insert(
+                format!("{prefix}_NullifierPathElements"),
+                inclusion
+                    .path
+                    .iter()
+                    .map(zolana_gnark_ffi_prover::decimal)
+                    .collect(),
+            );
             bytes(&mut map, &format!("{prefix}_SigningPK"), &slot.signing_pk);
             bytes(
                 &mut map,

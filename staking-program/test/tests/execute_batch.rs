@@ -12,8 +12,8 @@ mod common;
 use std::{collections::BTreeMap, sync::Mutex, time::Instant};
 
 use common::{
-    non_inclusion_proof, start_prover, wallet, ConfigParams, Harness, SppInterfaces,
-    StakePoolFixture, StakePoolParams, TreeFixture, EPOCH, SPP,
+    start_prover, wallet, ConfigParams, Harness, SppInterfaces, StakePoolFixture, StakePoolParams,
+    TreeFixture, EPOCH, SPP,
 };
 use mollusk_svm::result::InstructionResult;
 use p256::SecretKey;
@@ -24,7 +24,7 @@ use private_staking_program::{
         management::{CreateConfigIxData, FillBatchIxData},
     },
     pda,
-    settlement::{PoolOperation, SettlementAmounts, SettlementLegs, SppProofData},
+    settlement::{EntryKind, PoolOperation, SettlementAmounts, SettlementLegs, SppProofData},
     state::{self, Config, EpochHeader, HashChain, IntentUtxoData},
 };
 use private_staking_sdk::{
@@ -32,7 +32,7 @@ use private_staking_sdk::{
     encryption::{decrypt_payout, Context, Recipient},
     instructions::{self, PoolAccounts},
     note::{crank_address, recipient_address, Note},
-    settlement::{Escrow, SettlementBuilder, SettlementParams},
+    settlement::{CancelledProof, Escrow, SettlementBuilder, SettlementParams},
 };
 use solana_account::Account;
 use solana_address::Address;
@@ -73,10 +73,13 @@ static PROVING: Mutex<()> = Mutex::new(());
 enum Intent {
     Deposit(u64),
     Withdrawal(u64),
-    /// An escrow whose cancellation already spent it.
+    /// An escrow whose cancellation already spent it. `absorbed`: a forester
+    /// moved its nullifier into the nullifier tree and closed its PDA;
+    /// otherwise the nullifier PDA is still queued.
     Cancelled {
         pool_asset: bool,
         amount: u64,
+        absorbed: bool,
     },
 }
 
@@ -92,6 +95,10 @@ impl Intent {
     fn cancelled(self) -> bool {
         matches!(self, Self::Cancelled { .. })
     }
+
+    fn absorbed(self) -> bool {
+        matches!(self, Self::Cancelled { absorbed: true, .. })
+    }
 }
 
 struct Scenario {
@@ -102,6 +109,8 @@ struct Scenario {
     config: Config,
     tree: Address,
     escrow_leaves: Vec<[u8; 32]>,
+    /// Nullifier root history index the builder proved against.
+    nullifier_root_index: u16,
     pool: StakePoolFixture,
     interfaces: SppInterfaces,
     crank: ShieldedKeypair,
@@ -166,11 +175,12 @@ fn scenario(intents: &[Intent]) -> Scenario {
 
     // Escrow notes owned by the escrow authority with the zero nullifier key.
     let authority = pda::escrow_authority(&config_key).0;
-    let zero_pk = NullifierKey::from_secret([0; 31]).pubkey().unwrap();
+    let zero_key = NullifierKey::from_secret([0; 31]);
+    let zero_pk = zero_key.pubkey().unwrap();
     let pool_mint = Mint::new(config.pool_mint, POOL_ASSET_ID);
     let mut recipients = Vec::with_capacity(intents.len());
-    let mut escrows = Vec::with_capacity(intents.len());
-    for ((leaf_index, intent), seed) in (0u64..).zip(intents).zip(20u8..) {
+    let mut notes = Vec::with_capacity(intents.len());
+    for (intent, seed) in intents.iter().zip(20u8..) {
         let recipient = keypair(seed);
         let (asset, amount) = match *intent {
             Intent::Deposit(amount) => (Mint::SOL, amount),
@@ -178,34 +188,56 @@ fn scenario(intents: &[Intent]) -> Scenario {
             Intent::Cancelled {
                 pool_asset: true,
                 amount,
+                ..
             } => (pool_mint, amount),
             Intent::Cancelled { amount, .. } => (Mint::SOL, amount),
         };
-        escrows.push(Escrow {
-            note: Note {
-                version: 1,
-                tree_id: TREE_ID,
-                asset: asset.asset,
-                asset_id: asset.asset_id,
-                amount,
-                blinding: right_align(&[seed, 0x5a]),
-                signing_pubkey: *PublicKey::from_pda(&authority).as_bytes(),
-                nullifier_pubkey: zero_pk,
-                intent: Some(IntentUtxoData {
-                    epoch,
-                    recipient: recipient_address(&recipient.shielded_address().unwrap()),
-                }),
-            },
-            leaf_index,
+        notes.push(Note {
+            version: 1,
+            tree_id: TREE_ID,
+            asset: asset.asset,
+            asset_id: asset.asset_id,
+            amount,
+            blinding: right_align(&[seed, 0x5a]),
+            signing_pubkey: *PublicKey::from_pda(&authority).as_bytes(),
+            nullifier_pubkey: zero_pk,
+            intent: Some(IntentUtxoData {
+                epoch,
+                recipient: recipient_address(&recipient.shielded_address().unwrap()),
+            }),
         });
         recipients.push(recipient);
     }
-    let escrow_leaves: Vec<[u8; 32]> = escrows
+    let escrow_leaves: Vec<[u8; 32]> = notes.iter().map(|note| note.hash().unwrap()).collect();
+    let nullifiers: Vec<[u8; 32]> = notes
         .iter()
-        .map(|escrow| escrow.note.hash().unwrap())
+        .zip(&escrow_leaves)
+        .map(|(note, hash)| zero_key.nullifier(hash, &note.blinding).unwrap())
         .collect();
     h.seed_intent_hashes(&escrow_leaves);
-    let tree_fixture = h.tree(tree, &escrow_leaves);
+    // Absorbed cancellations: nullifiers in the escrow tree's nullifier tree.
+    let absorbed: Vec<[u8; 32]> = intents
+        .iter()
+        .zip(&nullifiers)
+        .filter(|(intent, _)| intent.absorbed())
+        .map(|(_, nullifier)| *nullifier)
+        .collect();
+    let tree_fixture = h.tree_with_nullifiers(tree, &escrow_leaves, &absorbed);
+    let escrows: Vec<Escrow> = (0u64..)
+        .zip(notes)
+        .zip(intents.iter().zip(&nullifiers))
+        .map(|((leaf_index, note), (intent, nullifier))| Escrow {
+            note,
+            leaf_index,
+            cancelled: match intent {
+                Intent::Cancelled { absorbed: true, .. } => {
+                    Some(tree_fixture.nullifiers.inclusion(*nullifier))
+                }
+                Intent::Cancelled { .. } => Some(CancelledProof::Queued),
+                _ => None,
+            },
+        })
+        .collect();
 
     h.settlement_time(SETTLEMENT_NOW);
     h.run(
@@ -229,6 +261,8 @@ fn scenario(intents: &[Intent]) -> Scenario {
         allocation: &allocation,
         pool: pool.snapshot,
         pool_asset_id: POOL_ASSET_ID,
+        nullifier_root: tree_fixture.nullifiers.root(),
+        nullifier_root_index: tree_fixture.nullifiers.root_index,
         ephemeral: SecretKey::from_slice(&[4; 32]).unwrap(),
         salt: [5; 16],
         withdrawal_blinding_seed: right_align(&[6, 6, 6]),
@@ -236,12 +270,16 @@ fn scenario(intents: &[Intent]) -> Scenario {
     })
     .unwrap();
 
-    // Cancelled escrows as `cancel_intent` leaves them: the nullifier PDA
-    // queued by SPP and the intent counted as resolved.
+    // Cancelled escrows as `cancel_intent` leaves them: the intent counted
+    // as resolved and, unless a forester already absorbed the nullifier and
+    // closed it, the nullifier PDA queued by SPP.
+    assert_eq!(builder.nullifiers(), nullifiers);
     let mut cancelled = 0;
-    for (intent, nullifier) in intents.iter().zip(builder.nullifiers()) {
+    for (intent, nullifier) in intents.iter().zip(&nullifiers) {
         if intent.cancelled() {
-            h.queued_nullifier(tree, nullifier, TREE_ID);
+            if !intent.absorbed() {
+                h.queued_nullifier(tree, *nullifier, TREE_ID);
+            }
             cancelled += 1;
         }
     }
@@ -292,6 +330,7 @@ fn scenario(intents: &[Intent]) -> Scenario {
         config,
         tree,
         escrow_leaves,
+        nullifier_root_index: tree_fixture.nullifiers.root_index,
         pool,
         interfaces,
         crank,
@@ -332,7 +371,7 @@ fn prove(
         .withdrawal_padding_nullifiers()
         .unwrap()
         .into_iter()
-        .map(|nullifier| non_inclusion_proof(tree, nullifier))
+        .map(|nullifier| tree_fixture.non_inclusion_proof(tree, nullifier))
         .collect();
     let spend = builder
         .withdrawal_request(spend_proofs, padding)
@@ -340,7 +379,7 @@ fn prove(
         .prove(&ProverClient::local(), &keys)
         .unwrap();
     let payout = builder
-        .payout_request(non_inclusion_proof(tree, cached.nullifier))
+        .payout_request(tree_fixture.non_inclusion_proof(tree, cached.nullifier))
         .unwrap()
         .prove(&ProverClient::local(), &keys)
         .unwrap();
@@ -379,7 +418,7 @@ struct ExecutionSnapshot {
     spl_interface_tokens: u64,
     cache_lamports: u64,
     /// Owners of the entries' nullifier PDAs (chain order), then the cached
-    /// UTXO's when an entry settles.
+    /// UTXO's when an entry settles; `None` for an absent account.
     nullifier_owners: Vec<Option<Address>>,
     tree_next_index: u64,
     tree_root: [u8; 32],
@@ -432,7 +471,14 @@ impl Scenario {
             nullifier_owners: self
                 .nullifier_pdas()
                 .iter()
-                .map(|key| h.accounts.get(key).map(|account| account.owner))
+                .map(|key| {
+                    // A zero-lamport account does not exist; the harness keeps
+                    // one for every key a successful instruction referenced.
+                    h.accounts
+                        .get(key)
+                        .filter(|account| account.lamports != 0)
+                        .map(|account| account.owner)
+                })
                 .collect(),
             tree_next_index: tree.utxo_tree().next_index(),
             tree_root: tree.utxo_tree().root(),
@@ -522,7 +568,14 @@ impl Scenario {
             spl_interface_tokens: before.spl_interface_tokens - amounts.escrow_pool_tokens
                 + amounts.payout_pool_tokens,
             cache_lamports: 0,
-            nullifier_owners: vec![Some(SPP); before.nullifier_owners.len()],
+            // Absorbed cancellations have no PDA; every other entry's and the
+            // cached UTXO's PDA is SPP's.
+            nullifier_owners: self
+                .intents
+                .iter()
+                .map(|intent| (!intent.absorbed()).then_some(SPP))
+                .chain(self.builder.cached_utxo().map(|_| Some(SPP)))
+                .collect(),
             tree_next_index: u64::try_from(leaves.len()).unwrap(),
             tree_root: reference.root(),
             pool_total_lamports: total,
@@ -803,23 +856,83 @@ fn balanced_batch_leaves_the_pool_unchanged() {
 }
 
 #[test]
-fn cancelled_entry_is_skipped() {
+fn cancelled_entries_are_skipped() {
     let start = Instant::now();
     let mut s = scenario(&[
         Intent::Deposit(2 * LAMPORTS_PER_SOL),
         Intent::Cancelled {
             pool_asset: false,
             amount: LAMPORTS_PER_SOL,
+            absorbed: false,
         },
         Intent::Deposit(4 * LAMPORTS_PER_SOL),
+        Intent::Cancelled {
+            pool_asset: true,
+            amount: 3 * LAMPORTS_PER_SOL,
+            absorbed: true,
+        },
     ]);
-    // A cancelled entry needs the nullifier PDA its cancellation created.
-    let marker = s.nullifier_pdas().into_iter().nth(1).unwrap();
-    let account = s.h.accounts.remove(&marker).unwrap();
-    s.reject(s.ix.clone(), StakingError::InvalidCancellation);
-    s.h.accounts.insert(marker, account);
-    s.execute("one cancelled");
-    println!("cancelled entry test in {:?}", start.elapsed());
+    assert_eq!(
+        s.builder.entry_kinds(),
+        vec![
+            EntryKind::Active,
+            EntryKind::QueuedCancellation,
+            EntryKind::Active,
+            EntryKind::AbsorbedCancellation,
+        ]
+    );
+    assert_ne!(s.nullifier_root_index, 0);
+    let pdas = s.nullifier_pdas();
+    let (queued, absorbed) = (*pdas.get(1).unwrap(), *pdas.get(3).unwrap());
+    let absorbed_nullifier = *s.builder.nullifiers().get(3).unwrap();
+    let ix = s.ix.clone();
+
+    // Without its queued PDA, the entry reads as absorbed, which the proof
+    // does not show.
+    let account = s.h.accounts.remove(&queued).unwrap();
+    s.reject(ix.clone(), StakingError::ProofVerificationFailed);
+    s.h.accounts.insert(queued, account);
+
+    // An SPP-owned account at the absorbed entry's address must be a valid
+    // queued PDA on the escrow tree.
+    s.h.queued_nullifier(s.tree, absorbed_nullifier, TREE_ID + 1);
+    s.reject(ix.clone(), StakingError::InvalidCancellation);
+    // A valid queued PDA makes it a queued entry, which the proof does not show.
+    s.h.queued_nullifier(s.tree, absorbed_nullifier, TREE_ID);
+    s.reject(ix.clone(), StakingError::ProofVerificationFailed);
+    // Any other owner or data is rejected.
+    s.h.accounts.insert(
+        absorbed,
+        Account {
+            lamports: 1,
+            owner: ATTACKER,
+            ..Account::default()
+        },
+    );
+    s.reject(ix.clone(), StakingError::InvalidCancellation);
+    s.h.accounts.insert(
+        absorbed,
+        Account {
+            lamports: 1,
+            data: vec![0],
+            ..Account::default()
+        },
+    );
+    s.reject(ix.clone(), StakingError::InvalidCancellation);
+    s.h.accounts.remove(&absorbed);
+
+    // The nullifier root must be in the escrow tree's root history.
+    for index in [s.nullifier_root_index + 1, u16::MAX] {
+        let unwritten = with_data(&ix, |data| data.nullifier_root_index = index);
+        s.reject(unwritten, StakingError::InvalidTree);
+    }
+    // Another root in the history is not the one the proof shows inclusion
+    // under.
+    let init_root = with_data(&ix, |data| data.nullifier_root_index = 0);
+    s.reject(init_root, StakingError::ProofVerificationFailed);
+
+    s.execute("queued and absorbed cancelled");
+    println!("cancelled entries test in {:?}", start.elapsed());
 }
 
 #[test]
@@ -829,10 +942,12 @@ fn all_cancelled_batch_closes_without_spp() {
         Intent::Cancelled {
             pool_asset: false,
             amount: 2 * LAMPORTS_PER_SOL,
+            absorbed: false,
         },
         Intent::Cancelled {
             pool_asset: true,
             amount: 3 * LAMPORTS_PER_SOL,
+            absorbed: true,
         },
     ]);
     assert!(s.builder.cached_utxo().is_none());

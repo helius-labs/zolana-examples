@@ -17,7 +17,7 @@ use private_staking_sdk::{
     encryption::{decrypt_payout, Context, Recipient},
     instructions::PoolAccounts,
     note::recipient_address,
-    settlement::SettlementProofInputs,
+    settlement::{CancelledProof, SettlementProofInputs},
 };
 use solana_address::Address;
 use spl_stake_pool::state::Fee;
@@ -68,14 +68,15 @@ fn assert_context_parity(fixture: &fixture::Fixture) {
         payout_pool_tokens: decimal_u64(&witness, "Context_Amounts_PayoutPoolTokens"),
     };
     let entries = builder.batch_entries();
+    let kinds = builder.entry_kinds();
     let entries_hash =
-        settlement::entries_hash(&entries, &builder.tx_viewing_pk(), &[5; 16]).unwrap();
+        settlement::entries_hash(&entries, &kinds, &builder.tx_viewing_pk(), &[5; 16]).unwrap();
     assert_eq!(
         settlement::pool_hash(&pool).unwrap(),
         inputs.context.pool_hash
     );
     assert_eq!(
-        settlement::batch_hash(&amounts, &entries_hash).unwrap(),
+        settlement::batch_hash(&amounts, &entries_hash, &builder.nullifier_root()).unwrap(),
         inputs.context.batch_hash
     );
 
@@ -124,6 +125,8 @@ fn assert_context_parity(fixture: &fixture::Fixture) {
         &fixture.epoch,
         &batch,
         &entries,
+        &kinds,
+        &builder.nullifier_root(),
         fixture::TREE_ID,
         &pool,
         legs.as_ref().map(|(legs, cached)| (legs, cached)),
@@ -138,18 +141,21 @@ fn assert_context_parity(fixture: &fixture::Fixture) {
 
 #[test]
 fn settlement_context_matches_the_program() {
-    for intents in [fixture::four(), fixture::sixteen(), fixture::cancelled()] {
-        assert_context_parity(&fixture::fixture(&intents).unwrap());
+    for (_, intents, absorbed) in fixture::all() {
+        assert_context_parity(&fixture::fixture(&intents, absorbed).unwrap());
     }
 }
 
 #[test]
 fn absent_slots_copy_slot_zero() {
-    let fixture = fixture::fixture(&fixture::four()).unwrap();
+    let fixture = fixture::fixture(&fixture::four(), fixture::FOUR_ABSORBED).unwrap();
     let witness = fixture.builder.proof_inputs().unwrap().witness().unwrap();
     for (name, expected) in [
         ("Present", Some("0")),
         ("Cancelled", Some("0")),
+        ("CancelledInTree", Some("0")),
+        ("NullifierNextValue", Some("0")),
+        ("NullifierPathIndex", Some("0")),
         ("PoolAsset", None),
         ("Amount", None),
         ("Blinding", None),
@@ -167,6 +173,45 @@ fn absent_slots_copy_slot_zero() {
             }
         }
     }
+    let zero_path = vec!["0".to_string(); NULLIFIER_TREE_HEIGHT];
+    for index in [0, 2, 3, 4, 15] {
+        assert_eq!(
+            witness
+                .get(&format!("Escrow{index}_NullifierPathElements"))
+                .unwrap(),
+            &zero_path
+        );
+    }
+    // The absorbed cancellation carries its inclusion proof.
+    let Some(CancelledProof::InTree {
+        next_value,
+        path,
+        leaf_index,
+    }) = fixture.cancelled.get(1).cloned().flatten()
+    else {
+        panic!("escrow 1 is absorbed");
+    };
+    assert_eq!(
+        (
+            witness.get("Escrow1_CancelledInTree").unwrap().clone(),
+            witness.get("Escrow1_NullifierNextValue").unwrap().clone(),
+            witness.get("Escrow1_NullifierPathIndex").unwrap().clone(),
+            witness
+                .get("Escrow1_NullifierPathElements")
+                .unwrap()
+                .clone(),
+            witness.get("Context_NullifierRoot").unwrap().clone(),
+        ),
+        (
+            vec!["1".to_string()],
+            vec![zolana_gnark_ffi_prover::decimal(&next_value)],
+            vec![leaf_index.to_string()],
+            path.iter().map(zolana_gnark_ffi_prover::decimal).collect(),
+            vec![zolana_gnark_ffi_prover::decimal(
+                &fixture.builder.nullifier_root()
+            )],
+        )
+    );
     // The cancelled entry has no payout blinding; its recipient point is uncompressed.
     assert_eq!(
         witness.get("Escrow1_PayoutBlinding").unwrap(),
@@ -179,6 +224,43 @@ fn absent_slots_copy_slot_zero() {
         .map(u8::to_string)
         .collect();
     assert_eq!(witness.get("Escrow0_UserPoint").unwrap(), &point);
+}
+
+/// A cancelled proof is required exactly for cancelled allocations, and an
+/// in-tree path has `NULLIFIER_TREE_HEIGHT` siblings.
+#[test]
+fn cancelled_proofs_must_match_the_allocation() {
+    let four = fixture::four();
+    let absorbed = fixture::FOUR_ABSORBED;
+    let missing = fixture::fixture_with(&four, absorbed, |escrows| {
+        if let Some(escrow) = escrows.get_mut(1) {
+            escrow.cancelled = None;
+        }
+    });
+    let extra = fixture::fixture_with(&four, absorbed, |escrows| {
+        if let Some(escrow) = escrows.get_mut(0) {
+            escrow.cancelled = Some(CancelledProof::Queued);
+        }
+    });
+    let short = fixture::fixture_with(&four, absorbed, |escrows| {
+        if let Some(CancelledProof::InTree { path, .. }) = escrows
+            .get_mut(1)
+            .and_then(|escrow| escrow.cancelled.as_mut())
+        {
+            path.pop();
+        }
+    });
+    for (name, result) in [("missing", missing), ("extra", extra)] {
+        let error = result
+            .err()
+            .unwrap_or_else(|| panic!("{name} was accepted"));
+        assert!(
+            error.to_string().contains("cancelled proof is required"),
+            "{name}: {error}"
+        );
+    }
+    let error = short.err().expect("a short path was accepted");
+    assert!(error.to_string().contains("siblings"), "{error}");
 }
 
 fn context(tree: Address, tree_type: u16) -> MerkleContext {
@@ -204,7 +286,7 @@ fn non_inclusion(leaf: [u8; 32], tree: Address) -> NonInclusionProof {
 /// builders field by field and carry the locally computed private tx hashes.
 #[test]
 fn spp_legs_match_the_program_leg_builders() {
-    let fixture = fixture::fixture(&fixture::four()).unwrap();
+    let fixture = fixture::fixture(&fixture::four(), fixture::FOUR_ABSORBED).unwrap();
     let builder = &fixture.builder;
     let tree = fixture.config.escrow_tree;
     let spend_proofs = builder
@@ -356,7 +438,7 @@ fn verify(inputs: &SettlementProofInputs, proof: &proof::LogicProof) -> bool {
 
 #[test]
 fn proves_and_verifies_a_four_entry_settlement() {
-    let fixture = fixture::fixture(&fixture::four()).unwrap();
+    let fixture = fixture::fixture(&fixture::four(), fixture::FOUR_ABSORBED).unwrap();
     let mut inputs = fixture.builder.proof_inputs().unwrap();
     let start = std::time::Instant::now();
     let proof = inputs.prove().unwrap();

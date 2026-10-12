@@ -180,9 +180,32 @@ pub fn pool_hash(pool: &PoolSnapshot) -> Result<[u8; 32], ProgramError> {
     .map_err(|_| StakingError::HashingFailed.into())
 }
 
+/// How a stored entry resolves, hashed into its entry leaf as `code`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum EntryKind {
+    /// `Some(output)`: settled by this batch.
+    Active = 0,
+    /// `None` whose nullifier PDA is still queued in SPP; the program checks it.
+    QueuedCancellation = 1,
+    /// `None` whose nullifier PDA was closed after the nullifier entered the
+    /// SPP nullifier tree; the proof shows its inclusion under the batch's
+    /// nullifier root.
+    AbsorbedCancellation = 2,
+}
+
+impl EntryKind {
+    pub const fn code(self) -> u8 {
+        self as u8
+    }
+}
+
+/// Poseidon over the amounts, the entries chain, and the nullifier root the
+/// absorbed cancellations are proven against.
 pub fn batch_hash(
     amounts: &SettlementAmounts,
     entries_hash: &[u8; 32],
+    nullifier_root: &[u8; 32],
 ) -> Result<[u8; 32], ProgramError> {
     Poseidon::hashv(&[
         &right_align(&amounts.escrow_sol.to_be_bytes()),
@@ -190,19 +213,20 @@ pub fn batch_hash(
         &right_align(&amounts.payout_sol.to_be_bytes()),
         &right_align(&amounts.payout_pool_tokens.to_be_bytes()),
         entries_hash,
+        nullifier_root,
     ])
     .map_err(|_| StakingError::HashingFailed.into())
 }
 
 pub fn entry_leaf(
     nullifier_hash: &[u8; 32],
-    cancelled: bool,
+    code: u8,
     output_hash: Option<&[u8; 32]>,
     ciphertext_context_hash: Option<&[u8; 32]>,
 ) -> Result<[u8; 32], ProgramError> {
     Poseidon::hashv(&[
         nullifier_hash,
-        &right_align(&[u8::from(cancelled)]),
+        &right_align(&[code]),
         output_hash.unwrap_or(&[0; 32]),
         ciphertext_context_hash.unwrap_or(&[0; 32]),
     ])
@@ -214,34 +238,46 @@ pub fn fold_entry(acc: &[u8; 32], leaf: &[u8; 32]) -> Result<[u8; 32], ProgramEr
     Poseidon::hashv(&[acc, leaf]).map_err(|_| StakingError::HashingFailed.into())
 }
 
-/// Folds every stored entry; `Some` outputs bind their payout ciphertext context.
+/// Folds every stored entry with its kind (aligned with `entries`); `Some`
+/// outputs bind their payout ciphertext context. A kind must be `Active`
+/// exactly for the entries with an output.
 pub fn entries_hash(
     entries: &[BatchEntry],
+    kinds: &[EntryKind],
     tx_viewing_pk: &[u8; 33],
     salt: &[u8; 16],
 ) -> Result<[u8; 32], ProgramError> {
+    if entries.len() != kinds.len() {
+        return Err(StakingError::InvalidInstructionData.into());
+    }
     let pk_hash = hash_bytes(tx_viewing_pk).map_err(|_| StakingError::HashingFailed)?;
-    entries.iter().try_fold([0; 32], |acc, (input, output)| {
-        let leaf = match output {
-            Some(output) => {
-                let data = output
-                    .data
-                    .as_deref()
-                    .ok_or(StakingError::InvalidCiphertext)?;
-                let context = proof::ciphertext_context_hash_with_pk_hash::<
-                    PAYOUT_CIPHERTEXT_BYTES,
-                >(data, &pk_hash, salt)?;
-                entry_leaf(
-                    &input.nullifier_hash,
-                    false,
-                    Some(&output.utxo_hash),
-                    Some(&context),
-                )?
-            }
-            None => entry_leaf(&input.nullifier_hash, true, None, None)?,
-        };
-        fold_entry(&acc, &leaf)
-    })
+    entries
+        .iter()
+        .zip(kinds)
+        .try_fold([0; 32], |acc, ((input, output), kind)| {
+            let leaf = match (output, kind) {
+                (Some(output), EntryKind::Active) => {
+                    let data = output
+                        .data
+                        .as_deref()
+                        .ok_or(StakingError::InvalidCiphertext)?;
+                    let context = proof::ciphertext_context_hash_with_pk_hash::<
+                        PAYOUT_CIPHERTEXT_BYTES,
+                    >(data, &pk_hash, salt)?;
+                    entry_leaf(
+                        &input.nullifier_hash,
+                        kind.code(),
+                        Some(&output.utxo_hash),
+                        Some(&context),
+                    )?
+                }
+                (None, EntryKind::QueuedCancellation | EntryKind::AbsorbedCancellation) => {
+                    entry_leaf(&input.nullifier_hash, kind.code(), None, None)?
+                }
+                _ => return Err(StakingError::InvalidInstructionData.into()),
+            };
+            fold_entry(&acc, &leaf)
+        })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -251,12 +287,14 @@ pub fn proof_context(
     epoch: &Address,
     batch: &BatchHeader,
     entries: &[BatchEntry],
+    kinds: &[EntryKind],
+    nullifier_root: &[u8; 32],
     tree_id: u16,
     pool: &PoolSnapshot,
     legs: Option<(&SettlementLegs, &CachedUtxo)>,
 ) -> Result<SettlementProofContext, ProgramError> {
     let hashing = |_| StakingError::HashingFailed;
-    let entries_hash = entries_hash(entries, &batch.tx_viewing_pk, &batch.salt)?;
+    let entries_hash = entries_hash(entries, kinds, &batch.tx_viewing_pk, &batch.salt)?;
     let amounts = legs.map(|(legs, _)| legs.amounts).unwrap_or_default();
     let authority = pda::escrow_authority(config_key).0;
     Ok(SettlementProofContext {
@@ -272,7 +310,7 @@ pub fn proof_context(
         escrow_owner_identity: solana_owner_identity(authority.as_array()).map_err(hashing)?,
         tree_id,
         pool_hash: pool_hash(pool)?,
-        batch_hash: batch_hash(&amounts, &entries_hash)?,
+        batch_hash: batch_hash(&amounts, &entries_hash, nullifier_root)?,
     })
 }
 
@@ -577,6 +615,9 @@ mod tests {
         ]
     }
 
+    /// Kinds of `entries()`: a queued cancellation, then an active entry.
+    const KINDS: [EntryKind; 2] = [EntryKind::QueuedCancellation, EntryKind::Active];
+
     fn spp_proof(byte: u8) -> SppProofData {
         SppProofData {
             proof: TransactProof {
@@ -661,22 +702,56 @@ mod tests {
         let context =
             proof::ciphertext_context_hash::<PAYOUT_CIPHERTEXT_BYTES>(&ciphertext(6), &pk, &salt)
                 .unwrap();
-        let cancelled = entry_leaf(&[1; 32], true, None, None).unwrap();
-        let active = entry_leaf(&[2; 32], false, Some(&[4; 32]), Some(&context)).unwrap();
+        let cancelled = entry_leaf(&[1; 32], 1, None, None).unwrap();
+        let active = entry_leaf(&[2; 32], 0, Some(&[4; 32]), Some(&context)).unwrap();
         let expected = fold_entry(&fold_entry(&[0; 32], &cancelled).unwrap(), &active).unwrap();
+        let kinds = KINDS;
+        let absorbed = [EntryKind::AbsorbedCancellation, EntryKind::Active];
         let reversed: Vec<_> = entries.iter().rev().cloned().collect();
+        let reversed_kinds = [EntryKind::Active, EntryKind::QueuedCancellation];
         let mut tampered = entries.clone();
         if let Some((_, Some(output))) = tampered.get_mut(1) {
             output.data = Some(ciphertext(9));
         }
+        let invalid = Err(StakingError::InvalidInstructionData.into());
         assert_eq!(
             (
-                entries_hash(&entries, &pk, &salt).unwrap() == expected,
-                entries_hash(&reversed, &pk, &salt).unwrap() == expected,
-                entries_hash(&tampered, &pk, &salt).unwrap() == expected,
-                entries_hash(&[], &pk, &salt).unwrap(),
+                entries_hash(&entries, &kinds, &pk, &salt).unwrap() == expected,
+                entries_hash(&entries, &absorbed, &pk, &salt).unwrap() == expected,
+                entries_hash(&reversed, &reversed_kinds, &pk, &salt).unwrap() == expected,
+                entries_hash(&tampered, &kinds, &pk, &salt).unwrap() == expected,
+                entries_hash(&[], &[], &pk, &salt).unwrap(),
             ),
-            (true, false, false, [0; 32])
+            (true, false, false, false, [0; 32])
+        );
+        // Kinds must align with the entries: one per entry, `Active` exactly
+        // for the entries with an output.
+        for bad in [
+            &[EntryKind::QueuedCancellation][..],
+            &[EntryKind::Active, EntryKind::Active],
+            &[
+                EntryKind::QueuedCancellation,
+                EntryKind::AbsorbedCancellation,
+            ],
+        ] {
+            assert_eq!(entries_hash(&entries, bad, &pk, &salt), invalid);
+        }
+        assert_eq!(
+            (
+                EntryKind::Active.code(),
+                EntryKind::QueuedCancellation.code(),
+                EntryKind::AbsorbedCancellation.code()
+            ),
+            (0, 1, 2)
+        );
+    }
+
+    #[test]
+    fn batch_hash_binds_the_nullifier_root() {
+        let amounts = SettlementAmounts::default();
+        assert_ne!(
+            batch_hash(&amounts, &[1; 32], &[2; 32]).unwrap(),
+            batch_hash(&amounts, &[1; 32], &[3; 32]).unwrap()
         );
     }
 
@@ -737,6 +812,8 @@ mod tests {
                 &address(9),
                 &batch,
                 &entries(),
+                &KINDS,
+                &[12; 32],
                 7,
                 &pool(),
                 legs,
@@ -745,7 +822,8 @@ mod tests {
         };
         let none = context(None);
         let some = context(Some((&legs, &cached)));
-        let entries_hash = entries_hash(&entries(), &batch.tx_viewing_pk, &batch.salt).unwrap();
+        let entries_hash =
+            entries_hash(&entries(), &KINDS, &batch.tx_viewing_pk, &batch.salt).unwrap();
         assert_eq!(
             (
                 none.spend_private_tx_hash,
@@ -764,11 +842,11 @@ mod tests {
                 [0; 32],
                 [0; 32],
                 [0; 32],
-                batch_hash(&SettlementAmounts::default(), &entries_hash).unwrap(),
+                batch_hash(&SettlementAmounts::default(), &entries_hash, &[12; 32]).unwrap(),
                 [5; 32],
                 [6; 32],
                 cached.hash,
-                batch_hash(&legs.amounts, &entries_hash).unwrap(),
+                batch_hash(&legs.amounts, &entries_hash, &[12; 32]).unwrap(),
                 pool_hash(&pool()).unwrap(),
                 2,
                 7,

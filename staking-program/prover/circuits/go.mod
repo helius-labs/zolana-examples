@@ -6,6 +6,7 @@ require (
 	github.com/consensys/gnark v0.16.3
 	github.com/consensys/gnark-crypto v0.21.0
 	github.com/iden3/go-iden3-crypto v0.0.17
+	github.com/reilabs/gnark-lean-extractor/v3 v3.0.0
 	zolana/gnarkffiprover v0.0.0
 	zolana/gnarksdk v0.0.0
 	zolana/prover v0.0.0
@@ -18,7 +19,6 @@ require (
 	github.com/google/pprof v0.0.0-20260906184651-6331bc6350fe // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
-	github.com/reilabs/gnark-lean-extractor/v3 v3.0.0 // indirect
 	github.com/ronanh/intcomp v1.1.1 // indirect
 	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/stretchr/testify v1.12.1 // indirect

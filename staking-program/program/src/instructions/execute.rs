@@ -15,6 +15,7 @@ use zolana_interface::{
     SOL_INTERFACE_PUBKEY,
 };
 use zolana_program::cpi::SppTransactAccounts;
+use zolana_tree::TreeAccount;
 
 use super::{
     management::check_batch_chain,
@@ -25,7 +26,9 @@ use crate::{
     error::StakingError,
     math::PoolSnapshot,
     pda, pool,
-    settlement::{self, CachedUtxo, LegContext, PoolOperation, SettlementAmounts, SettlementLegs},
+    settlement::{
+        self, CachedUtxo, EntryKind, LegContext, PoolOperation, SettlementAmounts, SettlementLegs,
+    },
     state::{self, BatchEntry, BatchHeader, Config},
 };
 use spl_stake_pool::state::StakePool;
@@ -54,6 +57,9 @@ pub struct ExecuteBatchIxData {
     pub settlement_proof: LogicProof,
     /// `None` iff every stored entry is cancelled.
     pub legs: Option<SettlementLegs>,
+    /// Root of the escrow tree's nullifier tree the absorbed cancellations
+    /// are proven against.
+    pub nullifier_root_index: u16,
 }
 
 /// The outer accounts both SPP legs forward, generic over the account type so
@@ -145,21 +151,48 @@ pub fn create_cache_data(data: &CreateCacheData) -> Result<Vec<u8>, StakingError
     Ok(bytes)
 }
 
-/// A cancelled entry's nullifier was queued by SPP: its PDA exists, belongs
-/// to SPP, and records a queue index on the escrow tree.
-fn check_cancelled(account: &AccountView, expected: &Address, tree_id: u16) -> ProgramResult {
+/// Classifies a cancelled entry by the account at its canonical nullifier PDA
+/// address. An SPP-owned PDA recording a queue index on the escrow tree is a
+/// queued cancellation. An empty system account means the PDA was closed once
+/// the nullifier entered the nullifier tree, which the proof shows. Anything
+/// else is rejected.
+fn check_cancelled(
+    account: &AccountView,
+    expected: &Address,
+    tree_id: u16,
+) -> Result<EntryKind, ProgramError> {
     let error = StakingError::InvalidCancellation;
-    if account.address() != expected
-        || !account.owned_by(&PROGRAM_ID_PUBKEY)
-        || account.data_len() != NULLIFIER_PDA_SIZE
-    {
+    if account.address() != expected {
         return Err(error.into());
     }
-    let record = NullifierPda::read_from(&account.try_borrow()?).ok_or(error)?;
-    if record.queue_index == 0 || record.tree_id != tree_id {
-        return Err(error.into());
+    if account.owned_by(&PROGRAM_ID_PUBKEY) {
+        if account.data_len() != NULLIFIER_PDA_SIZE {
+            return Err(error.into());
+        }
+        let record = NullifierPda::read_from(&account.try_borrow()?).ok_or(error)?;
+        if record.queue_index == 0 || record.tree_id != tree_id {
+            return Err(error.into());
+        }
+        return Ok(EntryKind::QueuedCancellation);
     }
-    Ok(())
+    if account.owned_by(&Address::default()) && account.data_len() == 0 {
+        return Ok(EntryKind::AbsorbedCancellation);
+    }
+    Err(error.into())
+}
+
+/// The escrow tree's nullifier root at `index`. `TreeAccount` loads only
+/// through a mutable borrow; nothing is written and the borrow ends here,
+/// before any CPI. The caller has checked the tree's owner and discriminator.
+#[inline(never)]
+fn load_nullifier_root(tree: &mut AccountView, index: u16) -> Result<[u8; 32], ProgramError> {
+    let address = tree.address().to_bytes();
+    let mut data = tree
+        .try_borrow_mut()
+        .map_err(|_| StakingError::InvalidTree)?;
+    TreeAccount::from_bytes(&mut data, address)
+        .and_then(|account| account.get_nullifier_tree_root(index))
+        .map_err(|_| StakingError::InvalidTree.into())
 }
 
 fn invoke_create_cache(
@@ -285,21 +318,24 @@ pub fn process_execute_batch(accounts: &mut [AccountView], data: &[u8]) -> Progr
     }
     let tree_id = zolana_program::compression::load_tree_id(escrow_tree)
         .map_err(|_| StakingError::InvalidTree)?;
+    let nullifier_root = load_nullifier_root(escrow_tree, ix.nullifier_root_index)?;
 
-    // One nullifier PDA per stored entry, in entry order.
+    // One nullifier PDA address per stored entry, in entry order.
     let mut active_pdas = Vec::with_capacity(active);
+    let mut kinds = Vec::with_capacity(entries.len());
     for (input, output) in &entries {
         let account = iter.next_account("nullifier_pda")?;
-        check_entry_pda(
+        let kind = check_entry_pda(
             account,
             &config.escrow_tree,
             &input.nullifier_hash,
             output.is_some(),
             tree_id,
         )?;
-        if output.is_some() {
+        if kind == EntryKind::Active {
             active_pdas.push(*account);
         }
+        kinds.push(kind);
     }
 
     // SPP section, present only when an entry settles.
@@ -364,6 +400,8 @@ pub fn process_execute_batch(accounts: &mut [AccountView], data: &[u8]) -> Progr
         epoch_account.address(),
         &batch,
         &entries,
+        &kinds,
+        &nullifier_root,
         tree_id,
         &snapshot,
         cached.as_ref(),
@@ -448,7 +486,8 @@ fn load_batch_boxed(account: &AccountView) -> Result<Box<BatchHeader>, ProgramEr
 }
 
 /// Active entries: the writable PDA SPP creates on spend. Cancelled entries:
-/// the PDA SPP created when the cancel spent the escrow.
+/// the queued PDA SPP created when the cancel spent the escrow, or the empty
+/// address once that PDA was closed.
 #[inline(never)]
 fn check_entry_pda(
     account: &AccountView,
@@ -456,7 +495,7 @@ fn check_entry_pda(
     nullifier: &[u8; 32],
     active: bool,
     tree_id: u16,
-) -> ProgramResult {
+) -> Result<EntryKind, ProgramError> {
     let expected = zolana_interface::pda::nullifier_pda(tree, nullifier).0;
     if !active {
         return check_cancelled(account, &expected, tree_id);
@@ -464,7 +503,7 @@ fn check_entry_pda(
     if account.address() != &expected || !account.is_writable() {
         return Err(StakingError::InvalidAccount.into());
     }
-    Ok(())
+    Ok(EntryKind::Active)
 }
 
 /// Fixed accounts the SPP legs forward alongside the SPP section.
@@ -559,6 +598,8 @@ fn verify_settlement_proof(
     epoch: &Address,
     batch: &BatchHeader,
     entries: &[BatchEntry],
+    kinds: &[EntryKind],
+    nullifier_root: &[u8; 32],
     tree_id: u16,
     snapshot: &PoolSnapshot,
     cached: Option<&CachedUtxo>,
@@ -569,6 +610,8 @@ fn verify_settlement_proof(
         epoch,
         batch,
         entries,
+        kinds,
+        nullifier_root,
         tree_id,
         snapshot,
         ix.legs.as_ref().zip(cached),
@@ -947,6 +990,7 @@ mod tests {
             let ix = ExecuteBatchIxData {
                 settlement_proof,
                 legs,
+                nullifier_root_index: 0x0102,
             };
             let bytes = wincode::serialize(&ix).unwrap();
             assert_eq!(parse::<ExecuteBatchIxData>(&bytes), Ok(ix));

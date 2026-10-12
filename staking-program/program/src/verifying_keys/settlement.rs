@@ -14,25 +14,25 @@ use groth16_solana::groth16::{CommitmentVerifyingKey, Groth16Verifyingkey};
 
 static VERIFYINGKEY_VK_IC: &[[u8; 64]] = &[
     [
-        8u8, 115u8, 132u8, 70u8, 148u8, 241u8, 234u8, 84u8, 83u8, 128u8, 193u8, 42u8, 99u8, 47u8,
-        75u8, 99u8, 56u8, 86u8, 34u8, 216u8, 210u8, 137u8, 239u8, 244u8, 138u8, 24u8, 56u8, 119u8,
-        49u8, 51u8, 3u8, 210u8, 7u8, 6u8, 120u8, 119u8, 143u8, 153u8, 97u8, 49u8, 146u8, 56u8, 8u8,
-        119u8, 182u8, 95u8, 193u8, 195u8, 255u8, 84u8, 43u8, 7u8, 10u8, 197u8, 48u8, 207u8, 185u8,
-        62u8, 205u8, 231u8, 171u8, 126u8, 185u8, 105u8,
+        45u8, 146u8, 132u8, 119u8, 119u8, 211u8, 48u8, 2u8, 206u8, 197u8, 63u8, 206u8, 166u8, 8u8,
+        221u8, 109u8, 165u8, 37u8, 191u8, 51u8, 4u8, 70u8, 157u8, 137u8, 177u8, 80u8, 169u8, 155u8,
+        195u8, 255u8, 29u8, 119u8, 34u8, 34u8, 67u8, 249u8, 234u8, 176u8, 53u8, 144u8, 70u8, 214u8,
+        96u8, 137u8, 191u8, 187u8, 218u8, 136u8, 86u8, 222u8, 51u8, 43u8, 53u8, 181u8, 201u8,
+        158u8, 21u8, 238u8, 79u8, 97u8, 68u8, 252u8, 162u8, 185u8,
     ],
     [
-        33u8, 133u8, 35u8, 152u8, 210u8, 235u8, 61u8, 131u8, 214u8, 249u8, 108u8, 47u8, 160u8,
-        110u8, 116u8, 55u8, 70u8, 240u8, 150u8, 23u8, 132u8, 54u8, 74u8, 173u8, 157u8, 0u8, 242u8,
-        234u8, 70u8, 129u8, 221u8, 209u8, 39u8, 33u8, 107u8, 68u8, 52u8, 4u8, 19u8, 72u8, 250u8,
-        23u8, 149u8, 220u8, 37u8, 66u8, 87u8, 250u8, 150u8, 35u8, 185u8, 77u8, 185u8, 35u8, 1u8,
-        221u8, 26u8, 86u8, 27u8, 22u8, 142u8, 95u8, 38u8, 42u8,
+        13u8, 228u8, 252u8, 50u8, 37u8, 68u8, 68u8, 37u8, 1u8, 200u8, 223u8, 235u8, 188u8, 36u8,
+        51u8, 212u8, 175u8, 222u8, 115u8, 83u8, 161u8, 231u8, 192u8, 254u8, 162u8, 170u8, 53u8,
+        102u8, 155u8, 87u8, 145u8, 50u8, 8u8, 194u8, 228u8, 227u8, 255u8, 46u8, 49u8, 213u8, 186u8,
+        235u8, 119u8, 189u8, 17u8, 74u8, 179u8, 82u8, 130u8, 104u8, 147u8, 91u8, 182u8, 254u8,
+        65u8, 66u8, 203u8, 232u8, 109u8, 191u8, 237u8, 221u8, 50u8, 8u8,
     ],
     [
-        0u8, 64u8, 163u8, 173u8, 73u8, 31u8, 207u8, 135u8, 126u8, 158u8, 209u8, 173u8, 41u8, 148u8,
-        58u8, 89u8, 243u8, 187u8, 166u8, 143u8, 157u8, 245u8, 95u8, 18u8, 131u8, 125u8, 247u8,
-        146u8, 179u8, 24u8, 114u8, 111u8, 13u8, 91u8, 241u8, 209u8, 94u8, 203u8, 18u8, 213u8,
-        245u8, 86u8, 247u8, 96u8, 251u8, 240u8, 21u8, 182u8, 242u8, 34u8, 75u8, 247u8, 197u8, 76u8,
-        68u8, 177u8, 151u8, 179u8, 16u8, 12u8, 242u8, 28u8, 194u8, 25u8,
+        8u8, 253u8, 93u8, 103u8, 222u8, 85u8, 172u8, 160u8, 216u8, 12u8, 20u8, 235u8, 116u8, 190u8,
+        113u8, 46u8, 98u8, 213u8, 181u8, 127u8, 164u8, 122u8, 116u8, 219u8, 42u8, 96u8, 51u8,
+        207u8, 112u8, 211u8, 196u8, 87u8, 48u8, 3u8, 199u8, 249u8, 149u8, 47u8, 29u8, 195u8, 171u8,
+        38u8, 14u8, 103u8, 89u8, 208u8, 243u8, 102u8, 39u8, 193u8, 88u8, 71u8, 42u8, 7u8, 60u8,
+        110u8, 48u8, 170u8, 246u8, 20u8, 202u8, 215u8, 144u8, 141u8,
     ],
 ];
 
@@ -113,7 +113,7 @@ pub const VERIFYINGKEY: Groth16Verifyingkey = Groth16Verifyingkey {
 /// SHA-256 of the proving key file this verifying key was generated with.
 #[allow(dead_code)]
 #[rustfmt::skip]
-pub const VERIFYINGKEY_PROVING_KEY_SHA256: [u8; 32] = [249u8, 135u8, 249u8, 49u8, 28u8, 189u8, 181u8, 10u8, 152u8, 64u8, 8u8, 223u8, 72u8, 1u8, 192u8, 15u8, 84u8, 171u8, 53u8, 47u8, 181u8, 221u8, 218u8, 234u8, 239u8, 81u8, 30u8, 116u8, 206u8, 3u8, 54u8, 163u8];
+pub const VERIFYINGKEY_PROVING_KEY_SHA256: [u8; 32] = [38u8, 144u8, 241u8, 106u8, 41u8, 143u8, 159u8, 102u8, 28u8, 250u8, 58u8, 200u8, 212u8, 6u8, 253u8, 54u8, 92u8, 157u8, 128u8, 4u8, 3u8, 118u8, 196u8, 84u8, 107u8, 87u8, 231u8, 250u8, 114u8, 33u8, 193u8, 196u8];
 
 /// `true` for a test setup whose secret randomness is public or untrusted:
 /// whoever knows it can make this key accept a proof for any public
@@ -125,9 +125,9 @@ pub const VERIFYINGKEY_INSECURE_TEST_SETUP: bool = true;
 /// The two consts above as a delimited string, exported so it stays in
 /// the program binary; read it back with
 /// `groth16_solana::vk::setup::find_setup_txts`.
-#[unsafe(export_name = "groth16_solana_vk_setup_1c382f0faccbeeb2")]
+#[unsafe(export_name = "groth16_solana_vk_setup_8e9a840b4aed4922")]
 #[rustfmt::skip]
-pub static VERIFYINGKEY_SETUP_TXT: &str = "=======BEGIN GROTH16 VK SETUP V1=======\x00name\x00VERIFYINGKEY\x00insecure_test_setup\x00true\x00proving_key_sha256\x00f987f9311cbdb50a984008df4801c00f54ab352fb5dddaeaef511e74ce0336a3\x00=======END GROTH16 VK SETUP V1=======\x00";
+pub static VERIFYINGKEY_SETUP_TXT: &str = "=======BEGIN GROTH16 VK SETUP V1=======\x00name\x00VERIFYINGKEY\x00insecure_test_setup\x00true\x00proving_key_sha256\x002690f16a298f9f661cfa3ac8d406fd365c9d80040376c4546b57e7fa7221c1c4\x00=======END GROTH16 VK SETUP V1=======\x00";
 
 #[cfg(not(feature = "insecure-test-setup"))]
 compile_error!("VERIFYINGKEY comes from an insecure test setup: whoever knows its setup randomness can make it accept a proof for any public inputs. Enable the `insecure-test-setup` feature only in test builds, not for a devnet or mainnet deployment.");

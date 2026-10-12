@@ -6,7 +6,9 @@ import (
 	"stakingcircuits/shared"
 
 	"github.com/consensys/gnark/frontend"
+	"github.com/reilabs/gnark-lean-extractor/v3/abstractor"
 	"zolana/gnarksdk"
+	"zolana/prover/circuits/gadget"
 	spp "zolana/prover/circuits/spp_transaction/shared"
 )
 
@@ -35,6 +37,10 @@ type Context struct {
 	TreeID              frontend.Variable
 	Pool                shared.Pool
 	Amounts             Amounts
+	// NullifierRoot is the SPP nullifier tree root the in-tree cancellations
+	// are proven against; the program reads it from the escrow tree's root
+	// history at the instruction's nullifier_root_index.
+	NullifierRoot frontend.Variable
 }
 
 // Hash is the program's SettlementProofContext::hash.
@@ -42,7 +48,7 @@ func (c *Context) Hash(api frontend.API, entriesHash frontend.Variable) frontend
 	pool := gnarksdk.Poseidon(api, c.Pool.Lamports, c.Pool.Supply, c.Pool.DepositNumerator,
 		c.Pool.DepositDenominator, c.Pool.WithdrawalNumerator, c.Pool.WithdrawalDenominator)
 	batch := gnarksdk.Poseidon(api, c.Amounts.EscrowSol, c.Amounts.EscrowPoolTokens,
-		c.Amounts.PayoutSol, c.Amounts.PayoutPoolTokens, entriesHash)
+		c.Amounts.PayoutSol, c.Amounts.PayoutPoolTokens, entriesHash, c.NullifierRoot)
 	return gnarksdk.Poseidon(api, c.SpendPrivateTxHash, c.PayoutPrivateTxHash, c.CachedUtxoHash,
 		c.UtxoHashChain, c.IntentCount, c.EpochHash, c.PoolMintHash, c.CrankViewingHash,
 		c.EscrowOwnerIdentity, c.TreeID, pool, batch)
@@ -50,16 +56,27 @@ func (c *Context) Hash(api frontend.API, entriesHash frontend.Variable) frontend
 
 // Slot is one stored batch entry. Absent slots repeat slot 0's keys with
 // Present = 0 so every point and scalar stays valid.
+//
+// A cancelled entry is either queued (its nullifier PDA still exists, which
+// the program checks) or in the nullifier tree (the forester absorbed the
+// nullifier and closed the PDA). CancelledInTree marks the latter, which the
+// circuit proves by the inclusion of IndexedLeafHash(nullifier,
+// NullifierNextValue) at NullifierPathIndex under Context.NullifierRoot. The
+// proof fields are unconstrained (zeros) when CancelledInTree is 0.
 type Slot struct {
-	Present        frontend.Variable
-	Cancelled      frontend.Variable
-	PoolAsset      frontend.Variable
-	Amount         frontend.Variable
-	Blinding       frontend.Variable
-	NullifierPK    frontend.Variable
-	PayoutBlinding frontend.Variable
-	SigningPK      [34]frontend.Variable
-	UserPoint      [65]frontend.Variable
+	Present               frontend.Variable
+	Cancelled             frontend.Variable
+	CancelledInTree       frontend.Variable
+	NullifierNextValue    frontend.Variable
+	NullifierPathElements [spp.NullifierTreeHeight]frontend.Variable
+	NullifierPathIndex    frontend.Variable
+	PoolAsset             frontend.Variable
+	Amount                frontend.Variable
+	Blinding              frontend.Variable
+	NullifierPK           frontend.Variable
+	PayoutBlinding        frontend.Variable
+	SigningPK             [34]frontend.Variable
+	UserPoint             [65]frontend.Variable
 }
 
 type Circuit struct {
@@ -127,6 +144,8 @@ func Constrain(api frontend.API, publicInputHash frontend.Variable, ctx *Context
 		api.AssertIsEqual(api.Mul(s.Present, api.Sub(1, previous)), 0)
 		previous = s.Present
 		api.AssertIsEqual(api.Mul(s.Cancelled, api.Sub(1, s.Present)), 0)
+		api.AssertIsBoolean(s.CancelledInTree)
+		api.AssertIsEqual(api.Mul(s.CancelledInTree, api.Sub(1, s.Cancelled)), 0)
 		active := api.Sub(s.Present, s.Cancelled)
 		api.ToBinary(s.Amount, 64)
 		api.AssertIsEqual(api.Mul(s.Present, api.IsZero(s.Amount)), 0)
@@ -141,6 +160,7 @@ func Constrain(api frontend.API, publicInputHash frontend.Variable, ctx *Context
 		escrowHash := escrow.Hash(api)
 		nullifier := gnarksdk.Poseidon(api, escrowHash, s.Blinding, 0)
 		chain = api.Select(s.Present, gnarksdk.Poseidon(api, chain, escrowHash), chain)
+		assertNullifierInTree(api, s, nullifier, ctx.NullifierRoot)
 		count = api.Add(count, s.Present)
 		spendInputs[i] = api.Select(active, escrowHash, 0)
 
@@ -174,7 +194,9 @@ func Constrain(api frontend.API, publicInputHash frontend.Variable, ctx *Context
 		activeCount = api.Add(activeCount, active)
 		payoutOutputs[i] = api.Select(active, payoutHash, 0)
 
-		leaf := gnarksdk.Poseidon(api, nullifier, s.Cancelled, payoutOutputs[i], api.Select(active, contextHash, 0))
+		// 0 active, 1 queued cancellation, 2 cancelled in the nullifier tree.
+		cancelledCode := api.Add(s.Cancelled, s.CancelledInTree)
+		leaf := gnarksdk.Poseidon(api, nullifier, cancelledCode, payoutOutputs[i], api.Select(active, contextHash, 0))
 		entries = api.Select(s.Present, gnarksdk.Poseidon(api, entries, leaf), entries)
 	}
 
@@ -198,4 +220,18 @@ func Constrain(api frontend.API, publicInputHash frontend.Variable, ctx *Context
 
 	api.AssertIsEqual(publicInputHash, ctx.Hash(api, entries))
 	return nil
+}
+
+// assertNullifierInTree proves, when s.CancelledInTree is 1, that the indexed
+// leaf (nullifier, s.NullifierNextValue) lies at s.NullifierPathIndex in the
+// nullifier tree with root nullifierRoot. Inclusion of the nullifier's own
+// leaf proves it was inserted, so the escrow is spent.
+func assertNullifierInTree(api frontend.API, s Slot, nullifier, nullifierRoot frontend.Variable) {
+	root := abstractor.Call(api, gadget.MerkleRootGadget{
+		Hash:   gadget.IndexedLeafHash(api, nullifier, s.NullifierNextValue),
+		Index:  api.ToBinary(s.NullifierPathIndex, spp.NullifierTreeHeight),
+		Path:   s.NullifierPathElements[:],
+		Height: spp.NullifierTreeHeight,
+	})
+	api.AssertIsEqual(api.Mul(s.CancelledInTree, api.Sub(root, nullifierRoot)), 0)
 }

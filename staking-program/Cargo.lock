@@ -3377,6 +3377,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "groth16-solana",
+ "num-bigint 0.4.8",
  "p256 0.13.2",
  "private-staking-program",
  "private-staking-prover",
@@ -3394,6 +3395,7 @@ dependencies = [
  "zolana-hasher",
  "zolana-interface",
  "zolana-keypair",
+ "zolana-merkle-tree",
  "zolana-program",
  "zolana-transaction",
 ]

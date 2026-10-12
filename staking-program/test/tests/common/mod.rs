@@ -23,7 +23,7 @@ use private_staking_program::{
     state::{self, Config, EpochHeader},
     ID,
 };
-use private_staking_sdk::instructions;
+use private_staking_sdk::{instructions, settlement::CancelledProof};
 use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::{error::InstructionError, Instruction};
@@ -37,7 +37,7 @@ use zolana_client::{
     STATE_TREE_HEIGHT,
 };
 use zolana_gnark_ffi_prover::Circuit;
-use zolana_hasher::Poseidon;
+use zolana_hasher::{bigint::bigint_to_be_bytes_array, Poseidon};
 use zolana_interface::{
     state::{
         default_tree_fees, discriminator::TREE_ACCOUNT_DISCRIMINATOR, nullifier_tree_params,
@@ -122,11 +122,88 @@ pub struct TreeFixture {
     pub state: MerkleTree<Poseidon>,
     /// Root history index of the current UTXO root (0 for an empty tree).
     pub root_index: u16,
+    /// The nullifier tree every proof against this account uses.
+    pub nullifiers: NullifierTreeFixture,
+}
+
+/// A reference indexed nullifier tree and the index of its root in the tree
+/// account's nullifier root history.
+pub struct NullifierTreeFixture {
+    pub tree: IndexedMerkleTree<Poseidon, usize>,
+    pub root_index: u16,
+}
+
+impl NullifierTreeFixture {
+    pub fn root(&self) -> [u8; 32] {
+        self.tree.root()
+    }
+
+    /// Proof that `nullifier` is absent from this tree at `root_index`.
+    pub fn non_inclusion_proof(&self, tree: Address, nullifier: [u8; 32]) -> NonInclusionProof {
+        let absence = self
+            .tree
+            .get_non_inclusion_proof(&BigUint::from_bytes_be(&nullifier))
+            .unwrap();
+        NonInclusionProof {
+            leaf: nullifier,
+            merkle_context: MerkleContext { tree_type: 0, tree },
+            path: absence.merkle_proof.to_vec(),
+            low_element: absence.leaf_lower_range_value,
+            low_element_index: absence.leaf_index as u64,
+            high_element: absence.leaf_higher_range_value,
+            high_element_index: 0,
+            root: self.tree.root(),
+            root_seq: 0,
+            root_index: self.root_index,
+        }
+    }
+
+    /// The indexed leaf of an absorbed `nullifier` and its path to `root()`.
+    pub fn inclusion(&self, nullifier: [u8; 32]) -> CancelledProof {
+        let array = &self.tree.indexed_array;
+        let element = array
+            .find_element(&BigUint::from_bytes_be(&nullifier))
+            .unwrap_or_else(|| panic!("nullifier {nullifier:?} is not in the tree"));
+        let next_value = if element.next_index() == 0 {
+            array.highest_value.clone()
+        } else {
+            array.get(element.next_index()).unwrap().value.clone()
+        };
+        CancelledProof::InTree {
+            next_value: bigint_to_be_bytes_array::<32>(&next_value).unwrap(),
+            path: self.tree.get_proof_of_leaf(element.index(), true).unwrap(),
+            leaf_index: element.index() as u64,
+        }
+    }
 }
 
 pub fn tree_fixture(tree: Address, leaves: &[[u8; 32]]) -> TreeFixture {
+    tree_fixture_with_nullifiers(tree, leaves, &[])
+}
+
+/// Like [`tree_fixture`], with `absorbed` nullifiers in the nullifier tree.
+///
+/// Production trees reach this state through the forester: SPP queues each
+/// spent nullifier, a batch update proof appends the queued values to the
+/// indexed tree and pushes the new root into the nullifier root history, and
+/// the nullifier PDAs are closed once every root in the history contains
+/// them. The fixture skips the queue and the update proof: it appends
+/// `absorbed` to a reference indexed tree and writes that root into the next
+/// root history slot the way `append_root` does. With no absorbed values the
+/// history keeps only the init root at index 0.
+pub fn tree_fixture_with_nullifiers(
+    tree: Address,
+    leaves: &[[u8; 32]],
+    absorbed: &[[u8; 32]],
+) -> TreeFixture {
+    let mut nullifiers = fresh_nullifier_tree();
+    for nullifier in absorbed {
+        nullifiers
+            .append(&BigUint::from_bytes_be(nullifier))
+            .unwrap();
+    }
     let mut bytes = vec![0; tree_account_size()];
-    let (utxo_root, root_index, nullifier_root) = {
+    let (utxo_root, root_index, nullifier_root_index) = {
         let mut account = TreeAccount::init(
             &mut bytes,
             TREE_ACCOUNT_DISCRIMINATOR,
@@ -137,22 +214,43 @@ pub fn tree_fixture(tree: Address, leaves: &[[u8; 32]]) -> TreeFixture {
             default_tree_fees(nullifier_tree_params().input_queue_zkp_batch_size).unwrap(),
         )
         .unwrap();
+        assert_eq!(
+            account.get_nullifier_tree_root(0).unwrap(),
+            fresh_nullifier_tree().root()
+        );
         if !leaves.is_empty() {
             account.utxo_tree().append_batch(leaves, 1).unwrap();
         }
+        let nullifier_root_index = if absorbed.is_empty() {
+            0
+        } else {
+            let history = &mut account.nullifier_tree().root_history;
+            let capacity = history.roots.len() as u64;
+            let index = history.current_index;
+            *history.roots.get_mut(index as usize).unwrap() = nullifiers.root();
+            history.current_index = (index + 1) % capacity;
+            u16::try_from(index).unwrap()
+        };
+        assert_eq!(
+            account
+                .get_nullifier_tree_root(nullifier_root_index)
+                .unwrap(),
+            nullifiers.root()
+        );
         let root_index = account.utxo_tree().current_root_index();
         (
             account.get_utxo_tree_root(root_index).unwrap(),
             root_index,
-            account.get_nullifier_tree_root(0).unwrap(),
+            nullifier_root_index,
         )
     };
+    // The fabricated account still loads as a valid tree.
+    TreeAccount::from_bytes(&mut bytes.clone(), tree.to_bytes()).unwrap();
     let mut state = MerkleTree::<Poseidon>::new(STATE_TREE_HEIGHT, 0);
     for leaf in leaves {
         state.append(leaf).unwrap();
     }
     assert_eq!(state.root(), utxo_root);
-    assert_eq!(fresh_nullifier_tree().root(), nullifier_root);
     TreeFixture {
         account: Account {
             lamports: TREE_LAMPORTS,
@@ -162,6 +260,10 @@ pub fn tree_fixture(tree: Address, leaves: &[[u8; 32]]) -> TreeFixture {
         },
         state,
         root_index,
+        nullifiers: NullifierTreeFixture {
+            tree: nullifiers,
+            root_index: nullifier_root_index,
+        },
     }
 }
 
@@ -171,29 +273,35 @@ fn fresh_nullifier_tree() -> IndexedMerkleTree<Poseidon, usize> {
         .unwrap()
 }
 
-/// Proof that `nullifier` is absent from the tree's empty nullifier tree
+/// Proof that `nullifier` is absent from a tree's empty nullifier tree
 /// (root index 0).
 pub fn non_inclusion_proof(tree: Address, nullifier: [u8; 32]) -> NonInclusionProof {
-    let nullifiers = fresh_nullifier_tree();
-    let absence = nullifiers
-        .get_non_inclusion_proof(&BigUint::from_bytes_be(&nullifier))
-        .unwrap();
-    NonInclusionProof {
-        leaf: nullifier,
-        merkle_context: MerkleContext { tree_type: 0, tree },
-        path: absence.merkle_proof.to_vec(),
-        low_element: absence.leaf_lower_range_value,
-        low_element_index: absence.leaf_index as u64,
-        high_element: absence.leaf_higher_range_value,
-        high_element_index: 0,
-        root: nullifiers.root(),
-        root_seq: 0,
+    NullifierTreeFixture {
+        tree: fresh_nullifier_tree(),
         root_index: 0,
+    }
+    .non_inclusion_proof(tree, nullifier)
+}
+
+fn state_proof(
+    tree: Address,
+    state: &MerkleTree<Poseidon>,
+    root_index: u16,
+    leaf_index: usize,
+) -> MerkleProof {
+    MerkleProof {
+        leaf: state.get_leaf(leaf_index).unwrap(),
+        merkle_context: MerkleContext { tree_type: 0, tree },
+        path: state.get_proof_of_leaf(leaf_index, true).unwrap().to_vec(),
+        leaf_index: leaf_index as u64,
+        root: state.root(),
+        root_seq: 0,
+        root_index,
     }
 }
 
 /// Inclusion proof of leaf `leaf_index` of `state` at `root_index`, plus the
-/// non-inclusion proof of its nullifier.
+/// non-inclusion proof of its nullifier in an empty nullifier tree.
 pub fn spend_proof(
     tree: Address,
     state: &MerkleTree<Poseidon>,
@@ -202,22 +310,23 @@ pub fn spend_proof(
     nullifier: [u8; 32],
 ) -> SpendProof {
     SpendProof {
-        state: MerkleProof {
-            leaf: state.get_leaf(leaf_index).unwrap(),
-            merkle_context: MerkleContext { tree_type: 0, tree },
-            path: state.get_proof_of_leaf(leaf_index, true).unwrap().to_vec(),
-            leaf_index: leaf_index as u64,
-            root: state.root(),
-            root_seq: 0,
-            root_index,
-        },
+        state: state_proof(tree, state, root_index, leaf_index),
         nullifier: non_inclusion_proof(tree, nullifier),
     }
 }
 
 impl TreeFixture {
+    /// Spend proof of leaf `leaf_index`, its nullifier proven absent from
+    /// this fixture's nullifier tree.
     pub fn spend_proof(&self, tree: Address, leaf_index: usize, nullifier: [u8; 32]) -> SpendProof {
-        spend_proof(tree, &self.state, self.root_index, leaf_index, nullifier)
+        SpendProof {
+            state: state_proof(tree, &self.state, self.root_index, leaf_index),
+            nullifier: self.nullifiers.non_inclusion_proof(tree, nullifier),
+        }
+    }
+
+    pub fn non_inclusion_proof(&self, tree: Address, nullifier: [u8; 32]) -> NonInclusionProof {
+        self.nullifiers.non_inclusion_proof(tree, nullifier)
     }
 }
 
@@ -733,7 +842,19 @@ impl Harness {
 
     /// Insert an escrow tree account with `leaves`.
     pub fn tree(&mut self, tree: Address, leaves: &[[u8; 32]]) -> TreeFixture {
-        let fixture = tree_fixture(tree, leaves);
+        self.tree_with_nullifiers(tree, leaves, &[])
+    }
+
+    /// Insert an escrow tree account with `leaves` whose nullifier root
+    /// history holds a root containing `absorbed` (see
+    /// [`tree_fixture_with_nullifiers`]).
+    pub fn tree_with_nullifiers(
+        &mut self,
+        tree: Address,
+        leaves: &[[u8; 32]],
+        absorbed: &[[u8; 32]],
+    ) -> TreeFixture {
+        let fixture = tree_fixture_with_nullifiers(tree, leaves, absorbed);
         self.accounts.insert(tree, fixture.account.clone());
         fixture
     }

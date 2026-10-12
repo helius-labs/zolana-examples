@@ -2,6 +2,7 @@ package settlement
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -111,7 +112,7 @@ func (f fixture) publicInputHash(t *testing.T) *big.Int {
 	pool := hash(t, c("Pool_Lamports"), c("Pool_Supply"), c("Pool_DepositNumerator"),
 		c("Pool_DepositDenominator"), c("Pool_WithdrawalNumerator"), c("Pool_WithdrawalDenominator"))
 	batch := hash(t, c("Amounts_EscrowSol"), c("Amounts_EscrowPoolTokens"), c("Amounts_PayoutSol"),
-		c("Amounts_PayoutPoolTokens"), f.int(t, metaPrefix+"EntriesHash", 0))
+		c("Amounts_PayoutPoolTokens"), f.int(t, metaPrefix+"EntriesHash", 0), c("NullifierRoot"))
 	return hash(t, c("SpendPrivateTxHash"), c("PayoutPrivateTxHash"), c("CachedUtxoHash"),
 		c("UtxoHashChain"), c("IntentCount"), c("EpochHash"), c("PoolMintHash"), c("CrankViewingHash"),
 		c("EscrowOwnerIdentity"), c("TreeID"), pool, batch)
@@ -147,16 +148,109 @@ func solve(t *testing.T, f fixture) error {
 	return err
 }
 
+// cancelledKinds lists the slots with Cancelled = 1 and those of them with
+// CancelledInTree = 1.
+func (f fixture) cancelledKinds(t *testing.T) (cancelled, inTree []int) {
+	t.Helper()
+	for i := 0; i < N; i++ {
+		prefix := fmt.Sprintf("Escrow%d_", i)
+		if f.int(t, prefix+"Cancelled", 0).Sign() != 0 {
+			cancelled = append(cancelled, i)
+		}
+		if f.int(t, prefix+"CancelledInTree", 0).Sign() != 0 {
+			inTree = append(inTree, i)
+		}
+	}
+	return cancelled, inTree
+}
+
 func TestSettlementFixturesSolve(t *testing.T) {
-	for _, name := range []string{"settlement-4.json", "settlement-16.json", "settlement-cancelled.json"} {
-		t.Run(name, func(t *testing.T) {
-			f := load(t, name)
+	for _, tc := range []struct {
+		name      string
+		cancelled []int
+		inTree    []int
+	}{
+		{"settlement-4.json", []int{1}, []int{1}},
+		{"settlement-16.json", []int{3, 8, 13}, []int{8, 13}},
+		{"settlement-cancelled.json", []int{0, 1, 2}, []int{1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := load(t, tc.name)
 			if got, want := f.publicInputHash(t), f.int(t, "PublicInputHash", 0); got.Cmp(want) != 0 {
 				t.Fatalf("Go context hash %s differs from the SDK's %s", got, want)
+			}
+			cancelled, inTree := f.cancelledKinds(t)
+			if fmt.Sprint(cancelled, inTree) != fmt.Sprint(tc.cancelled, tc.inTree) {
+				t.Fatalf("cancelled %v in tree %v, want %v and %v", cancelled, inTree, tc.cancelled, tc.inTree)
 			}
 			if err := solve(t, f); err != nil {
 				t.Fatal(err)
 			}
+		})
+	}
+}
+
+func assertRejected(t *testing.T, f fixture) {
+	t.Helper()
+	err := solve(t, f)
+	if err == nil {
+		t.Fatal("mutated witness was accepted")
+	}
+	message := err.Error()
+	if len(message) > 300 {
+		message = message[:300]
+	}
+	t.Logf("rejected: %s", message)
+}
+
+// In settlement-4 slot 1 is cancelled in the nullifier tree; in settlement-16
+// slot 3 is a queued cancellation.
+func TestSettlementRejectsInvalidNullifierInclusion(t *testing.T) {
+	one := big.NewInt(1)
+	for _, tc := range []struct {
+		name    string
+		fixture string
+		mutate  func(t *testing.T, f fixture)
+	}{
+		{"in-tree flag on an active slot", "settlement-4.json", func(t *testing.T, f fixture) {
+			f.set(t, "Escrow0_CancelledInTree", 0, one)
+		}},
+		{"in-tree flag on an absent slot", "settlement-4.json", func(t *testing.T, f fixture) {
+			f.set(t, "Escrow5_CancelledInTree", 0, one)
+		}},
+		{"non-boolean in-tree flag", "settlement-4.json", func(t *testing.T, f fixture) {
+			f.set(t, "Escrow1_CancelledInTree", 0, big.NewInt(2))
+		}},
+		{"wrong next value", "settlement-4.json", func(t *testing.T, f fixture) {
+			f.add(t, "Escrow1_NullifierNextValue", 1)
+		}},
+		{"wrong path index", "settlement-4.json", func(t *testing.T, f fixture) {
+			f.add(t, "Escrow1_NullifierPathIndex", 1)
+		}},
+		{"wrong path element", "settlement-4.json", func(t *testing.T, f fixture) {
+			f.set(t, "Escrow1_NullifierPathElements", 39, new(big.Int).Add(f.int(t, "Escrow1_NullifierPathElements", 39), one))
+		}},
+		{"wrong nullifier root", "settlement-4.json", func(t *testing.T, f fixture) {
+			f.add(t, "Context_NullifierRoot", 1)
+			f.rehash(t)
+		}},
+		{"absorbed cancellation claimed queued changes its leaf", "settlement-4.json", func(t *testing.T, f fixture) {
+			f.set(t, "Escrow1_CancelledInTree", 0, big.NewInt(0))
+		}},
+		{"queued cancellation flagged in tree with zero proof", "settlement-16.json", func(t *testing.T, f fixture) {
+			f.set(t, "Escrow3_CancelledInTree", 0, one)
+		}},
+		{"queued cancellation flagged in tree with another entry's proof", "settlement-16.json", func(t *testing.T, f fixture) {
+			f.set(t, "Escrow3_CancelledInTree", 0, one)
+			for _, field := range []string{"NullifierNextValue", "NullifierPathElements", "NullifierPathIndex"} {
+				f["Escrow3_"+field] = append([]string(nil), f["Escrow8_"+field]...)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := load(t, tc.fixture).clone()
+			tc.mutate(t, f)
+			assertRejected(t, f)
 		})
 	}
 }
@@ -226,15 +320,7 @@ func TestSettlementRejectsInvalidWitnesses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := base.clone()
 			tc.mutate(t, f)
-			err := solve(t, f)
-			if err == nil {
-				t.Fatal("mutated witness was accepted")
-			}
-			message := err.Error()
-			if len(message) > 300 {
-				message = message[:300]
-			}
-			t.Logf("rejected: %s", message)
+			assertRejected(t, f)
 		})
 	}
 }

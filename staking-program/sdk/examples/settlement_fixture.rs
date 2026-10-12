@@ -6,9 +6,12 @@
 //! negative tests use to recompute the public input after mutating a context
 //! field. Every key and blinding derives from fixed seeds, and both private
 //! transaction hashes are computed locally, so no SPP proof is needed.
+//! Cancelled entries listed as absorbed get an inclusion proof in a nullifier
+//! tree holding exactly their nullifiers; the rest stay queued.
 use std::collections::BTreeMap;
 
-use anyhow::Result;
+use anyhow::{anyhow, ensure, Result};
+use num_bigint::BigUint;
 use p256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
 use private_staking_program::{
     math::PoolSnapshot,
@@ -19,18 +22,21 @@ use private_staking_program::{
 use private_staking_sdk::{
     allocation::{allocate, IntentAmount},
     note::{crank_address, recipient_address, Note},
-    settlement::{Escrow, SettlementBuilder, SettlementParams},
+    settlement::{CancelledProof, Escrow, SettlementBuilder, SettlementParams},
 };
 use solana_address::Address;
 use spl_stake_pool::state::Fee;
-use zolana_hasher::primitives::right_align;
+use zolana_client::NULLIFIER_TREE_HEIGHT;
+use zolana_hasher::{primitives::right_align, Poseidon};
 use zolana_keypair::{NullifierKey, PublicKey, ShieldedKeypair, SigningKey};
-use zolana_transaction::Mint;
+use zolana_merkle_tree::indexed::IndexedMerkleTree;
+use zolana_transaction::{instructions::transact::BN254_MODULUS_DEC, Mint};
 
 pub const TREE_ID: u16 = 7;
 pub const EPOCH_ID: u64 = 43;
 pub const POOL_ASSET_ID: u64 = 2;
 pub const DEADLINE: i64 = 10_000;
+pub const NULLIFIER_ROOT_INDEX: u16 = 5;
 
 pub struct Fixture {
     pub builder: SettlementBuilder,
@@ -41,6 +47,8 @@ pub struct Fixture {
     pub payer: Address,
     pub crank: ShieldedKeypair,
     pub recipients: Vec<ShieldedKeypair>,
+    /// Each escrow's cancelled proof, in chain order.
+    pub cancelled: Vec<Option<CancelledProof>>,
 }
 
 pub fn keypair(seed: u8) -> Result<ShieldedKeypair> {
@@ -83,9 +91,68 @@ pub fn config(crank: &ShieldedKeypair) -> Result<(Address, Config)> {
     Ok((pda::config(&stake_pool).0, config))
 }
 
+/// An empty SPP nullifier tree, as the shielded pool initializes it.
+pub fn fresh_nullifier_tree() -> Result<IndexedMerkleTree<Poseidon, usize>> {
+    let modulus = BigUint::parse_bytes(BN254_MODULUS_DEC.as_bytes(), 10)
+        .ok_or_else(|| anyhow!("invalid modulus"))?
+        - 1u32;
+    IndexedMerkleTree::<Poseidon, usize>::new_with_next_value(NULLIFIER_TREE_HEIGHT, 0, modulus)
+        .map_err(|error| anyhow!("nullifier tree: {error:?}"))
+}
+
+fn field_bytes(value: &BigUint) -> Result<[u8; 32]> {
+    let bytes = value.to_bytes_be();
+    let mut out = [0; 32];
+    let offset = out
+        .len()
+        .checked_sub(bytes.len())
+        .ok_or_else(|| anyhow!("value exceeds 32 bytes"))?;
+    out.get_mut(offset..)
+        .ok_or_else(|| anyhow!("value exceeds 32 bytes"))?
+        .copy_from_slice(&bytes);
+    Ok(out)
+}
+
+/// Inclusion proof of `nullifier`, already appended to `tree`.
+pub fn in_tree_proof(
+    tree: &IndexedMerkleTree<Poseidon, usize>,
+    nullifier: &[u8; 32],
+) -> Result<CancelledProof> {
+    let array = &tree.indexed_array;
+    let element = array
+        .find_element(&BigUint::from_bytes_be(nullifier))
+        .ok_or_else(|| anyhow!("nullifier is not in the tree"))?;
+    let next_value = if element.next_index == 0 {
+        array.highest_value.clone()
+    } else {
+        array
+            .get(element.next_index)
+            .ok_or_else(|| anyhow!("missing next element"))?
+            .value
+            .clone()
+    };
+    Ok(CancelledProof::InTree {
+        next_value: field_bytes(&next_value)?,
+        path: tree
+            .get_proof_of_leaf(element.index, true)
+            .map_err(|error| anyhow!("nullifier path: {error:?}"))?,
+        leaf_index: u64::try_from(element.index)?,
+    })
+}
+
 /// A chain of escrows for `intents`; cancelled entries alternate between
-/// SOL and pool token escrows.
-pub fn fixture(intents: &[IntentAmount]) -> Result<Fixture> {
+/// SOL and pool token escrows. Cancelled entries whose index is in `absorbed`
+/// are proven in the nullifier tree; the others are queued.
+pub fn fixture(intents: &[IntentAmount], absorbed: &[usize]) -> Result<Fixture> {
+    fixture_with(intents, absorbed, |_| {})
+}
+
+/// [`fixture`] with `edit` applied to the escrows before building.
+pub fn fixture_with(
+    intents: &[IntentAmount],
+    absorbed: &[usize],
+    edit: impl FnOnce(&mut [Escrow]),
+) -> Result<Fixture> {
     let crank = keypair(200)?;
     let (config_key, config) = config(&crank)?;
     let epoch = pda::epoch(&config_key, EPOCH_ID, 0).0;
@@ -118,9 +185,41 @@ pub fn fixture(intents: &[IntentAmount]) -> Result<Fixture> {
                 }),
             },
             leaf_index: index as u64,
+            cancelled: (*intent == IntentAmount::Cancelled).then_some(CancelledProof::Queued),
         });
         recipients.push(recipient);
     }
+
+    // Absorb the listed cancellations, then prove each against the final root.
+    let zero_key = NullifierKey::from_secret([0; 31]);
+    let mut tree = fresh_nullifier_tree()?;
+    let mut nullifiers = Vec::with_capacity(absorbed.len());
+    for &index in absorbed {
+        let escrow = escrows
+            .get(index)
+            .ok_or_else(|| anyhow!("no escrow {index}"))?;
+        ensure!(
+            escrow.cancelled.is_some(),
+            "escrow {index} is not cancelled"
+        );
+        let nullifier = zero_key.nullifier(&escrow.note.hash()?, &escrow.note.blinding)?;
+        tree.append(&BigUint::from_bytes_be(&nullifier))
+            .map_err(|error| anyhow!("append: {error:?}"))?;
+        nullifiers.push((index, nullifier));
+    }
+    for (index, nullifier) in nullifiers {
+        let proof = in_tree_proof(&tree, &nullifier)?;
+        let escrow = escrows
+            .get_mut(index)
+            .ok_or_else(|| anyhow!("no escrow {index}"))?;
+        escrow.cancelled = Some(proof);
+    }
+
+    edit(&mut escrows);
+    let cancelled = escrows
+        .iter()
+        .map(|escrow| escrow.cancelled.clone())
+        .collect();
     let pool = pool();
     let allocation =
         allocate(&pool, intents).map_err(|error| anyhow::anyhow!("allocate: {error:?}"))?;
@@ -138,6 +237,8 @@ pub fn fixture(intents: &[IntentAmount]) -> Result<Fixture> {
         allocation: &allocation,
         pool,
         pool_asset_id: POOL_ASSET_ID,
+        nullifier_root: tree.root(),
+        nullifier_root_index: NULLIFIER_ROOT_INDEX,
         ephemeral: SecretKey::from_slice(&[4; 32])?,
         salt: [5; 16],
         withdrawal_blinding_seed: right_align(&[6, 6, 6]),
@@ -152,10 +253,12 @@ pub fn fixture(intents: &[IntentAmount]) -> Result<Fixture> {
         payer,
         crank,
         recipients,
+        cancelled,
     })
 }
 
 /// Deposit 30, Cancelled, Withdrawal 20, Deposit 70: payouts 29, -, 20, 70.
+/// The cancellation is absorbed into the nullifier tree.
 pub fn four() -> Vec<IntentAmount> {
     vec![
         IntentAmount::Deposit(30),
@@ -176,8 +279,26 @@ pub fn sixteen() -> Vec<IntentAmount> {
         .collect()
 }
 
+pub const FOUR_ABSORBED: &[usize] = &[1];
+
+/// Of the cancellations at 3, 8 and 13, the first is queued and the others
+/// are absorbed.
+pub const SIXTEEN_ABSORBED: &[usize] = &[8, 13];
+
 pub fn cancelled() -> Vec<IntentAmount> {
     vec![IntentAmount::Cancelled; 3]
+}
+
+/// Queued, absorbed, queued.
+pub const CANCELLED_ABSORBED: &[usize] = &[1];
+
+/// The three fixtures: file name, intents, absorbed cancellations.
+pub fn all() -> [(&'static str, Vec<IntentAmount>, &'static [usize]); 3] {
+    [
+        ("settlement-4.json", four(), FOUR_ABSORBED),
+        ("settlement-16.json", sixteen(), SIXTEEN_ABSORBED),
+        ("settlement-cancelled.json", cancelled(), CANCELLED_ABSORBED),
+    ]
 }
 
 /// The JSON fixture: the witness plus `Meta_EntriesHash`.
@@ -186,6 +307,7 @@ pub fn fixture_json(fixture: &Fixture) -> Result<String> {
     let mut map: BTreeMap<String, Vec<String>> = inputs.witness()?.into_iter().collect();
     let entries_hash = settlement::entries_hash(
         &fixture.builder.batch_entries(),
+        &fixture.builder.entry_kinds(),
         &fixture.builder.tx_viewing_pk(),
         &[5; 16],
     )
@@ -207,13 +329,9 @@ pub fn uncompressed(key: &[u8; 33]) -> Result<Vec<u8>> {
 
 fn main() -> Result<()> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../prover/circuits/testdata");
-    for (name, intents) in [
-        ("settlement-4.json", four()),
-        ("settlement-16.json", sixteen()),
-        ("settlement-cancelled.json", cancelled()),
-    ] {
+    for (name, intents, absorbed) in all() {
         let path = dir.join(name);
-        std::fs::write(&path, fixture_json(&fixture(&intents)?)?)?;
+        std::fs::write(&path, fixture_json(&fixture(&intents, absorbed)?)?)?;
         println!("wrote {}", path.display());
     }
     Ok(())
