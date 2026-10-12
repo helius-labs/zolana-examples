@@ -308,6 +308,18 @@ pub fn read_entry(data: &[u8], index: usize) -> Result<BatchEntry, ProgramError>
     if index >= usize::from(header.filled_count) {
         return Err(StakingError::InvalidAccount.into());
     }
+    decode_entry(data, index)
+}
+
+/// Every stored entry in order, decoding the header once.
+pub fn read_entries(data: &[u8]) -> Result<Vec<BatchEntry>, ProgramError> {
+    let header = batch_from_bytes(data)?;
+    (0..usize::from(header.filled_count))
+        .map(|index| decode_entry(data, index))
+        .collect()
+}
+
+fn decode_entry(data: &[u8], index: usize) -> Result<BatchEntry, ProgramError> {
     let slot = data
         .get(entry_range(index)?)
         .ok_or(StakingError::InvalidAccount)?;

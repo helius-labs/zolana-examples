@@ -9,3 +9,7 @@ zolana-gnark-ffi-prover.workspace = true
 
 [build-dependencies]
 zolana-gnark-ffi-prover-build.workspace = true
+
+[dev-dependencies]
+private-staking-program = { path = "../program" }
+sha2 = "0.10"

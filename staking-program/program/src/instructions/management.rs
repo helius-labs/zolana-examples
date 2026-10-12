@@ -1,7 +1,6 @@
 use borsh::BorshDeserialize;
 use pinocchio::{
     cpi::{Seed, Signer},
-    error::ProgramError,
     sysvars::{clock::Clock, Sysvar},
     AccountView, Address, ProgramResult,
 };
@@ -9,6 +8,7 @@ use solana_sysvar::Sysvar as SolanaSysvar;
 use wincode::{SchemaRead, SchemaWrite};
 use zolana_account_checks::AccountIterator;
 
+use super::shared::{check_crank, check_key, check_system, close_to, no_more, parse};
 use crate::{
     error::StakingError,
     pda,
@@ -48,55 +48,11 @@ pub struct ResetBatchIxData {
     pub salt: [u8; 16],
 }
 
-fn parse<'a, T: SchemaRead<'a, wincode::config::DefaultConfig, Dst = T>>(
-    data: &'a [u8],
-) -> Result<T, ProgramError> {
-    wincode::deserialize_exact(data).map_err(|_| StakingError::InvalidInstructionData.into())
-}
-
-fn check_key(account: &AccountView, expected: &Address) -> ProgramResult {
-    if account.address() != expected {
-        return Err(StakingError::InvalidAccount.into());
-    }
-    Ok(())
-}
-
-fn check_system(account: &AccountView) -> ProgramResult {
-    check_key(account, &pinocchio_system::ID)
-}
-
-fn check_crank(account: &AccountView, crank: &ShieldedAddress) -> ProgramResult {
-    if !account.is_signer() || account.address() != &crank.signing_pubkey {
-        return Err(StakingError::InvalidCrank.into());
-    }
-    Ok(())
-}
-
-fn no_more(iter: &AccountIterator<'_>) -> ProgramResult {
-    if !iter.iterator_is_empty() {
-        return Err(ProgramError::InvalidArgument);
-    }
-    Ok(())
-}
-
 fn ensure_empty(account: &AccountView) -> ProgramResult {
     if !account.owned_by(&Address::default()) || account.data_len() != 0 {
         return Err(StakingError::InvalidAccount.into());
     }
     Ok(())
-}
-
-fn close_to(account: &mut AccountView, recipient: &mut AccountView) -> ProgramResult {
-    if account.address() == recipient.address() || !recipient.is_writable() {
-        return Err(StakingError::InvalidAccount.into());
-    }
-    let lamports = recipient
-        .lamports()
-        .checked_add(account.lamports())
-        .ok_or(StakingError::Overflow)?;
-    recipient.set_lamports(lamports);
-    account.set_lamports(0);
-    account.close()
 }
 
 pub fn process_create_config(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -368,7 +324,7 @@ pub fn process_create_batch(accounts: &mut [AccountView], data: &[u8]) -> Progra
     )
 }
 
-fn check_batch_epoch(epoch_account: &AccountView, batch: &BatchHeader) -> ProgramResult {
+pub(crate) fn check_batch_epoch(epoch_account: &AccountView, batch: &BatchHeader) -> ProgramResult {
     check_key(epoch_account, &batch.epoch)?;
     state::load_epoch(epoch_account)?.check_settlement(Clock::get()?.unix_timestamp)?;
     let chain = state::read_chain(&epoch_account.try_borrow()?, batch.hash_chain_index)?;
