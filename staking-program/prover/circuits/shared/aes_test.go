@@ -20,7 +20,7 @@ type ctrCircuit struct {
 
 func (c *ctrCircuit) Define(api frontend.API) error {
 	g := aes.NewAESGadget(api)
-	expanded := ctrEncryptExpanded(api, g, c.Key, c.Nonce, c.Plaintext)
+	expanded := NewAES(api).ctrEncryptExpanded(c.Key, c.Nonce, c.Plaintext)
 	reference := aes.CTREncrypt(api, g, c.Key, c.Nonce, c.Plaintext)
 	for i := range c.Ciphertext {
 		api.AssertIsEqual(expanded[i], reference[i])

@@ -11,7 +11,6 @@ import (
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/test"
 	"github.com/iden3/go-iden3-crypto/poseidon"
-	"zolana/prover/circuits/verifiable-encryption/aes"
 )
 
 type encryptionCircuit struct {
@@ -130,7 +129,7 @@ type batchEncryptionCircuit struct {
 }
 
 func (c *batchEncryptionCircuit) Define(api frontend.API) error {
-	b := c.Encryption.Prepare(api, aes.NewAESGadget(api))
+	b := c.Encryption.Prepare(api, NewAES(api))
 	ciphertext := b.Encrypt(b.Recipient(c.UserPoint), c.Plaintext, c.OutputIndex, c.UtxoHash)
 	if len(ciphertext) != len(c.Ciphertext) {
 		panic("ciphertext length")

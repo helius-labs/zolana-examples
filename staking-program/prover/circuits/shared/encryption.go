@@ -115,7 +115,7 @@ type Recipient struct {
 // fixed hashes once, then encrypts any number of outputs.
 type BatchEncryptor struct {
 	api           frontend.API
-	g             *aes.AESGadget
+	g             *AES
 	secret        [32]frontend.Variable
 	txViewingHash frontend.Variable
 	salt          frontend.Variable
@@ -123,7 +123,7 @@ type BatchEncryptor struct {
 	info          []frontend.Variable
 }
 
-func (e *BatchEncryption) Prepare(api frontend.API, g *aes.AESGadget) *BatchEncryptor {
+func (e *BatchEncryption) Prepare(api frontend.API, g *AES) *BatchEncryptor {
 	lessThanBytes(api, e.EphemeralSecret[:], p256.GroupOrder().FillBytes(make([]byte, 32)))
 	var scalarSum frontend.Variable = 0
 	for _, b := range e.EphemeralSecret {
@@ -172,7 +172,7 @@ func (b *BatchEncryptor) Encrypt(user Recipient, plaintext []frontend.Variable, 
 		shared := gnarksdk.Poseidon(api, domain, recipient.DHHash, b.txViewingHash,
 			recipient.KeyHash, b.salt, outputIndex, role, utxoHash)
 		key, nonce := ve.KeySchedule(api, shared, b.info, 10)
-		result = append(result, ctrEncryptExpanded(api, b.g, key, nonce, plaintext)...)
+		result = append(result, b.g.ctrEncryptExpanded(key, nonce, plaintext)...)
 	}
 	return result
 }
