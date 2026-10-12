@@ -66,6 +66,10 @@ impl User {
         offer: &Offer,
         width: Option<usize>,
     ) -> Result<Order> {
+        if offer.pair != *pair {
+            return Err(k_lend_rfq_sdk::swap::SwapError::WrongPair.into());
+        }
+        offer.verify_price(&crate::chain::read_vault(client.rpc(), pair)?)?;
         let (asset_in, _) = offer.quote.direction.assets(pair);
         let inputs = select_inputs(
             self.wallet.balance(asset_in, None)?.utxos,

@@ -84,6 +84,8 @@ impl Inner {
             },
         );
         Ok(Offer {
+            pair: *pair,
+            fee_bps,
             id,
             expires_at,
             quote,

@@ -87,6 +87,8 @@ pub struct FillTransfer {
     pub order: OrderId,
     /// The user's proven transfer, first in the swap message.
     pub user_transfer: Instruction,
+    /// The requesting user's input-owner signer, checked before co-signing.
+    pub user_signer: Address,
     /// The order's expiry (`OpenOrder::expires_at`), carried as an absolute
     /// instant so that backlog, proving and requeues cannot push it out.
     /// No proof is started and no message offered once it has passed.

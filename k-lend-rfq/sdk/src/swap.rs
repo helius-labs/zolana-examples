@@ -63,6 +63,21 @@ pub enum SwapError {
     /// payer, instruction count, program, tag or account index.
     #[error("the transaction is not the user's transfer followed by one market maker transact")]
     UnexpectedTransaction,
+    /// The accepted offer names another vault or pair of mints.
+    #[error("the accepted offer belongs to a different swap pair")]
+    WrongPair,
+    /// The advertised quote differs from independently computed pricing.
+    #[error("the offer pays {offered}, its vault price and fee give {expected}")]
+    QuoteMismatch { expected: u64, offered: u64 },
+    /// The payment does not authorize exactly the requesting user's input owner.
+    #[error("the user transfer must authorize only the user's input owner {expected}")]
+    UserTransferSigner { expected: Address },
+    /// A payment input was already confirmed spent.
+    #[error("user input {nullifier:?} is already spent")]
+    UserInputSpent { nullifier: [u8; 32] },
+    /// A payment repeats an input within the request or overlaps an active fill.
+    #[error("user input {nullifier:?} already belongs to an in-flight fill")]
+    DuplicateFill { nullifier: [u8; 32] },
     /// The first instruction of the swap message differs from the transfer
     /// the user proved.
     #[error("the transaction does not carry the user's transfer as the user built it")]
@@ -240,6 +255,10 @@ impl Quote {
 /// (`crate::address::order_address`) the market maker's transfer must carry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Offer {
+    /// The vault and mints this offer trades.
+    pub pair: Pair,
+    /// The fee used to price the recorded quote, in basis points.
+    pub fee_bps: u64,
     /// The order this offer opens. The user names it in its `SwapRequest`; the
     /// market maker checks at fill time that it is known, unexpired, unfilled
     /// and quoted for the requested pair.
@@ -257,6 +276,28 @@ pub struct Offer {
     pub max_user_inputs: usize,
     /// Outputs the user's transfer must have (payment and change).
     pub user_outputs: usize,
+}
+
+impl Offer {
+    /// Checks the quote against an independently read vault state and the
+    /// advertised fee before the user accepts it. A later vault-rate change
+    /// does not alter the market maker's recorded order terms.
+    pub fn verify_price(&self, rate: &VaultState) -> Result<()> {
+        let expected = Quote::price(
+            rate,
+            self.quote.direction,
+            self.quote.amount_in,
+            self.fee_bps,
+        )?;
+        if expected != self.quote {
+            return Err(SwapError::QuoteMismatch {
+                expected: expected.amount_out,
+                offered: self.quote.amount_out,
+            }
+            .into());
+        }
+        Ok(())
+    }
 }
 
 /// The user's fill request: the order and the proven transfer that pays it.
@@ -363,5 +404,48 @@ mod tests {
         ]);
         let want = "000123456789abcdef1032547698baff";
         assert_eq!(id.to_string(), want, "display: got {id}, want {want}");
+    }
+    #[test]
+    fn an_offer_binds_its_price_to_the_advertised_fee() -> anyhow::Result<()> {
+        use zolana_keypair::ShieldedKeypair;
+        let rate = capped_vault();
+        let quote = Quote::price(&rate, Direction::Deposit, 1_000, 30)?;
+        let keys = ShieldedKeypair::new_ed25519()?;
+        let mut offer = super::Offer {
+            pair: crate::pair::Pair::new(rate.token_mint, rate.token_mint),
+            fee_bps: 30,
+            id: OrderId([7; 16]),
+            expires_at: u64::MAX,
+            quote,
+            market_maker: keys.shielded_address()?,
+            fee_payer: rate.token_mint,
+            max_user_inputs: 1,
+            user_outputs: 2,
+        };
+        offer.verify_price(&rate)?;
+        offer.fee_bps = 0;
+        assert_eq!(
+            offer
+                .verify_price(&rate)
+                .err()
+                .and_then(|e| e.downcast::<SwapError>().ok()),
+            Some(SwapError::QuoteMismatch {
+                expected: 1_000,
+                offered: quote.amount_out
+            })
+        );
+        offer.fee_bps = 30;
+        offer.quote.amount_out += 1;
+        assert_eq!(
+            offer
+                .verify_price(&rate)
+                .err()
+                .and_then(|e| e.downcast::<SwapError>().ok()),
+            Some(SwapError::QuoteMismatch {
+                expected: quote.amount_out,
+                offered: quote.amount_out + 1
+            })
+        );
+        Ok(())
     }
 }

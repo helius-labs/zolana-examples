@@ -30,8 +30,10 @@ No custom program is involved, the vault is the unmodified kVault program.
 
 2. Market maker: quote. The market maker returns:
    1. `amount_out` at the vault rate minus its fee
-   2. its addresses
-   3. `max_user_inputs`, the widest user transfer that still fits next to its own transfer in one v1 transaction (4,096 bytes, 64 addresses, 1.4M compute units)
+   2. the pair and `fee_bps`, so the user can independently check its price before accepting
+   3. its addresses
+   4. the order ID and expiry, binding its recorded terms until that deadline
+   5. `max_user_inputs`, the widest user transfer that still fits next to its own transfer in one v1 transaction (4,096 bytes, 64 addresses, 1.4M compute units)
 
    The market maker only quotes amounts its inventory can absorb while staying within its target range, so a single swap cannot force a rebalance on its own.
 
@@ -42,7 +44,7 @@ No custom program is involved, the vault is the unmodified kVault program.
    The user sends the market maker only the instruction.
 
 4. Market maker: create maker transfer instruction and transaction.
-   1. The market maker checks the user transfer.
+   1. The market maker consumes the open order and checks the user's input-owner signer, payment and spent nullifiers against its recorded terms. User inputs are reserved against overlapping fills until confirmation or abort.
    2. It generates a transact zk proof that spends M of its inventory UTXOs and creates 1 + C UTXOs: `amount_out` for the user, C change UTXOs for itself (C >= 1).
    3. It builds one transaction containing the user transfer and the maker transfer, and sends it to the user.
 

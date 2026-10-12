@@ -450,14 +450,12 @@ fn classify_send_error(error: &ClientError) -> SendFailure {
 }
 
 /// The status of a step from the statuses of its `sends` (same order) at
-/// `block_height`: confirmed if any send succeeded at `confirmed`, else
-/// failed if any failed at `confirmed` (the last one reported), else pending
-/// if any landed below `confirmed` (it may still be confirmed, or dropped
-/// with its fork), else expired if every send's blockhash is past, else
-/// pending. A landed success wins over a failure because only one of the
-/// sends can spend the inputs. A failure counts only at `confirmed`, like a
-/// success: a failure on a minority fork must not re-prove or requeue the
-/// step while the same signature can still land on the main fork.
+/// `block_height`: confirmed if any send succeeded at `confirmed`; otherwise
+/// pending while any other attempt can still land or has only a `processed`
+/// status. A confirmed failure becomes final only when no attempt is pending.
+/// With no landed result, expiration requires every send's blockhash to expire.
+/// This prevents an earlier failed attempt from releasing inputs that a later
+/// submission can still spend. Missing statuses are treated as unobserved sends.
 ///
 /// Ordering invariant: `block_height` must be read before `statuses` (see
 /// `poll_sent`). A send missing from `statuses` was then not landed at a
@@ -471,36 +469,37 @@ pub fn classify(
     block_height: u64,
 ) -> StepStatus {
     let mut failure = None;
-    let mut unconfirmed = false;
-    let landed = sends
+    let mut pending = false;
+    for (sent, status) in sends
         .iter()
-        .zip(statuses)
-        .filter_map(|(sent, status)| Some((sent, status.as_ref()?)));
-    for (sent, status) in landed {
+        .zip(statuses.iter().chain(std::iter::repeat(&None)))
+    {
+        let Some(status) = status else {
+            pending |= block_height <= sent.last_valid_block_height;
+            continue;
+        };
         if !status.satisfies_commitment(CommitmentConfig::confirmed()) {
-            unconfirmed = true;
+            pending = true;
             continue;
         }
-        let Some(error) = &status.err else {
-            return StepStatus::Confirmed {
-                signature: sent.signature,
-            };
-        };
-        failure = Some(StepStatus::Failed {
-            reason: error.to_string(),
-            custom: CustomError::of(error),
-        });
+        match &status.err {
+            None => {
+                return StepStatus::Confirmed {
+                    signature: sent.signature,
+                }
+            }
+            Some(error) => {
+                failure = Some(StepStatus::Failed {
+                    reason: error.to_string(),
+                    custom: CustomError::of(error),
+                })
+            }
+        }
     }
-    if let Some(failure) = failure {
-        return failure;
-    }
-    let last_valid = sends
-        .iter()
-        .map(|sent| sent.last_valid_block_height)
-        .max()
-        .unwrap_or(0);
-    if unconfirmed || block_height <= last_valid {
+    if pending {
         StepStatus::Pending
+    } else if let Some(failure) = failure {
+        failure
     } else {
         StepStatus::Expired
     }
@@ -1024,5 +1023,50 @@ mod tests {
         for (label, status, block_height, want) in cases {
             assert_eq!(classify(&sends, &[status], block_height), want, "{label}");
         }
+    }
+    #[test]
+    fn a_live_retry_prevents_failure_until_it_confirms_or_expires() {
+        let sends = [
+            sent(100),
+            Sent {
+                signature: Signature::from([2; 64]),
+                last_valid_block_height: 200,
+            },
+        ];
+        let error = TransactionError::InstructionError(0, InstructionError::Custom(42));
+        let failure = Some(status(
+            Some(error.clone()),
+            TransactionConfirmationStatus::Confirmed,
+        ));
+        let expected_failure = StepStatus::Failed {
+            reason: error.to_string(),
+            custom: Some(CustomError { index: 0, code: 42 }),
+        };
+        assert_eq!(
+            classify(&sends, &[failure.clone(), None], 150),
+            StepStatus::Pending
+        );
+        assert_eq!(
+            classify(&sends, std::slice::from_ref(&failure), 150),
+            StepStatus::Pending
+        );
+        assert_eq!(
+            classify(&sends, &[failure.clone(), None], 201),
+            expected_failure
+        );
+        assert_eq!(
+            classify(
+                &sends,
+                &[
+                    failure,
+                    Some(status(None, TransactionConfirmationStatus::Confirmed))
+                ],
+                150
+            ),
+            StepStatus::Confirmed {
+                signature: Signature::from([2; 64])
+            }
+        );
+        assert_eq!(classify(&sends, &[None, None], 201), StepStatus::Expired);
     }
 }

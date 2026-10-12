@@ -4,7 +4,7 @@
 //! from admission until the indexed balance takes it over, and never twice.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex, MutexGuard, PoisonError,
@@ -95,6 +95,13 @@ pub struct FillRanges {
     pub outflow: Option<TargetRange>,
 }
 
+/// One user input, identified by its state tree and nullifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct UserInput {
+    pub tree: Address,
+    pub nullifier: [u8; 32],
+}
+
 /// The in- and outflows of admitted fills, keyed by operation.
 #[derive(Default)]
 struct FillFlows {
@@ -103,6 +110,7 @@ struct FillFlows {
     /// The commitments of the market maker inputs the fill's current step
     /// spends, set once inputs are selected (`fill_inputs`).
     outflow_inputs: HashMap<OperationId, Vec<[u8; 32]>>,
+    user_inputs: HashMap<UserInput, OperationId>,
 }
 
 impl FillFlows {
@@ -155,6 +163,7 @@ impl FillFlows {
         self.inflows.remove(operation);
         self.outflows.remove(operation);
         self.outflow_inputs.remove(operation);
+        self.user_inputs.retain(|_, holder| holder != operation);
     }
 }
 
@@ -283,38 +292,60 @@ impl PendingBalance {
     /// (wrapped in `MarketMakerError::Swap`).
     ///
     /// Inflow outputs `Reservations` already tracks are left out: they
-    /// already landed (for example a user transfer reused for a second
-    /// order) and `Reservations::balance` counts them, so recording them would
-    /// count them twice until `drop_fill`.
+    /// already landed and `Reservations::balance` counts them, so recording them would
+    /// count them twice until `drop_fill`. User inputs are reserved under
+    /// the same fill lock: duplicates within a request or across admitted
+    /// fills fail with `SwapError::DuplicateFill`, and confirmed spends
+    /// with `SwapError::UserInputSpent`, before any balance is recorded.
     pub fn queue_fill(
         &self,
         operation: OperationId,
         mut inflow: Inflow,
         outflow: Outflow,
         ranges: FillRanges,
+        user_inputs: &[UserInput],
     ) -> Result<(), MarketMakerError> {
         let mut fills = locked(&self.fills);
-        inflow
-            .outputs
-            .retain(|output| !self.reservations.tracks(&output.utxo_hash));
-        let out_balance = fills.net_balance(&self.reservations, &outflow.asset);
-        range_check(
-            outflow.asset,
-            out_balance,
-            outflow.amount,
-            Flow::Out,
-            ranges.outflow,
-        )?;
-        let in_balance = fills.net_balance(&self.reservations, &inflow.asset);
-        range_check(
-            inflow.asset,
-            in_balance,
-            inflow.amount(),
-            Flow::In,
-            ranges.inflow,
-        )?;
+        self.reservations.snapshot(|reservations| {
+            let mut unique = HashSet::new();
+            for input in user_inputs {
+                if fills.user_inputs.contains_key(input) || !unique.insert(*input) {
+                    return Err(SwapError::DuplicateFill {
+                        nullifier: input.nullifier,
+                    });
+                }
+                if reservations.is_spent(&input.nullifier) {
+                    return Err(SwapError::UserInputSpent {
+                        nullifier: input.nullifier,
+                    });
+                }
+            }
+            inflow
+                .outputs
+                .retain(|output| !reservations.tracks(&output.utxo_hash));
+            let out_balance = fills.net_balance(reservations, &outflow.asset);
+            range_check(
+                outflow.asset,
+                out_balance,
+                outflow.amount,
+                Flow::Out,
+                ranges.outflow,
+            )?;
+            let in_balance = fills.net_balance(reservations, &inflow.asset);
+            range_check(
+                inflow.asset,
+                in_balance,
+                inflow.amount(),
+                Flow::In,
+                ranges.inflow,
+            )?;
+            Ok::<_, SwapError>(())
+        })?;
         fills.inflows.insert(operation, inflow);
         fills.outflows.insert(operation, outflow);
+        fills
+            .user_inputs
+            .extend(user_inputs.iter().map(|input| (*input, operation)));
         Ok(())
     }
 
@@ -332,14 +363,23 @@ impl PendingBalance {
 
     /// The fill landed: its outflow is now visible as spent inputs, if sync
     /// has not already removed them. The inflow stays until sync indexes the
-    /// user's outputs (`inflow_landed`).
+    /// user's outputs (`inflow_landed`). User inputs become spent tombstones
+    /// before their reservations are released.
     pub fn finish_fill(&self, operation: OperationId) {
         let mut fills = locked(&self.fills);
         fills.outflows.remove(&operation);
         fills.outflow_inputs.remove(&operation);
+        let spent: Vec<_> = fills
+            .user_inputs
+            .iter()
+            .filter(|(_, holder)| **holder == operation)
+            .map(|(input, _)| input.nullifier)
+            .collect();
+        self.reservations.remove_spent_nullifiers(spent);
+        fills.user_inputs.retain(|_, holder| *holder != operation);
     }
 
-    /// The fill will not land: both its flows are removed.
+    /// The fill will not land: its flows and user-input reservations are removed.
     pub fn drop_fill(&self, operation: OperationId) {
         locked(&self.fills).remove(&operation);
     }
@@ -376,7 +416,9 @@ impl PendingBalance {
 
     /// See `FillFlows::net_balance`.
     pub fn net_balance(&self, asset: &Address) -> u64 {
-        locked(&self.fills).net_balance(&self.reservations, asset)
+        let fills = locked(&self.fills);
+        self.reservations
+            .snapshot(|reservations| fills.net_balance(reservations, asset))
     }
 
     /// A fresh operation id, unique for the process lifetime.
@@ -503,6 +545,7 @@ mod tests {
                     amount: 5,
                 },
                 NO_RANGES,
+                &[],
             )
             .expect("fill without ranges is admitted");
         for (label, landed, want) in [
@@ -544,6 +587,7 @@ mod tests {
                     amount: 30,
                 },
                 NO_RANGES,
+                &[],
             )
             .expect("fill without ranges is admitted");
         pending.fill_inputs(operation, vec![INPUT]);
@@ -615,10 +659,83 @@ mod tests {
                     amount: 0,
                 },
                 NO_RANGES,
+                &[],
             )
             .expect("fill without ranges is admitted");
         let got = pending.net_balance(&PAID);
         let want = FIRST.amount + SECOND.amount;
         assert_eq!(got, want, "net balance: got {got}, want {want}");
+    }
+    fn queue_user_inputs(
+        pending: &PendingBalance,
+        id: OperationId,
+        inputs: &[UserInput],
+    ) -> Result<(), MarketMakerError> {
+        pending.queue_fill(
+            id,
+            Inflow {
+                asset: PAID,
+                outputs: vec![FIRST],
+            },
+            Outflow {
+                asset: SENT,
+                amount: 10,
+            },
+            NO_RANGES,
+            inputs,
+        )
+    }
+
+    #[test]
+    fn overlapping_user_inputs_are_released_on_abort_and_spent_on_confirmation(
+    ) -> Result<(), MarketMakerError> {
+        let pending = PendingBalance::new(Arc::new(Reservations::default()));
+        let first = UserInput {
+            tree: PAID,
+            nullifier: [41; 32],
+        };
+        let shared = UserInput {
+            tree: PAID,
+            nullifier: [42; 32],
+        };
+        queue_user_inputs(&pending, 1, &[first, shared])?;
+        assert!(matches!(queue_user_inputs(&pending, 2, &[shared]),
+            Err(MarketMakerError::Swap(SwapError::DuplicateFill { nullifier })) if nullifier == shared.nullifier));
+        pending.drop_fill(1);
+        queue_user_inputs(&pending, 2, &[shared])?;
+        pending.finish_fill(2);
+        assert!(matches!(queue_user_inputs(&pending, 3, &[shared]),
+            Err(MarketMakerError::Swap(SwapError::UserInputSpent { nullifier })) if nullifier == shared.nullifier));
+        queue_user_inputs(&pending, 4, &[first])?;
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_inputs_in_one_request_leave_no_reservation() -> Result<(), MarketMakerError> {
+        let pending = PendingBalance::new(Arc::new(Reservations::default()));
+        let input = UserInput {
+            tree: PAID,
+            nullifier: [43; 32],
+        };
+        assert!(matches!(
+            queue_user_inputs(&pending, 1, &[input, input]),
+            Err(MarketMakerError::Swap(SwapError::DuplicateFill { .. }))
+        ));
+        assert_eq!(pending.net_balance(&PAID), 0);
+        queue_user_inputs(&pending, 2, &[input])?;
+        Ok(())
+    }
+
+    #[test]
+    fn a_spend_observed_before_its_note_prevents_late_insertion() {
+        use super::super::reservations::InsertOutcome;
+        let reservations = Reservations::default();
+        let hash = [44; 32];
+        assert_eq!(reservations.remove_spent_nullifiers([hash]), 0);
+        assert_eq!(
+            reservations.insert(tracked(PAID, hash, 100, Some(0))),
+            InsertOutcome::AlreadySpent
+        );
+        assert_eq!(reservations.balance(&PAID), 0);
     }
 }

@@ -99,7 +99,12 @@ impl Coordinator {
             let _ = reply.send(Err(MarketMakerError::UnknownFill));
             return;
         };
-        match co_sign(self.identity.signer.as_ref(), message, user_signature) {
+        match co_sign(
+            self.identity.signer.as_ref(),
+            message,
+            fill.user_signer,
+            user_signature,
+        ) {
             Ok(transaction) => {
                 fill.transaction = Some(transaction);
                 fill.settle = Some(reply);
@@ -124,7 +129,9 @@ impl Coordinator {
 ///    `MarketMakerError::UnexpectedSigner` naming the second;
 /// 4. that signer, the user, exists, else
 ///    `MarketMakerError::MissingUserSigner`;
-/// 5. `user_signature` verifies for the user's key over the serialized
+/// 5. that signer matches the requesting user recorded by the fill, else
+///    `MarketMakerError::UnexpectedSigner`;
+/// 6. `user_signature` verifies for the user's key over the serialized
 ///    message, else `MarketMakerError::InvalidUserSignature`.
 ///
 /// Signing itself can fail with `MarketMakerError::Signer`.
@@ -135,6 +142,7 @@ impl Coordinator {
 fn co_sign(
     market_maker_signer: &dyn Signer,
     message: VersionedMessage,
+    user_signer: Address,
     user_signature: Signature,
 ) -> Result<VersionedTransaction, MarketMakerError> {
     let payer = market_maker_signer.pubkey();
@@ -155,8 +163,13 @@ fn co_sign(
     if let Some(extra) = users.get(1) {
         return Err(MarketMakerError::UnexpectedSigner { signer: *extra });
     }
-    let serialized = message.serialize();
     let user = users.first().ok_or(MarketMakerError::MissingUserSigner)?;
+    if users.as_slice() != [user_signer] || user_signer == payer {
+        return Err(MarketMakerError::UnexpectedSigner {
+            signer: user_signer,
+        });
+    }
+    let serialized = message.serialize();
     if !user_signature.verify(user.as_ref(), &serialized) {
         return Err(MarketMakerError::InvalidUserSignature { signer: *user });
     }
@@ -213,7 +226,7 @@ mod tests {
         let [market_maker, user] = signers();
         let message = message(&user.pubkey(), &[]);
         let signature = sign(&user, &message.serialize());
-        let outcome = co_sign(&market_maker, message, signature);
+        let outcome = co_sign(&market_maker, message, user.pubkey(), signature);
         assert!(
             matches!(outcome, Err(MarketMakerError::MarketMakerNotSigner)),
             "got {outcome:?}, want MarketMakerNotSigner"
@@ -225,7 +238,12 @@ mod tests {
     fn co_sign_rejects_message_without_user() {
         let [market_maker, _] = signers();
         let message = message(&market_maker.pubkey(), &[]);
-        let outcome = co_sign(&market_maker, message, Signature::default());
+        let outcome = co_sign(
+            &market_maker,
+            message,
+            Address::new_unique(),
+            Signature::default(),
+        );
         assert!(
             matches!(outcome, Err(MarketMakerError::MissingUserSigner)),
             "got {outcome:?}, want MissingUserSigner"
@@ -240,7 +258,7 @@ mod tests {
         let message = message(&market_maker.pubkey(), &[user.pubkey(), stranger]);
         let signature = sign(&user, &message.serialize());
         let want = second_user_signer(&message, &market_maker.pubkey());
-        let outcome = co_sign(&market_maker, message, signature);
+        let outcome = co_sign(&market_maker, message, user.pubkey(), signature);
         assert!(
             matches!(outcome, Err(MarketMakerError::UnexpectedSigner { signer }) if signer == want),
             "got {outcome:?}, want UnexpectedSigner of {want}"
@@ -261,6 +279,7 @@ mod tests {
         let outcome = co_sign(
             &market_maker,
             VersionedMessage::Legacy(legacy),
+            user.pubkey(),
             Signature::default(),
         );
         assert!(
@@ -283,7 +302,7 @@ mod tests {
         let message = message(&market_maker.pubkey(), &[user.pubkey()]);
         let serialized = message.serialize();
         let forged = sign(&market_maker, &serialized);
-        let outcome = co_sign(&market_maker, message.clone(), forged);
+        let outcome = co_sign(&market_maker, message.clone(), user.pubkey(), forged);
         let user_key = user.pubkey();
         assert!(
             matches!(outcome, Err(MarketMakerError::InvalidUserSignature { signer }) if signer == user_key),
@@ -291,7 +310,8 @@ mod tests {
         );
 
         let user_signature = sign(&user, &serialized);
-        let transaction = co_sign(&market_maker, message, user_signature).expect("valid co-sign");
+        let transaction =
+            co_sign(&market_maker, message, user.pubkey(), user_signature).expect("valid co-sign");
         assert_eq!(
             transaction.signatures,
             vec![sign(&market_maker, &serialized), user_signature],

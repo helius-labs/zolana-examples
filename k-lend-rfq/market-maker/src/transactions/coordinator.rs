@@ -501,6 +501,7 @@ impl Inner {
                         outflow: settings.range(&order.asset),
                     }
                 },
+                &order.user_inputs,
             )?;
         }
         let asset = operation.asset();

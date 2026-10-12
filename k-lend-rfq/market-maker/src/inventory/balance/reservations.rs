@@ -3,6 +3,8 @@
 //! nullifier was seen spent is never tracked again, so no two steps can
 //! spend the same input and a late sync cannot resurrect a spent one.
 
+use std::sync::{Mutex, PoisonError};
+
 use dashmap::{mapref::entry::Entry, DashMap, DashSet};
 use solana_address::Address;
 use zolana_transaction::WalletUtxo;
@@ -51,26 +53,59 @@ pub struct Reservations {
     /// Commitment to the step that holds it.
     reserved: DashMap<[u8; 32], StepId>,
     spent_nullifiers: DashSet<[u8; 32]>,
+    mutations: Mutex<()>,
+}
+
+/// Whether a note became tracked or gained its spendable leaf index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InsertOutcome {
+    Added,
+    Indexed,
+    Unchanged,
+    AlreadySpent,
 }
 
 impl Reservations {
-    /// Tracks `utxo`; returns whether it was new. An already tracked UTXO
-    /// only gains a leaf index it lacked; a spent one is ignored.
-    pub fn insert(&self, utxo: TrackedUtxo) -> bool {
-        if self.spent_nullifiers.contains(&utxo.wallet.nullifier) {
-            return false;
-        }
-        match self.utxos.entry(utxo.utxo_hash()) {
-            Entry::Occupied(mut existing) => {
-                let existing = existing.get_mut();
-                existing.leaf_index = existing.leaf_index.or(utxo.leaf_index);
-                false
+    /// Runs a balance read or mutation while note and reservation changes are
+    /// excluded. The closure must not call another mutation or snapshot.
+    pub fn snapshot<T>(&self, read: impl FnOnce(&Self) -> T) -> T {
+        let guard = self
+            .mutations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let value = read(self);
+        drop(guard);
+        value
+    }
+
+    /// Whether a nullifier was observed spent, including before its note arrived.
+    pub fn is_spent(&self, nullifier: &[u8; 32]) -> bool {
+        self.spent_nullifiers.contains(nullifier)
+    }
+
+    /// Tracks a new note or replaces an unindexed receipt with its indexed
+    /// wallet data. Spent notes are ignored, including late indexer replays.
+    pub fn insert(&self, utxo: TrackedUtxo) -> InsertOutcome {
+        self.snapshot(|reservations| {
+            if reservations.is_spent(&utxo.wallet.nullifier) {
+                return InsertOutcome::AlreadySpent;
             }
-            Entry::Vacant(vacant) => {
-                vacant.insert(utxo);
-                true
+            match reservations.utxos.entry(utxo.utxo_hash()) {
+                Entry::Occupied(mut existing) => {
+                    let existing = existing.get_mut();
+                    if existing.leaf_index.is_none() && utxo.leaf_index.is_some() {
+                        *existing = utxo;
+                        InsertOutcome::Indexed
+                    } else {
+                        InsertOutcome::Unchanged
+                    }
+                }
+                Entry::Vacant(vacant) => {
+                    vacant.insert(utxo);
+                    InsertOutcome::Added
+                }
             }
-        }
+        })
     }
 
     /// Whether the UTXO with commitment `utxo_hash` is tracked.
@@ -88,51 +123,63 @@ impl Reservations {
     /// `MarketMakerError::UtxoReserved` for one another step holds.
     /// Re-reserving for the same step is allowed.
     pub fn reserve(&self, step: StepId, utxo_hashes: &[[u8; 32]]) -> Result<(), MarketMakerError> {
-        for hash in utxo_hashes {
-            if !self.utxos.contains_key(hash) {
-                return Err(MarketMakerError::UtxoNotTracked(*hash));
+        self.snapshot(|_| {
+            for hash in utxo_hashes {
+                if !self.utxos.contains_key(hash) {
+                    return Err(MarketMakerError::UtxoNotTracked(*hash));
+                }
+                if self
+                    .reserved
+                    .get(hash)
+                    .is_some_and(|holder| *holder != step)
+                {
+                    return Err(MarketMakerError::UtxoReserved(*hash));
+                }
             }
-            if self
-                .reserved
-                .get(hash)
-                .is_some_and(|holder| *holder != step)
-            {
-                return Err(MarketMakerError::UtxoReserved(*hash));
+            for hash in utxo_hashes {
+                self.reserved.insert(*hash, step);
             }
-        }
-        for hash in utxo_hashes {
-            self.reserved.insert(*hash, step);
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Releases every UTXO `step` holds.
     pub fn release(&self, step: StepId) {
-        self.reserved.retain(|_, holder| *holder != step);
+        self.snapshot(|reservations| reservations.reserved.retain(|_, holder| *holder != step));
     }
 
     /// Stops tracking the spent `utxo_hashes` and remembers their
     /// nullifiers so no later sync re-adds them.
     pub fn remove_spent(&self, utxo_hashes: &[[u8; 32]]) {
-        for hash in utxo_hashes {
-            if let Some((_, utxo)) = self.utxos.remove(hash) {
-                self.spent_nullifiers.insert(utxo.wallet.nullifier);
+        self.snapshot(|reservations| {
+            for hash in utxo_hashes {
+                if let Some((_, utxo)) = reservations.utxos.remove(hash) {
+                    reservations.spent_nullifiers.insert(utxo.wallet.nullifier);
+                }
+                reservations.reserved.remove(hash);
             }
-            self.reserved.remove(hash);
-        }
+        });
     }
 
-    /// Removes every tracked UTXO whose nullifier `is_spent`; returns how
-    /// many.
-    pub fn remove_spent_nullifiers(&self, is_spent: impl Fn(&[u8; 32]) -> bool) -> usize {
-        let spent: Vec<[u8; 32]> = self
-            .utxos
-            .iter()
-            .filter(|entry| is_spent(&entry.wallet.nullifier))
-            .map(|entry| *entry.key())
-            .collect();
-        self.remove_spent(&spent);
-        spent.len()
+    /// Records every spent nullifier, even when its note is not tracked yet,
+    /// and removes matching notes. Returns the number of removed notes.
+    pub fn remove_spent_nullifiers(&self, nullifiers: impl IntoIterator<Item = [u8; 32]>) -> usize {
+        self.snapshot(|reservations| {
+            for nullifier in nullifiers {
+                reservations.spent_nullifiers.insert(nullifier);
+            }
+            let spent: Vec<_> = reservations
+                .utxos
+                .iter()
+                .filter(|entry| reservations.is_spent(&entry.wallet.nullifier))
+                .map(|entry| *entry.key())
+                .collect();
+            for hash in &spent {
+                reservations.utxos.remove(hash);
+                reservations.reserved.remove(hash);
+            }
+            spent.len()
+        })
     }
 
     /// The nullifiers of every tracked UTXO.

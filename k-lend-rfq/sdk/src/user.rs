@@ -157,7 +157,8 @@ pub struct QuoteCheck<'a> {
 
 impl QuoteCheck<'_> {
     /// Checks the swap message the market maker returns for `order` before the
-    /// user signs it. Checks, in order:
+    /// user signs it. The offer must name the requested pair, else
+    /// `SwapError::WrongPair`. Then checks, in order:
     ///
     /// 1. the first account key (the fee payer) is `offer.fee_payer`, else
     ///    `SwapError::UnexpectedTransaction`;
@@ -201,6 +202,9 @@ impl QuoteCheck<'_> {
     /// slot's non-inclusion proof.
     pub fn verify(&self, receiver: &Receiver) -> Result<()> {
         let order = self.order;
+        if order.offer.pair != *self.pair {
+            return Err(SwapError::WrongPair.into());
+        }
         if self.message.static_account_keys().first() != Some(&order.offer.fee_payer) {
             return Err(SwapError::UnexpectedTransaction.into());
         }
@@ -348,7 +352,10 @@ mod tests {
             &[user_transfer.clone(), market_maker_transfer],
             Some(&fee_payer),
         ));
+        let pair = Pair::new(Address::new_unique(), Address::new_unique());
         let offer = Offer {
+            pair,
+            fee_bps: 0,
             id,
             expires_at: u64::MAX,
             quote: Quote {
@@ -369,7 +376,6 @@ mod tests {
                 transfer: user_transfer,
             },
         };
-        let pair = Pair::new(Address::new_unique(), Address::new_unique());
         let registry = AssetRegistry::default();
         let receiver = Receiver {
             keys: &keypair,

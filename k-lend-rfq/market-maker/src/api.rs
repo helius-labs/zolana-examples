@@ -1,5 +1,5 @@
 //! The market maker's public handle. `MarketMaker` is a cheap clone around
-//! `Inner`; every state change goes through the coordinator task, and
+//! `Inner`; transaction steps run through the coordinator task, and
 //! dropping the last handle cancels it and every task it spawned.
 
 use std::sync::{Arc, Mutex, PoisonError, RwLock, RwLockReadGuard};
@@ -114,25 +114,19 @@ impl Inner {
 }
 
 impl MarketMaker {
-    /// Validates `config`, checks every pair against its vault, reads the
-    /// asset registry, runs a first sync, sizes the
-    /// transaction budget and starts the sync and coordinator tasks.
+    /// Initializes the market maker and starts its background tasks.
     ///
-    /// The vault check (`check_vault`) reads each pair's vault once over the
-    /// same pricing path a quote uses (vault, `GlobalConfig`, allocated
-    /// reserves) and verifies that the vault's mint is `pair.token_mint` and
-    /// that `pair.shares_mint`, `pair.token_vault` and `pair.authority` are the
-    /// vault's PDAs. A missing or misconfigured vault therefore fails here
-    /// rather than at the first quote: with `MarketMakerError::VaultMissing`
-    /// when the vault account does not exist (or the rpc does not show it yet),
-    /// `MarketMakerError::VaultState` when a pricing account is missing or does
-    /// not parse, and `MarketMakerError::Config(ConfigError::VaultMismatch)`
-    /// naming the first field that differs.
+    /// 1. Validate configuration, derive identities and create RPC, indexer and prover clients.
+    /// 2. Check each pair against its vault and pricing accounts.
+    /// 3. Load asset registrations and sync the initial inventory.
+    /// 4. Compute transaction budgets and the market maker input limit.
+    /// 5. Initialize proof and send queues and shared settings.
+    /// 6. Start periodic inventory sync and the transaction coordinator.
     ///
-    /// Errors with `MarketMakerError::Config` on an invalid configuration, with
-    /// the vault check errors above, with the rpc, registry or sync error, and
-    /// with `MarketMakerError::Budget` when not even the narrowest swap fits
-    /// one transaction.
+    /// Missing vaults fail with `MarketMakerError::VaultMissing`; invalid pricing accounts
+    /// with `MarketMakerError::VaultState`; mismatched pair addresses with
+    /// `MarketMakerError::Config`. Configuration, registry, sync and transaction-budget
+    /// errors are returned before a handle is created.
     pub async fn start(config: MarketMakerConfig) -> Result<Self, MarketMakerError> {
         let MarketMakerConfig {
             connection,
@@ -248,13 +242,13 @@ impl MarketMaker {
         })
     }
 
-    /// Applies `update` through the coordinator; see `Inner::update_config`.
-    pub async fn update_config(&self, update: ConfigUpdate) -> Result<()> {
-        Ok(self.inner.update_config(update).await?)
-    }
-
-    /// Cancels the background tasks and waits for them and every spawned
-    /// task to finish. Fills awaiting a signature are released.
+    /// Shuts down background services and waits for tracked tasks to finish.
+    ///
+    /// 1. Signal cancellation to the background tasks.
+    /// 2. Await inventory sync and the coordinator, logging abnormal exits.
+    /// 3. Close the task tracker and await all remaining tracked tasks.
+    ///
+    /// Fills awaiting a signature release their inventory and user-input reservations.
     pub async fn shutdown(&self) {
         self.inner.runtime.cancel.cancel();
         let background = std::mem::take(
@@ -273,6 +267,127 @@ impl MarketMaker {
         self.inner.runtime.tasks.wait().await;
     }
 
+    /// Applies configuration changes to the running market maker.
+    ///
+    /// 1. Validate vaults and resolve asset registrations for any pairs being added.
+    /// 2. For added pairs, extend the asset registry and rescan inventory before publication.
+    /// 3. Ask the coordinator to validate and publish the update, and await its result.
+    pub async fn update_config(&self, update: ConfigUpdate) -> Result<()> {
+        Ok(self.inner.update_config(update).await?)
+    }
+
+    /// Refreshes the market maker's inventory from the indexer.
+    ///
+    /// 1. Fetch new transactions, deposits, and spends.
+    /// 2. Decrypt fetched outputs and verify new notes, retaining live merge inputs.
+    /// 3. Add newly discovered UTXOs and remove spent ones.
+    /// 4. Notify the coordinator to retry queued operations.
+    pub async fn sync(&self) -> Result<()> {
+        Ok(self.inner.sync().await?)
+    }
+
+    /// Prices a swap and opens a recorded, expiring order.
+    ///
+    /// 1. Sweep expired orders and verify that the pair is served.
+    /// 2. Read the vault state and price the amount with the configured fee.
+    /// 3. Check projected balances against the inventory target ranges.
+    /// 4. Determine the user input limit from available inventory and the transaction budget.
+    /// 5. Record the pair, amounts, width and expiry, then return the offer and its fee.
+    ///
+    /// Recorded terms remain fixed until expiry, including after a configuration update.
+    pub async fn quote(&self, pair: &Pair, direction: Direction, amount_in: u64) -> Result<Offer> {
+        self.inner.quote(pair, direction, amount_in).await
+    }
+
+    /// Prepares a recorded order's swap transaction for the user's signature.
+    ///
+    /// 1. Verify the pair and consume its open, unexpired order.
+    /// 2. Validate the user's input-owner signer, spent inputs, transfer shape and payment.
+    /// 3. Reserve user inputs against overlapping fills and admit the inventory flows.
+    /// 4. Select market maker inputs and prove its transfer with the SPP order address.
+    /// 5. Combine the transfers and return the unsigned message, input nullifiers, change and deadline.
+    ///
+    /// Amounts and the deadline come from the recorded order. A failed fill attempt
+    /// consumes the order, so a retry requires a fresh quote.
+    pub async fn fill(&self, pair: &Pair, request: &SwapRequest) -> Result<MarketMakerFill> {
+        self.inner.fill(pair, request).await
+    }
+
+    /// Settles a prepared fill using the user's signature.
+    ///
+    /// 1. Send the fill message and user signature to the coordinator.
+    /// 2. Check that the fill is known, awaiting a signature, and unexpired.
+    /// 3. Verify the expected user's signature, add the market maker's signature, and submit.
+    /// 4. Await confirmation, update tracked inventory, and return the transaction signature.
+    ///
+    /// An invalid signature leaves the fill open for a valid signature before expiry.
+    pub async fn settle(&self, fill: &Fill, user_signature: Signature) -> Result<Signature> {
+        Ok(self.inner.settle(fill, user_signature).await?)
+    }
+
+    /// Reshapes available UTXOs for an asset using its configured inventory profile.
+    ///
+    /// 1. Verify the asset is configured and queue the consolidation.
+    /// 2. Require at least two available UTXOs and select inputs within the transaction budget.
+    /// 3. Plan replacement outputs from the inventory profile and reserve the selected inputs.
+    /// 4. Prove, sign, and submit the self-transfer.
+    /// 5. Await confirmation, update tracked inventory, and return the signature and UTXO counts.
+    pub async fn consolidate(&self, asset: Address) -> Result<ConsolidateReceipt> {
+        Ok(self.inner.consolidate(asset).await?)
+    }
+
+    /// Seeds private inventory from the market maker's public collateral balance.
+    ///
+    /// 1. Verify the pair is served, require a nonzero funding amount, and read the vault state.
+    /// 2. Plan shielding of `collateral` using its configured inventory profile.
+    /// 3. For a nonzero `deposit`, build a kVault deposit and shield the simulated share proceeds.
+    /// 4. Check transaction size, sign, and submit the combined deposit and shielding instructions.
+    /// 5. Await confirmation and indexing, sync inventory, and return the vault operation receipt.
+    pub async fn seed_inventory(
+        &self,
+        pair: &Pair,
+        deposit: u64,
+        collateral: u64,
+    ) -> Result<VaultOperation> {
+        Ok(self.inner.seed_inventory(pair, deposit, collateral).await?)
+    }
+
+    /// Converts the market maker's existing private collateral into private kVault shares.
+    ///
+    /// 1. Verify the pair is served and sync inventory.
+    /// 2. Queue the rebalance and read the vault state to plan the deposit and share outputs.
+    /// 3. Select and reserve available collateral UTXOs within the transaction budget.
+    /// 4. Prove unshielding of the required collateral, preserving private change.
+    /// 5. Submit the unshield, kVault deposit, and shielding of simulated share proceeds atomically.
+    /// 6. Await confirmation and indexing, sync inventory, and return the vault operation receipt.
+    ///
+    /// This manual rebalance is not added to the automatic `rebalances` list.
+    pub async fn rebalance_shares(&self, pair: &Pair, collateral: u64) -> Result<VaultOperation> {
+        Ok(self
+            .inner
+            .rebalance(pair, RebalanceKind::Shares, collateral)
+            .await?)
+    }
+
+    /// Converts the market maker's existing private kVault shares into private collateral.
+    ///
+    /// 1. Verify the pair is served and sync inventory.
+    /// 2. Queue the rebalance and read the vault state to plan the withdrawal and collateral outputs.
+    /// 3. Select and reserve available share UTXOs within the transaction budget.
+    /// 4. Prove unshielding of the required shares, preserving private change.
+    /// 5. Submit the unshield, kVault withdrawal, and shielding of simulated collateral proceeds atomically.
+    /// 6. Await confirmation and indexing, sync inventory, and return the vault operation receipt.
+    ///
+    /// This manual rebalance is not added to the automatic `rebalances` list.
+    pub async fn rebalance_collateral(&self, pair: &Pair, shares: u64) -> Result<VaultOperation> {
+        Ok(self
+            .inner
+            .rebalance(pair, RebalanceKind::Collateral, shares)
+            .await?)
+    }
+}
+
+impl MarketMaker {
     /// Operator-facing: the market maker's balance of `asset` as quoting sees
     /// it, in base units of `asset`. Reflects the `Reservations` balance plus
     /// user payments of admitted fills not yet indexed minus payouts of fills
@@ -374,70 +489,5 @@ impl MarketMaker {
     /// indexed yet.
     pub fn spendable(&self, asset: &Address) -> Vec<WalletUtxo> {
         self.inner.services.pending.reservations.spendable(asset)
-    }
-
-    /// Runs one indexer sync now; see `Inner::sync`.
-    pub async fn sync(&self) -> Result<()> {
-        Ok(self.inner.sync().await?)
-    }
-
-    /// Prices a swap and opens an order; see `Inner::quote` for the checks.
-    pub async fn quote(&self, pair: &Pair, direction: Direction, amount_in: u64) -> Result<Offer> {
-        self.inner.quote(pair, direction, amount_in).await
-    }
-
-    /// Fills an open order; see `Inner::fill` for the checks.
-    pub async fn fill(&self, pair: &Pair, request: &SwapRequest) -> Result<MarketMakerFill> {
-        self.inner.fill(pair, request).await
-    }
-
-    /// Co-signs and sends a fill with the user's signature and returns the
-    /// landed signature; see `Coordinator::on_settle` and `co_sign`.
-    pub async fn settle(&self, fill: &Fill, user_signature: Signature) -> Result<Signature> {
-        Ok(self.inner.settle(fill, user_signature).await?)
-    }
-
-    /// Operator-facing: merges the available UTXOs of `asset` into the
-    /// profile's parts in one transfer and returns once it landed, with the
-    /// signature and the number of UTXOs spent and created. Errors with
-    /// `MarketMakerError::NothingToConsolidate` when fewer than two UTXOs are
-    /// available; see `Inner::consolidate`.
-    pub async fn consolidate(&self, asset: Address) -> Result<ConsolidateReceipt> {
-        Ok(self.inner.consolidate(asset).await?)
-    }
-
-    /// Funds the shielded inventory from the market maker's public accounts;
-    /// see `Inner::seed_inventory`.
-    pub async fn seed_inventory(
-        &self,
-        pair: &Pair,
-        deposit: u64,
-        collateral: u64,
-    ) -> Result<VaultOperation> {
-        Ok(self.inner.seed_inventory(pair, deposit, collateral).await?)
-    }
-
-    /// Operator-facing: manual deposit-side rebalance. Spends `collateral`
-    /// (base units of `pair.token_mint`) from the shielded inventory, deposits
-    /// it into the kVault and shields the minted shares; returns once indexed,
-    /// with the vault before and after. Not listed in `rebalances`. Shares
-    /// `Inner::rebalance` with `rebalance_collateral`.
-    pub async fn rebalance_shares(&self, pair: &Pair, collateral: u64) -> Result<VaultOperation> {
-        Ok(self
-            .inner
-            .rebalance(pair, RebalanceKind::Shares, collateral)
-            .await?)
-    }
-
-    /// Operator-facing: manual withdraw-side rebalance. Spends `shares` (base
-    /// units of `pair.shares_mint`) from the shielded inventory, withdraws
-    /// them from the kVault and shields the collateral paid out; returns once
-    /// indexed, with the vault before and after. Not listed in `rebalances`.
-    /// Shares `Inner::rebalance` with `rebalance_shares`.
-    pub async fn rebalance_collateral(&self, pair: &Pair, shares: u64) -> Result<VaultOperation> {
-        Ok(self
-            .inner
-            .rebalance(pair, RebalanceKind::Collateral, shares)
-            .await?)
     }
 }

@@ -12,7 +12,8 @@ use solana_address::Address;
 use solana_hash::Hash;
 use solana_instruction::Instruction;
 use solana_message::VersionedMessage;
-use zolana_client::{compile_message, ComputeBudgetConfig};
+use zolana_client::{compile_message, AsyncRpc, ComputeBudgetConfig};
+use zolana_interface::{instruction::TransactIxData, pda, PROGRAM_ID_PUBKEY};
 use zolana_keypair::ShieldedAddress;
 use zolana_transaction::WalletUtxo;
 
@@ -27,7 +28,7 @@ use crate::{
     api::Inner,
     error::MarketMakerError,
     inventory::balance::{
-        pending::{Inflow, InflowOutput},
+        pending::{Inflow, InflowOutput, UserInput},
         select::select,
     },
     transactions::budget::MAX_COMPUTE_UNITS,
@@ -77,6 +78,10 @@ pub struct FillOrder {
     /// The user's outputs to the market maker, tracked as pending until they
     /// land.
     pub inflow: Inflow,
+    /// The user inputs held until the fill confirms or aborts.
+    pub user_inputs: Vec<UserInput>,
+    /// The input-owner signer the user must supply when settling.
+    pub user_signer: Address,
     /// The order's expiry (`OpenOrder::expires_at`). Scheduling and offering
     /// reject the fill with `SwapError::OrderExpired` once it has passed, and
     /// the swap message's co-sign deadline is this instant: the co-sign
@@ -116,7 +121,7 @@ impl Inner {
         let order = self.orders.take(request.order, pair)?;
         let quote = order.quote;
         let (asset_in, asset_out) = quote.direction.assets(pair);
-        let inflow = self
+        let (inflow, user_inputs, user_signer) = self
             .check_user_transfer(asset_in, quote.amount_in, order.max_user_inputs, request)
             .await?;
         let outcome = self
@@ -127,6 +132,8 @@ impl Inner {
                 recipient: request.user,
                 user_transfer: request.transfer.clone(),
                 inflow,
+                user_inputs,
+                user_signer,
                 deadline: order.expires_at,
             }))
             .await
@@ -160,9 +167,12 @@ impl Inner {
     ///    else `SwapError::UserTransferTooWide`;
     /// 4. it has exactly `USER_OUTPUTS` outputs, else
     ///    `SwapError::UserTransferOutputs`;
-    /// 5. every output the market maker can decrypt opens to its commitment,
+    /// 5. its sole input-owner signer is the requesting user and none of its
+    ///    nullifiers were spent (`SwapError::UserTransferSigner` or
+    ///    `SwapError::UserInputSpent`);
+    /// 6. every output the market maker can decrypt opens to its commitment,
     ///    else `SwapError::CommitmentMismatch`;
-    /// 6. the decrypted outputs of `asset_in` sum to exactly `amount_in`,
+    /// 7. the decrypted outputs of `asset_in` sum to exactly `amount_in`,
     ///    else `SwapError::AmountOverflow` or `SwapError::Underpaid`.
     ///
     /// Width and output count are checked because the market maker's transfer
@@ -177,7 +187,7 @@ impl Inner {
         amount_in: u64,
         max: usize,
         request: &SwapRequest,
-    ) -> Result<Inflow> {
+    ) -> Result<(Inflow, Vec<UserInput>, Address)> {
         let user_transact = transact_data(&request.transfer)?;
         if !user_transact.interface_transfers.is_empty() {
             return Err(SwapError::PublicTransfer {
@@ -199,6 +209,15 @@ impl Inner {
             }
             .into());
         }
+        let signer = Address::new_from_array(request.user.signing_pubkey.as_ed25519()?);
+        let inputs = user_inputs(
+            &request.transfer,
+            &user_transact,
+            self.identity.payer,
+            signer,
+            self.identity.tree,
+        )?;
+        self.check_user_inputs(&inputs).await?;
         let registry = self
             .registry
             .read()
@@ -226,17 +245,166 @@ impl Inner {
             }
             .into());
         }
-        Ok(Inflow {
-            asset: asset_in,
-            outputs: outputs
-                .into_iter()
-                .map(|(utxo, utxo_hash)| InflowOutput {
-                    utxo_hash,
-                    amount: utxo.amount,
-                })
-                .collect(),
-        })
+        Ok((
+            Inflow {
+                asset: asset_in,
+                outputs: outputs
+                    .into_iter()
+                    .map(|(utxo, utxo_hash)| InflowOutput {
+                        utxo_hash,
+                        amount: utxo.amount,
+                    })
+                    .collect(),
+            },
+            inputs,
+            signer,
+        ))
     }
+
+    /// Rejects spent notes using local tombstones, live nullifier PDAs and
+    /// indexed spends, which remain available after a PDA is closed.
+    async fn check_user_inputs(&self, inputs: &[UserInput]) -> Result<()> {
+        for input in inputs {
+            if self
+                .services
+                .pending
+                .reservations
+                .is_spent(&input.nullifier)
+            {
+                return Err(SwapError::UserInputSpent {
+                    nullifier: input.nullifier,
+                }
+                .into());
+            }
+        }
+        let addresses = inputs
+            .iter()
+            .map(|input| pda::nullifier_pda(&input.tree, &input.nullifier).0)
+            .collect();
+        let accounts = self.services.rpc.get_multiple_accounts(addresses).await?;
+        if accounts.len() != inputs.len() {
+            return Err(SwapError::UnexpectedTransaction.into());
+        }
+        for (input, account) in inputs.iter().zip(accounts) {
+            if account.is_some_and(|account| {
+                account.owner != Address::default() || !account.data.is_empty()
+            }) {
+                return Err(SwapError::UserInputSpent {
+                    nullifier: input.nullifier,
+                }
+                .into());
+            }
+        }
+        // Closed nullifier PDAs are absent; the indexer retains their confirmed spends.
+        let spent = self
+            .services
+            .indexer
+            .get_shielded_transactions_by_nullifiers(
+                inputs.iter().map(|input| input.nullifier).collect(),
+                None,
+                Some(1),
+                None,
+            )
+            .await?;
+        for input in inputs {
+            if spent
+                .transactions
+                .iter()
+                .any(|tx| tx.nullifiers.contains(&input.nullifier))
+            {
+                return Err(SwapError::UserInputSpent {
+                    nullifier: input.nullifier,
+                }
+                .into());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Validates the account layout and binds every input-owner signature to
+/// the requesting user before inventory is reserved or a proof is started.
+fn user_inputs(
+    instruction: &Instruction,
+    data: &TransactIxData,
+    payer: Address,
+    signer: Address,
+    output_tree: Address,
+) -> Result<Vec<UserInput>> {
+    let invalid = || SwapError::UserTransferSigner { expected: signer };
+    let owner_start = 4usize
+        .checked_add(data.tree_contexts.len())
+        .and_then(|offset| offset.checked_add(data.inputs.len()))
+        .ok_or_else(invalid)?;
+    let owners = instruction
+        .accounts
+        .get(owner_start..)
+        .ok_or_else(invalid)?;
+    let [owner] = owners else {
+        return Err(invalid().into());
+    };
+    if signer == payer
+        || owner.pubkey != signer
+        || !owner.is_signer
+        || data.inputs.is_empty()
+        || data.tree_contexts.is_empty()
+        || data.circuit.cache_access().is_some()
+        || instruction
+            .accounts
+            .first()
+            .is_none_or(|account| account.pubkey != payer || !account.is_signer)
+    {
+        return Err(invalid().into());
+    }
+    let [payer_meta, tree_meta, program_meta, system_meta] = instruction
+        .accounts
+        .get(..4)
+        .ok_or(SwapError::UnexpectedTransaction)?
+    else {
+        return Err(SwapError::UnexpectedTransaction.into());
+    };
+    if !payer_meta.is_writable
+        || tree_meta.pubkey != output_tree
+        || !tree_meta.is_writable
+        || tree_meta.is_signer
+        || program_meta.pubkey != PROGRAM_ID_PUBKEY
+        || program_meta.is_signer
+        || system_meta.pubkey != Address::default()
+        || system_meta.is_signer
+    {
+        return Err(SwapError::UnexpectedTransaction.into());
+    }
+    let trees = instruction
+        .accounts
+        .get(4..4 + data.tree_contexts.len())
+        .ok_or(SwapError::UnexpectedTransaction)?;
+    for tree in trees {
+        if tree.is_signer || !tree.is_writable {
+            return Err(SwapError::UnexpectedTransaction.into());
+        }
+    }
+    data.inputs
+        .iter()
+        .enumerate()
+        .map(|(position, input)| {
+            let tree = trees
+                .get(usize::from(input.tree_index))
+                .ok_or(SwapError::UnexpectedTransaction)?
+                .pubkey;
+            let nullifier = pda::nullifier_pda(&tree, &input.nullifier_hash).0;
+            let account = instruction
+                .accounts
+                .get(4 + trees.len() + position)
+                .ok_or(SwapError::UnexpectedTransaction)?;
+            if account.pubkey != nullifier || account.is_signer || !account.is_writable {
+                return Err(SwapError::UnexpectedTransaction.into());
+            }
+            Ok(UserInput {
+                tree,
+                nullifier: input.nullifier_hash,
+            })
+        })
+        .collect()
 }
 
 impl Coordinator {
@@ -303,6 +471,7 @@ impl Coordinator {
         let fill = FillTransfer {
             order: order.order,
             user_transfer: order.user_transfer.clone(),
+            user_signer: order.user_signer,
             deadline: order.deadline,
             spends,
             message: None,
