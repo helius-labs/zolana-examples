@@ -1,15 +1,17 @@
 import {
   ShieldedKeypair,
   SigningKey,
-  buildRegistrationTransaction,
   createZolanaClient,
 } from "@heliuslabs/zolana";
+import {
+  getRegisterInstructionAsync,
+  getSetMergingEnabledInstructionAsync,
+} from "@heliuslabs/zolana/instructions";
 import { isWalletRegistered } from "@heliuslabs/zolana/wallet";
 
 import {
   cliKeypair,
   sendAndConfirmFactory,
-  sendTransactionFactory,
   setup,
   transferLamportsInstruction,
 } from "../src/lib.js";
@@ -45,18 +47,23 @@ async function main(): Promise<void> {
       FUND_LAMPORTS,
     ),
   ]);
-  const registration =
-    await buildRegistrationTransaction({
-      client,
-      owner: senderSigner.address,
-      address: sender.shieldedAddress(),
-    });
-  if (registration !== undefined) {
-    await sendTransactionFactory(
-      client,
-      senderSigner,
-    )(registration);
-  }
+  const senderAddress = sender.shieldedAddress();
+  await sendAndConfirmFactory(
+    client,
+    senderSigner,
+  )([
+    await getRegisterInstructionAsync({
+      owner: senderSigner,
+      nullifierPublicKey:
+        senderAddress.nullifierPublicKey,
+      viewingPublicKey:
+        senderAddress.viewingPublicKey.toBytes(),
+    }),
+    await getSetMergingEnabledInstructionAsync({
+      owner: senderSigner,
+      enabled: true,
+    }),
+  ]);
 
   const registered = await isWalletRegistered({
     rpc: client,
