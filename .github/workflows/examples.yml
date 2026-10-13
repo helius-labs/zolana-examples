@@ -8,6 +8,7 @@ on:
       - "typescript-client/**"
       - "swap-program/**"
       - "escrow-program/**"
+      - "staking-program/**"
       - ".github/workflows/examples.yml"
   pull_request:
     paths:
@@ -15,6 +16,7 @@ on:
       - "typescript-client/**"
       - "swap-program/**"
       - "escrow-program/**"
+      - "staking-program/**"
       - ".github/workflows/examples.yml"
   workflow_dispatch:
 
@@ -25,6 +27,8 @@ concurrency:
 env:
   AGAVE_VERSION: v4.0.2
   SBF_TOOLS_VERSION: v1.54
+  # bump to redump the stake pool, token, and stake programs from mainnet
+  STAKING_MAINNET_PROGRAMS_CACHE_VERSION: 1
 
 jobs:
   rust-client:
@@ -135,3 +139,97 @@ jobs:
       - name: Build escrow program (SBF)
         working-directory: escrow-program/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --features bpf-entrypoint
+
+  staking-test:
+    name: test / staking-program
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: staking-program
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+          cache-dependency-path: staking-program/prover/circuits/go.sum
+
+      - name: Prepare pinned Zolana checkout
+        run: bash scripts/prepare-deps.sh
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            staking-program
+            staking-program/.deps/zolana
+
+      - name: Install Anza (Solana) CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Cache mainnet programs
+        uses: actions/cache@v4
+        with:
+          path: |
+            staking-program/target/deploy/spl_stake_pool.so
+            staking-program/target/deploy/spl_token.so
+            staking-program/target/deploy/solana_stake_program.so
+          key: staking-mainnet-programs-${{ env.STAKING_MAINNET_PROGRAMS_CACHE_VERSION }}
+
+      - name: Dump mainnet programs
+        run: bash scripts/dump-stake-pool.sh
+
+      - name: Cache SPP proving keys
+        uses: actions/cache@v4
+        with:
+          path: staking-program/build/spp-keys
+          key: staking-spp-keys-${{ hashFiles('staking-program/scripts/fetch-spp-keys.sh', 'staking-program/scripts/prepare-deps.sh') }}
+
+      - name: Fetch SPP proving keys
+        run: bash scripts/fetch-spp-keys.sh
+
+      - name: Cache circuit keys
+        uses: actions/cache@v4
+        with:
+          path: staking-program/build/gnark
+          key: staking-gnark-keys-${{ hashFiles('staking-program/prover/circuits/**/*.go', '!staking-program/prover/circuits/**/*_test.go', 'staking-program/prover/circuits/go.sum', 'staking-program/scripts/prepare-deps.sh') }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check code
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Check committed circuit fixtures
+        run: |
+          cargo run --locked -p private-staking-sdk --example settlement_fixture
+          cargo run --locked -p private-staking-sdk --example encryption_fixture -- refund > prover/circuits/testdata/refund-encryption.json
+          cargo run --locked -p private-staking-sdk --example encryption_fixture -- payout > prover/circuits/testdata/payout-encryption.json
+          git diff --exit-code prover/circuits/testdata
+
+      - name: Test circuits
+        working-directory: staking-program/prover/circuits
+        run: go test -timeout 30m ./...
+
+      - name: Generate missing circuit keys
+        run: |
+          for circuit in intent cancel settlement; do
+            if [[ ! -f "build/gnark/$circuit/pk.bin" ]]; then
+              cargo run --locked -p private-staking-prover --bin setup -- "$circuit" "build/gnark/$circuit" --rust-vk "program/src/verifying_keys/$circuit.rs" --insecure-test-keys
+            fi
+          done
+          git diff --exit-code program/src/verifying_keys
+
+      - name: Build programs and SPP prover
+        run: bash scripts/build-tests.sh
+
+      - name: Run program and SDK tests
+        run: cargo test --workspace --locked
