@@ -3,12 +3,13 @@ use rust_client_example::{cli_keypair, setup, SetupContext};
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 use solana_system_interface::instruction::transfer;
-use zolana_client::user_registry::{
-    build_registration_transaction_sync, is_wallet_registered_sync,
-};
-use zolana_client::{sign_transaction, Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::user_registry::is_wallet_registered_sync;
+use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
-use zolana_user_registry_interface::{instruction::set_merging_enabled, user_record_pda};
+use zolana_user_registry_interface::{
+    instruction::{register, set_merging_enabled, RegisterData},
+    user_record_pda,
+};
 
 const FUND_LAMPORTS: u64 = 10_000_000;
 
@@ -36,22 +37,22 @@ fn main() -> Result<()> {
         &[&payer],
         client.compute_budget(),
     )?;
-    if let Some(registration) = build_registration_transaction_sync(
-        &client,
-        sender.pubkey(),
-        &sender.shielded_address()?,
-        None,
-        None,
-    )? {
-        let registration = sign_transaction(registration, &[&sender])?;
-        client.process_transaction(registration)?;
-    }
+    let sender_address = sender.shielded_address()?;
+    let user_record = user_record_pda(&sender.pubkey()).0;
     client.create_and_send_transaction(
-        &[set_merging_enabled(
-            user_record_pda(&sender.pubkey()).0,
-            sender.pubkey(),
-            true,
-        )],
+        &[
+            register(
+                user_record,
+                sender.pubkey(),
+                sender.pubkey(),
+                RegisterData {
+                    owner_p256: None,
+                    nullifier_pubkey: sender_address.nullifier_pubkey,
+                    viewing_pubkey: *sender_address.viewing_pubkey.as_bytes(),
+                },
+            ),
+            set_merging_enabled(user_record, sender.pubkey(), true),
+        ],
         sender.pubkey(),
         &[&sender],
         client.compute_budget(),
