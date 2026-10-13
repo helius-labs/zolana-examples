@@ -8,6 +8,7 @@ use zolana_client::user_registry::{
 };
 use zolana_client::{sign_transaction, Rpc, SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
+use zolana_user_registry_interface::{instruction::set_merging_enabled, user_record_pda};
 
 const FUND_LAMPORTS: u64 = 10_000_000;
 
@@ -45,6 +46,16 @@ fn main() -> Result<()> {
         let registration = sign_transaction(registration, &[&sender])?;
         client.process_transaction(registration)?;
     }
+    client.create_and_send_transaction(
+        &[set_merging_enabled(
+            user_record_pda(&sender.pubkey()).0,
+            sender.pubkey(),
+            true,
+        )],
+        sender.pubkey(),
+        &[&sender],
+        client.compute_budget(),
+    )?;
 
     assert!(is_wallet_registered_sync(&client, sender.pubkey())?);
 

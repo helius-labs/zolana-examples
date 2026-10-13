@@ -2,6 +2,7 @@ import {
   ShieldedKeypair,
   SigningKey,
   buildRegistrationTransaction,
+  buildSetMergingEnabledTransaction,
   createZolanaClient,
 } from "@heliuslabs/zolana";
 import { isWalletRegistered } from "@heliuslabs/zolana/wallet";
@@ -57,6 +58,16 @@ async function main(): Promise<void> {
       senderSigner,
     )(registration);
   }
+  await sendTransactionFactory(
+    client,
+    senderSigner,
+  )(
+    await buildSetMergingEnabledTransaction({
+      client,
+      owner: senderSigner.address,
+      enabled: true,
+    }),
+  );
 
   const registered = await isWalletRegistered({
     rpc: client,
