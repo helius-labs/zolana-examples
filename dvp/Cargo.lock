@@ -1515,18 +1515,27 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dvp-program",
+ "dvp-prover",
  "dvp-sdk",
+ "light-program-profiler",
+ "mollusk-svm",
+ "num-bigint 0.4.8",
+ "solana-account 4.3.2",
  "solana-address 2.6.1",
  "solana-instruction",
  "solana-keypair",
+ "solana-pubkey 4.2.1",
  "solana-signature",
  "solana-signer",
  "zolana-client",
+ "zolana-hasher",
  "zolana-interface",
  "zolana-keypair",
+ "zolana-merkle-tree",
  "zolana-program-test",
  "zolana-test-utils",
  "zolana-transaction",
+ "zolana-tree",
 ]
 
 [[package]]
@@ -2694,6 +2703,9 @@ version = "0.1.1"
 source = "git+https://github.com/Lightprotocol/light-program-profiler?rev=db49f3c801996a80e1cb7e4e92b13a694e962b65#db49f3c801996a80e1cb7e4e92b13a694e962b65"
 dependencies = [
  "light-profiler-macro",
+ "mollusk-svm",
+ "solana-hash",
+ "solana-program-runtime",
 ]
 
 [[package]]
