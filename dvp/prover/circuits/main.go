@@ -8,12 +8,16 @@ import (
 	"github.com/consensys/gnark/frontend"
 
 	"circuits/create_dvp"
+	"circuits/reclaim_dvp"
 	"zolana/gnarkffiprover"
 )
 
 func init() {
 	gnarkffiprover.Register("create_dvp", gnarkffiprover.Circuit{
 		New: func() frontend.Circuit { return &create_dvp.Circuit{} },
+	})
+	gnarkffiprover.Register("reclaim_dvp", gnarkffiprover.Circuit{
+		New: func() frontend.Circuit { return &reclaim_dvp.Circuit{} },
 	})
 }
 
