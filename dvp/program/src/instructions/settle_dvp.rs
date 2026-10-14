@@ -33,7 +33,7 @@ pub struct SettleDvpIxData {
     /// settle proof checks it against the terms.
     pub creator: Address,
     pub dvp_id: [u8; 32],
-    /// Bump of `dvp_authority`, found off chain with `find_program_address`.
+    /// Canonical bump of `dvp_authority` (`find_program_address`).
     pub bump: u8,
     /// Time the settle proof checks the terms' settlement window against.
     /// The program requires `now - TIME_WINDOW <= current_timestamp <= now`

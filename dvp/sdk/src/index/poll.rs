@@ -14,13 +14,13 @@ pub(crate) fn index_until<T>(
     what: &str,
     mut collect: impl FnMut() -> Result<Vec<T>>,
 ) -> Result<Vec<T>> {
-    let deadline = Instant::now() + timeout;
+    let start = Instant::now();
     loop {
         let found = collect()?;
         if !found.is_empty() {
             return Ok(found);
         }
-        if Instant::now() >= deadline {
+        if start.elapsed() >= timeout {
             bail!("timed out discovering {what}");
         }
         std::thread::sleep(INDEX_POLL);

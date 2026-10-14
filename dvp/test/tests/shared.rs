@@ -308,8 +308,12 @@ pub fn assert_dvp_error(context: &str, result: Result<Signature>, error: DvpErro
         Ok(signature) => panic!("{context}: unexpectedly succeeded ({signature})"),
         Err(err) => format!("{err:?}"),
     };
+    let hex = format!("0x{code:x}");
     assert!(
-        text.contains(&format!("Custom({code})")) || text.contains(&format!("0x{code:x}")),
+        text.contains(&format!("Custom({code})"))
+            || text
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .any(|word| word == hex),
         "{context}: expected {error:?} ({code}) in: {text}"
     );
 }

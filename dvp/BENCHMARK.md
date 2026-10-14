@@ -21,13 +21,13 @@ Regenerate with `cargo test -p dvp-test --test bench_cu -- --ignored --nocapture
 
 | Function                  |   Total CU |     Net CU |
 | ------------------------- | ---------- | ---------- |
-| `cpi_spp_transact_signed` |    151,160 |    151,160 |
-| `process_cancel_dvp_ix`   |    255,266 |    104,106 |
+| `cpi_spp_transact_signed` |    151,150 |    151,150 |
+| `process_cancel_dvp_ix`   |    255,248 |    104,098 |
 
 **Proving Time**
 | SPP proof | DvP circuit proof | Total  |
 | --------- | ----------------- | ------ |
-|    236 ms |             27 ms | 263 ms |
+|    234 ms |             29 ms | 264 ms |
 
 **Transaction Size**
 | Instruction Data | Accounts | v1 Tx      |
@@ -38,13 +38,13 @@ Regenerate with `cargo test -p dvp-test --test bench_cu -- --ignored --nocapture
 
 | Function                  |   Total CU |     Net CU |
 | ------------------------- | ---------- | ---------- |
-| `cpi_spp_transact_signed` |    140,444 |    140,444 |
-| `process_create_dvp_ix`   |    242,642 |    102,198 |
+| `cpi_spp_transact_signed` |    140,436 |    140,436 |
+| `process_create_dvp_ix`   |    244,151 |    103,715 |
 
 **Proving Time**
 | SPP proof | DvP circuit proof | Total  |
 | --------- | ----------------- | ------ |
-|     65 ms |             81 ms | 146 ms |
+|     64 ms |             82 ms | 146 ms |
 
 **Transaction Size**
 | Instruction Data | Accounts | v1 Tx      |
@@ -55,13 +55,13 @@ Regenerate with `cargo test -p dvp-test --test bench_cu -- --ignored --nocapture
 
 | Function                  |   Total CU |     Net CU |
 | ------------------------- | ---------- | ---------- |
-| `cpi_spp_transact_signed` |    140,325 |    140,325 |
-| `process_reclaim_dvp_ix`  |    243,265 |    102,940 |
+| `cpi_spp_transact_signed` |    140,317 |    140,317 |
+| `process_reclaim_dvp_ix`  |    244,755 |    104,438 |
 
 **Proving Time**
 | SPP proof | DvP circuit proof | Total  |
 | --------- | ----------------- | ------ |
-|    126 ms |             16 ms | 143 ms |
+|    123 ms |             15 ms | 139 ms |
 
 **Transaction Size**
 | Instruction Data | Accounts | v1 Tx      |
@@ -72,13 +72,13 @@ Regenerate with `cargo test -p dvp-test --test bench_cu -- --ignored --nocapture
 
 | Function                  |   Total CU |     Net CU |
 | ------------------------- | ---------- | ---------- |
-| `cpi_spp_transact_signed` |    149,786 |    149,786 |
-| `process_reject_dvp_ix`   |    253,892 |    104,106 |
+| `cpi_spp_transact_signed` |    149,047 |    149,047 |
+| `process_reject_dvp_ix`   |    254,645 |    105,598 |
 
 **Proving Time**
 | SPP proof | DvP circuit proof | Total  |
 | --------- | ----------------- | ------ |
-|    233 ms |             29 ms | 263 ms |
+|    231 ms |             28 ms | 260 ms |
 
 **Transaction Size**
 | Instruction Data | Accounts | v1 Tx      |
@@ -89,13 +89,13 @@ Regenerate with `cargo test -p dvp-test --test bench_cu -- --ignored --nocapture
 
 | Function                  |   Total CU |     Net CU |
 | ------------------------- | ---------- | ---------- |
-| `cpi_spp_transact_signed` |    152,464 |    152,464 |
-| `process_settle_dvp_ix`   |    257,549 |    105,085 |
+| `cpi_spp_transact_signed` |    153,553 |    153,553 |
+| `process_settle_dvp_ix`   |    258,614 |    105,061 |
 
 **Proving Time**
 | SPP proof | DvP circuit proof | Total  |
 | --------- | ----------------- | ------ |
-|    247 ms |             37 ms | 285 ms |
+|    257 ms |             38 ms | 295 ms |
 
 **Transaction Size**
 | Instruction Data | Accounts | v1 Tx      |

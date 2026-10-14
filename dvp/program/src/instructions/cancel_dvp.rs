@@ -16,7 +16,7 @@ pub struct CancelDvpIxData {
     /// cancel proof checks it against the terms.
     pub creator: Address,
     pub dvp_id: [u8; 32],
-    /// Bump of `dvp_authority`, found off chain with `find_program_address`.
+    /// Canonical bump of `dvp_authority` (`find_program_address`).
     pub bump: u8,
     pub cancel_proof: AbortDvpProof,
     pub spp: TransactIxData,

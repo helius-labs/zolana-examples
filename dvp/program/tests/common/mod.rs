@@ -114,18 +114,31 @@ pub fn create_dvp_data(dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
     data
 }
 
+/// Whether `bump` gives the `(CREATOR, DVP_ID)` seeds a PDA.
+fn has_pda(bump: u8) -> bool {
+    Pubkey::create_program_address(
+        &[DVP_AUTHORITY_PDA_SEED, CREATOR.as_ref(), &DVP_ID, &[bump]],
+        &program_id(),
+    )
+    .is_ok()
+}
+
 /// A bump whose `(CREATOR, DVP_ID)` seeds hash onto the curve, so it has no
 /// PDA.
 pub fn off_curve_bump() -> u8 {
     (0..=u8::MAX)
-        .find(|bump| {
-            Pubkey::create_program_address(
-                &[DVP_AUTHORITY_PDA_SEED, CREATOR.as_ref(), &DVP_ID, &[*bump]],
-                &program_id(),
-            )
-            .is_err()
-        })
+        .find(|&bump| !has_pda(bump))
         .expect("some bump lands on the curve")
+}
+
+/// A bump below the canonical one whose `(CREATOR, DVP_ID)` seeds still give
+/// a PDA, just not the canonical `dvp_authority`.
+pub fn non_canonical_bump() -> u8 {
+    let (_, canonical) = dvp_authority(&CREATOR, &DVP_ID);
+    (0..canonical)
+        .rev()
+        .find(|&bump| has_pda(bump))
+        .expect("some bump below the canonical one has a PDA")
 }
 
 pub fn reclaim_dvp_data(creator: Pubkey, dvp_id: [u8; 32], bump: u8) -> Vec<u8> {

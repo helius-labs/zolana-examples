@@ -17,9 +17,11 @@ use crate::{
 
 /// Funding one leg: a plain SPP transfer of `amount` of the leg's mint from
 /// the funder's private balance to [`Deposit::address`]. It goes through no
-/// DvP instruction; the transfer's change returns to the funder. Anyone may
-/// fund either leg, and may send more than the leg amount: settlement
-/// refunds the surplus.
+/// DvP instruction; the transfer's change returns to the funder. The funder
+/// may send more than the leg amount: settlement refunds the surplus to the
+/// leg's refund destination. Only the leg's party (the seller for delivery,
+/// the buyer for payment) can reclaim a deposit, so anyone else who funds a
+/// leg gives up control of it.
 pub struct FundDvpParams {
     pub terms: SwapDvp,
     pub leg: Leg,

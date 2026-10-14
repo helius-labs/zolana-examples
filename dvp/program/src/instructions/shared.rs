@@ -30,15 +30,18 @@ pub fn check_settle_timestamp(now: i64, current_timestamp: i64) -> ProgramResult
     }
 }
 
-/// The per-DvP authority PDA `[b"dvp", creator, dvp_id, [bump]]`. The caller
-/// supplies the bump, so this costs one `create_program_address` instead of
-/// a bump search.
+/// The per-DvP authority PDA `[b"dvp", creator, dvp_id, [bump]]`. The bump
+/// must be canonical: a non-canonical bump gives another PDA, owner hash and
+/// address slot, so the same `(creator, dvp_id)` could be created twice
+/// (property 3).
 pub fn dvp_authority(creator: &Address, dvp_id: &[u8; 32], bump: u8) -> Result<Address, DvpError> {
-    Address::create_program_address(
-        &[DVP_AUTHORITY_PDA_SEED, creator.as_ref(), dvp_id, &[bump]],
+    match Address::try_find_program_address(
+        &[DVP_AUTHORITY_PDA_SEED, creator.as_ref(), dvp_id],
         &crate::ID,
-    )
-    .map_err(|_| DvpError::InvalidDvpAuthority)
+    ) {
+        Some((address, canonical_bump)) if canonical_bump == bump => Ok(address),
+        _ => Err(DvpError::InvalidDvpAuthority),
+    }
 }
 
 /// `Poseidon(id(dvp_authority), ZERO_NULLIFIER_PUBKEY)`: the owner of the DvP
