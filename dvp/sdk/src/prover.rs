@@ -1,5 +1,8 @@
 use anyhow::Result;
-use dvp_prover::{CreateDvpProofInputs, DvpProof, ReclaimDvpProofInputs, SettleDvpProofInputs};
+use dvp_prover::{
+    AbortDvpProofInputs, CreateDvpProofInputs, DvpProof, ReclaimDvpProofInputs,
+    SettleDvpProofInputs,
+};
 
 use crate::err;
 
@@ -20,6 +23,10 @@ impl DvpProverClient {
     }
 
     pub fn prove_settle_dvp(&self, inputs: &SettleDvpProofInputs) -> Result<DvpProof> {
+        inputs.prove().map_err(err)
+    }
+
+    pub fn prove_abort_dvp(&self, inputs: &AbortDvpProofInputs) -> Result<DvpProof> {
         inputs.prove().map_err(err)
     }
 }

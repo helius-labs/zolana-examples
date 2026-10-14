@@ -7,6 +7,7 @@ import "C"
 import (
 	"github.com/consensys/gnark/frontend"
 
+	"circuits/abort_dvp"
 	"circuits/create_dvp"
 	"circuits/reclaim_dvp"
 	"circuits/settle_dvp"
@@ -22,6 +23,9 @@ func init() {
 	})
 	gnarkffiprover.Register("settle_dvp", gnarkffiprover.Circuit{
 		New: func() frontend.Circuit { return &settle_dvp.Circuit{} },
+	})
+	gnarkffiprover.Register("abort_dvp", gnarkffiprover.Circuit{
+		New: func() frontend.Circuit { return &abort_dvp.Circuit{} },
 	})
 }
 

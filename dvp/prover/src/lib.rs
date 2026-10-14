@@ -1,10 +1,12 @@
 //! Proof inputs and the gnark prover for the DvP circuits.
+pub mod abort_dvp;
 pub mod create_dvp;
 pub mod proof;
 pub mod reclaim_dvp;
 pub mod settle_dvp;
 pub mod swap_dvp;
 
+pub use abort_dvp::AbortDvpProofInputs;
 pub use create_dvp::CreateDvpProofInputs;
 pub use proof::DvpProof;
 pub use reclaim_dvp::ReclaimDvpProofInputs;
@@ -17,16 +19,23 @@ pub enum CircuitId {
     CreateDvp,
     ReclaimDvp,
     SettleDvp,
+    AbortDvp,
 }
 
 impl zolana_gnark_ffi_prover::Circuit for CircuitId {
-    const ALL: &'static [Self] = &[Self::CreateDvp, Self::ReclaimDvp, Self::SettleDvp];
+    const ALL: &'static [Self] = &[
+        Self::CreateDvp,
+        Self::ReclaimDvp,
+        Self::SettleDvp,
+        Self::AbortDvp,
+    ];
 
     fn name(self) -> &'static str {
         match self {
             Self::CreateDvp => "create_dvp",
             Self::ReclaimDvp => "reclaim_dvp",
             Self::SettleDvp => "settle_dvp",
+            Self::AbortDvp => "abort_dvp",
         }
     }
 }
