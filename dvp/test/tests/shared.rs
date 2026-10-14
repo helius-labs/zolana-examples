@@ -8,21 +8,29 @@ use anyhow::{anyhow, Result};
 use dvp_program::error::DvpError;
 use dvp_sdk::{
     encryption::TERMS_RECIPIENTS,
-    instructions::create_dvp::{CreateDvp, CreateDvpDerivation, CreateDvpTransactionParams},
-    state::SwapDvp,
+    instructions::{
+        create_dvp::{CreateDvp, CreateDvpDerivation, CreateDvpTransactionParams},
+        fund_dvp::{FundDvp, FundDvpParams},
+    },
+    state::{Leg, SwapDvp},
 };
+use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use zolana_client::{ComputeBudgetConfig, ProverClient, Rpc};
+use zolana_interface::pda::spl_token_program_id;
 use zolana_keypair::{ShieldedAddress, ShieldedKeypair};
 use zolana_program_test::{
     fixture,
     localnet::{FixtureLocalnet, LocalnetPaths, LocalnetPorts},
 };
-use zolana_test_utils::test_validator_asserts::wait_for_non_inclusion_proof;
-use zolana_transaction::SOL_MINT;
+use zolana_test_utils::{
+    test_validator_asserts::wait_for_non_inclusion_proof,
+    wallet::{Deposit as ShieldDeposit, DepositParams},
+};
+use zolana_transaction::{decrypt_spendable, AssetRegistry, WalletUtxo, SOL_MINT};
 
 /// The whole per-transaction budget: an instruction verifies its own proof
 /// and the SPP proof.
@@ -197,6 +205,83 @@ impl TestEnv {
             &all_signers,
             budget,
         )?)
+    }
+
+    /// The pool's assets: SOL and the fixture SPL mint.
+    pub fn assets(&self) -> Result<AssetRegistry> {
+        let mut assets = AssetRegistry::default();
+        assets.insert(fixture::SPL_ASSET_ID, fixture::spl_mint())?;
+        Ok(assets)
+    }
+
+    /// Shields `amount` of `mint` from the payer's public balance (its SOL
+    /// or its fixture SPL token account) into `actor`'s private balance, and
+    /// returns the note once the indexer serves it.
+    pub fn shield(&self, actor: &Actor, mint: Address, amount: u64) -> Result<WalletUtxo> {
+        let recipient = actor.address()?;
+        let spl = mint != SOL_MINT;
+        let deposit = ShieldDeposit::new(DepositParams {
+            recipient: &recipient,
+            asset: mint,
+            amount,
+            spl_token_account: spl.then(fixture::payer_token_account),
+            spl_token_program: Some(spl_token_program_id()),
+            memo: None,
+        })?;
+        let client = &self.localnet.client;
+        let signature = deposit.send(client, &self.payer, self.localnet.tree, &self.payer)?;
+        client.confirm_private_transaction_sync(signature)?;
+        let transactions = client
+            .get_shielded_transactions_by_tags(vec![deposit.view_tag()], None, None, None)?
+            .transactions;
+        decrypt_spendable(&actor.shielded, &transactions, &self.assets()?)
+            .map_err(|e| anyhow!("decrypt shielded notes: {e:?}"))?
+            .balances
+            .get_balance(mint)
+            .into_iter()
+            .flat_map(|balance| balance.utxos.iter())
+            .find(|note| note.tx_signature == signature)
+            .cloned()
+            .ok_or_else(|| anyhow!("shielded note of {signature} not found"))
+    }
+
+    /// `funder` sends `amount` of `leg`'s mint from `note` to the DvP's
+    /// deposit address in a plain SPP transfer it pays and signs, and waits
+    /// until the indexer serves it.
+    pub fn fund(
+        &self,
+        funder: &Actor,
+        terms: &SwapDvp,
+        leg: Leg,
+        amount: u64,
+        note: WalletUtxo,
+    ) -> Result<Signature> {
+        let client = &self.localnet.client;
+        let proof_inputs = FundDvpParams {
+            terms: terms.clone(),
+            leg,
+            amount,
+            authority_viewing_pubkey: self.settlement_authority.shielded.viewing_pubkey(),
+            inputs: vec![note],
+            payer: funder.solana.pubkey(),
+            tree_id: self.localnet.tree_id,
+        }
+        .build(&funder.shielded)?;
+        let spp = client.prove_transact(proof_inputs, None, &funder.shielded)?;
+        let instruction = FundDvp {
+            payer: funder.solana.pubkey(),
+            tree: self.localnet.tree,
+            spp,
+        }
+        .instruction();
+        let signature = client.create_and_send_transaction(
+            &[instruction],
+            funder.solana.pubkey(),
+            &[&funder.solana],
+            ComputeBudgetConfig::new(TRANSACT_CU_LIMIT),
+        )?;
+        client.confirm_private_transaction_sync(signature)?;
+        Ok(signature)
     }
 }
 

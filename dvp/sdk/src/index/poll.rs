@@ -29,11 +29,11 @@ pub(crate) fn index_until<T>(
 
 /// Runs `scan` over every indexed transaction with an output or a message
 /// tagged `tag`, page by page, and collects what it returns.
-pub(crate) fn collect_tagged<I: Rpc, T>(
+pub(crate) fn collect_tagged<I: Rpc, F: IntoIterator>(
     tag: [u8; 32],
     indexer: &I,
-    mut scan: impl FnMut(&ShieldedTransaction) -> Result<Option<T>>,
-) -> Result<Vec<T>> {
+    mut scan: impl FnMut(&ShieldedTransaction) -> Result<F>,
+) -> Result<Vec<F::Item>> {
     let mut found = Vec::new();
     let mut cursor = None;
     loop {

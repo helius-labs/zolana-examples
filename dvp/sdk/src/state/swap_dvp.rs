@@ -555,10 +555,25 @@ mod tests {
             mutate(&mut terms);
             assert!(terms.validate().is_err(), "case {i}");
         }
-        let terms = SwapDvp {
-            buyer_refund_destination: p256,
-            ..fixed_terms()
-        };
-        assert!(terms.validate().is_err());
+        // D10: a P256 signing key in any destination is rejected; a PDA is
+        // accepted.
+        let destinations: [fn(&mut SwapDvp) -> &mut ShieldedAddress; 4] = [
+            |t| &mut t.seller_settlement_destination,
+            |t| &mut t.buyer_settlement_destination,
+            |t| &mut t.seller_refund_destination,
+            |t| &mut t.buyer_refund_destination,
+        ];
+        for (i, destination) in destinations.iter().enumerate() {
+            let mut terms = fixed_terms();
+            *destination(&mut terms) = p256;
+            assert!(terms.validate().is_err(), "P256 destination {i}");
+            let mut terms = fixed_terms();
+            *destination(&mut terms) = ShieldedAddress::for_pda(
+                &Address::new_from_array([6; 32]),
+                [0; 32],
+                p256.viewing_pubkey,
+            );
+            assert!(terms.validate().is_ok(), "PDA destination {i}");
+        }
     }
 }

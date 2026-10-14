@@ -1,0 +1,175 @@
+use anyhow::Result;
+use solana_address::Address;
+use zolana_keypair::{P256Pubkey, PublicKey, ShieldedAddress};
+use zolana_program::compression::ZERO_NULLIFIER_PUBKEY;
+use zolana_transaction::{
+    utxo::{SppProofInputUtxo, Utxo},
+    Data, Mint,
+};
+
+use super::dvp_utxo::pda_input_utxo;
+use crate::state::SwapDvp;
+
+/// The two legs of a DvP.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Leg {
+    /// The seller's asset, `delivery_mint` / `delivery_amount`.
+    Delivery,
+    /// The buyer's asset, `payment_mint` / `payment_amount`.
+    Payment,
+}
+
+impl Leg {
+    pub fn mint(self, terms: &SwapDvp) -> Address {
+        match self {
+            Self::Delivery => terms.delivery_mint,
+            Self::Payment => terms.payment_mint,
+        }
+    }
+
+    /// The amount settlement moves on this leg; a deposit may hold more.
+    pub fn amount(self, terms: &SwapDvp) -> u64 {
+        match self {
+            Self::Delivery => terms.delivery_amount,
+            Self::Payment => terms.payment_amount,
+        }
+    }
+
+    /// The leg whose mint is `mint`, if any. The mints differ
+    /// ([`SwapDvp::validate`]), so at most one matches.
+    pub fn of_mint(terms: &SwapDvp, mint: &Address) -> Option<Self> {
+        [Self::Delivery, Self::Payment]
+            .into_iter()
+            .find(|leg| &leg.mint(terms) == mint)
+    }
+}
+
+/// A funded leg: a plain UTXO a funder transferred to the DvP's deposit
+/// address ([`Deposit::address`]). It is owned by the DvP authority PDA with
+/// the zero nullifier secret, carries no data, and its ciphertext is
+/// readable by the settlement authority (and by the funder through its
+/// transaction viewing key).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Deposit {
+    pub terms: SwapDvp,
+    pub leg: Leg,
+    /// The deposited asset: its mint address and pool asset id.
+    pub mint: Mint,
+    /// The deposited amount; anything above `leg.amount(terms)` is surplus
+    /// that settlement refunds.
+    pub amount: u64,
+    pub blinding: [u8; 32],
+    /// Raw id of the tree holding the UTXO; the commitment folds it in.
+    pub tree_id: u16,
+    pub leaf_index: u64,
+}
+
+impl Deposit {
+    /// Where funders send a leg: the DvP authority PDA as owner, the zero
+    /// nullifier pubkey (so the program can spend without a secret), and the
+    /// settlement authority's viewing pubkey, which the deposit ciphertext is
+    /// encrypted to. The viewing pubkey does not enter the owner hash, so
+    /// every funder of the DvP sends to the same owner.
+    pub fn address(
+        terms: &SwapDvp,
+        authority_viewing_pubkey: P256Pubkey,
+    ) -> Result<ShieldedAddress> {
+        let (pda, _) = terms.dvp_authority()?;
+        Ok(ShieldedAddress::for_pda(
+            &pda,
+            ZERO_NULLIFIER_PUBKEY,
+            authority_viewing_pubkey,
+        ))
+    }
+
+    /// The deposit as an SPP input. Anyone holding the opening can build it;
+    /// spending needs the PDA signature only the program gives.
+    pub fn to_input_utxo(&self) -> Result<SppProofInputUtxo> {
+        let (pda, _) = self.terms.dvp_authority()?;
+        let utxo = Utxo {
+            owner: PublicKey::from_pda(&pda),
+            asset: self.mint,
+            amount: self.amount,
+            blinding: self.blinding,
+            ring_program_id: None,
+            data: Data::default(),
+        };
+        pda_input_utxo(utxo, None, self.tree_id, self.leaf_index)
+    }
+
+    pub fn hash(&self) -> Result<[u8; 32]> {
+        Ok(self.to_input_utxo()?.utxo_hash)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zolana_transaction::{instructions::transact::SppProofOutputUtxo, SOL_MINT};
+
+    use super::*;
+    use crate::index::fixture::{fixture_parties, sample_terms};
+
+    #[test]
+    fn legs_follow_the_terms() {
+        let terms = sample_terms(&fixture_parties());
+        assert_eq!(
+            (
+                Leg::of_mint(&terms, &terms.delivery_mint),
+                Leg::of_mint(&terms, &SOL_MINT),
+                Leg::of_mint(&terms, &Address::new_from_array([9; 32])),
+                Leg::Delivery.amount(&terms),
+                Leg::Payment.amount(&terms),
+            ),
+            (
+                Some(Leg::Delivery),
+                Some(Leg::Payment),
+                None,
+                terms.delivery_amount,
+                terms.payment_amount,
+            )
+        );
+    }
+
+    #[test]
+    fn input_utxo_spends_what_a_funder_sends_to_the_deposit_address() {
+        let parties = fixture_parties();
+        let terms = sample_terms(&parties);
+        let [_, _, authority] = &parties;
+        let address = Deposit::address(&terms, authority.viewing_pubkey()).unwrap();
+        let blinding = zolana_keypair::random_blinding();
+        let deposit = Deposit {
+            terms: terms.clone(),
+            leg: Leg::Payment,
+            mint: Mint::SOL,
+            amount: 3_000,
+            blinding,
+            tree_id: 1,
+            leaf_index: 4,
+        };
+        let sent = SppProofOutputUtxo {
+            asset: Mint::SOL,
+            amount: 3_000,
+            blinding,
+            owner_address: Some(address),
+            ..Default::default()
+        };
+        let input = deposit.to_input_utxo().unwrap();
+        let (pda, _) = terms.dvp_authority().unwrap();
+        assert_eq!(
+            (
+                input.utxo_hash,
+                input.nullifier_pubkey,
+                address.owner_hash().unwrap(),
+                input.leaf_index,
+            ),
+            (
+                sent.hash(1).unwrap(),
+                ZERO_NULLIFIER_PUBKEY,
+                *zolana_program::compression::PdaOwner::new(&pda)
+                    .unwrap()
+                    .owner_hash(),
+                4,
+            )
+        );
+    }
+}

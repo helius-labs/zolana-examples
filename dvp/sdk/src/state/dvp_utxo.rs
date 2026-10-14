@@ -55,39 +55,51 @@ impl DvpUtxo {
             ring_program_id: None,
             data: Data::default(),
         };
-        let key = zero_nullifier_key();
-        let nullifier_pubkey = key.pubkey().map_err(err)?;
-        let utxo_hash = utxo
-            .hash(
-                &nullifier_pubkey,
-                &derivation.dvp_id,
-                &[0; 32],
-                self.tree_id,
-            )
-            .map_err(err)?;
+        let input = pda_input_utxo(utxo, Some(derivation.dvp_id), self.tree_id, leaf_index)?;
         ensure!(
-            utxo_hash == derivation.dvp_utxo_hash,
+            input.utxo_hash == derivation.dvp_utxo_hash,
             "DvP input utxo does not hash to the created DvP UTXO"
         );
-        let nullifier = key.nullifier(&utxo_hash, &utxo.blinding).map_err(err)?;
-        Ok(SppProofInputUtxo {
-            utxo,
-            utxo_hash,
-            nullifier,
-            nullifier_pubkey,
-            data_hash: Some(derivation.dvp_id),
-            ring_data_hash: None,
-            tree_id: self.tree_id,
-            leaf_index,
-            cache_slot: None,
-            compact: false,
-        })
+        Ok(input)
     }
 }
 
 /// The public zero-secret nullifier key of every PDA-owned DvP UTXO.
 fn zero_nullifier_key() -> NullifierKey {
     NullifierKey::from_secret([0u8; 31])
+}
+
+/// A PDA-owned `utxo` (the DvP UTXO or a deposit) as an SPP input under the
+/// zero nullifier key, at `leaf_index` of the tree with raw id `tree_id`.
+pub(crate) fn pda_input_utxo(
+    utxo: Utxo,
+    data_hash: Option<[u8; 32]>,
+    tree_id: u16,
+    leaf_index: u64,
+) -> Result<SppProofInputUtxo> {
+    let key = zero_nullifier_key();
+    let nullifier_pubkey = key.pubkey().map_err(err)?;
+    let utxo_hash = utxo
+        .hash(
+            &nullifier_pubkey,
+            &data_hash.unwrap_or_default(),
+            &[0; 32],
+            tree_id,
+        )
+        .map_err(err)?;
+    let nullifier = key.nullifier(&utxo_hash, &utxo.blinding).map_err(err)?;
+    Ok(SppProofInputUtxo {
+        utxo,
+        utxo_hash,
+        nullifier,
+        nullifier_pubkey,
+        data_hash,
+        ring_data_hash: None,
+        tree_id,
+        leaf_index,
+        cache_slot: None,
+        compact: false,
+    })
 }
 
 #[cfg(test)]
