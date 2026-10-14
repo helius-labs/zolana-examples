@@ -1528,6 +1528,7 @@ dependencies = [
  "solana-signature",
  "solana-signer",
  "zolana-client",
+ "zolana-gnark-ffi-prover",
  "zolana-hasher",
  "zolana-interface",
  "zolana-keypair",

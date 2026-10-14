@@ -22,13 +22,16 @@
 //!   else `~/.config/zolana/proving-keys`.
 //! - The DvP circuit proofs come from the in-process gnark prover with the
 //!   keys in `dvp/build/gnark`.
+//! - The circuit constraint counts come from
+//!   `dvp/prover/circuits/testdata/constraints.txt`, which the circuits'
+//!   Go test `TestConstraintCounts` checks against the compiled circuits.
 //!
 //! The SPP tree account is built directly: the program's tree init, then the
 //! input UTXO hashes appended. The SPP proofs prove against local copies of
 //! the state tree and the (empty) nullifier tree, whose roots the tree
 //! account holds.
 use std::{
-    env,
+    env, fs,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Duration, Instant},
@@ -64,6 +67,7 @@ use zolana_client::{
     NonInclusionProof, Proof, ProveRequest, Prover, ProverClient, ProverExt, SpendProof,
     STATE_TREE_HEIGHT,
 };
+use zolana_gnark_ffi_prover::Circuit;
 use zolana_hasher::Poseidon;
 use zolana_interface::{
     instruction::instruction_data::transact::TransactIxData,
@@ -81,6 +85,12 @@ use zolana_tree::TreeAccount;
 
 const PROFILING_SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/bench");
 const OUTPUT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../BENCHMARK.md");
+/// `<circuit> <constraints>` per DvP circuit, kept current by the circuits'
+/// Go test `TestConstraintCounts`.
+const CONSTRAINTS_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../prover/circuits/testdata/constraints.txt"
+);
 /// The whole per-transaction budget, which every instruction must fit.
 const TRANSACT_CU_LIMIT: u32 = 1_400_000;
 /// The version 1 transaction size limit.
@@ -329,6 +339,66 @@ fn proving_time_table(spp: Duration, circuit: Duration) -> SectionTable {
     }
 }
 
+fn file_size(path: &Path) -> u64 {
+    fs::metadata(path)
+        .unwrap_or_else(|e| panic!("stat {}: {e}", path.display()))
+        .len()
+}
+
+/// Bytes in decimal units: `716 B`, `1.33 MB`.
+fn format_size(bytes: u64) -> String {
+    if bytes < 1_000_000 {
+        format!("{bytes} B")
+    } else {
+        format!("{:.2} MB", bytes as f64 / 1_000_000.0)
+    }
+}
+
+/// Each DvP circuit's constraint count, key sizes and the circuit proof time
+/// of the first instruction proving it (cancel_dvp for abort_dvp).
+fn circuits_table(proof_times: &[(CircuitId, Duration)]) -> SectionTable {
+    let constraints = fs::read_to_string(CONSTRAINTS_PATH)
+        .unwrap_or_else(|e| panic!("read {CONSTRAINTS_PATH}: {e}"));
+    let rows = CircuitId::ALL
+        .iter()
+        .map(|&circuit| {
+            let name = circuit.name();
+            let count = constraints
+                .lines()
+                .find_map(|line| {
+                    line.split_once(' ')
+                        .filter(|(circuit_name, _)| *circuit_name == name)
+                        .map(|(_, count)| count)
+                })
+                .unwrap_or_else(|| panic!("no constraint count for {name} in {CONSTRAINTS_PATH}"));
+            let keys_dir = PROVER.keys_dir(circuit);
+            let proof_time = proof_times
+                .iter()
+                .find(|(proven, _)| *proven == circuit)
+                .map(|(_, elapsed)| elapsed)
+                .unwrap_or_else(|| panic!("no proof time for {name}"));
+            vec![
+                name.into(),
+                count.into(),
+                format_size(file_size(&keys_dir.join("pk.bin"))),
+                format_size(file_size(&keys_dir.join("vk.bin"))),
+                format!("{} ms", proof_time.as_millis()),
+            ]
+        })
+        .collect();
+    SectionTable {
+        title: String::new(),
+        headers: vec![
+            "Circuit".into(),
+            "Constraints".into(),
+            "Proving key".into(),
+            "Verifying key".into(),
+            "Proof time".into(),
+        ],
+        rows,
+    }
+}
+
 /// The version 1 transaction this instruction is sent as. Its compute
 /// ceilings live in the message header. Panics if it exceeds 4096 bytes.
 fn tx_size_table(ix: &Instruction, payer: &Pubkey) -> SectionTable {
@@ -437,19 +507,22 @@ struct Bench {
     tree: Pubkey,
     prover: ProverClient,
     report: CuBenchmark,
+    /// The circuit proof time of the first instruction proving each circuit.
+    circuit_proof_times: Vec<(CircuitId, Duration)>,
 }
 
 impl Bench {
     /// Runs `ix` against `tree_account`, checks it succeeds (mollusk caps it
     /// at the transaction budget), and records its profile, proving times
-    /// and size.
+    /// and size, and the proof time of `circuit` if not yet recorded.
     fn record(
         &mut self,
         name: &str,
+        circuit: CircuitId,
         ix: &Instruction,
         payer: &Pubkey,
         tree_account: Account,
-        (spp, circuit): (Duration, Duration),
+        (spp, circuit_dur): (Duration, Duration),
     ) {
         let fixtures = vec![
             (self.tree, tree_account),
@@ -462,8 +535,15 @@ impl Bench {
         assert!(!entries.is_empty(), "no profiling entries for '{name}'");
         self.report.add_from_entries(name, entries);
         self.report
-            .add_table(name, proving_time_table(spp, circuit));
+            .add_table(name, proving_time_table(spp, circuit_dur));
         self.report.add_table(name, tx_size_table(ix, payer));
+        if !self
+            .circuit_proof_times
+            .iter()
+            .any(|(proven, _)| *proven == circuit)
+        {
+            self.circuit_proof_times.push((circuit, circuit_dur));
+        }
     }
 }
 
@@ -502,6 +582,9 @@ fn bench_cu_dvp() {
              instruction section also records its proving times (SPP proof plus the DvP circuit \
              proof) and the serialized size of the version 1 transaction it is sent as, which \
              states its compute ceilings in the message header and may run to 4096 bytes. The \
+             Circuits section lists each DvP circuit's R1CS constraint count, its proving and \
+             verifying key sizes and its circuit proof time (abort_dvp, which serves cancel_dvp \
+             and reject_dvp, as timed for cancel_dvp). The \
              profiled program must be built first: `cargo build-sbf --manifest-path \
              dvp/program/Cargo.toml --sbf-out-dir dvp/target/bench -- --features \
              bpf-entrypoint,profile-program`."
@@ -514,12 +597,7 @@ fn bench_cu_dvp() {
     });
 
     start_prover();
-    for circuit in [
-        CircuitId::CreateDvp,
-        CircuitId::ReclaimDvp,
-        CircuitId::SettleDvp,
-        CircuitId::AbortDvp,
-    ] {
+    for &circuit in CircuitId::ALL {
         PROVER.preload(circuit).expect("preload DvP keys");
     }
 
@@ -528,12 +606,15 @@ fn bench_cu_dvp() {
         tree: zolana_interface::pda::tree(BENCH_TREE_ID),
         prover: ProverClient::local(),
         report,
+        circuit_proof_times: Vec::new(),
     };
     bench_create_dvp(&mut bench);
     bench_reclaim_dvp(&mut bench);
     bench_settle_dvp(&mut bench);
     bench_abort_dvp(&mut bench, AbortMode::Cancel);
     bench_abort_dvp(&mut bench, AbortMode::Reject);
+    let circuits = circuits_table(&bench.circuit_proof_times);
+    bench.report.add_table("circuits", circuits);
 
     bench.report.generate().expect("write BENCHMARK.md");
 }
@@ -585,6 +666,7 @@ fn bench_create_dvp(bench: &mut Bench) {
 
     bench.record(
         "create_dvp",
+        CircuitId::CreateDvp,
         &ix,
         &parties.payer.pubkey(),
         tree_account,
@@ -631,6 +713,7 @@ fn bench_reclaim_dvp(bench: &mut Bench) {
 
     bench.record(
         "reclaim_dvp",
+        CircuitId::ReclaimDvp,
         &ix,
         &parties.payer.pubkey(),
         tree_account,
@@ -684,6 +767,7 @@ fn bench_settle_dvp(bench: &mut Bench) {
 
     bench.record(
         "settle_dvp",
+        CircuitId::SettleDvp,
         &ix,
         &parties.payer.pubkey(),
         tree_account,
@@ -762,5 +846,12 @@ fn bench_abort_dvp(bench: &mut Bench, mode: AbortMode) {
     };
     let ix = abort.instruction().expect("abort instruction");
 
-    bench.record(name, &ix, &payer, tree_account, (spp_dur, circuit_dur));
+    bench.record(
+        name,
+        CircuitId::AbortDvp,
+        &ix,
+        &payer,
+        tree_account,
+        (spp_dur, circuit_dur),
+    );
 }

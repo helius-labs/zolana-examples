@@ -89,7 +89,9 @@ the `<c>_pk.bin` line of the checksum file, and likewise for `vk.bin`.
 The program's verifying keys are committed in
 [`program/src/verifying_keys/`](program/src/verifying_keys/). After a circuit
 change, add `--rust-vk program/src/verifying_keys/$c.rs` to the setup command to
-regenerate them, and update `dvp-keys.CHECKSUM`.
+regenerate them, update `dvp-keys.CHECKSUM`, and rewrite the constraint counts
+the benchmark reports with
+`scripts/circuits-go.sh test . -run TestConstraintCounts -update`.
 
 ## Tests
 

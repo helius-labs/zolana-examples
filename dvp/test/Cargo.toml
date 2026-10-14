@@ -28,6 +28,7 @@ mollusk-svm = { workspace = true }
 num-bigint = { workspace = true }
 solana-account = { workspace = true }
 solana-pubkey = { workspace = true }
+zolana-gnark-ffi-prover = { workspace = true }
 zolana-hasher = { workspace = true }
 zolana-merkle-tree = { workspace = true }
 zolana-tree = { workspace = true }
