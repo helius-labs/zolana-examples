@@ -269,6 +269,10 @@ jobs:
       - name: Run prover and SDK tests
         run: cargo test --locked -p dvp-prover -p dvp-sdk
 
-      # Localnet e2e; the CU benchmark is #[ignore] and does not run.
+      # Localnet e2e; the CU benchmark is #[ignore] and does not run. The
+      # prover downloads missing SPP keys into the keys dir, but requires its
+      # parent to exist, which a fresh runner without a cache hit lacks.
       - name: Run e2e tests
-        run: cargo test --locked -p dvp-test
+        run: |
+          mkdir -p ~/.config/zolana/proving-keys
+          cargo test --locked -p dvp-test
