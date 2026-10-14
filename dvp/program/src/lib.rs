@@ -4,6 +4,8 @@ pub mod verifying_keys;
 
 use pinocchio::{address::address_eq, error::ProgramError, AccountView, Address, ProgramResult};
 
+use crate::instructions::create_dvp::process_create_dvp_ix;
+
 /// Instruction discriminators, matching the reference DvP program.
 pub mod tag {
     pub const CREATE_DVP: u8 = 0;
@@ -43,23 +45,19 @@ pinocchio::address::declare_id!("8ErdEhvg1NgRzzZRSw3Lx4z4rDEruc6Bjwzn7WVooUMx");
 
 pub fn process_instruction(
     program_id: &Address,
-    _accounts: &mut [AccountView],
+    accounts: &mut [AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
     if !address_eq(program_id, &crate::ID) {
         return Err(ProgramError::IncorrectProgramId);
     }
 
-    let (ix_tag, _ix_data) = instruction_data
+    let (ix_tag, ix_data) = instruction_data
         .split_first()
         .ok_or(ProgramError::InvalidInstructionData)?;
 
     match *ix_tag {
-        tag::CREATE_DVP
-        | tag::RECLAIM_DVP
-        | tag::SETTLE_DVP
-        | tag::CANCEL_DVP
-        | tag::REJECT_DVP => Err(ProgramError::InvalidInstructionData),
+        tag::CREATE_DVP => process_create_dvp_ix(accounts, ix_data),
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }

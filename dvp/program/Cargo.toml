@@ -39,6 +39,14 @@ zolana-hasher = { workspace = true }
 zolana-interface = { workspace = true }
 zolana-program = { workspace = true, features = ["cpi", "compression"] }
 
+[dev-dependencies]
+mollusk-svm = { workspace = true }
+zolana-test-utils = { workspace = true, features = ["mollusk"] }
+solana-account = { workspace = true }
+solana-instruction = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-program-error = { workspace = true }
+
 [lints.rust.unexpected_cfgs]
 level = "allow"
 check-cfg = [
