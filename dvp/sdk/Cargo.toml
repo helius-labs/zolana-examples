@@ -11,7 +11,6 @@ dvp-prover = { path = "../prover" }
 num-bigint = { workspace = true }
 solana-address = { workspace = true, features = ["curve25519"] }
 solana-instruction = { workspace = true }
-solana-pubkey = { workspace = true }
 solana-signature = { workspace = true }
 wincode = { workspace = true }
 zolana-client = { workspace = true, features = ["indexer-api"] }

@@ -1,16 +1,10 @@
 use dvp_program::{
-    instructions::{
-        create_dvp::{CreateDvpProof, CreateDvpPublicInput},
-        shared::u64_right_align,
-        verifier::{verify_groth16, CompressedGroth16Proof},
-    },
-    verifying_keys::create_dvp::VERIFYINGKEY,
+    instructions::create_dvp::CreateDvpPublicInput, verifying_keys::create_dvp::VERIFYINGKEY,
     DVP_ADDRESS_TREE_ID,
 };
 use dvp_prover::{CircuitId, CreateDvpProofInputs, ProofInputUtxo, SwapDvpProofInput};
 use dvp_sdk::{instructions::create_dvp::CreateDvpProofInputParams, state::SwapDvp};
 use zolana_hasher::primitives::solana_owner_identity;
-use zolana_keypair::hash::poseidon;
 use zolana_transaction::{
     instructions::transact::PrivateTxHash,
     utxo::{
@@ -19,26 +13,16 @@ use zolana_transaction::{
     SOL_MINT,
 };
 
+#[path = "shared/dvp_utxo.rs"]
+mod dvp_utxo;
 mod shared;
+use dvp_utxo::{address, dvp_utxo_blinding};
 use shared::{
-    ensure_keys, fe, generated_vk, pda_owner_hash, sample_terms, verify_with_generated_vk,
-    OUTPUT_TREE_ID,
+    assert_single_input_vk, assert_unsatisfied, assert_verifies, ensure_keys, fe, generated_vk,
+    pda_owner_hash, sample_terms, verify_with_generated_vk, OUTPUT_TREE_ID,
 };
 
 const CIRCUIT: CircuitId = CircuitId::CreateDvp;
-
-/// The address an address slot owned by `owner_hash` with seed `dvp_id`
-/// creates in tree `tree_id`.
-fn address(owner_hash: &[u8; 32], dvp_id: &[u8; 32], tree_id: u16) -> [u8; 32] {
-    let slot = ProofInputUtxo {
-        domain: u64_right_align(2),
-        tree_id: u64_right_align(u64::from(tree_id)),
-        owner_hash: *owner_hash,
-        blinding: *dvp_id,
-        ..Default::default()
-    };
-    poseidon(&[&slot.hash().expect("slot hash"), dvp_id, &[0u8; 32]]).expect("address")
-}
 
 /// The create witness of `terms`, derived independently of
 /// `CreateDvpProofInputParams` and without validating the terms, so the
@@ -138,7 +122,7 @@ fn assert_unprovable(
         address_tree_id,
         derive_blindings,
     );
-    assert!(inputs.prove().is_err(), "proving must fail: {reason}");
+    assert_unsatisfied(inputs.prove(), reason);
 }
 
 /// Terms the sdk refuses: derive the witness without validation and assert
@@ -156,24 +140,12 @@ fn assert_terms_unprovable(reason: &str, tamper: impl FnOnce(&mut SwapDvp)) {
         .is_err(),
         "the sdk must reject the terms: {reason}"
     );
-    assert!(
-        derive_create_inputs(&terms).prove().is_err(),
-        "proving must fail: {reason}"
-    );
+    assert_unsatisfied(derive_create_inputs(&terms).prove(), reason);
 }
 
 #[test]
 fn program_vk_has_no_commitment() {
-    assert_eq!(VERIFYINGKEY.nr_pubinputs, 1);
-    assert!(
-        VERIFYINGKEY.vk_commitment.is_none(),
-        "create_dvp circuit is standard Groth16: no BSB22 commitment"
-    );
-    assert_eq!(
-        VERIFYINGKEY.vk_ic.len(),
-        2,
-        "standard Groth16 vk_ic length must be public_inputs + 1"
-    );
+    assert_single_input_vk(&VERIFYINGKEY);
 }
 
 /// The sdk derivation matches the independent one in `shared`, and resealing
@@ -183,6 +155,16 @@ fn program_vk_has_no_commitment() {
 fn sdk_inputs_match_independent_derivation() {
     let expected = derive_create_inputs(&sample_terms());
     assert_eq!(sdk_inputs(sample_terms()), expected);
+    // The settle and abort tests spend the DvP UTXO under this blinding,
+    // derived from `CREATE_TAG` without `SwapDvp::create_blinding_seed`.
+    assert_eq!(
+        expected.dvp_utxo.blinding,
+        dvp_utxo_blinding(
+            &sample_terms(),
+            &expected.dvp_authority_owner_hash,
+            &expected.dvp_id
+        )
+    );
 
     let mut resealed = expected.clone();
     reseal(&mut resealed, &create_seed(), DVP_ADDRESS_TREE_ID, true);
@@ -192,38 +174,9 @@ fn sdk_inputs_match_independent_derivation() {
 #[test]
 fn create_dvp_prove_verify() {
     ensure_keys(CIRCUIT);
-    let vk = generated_vk(CIRCUIT);
-
     let inputs = sdk_inputs(sample_terms());
     let proof = inputs.prove().expect("prove failed");
-    assert!(
-        proof.proof_a.iter().any(|byte| *byte != 0),
-        "proof_a must not be all zero"
-    );
-
-    assert!(
-        verify_with_generated_vk(
-            &vk,
-            &proof.proof_a,
-            &proof.proof_b,
-            &proof.proof_c,
-            inputs.public_input_hash,
-        ),
-        "the proof must verify against the generated create_dvp verifying key"
-    );
-
-    let proof: CreateDvpProof = proof.into();
-    verify_groth16(
-        CompressedGroth16Proof {
-            a: &proof.proof_a,
-            b: &proof.proof_b,
-            c: &proof.proof_c,
-            commitment: None,
-        },
-        inputs.public_input_hash,
-        &VERIFYINGKEY,
-    )
-    .expect("the committed create_dvp VERIFYINGKEY must accept the proof; regenerate the keys");
+    assert_verifies(CIRCUIT, &proof, inputs.public_input_hash, &VERIFYINGKEY);
 }
 
 #[test]

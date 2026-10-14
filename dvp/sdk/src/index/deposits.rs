@@ -9,7 +9,7 @@ use zolana_transaction::{
 };
 
 use super::{
-    poll::{collect_tagged, index_until},
+    poll::{collect_tagged, index_until, spent_nullifiers},
     scan::{resolve_mint, tagged_confidential_outputs},
 };
 use crate::state::{Deposit, Leg, SwapDvp};
@@ -88,51 +88,76 @@ fn committed_deposits(
         .collect())
 }
 
-/// Polls the indexer until it serves deposits of `terms` the settlement
-/// authority can read ([`scan_deposits`]), found by the PDA tag.
+/// Polls the indexer until the unspent deposits of `terms` the settlement
+/// authority can read ([`scan_deposits`]), found by the PDA tag, satisfy
+/// `ready` (for example: both legs present).
 pub fn index_deposits<I: Rpc>(
     terms: &SwapDvp,
     authority: &ShieldedKeypair,
     registry: &AssetRegistry,
     indexer: &I,
     timeout: Duration,
+    ready: impl Fn(&[Deposit]) -> bool,
 ) -> Result<Vec<Deposit>> {
-    index_tagged(terms, indexer, timeout, "DvP deposits", |tx| {
+    index_unspent(terms, indexer, timeout, "DvP deposits", ready, |tx| {
         scan_deposits(tx, terms, authority, registry)
     })
 }
 
-/// Polls the indexer until it serves deposits of `terms` that `funder`
-/// made ([`scan_own_deposits`]), found by the PDA tag.
+/// Polls the indexer until the unspent deposits of `terms` that `funder`
+/// made ([`scan_own_deposits`]), found by the PDA tag, satisfy `ready`.
 pub fn index_own_deposits<I: Rpc>(
     terms: &SwapDvp,
     funder: &ShieldedKeypair,
     registry: &AssetRegistry,
     indexer: &I,
     timeout: Duration,
+    ready: impl Fn(&[Deposit]) -> bool,
 ) -> Result<Vec<Deposit>> {
-    index_tagged(terms, indexer, timeout, "own DvP deposits", |tx| {
+    index_unspent(terms, indexer, timeout, "own DvP deposits", ready, |tx| {
         scan_own_deposits(tx, terms, funder, registry)
     })
 }
 
-fn index_tagged<I: Rpc>(
+/// The deposits `scan` finds in the PDA-tagged transactions, without those
+/// an indexed settle, abort or reclaim already spent: a leg funded,
+/// reclaimed and funded again has only its second deposit left.
+fn index_unspent<I: Rpc>(
     terms: &SwapDvp,
     indexer: &I,
     timeout: Duration,
     what: &str,
+    ready: impl Fn(&[Deposit]) -> bool,
     mut scan: impl FnMut(&ShieldedTransaction) -> Result<Vec<Deposit>>,
 ) -> Result<Vec<Deposit>> {
     let pda_tag = terms.dvp_authority()?.0.to_bytes();
-    index_until(timeout, what, || {
-        collect_tagged(pda_tag, indexer, &mut scan)
-    })
+    index_until(
+        timeout,
+        what,
+        || {
+            let deposits = collect_tagged(pda_tag, indexer, &mut scan)?;
+            let nullifiers = deposits
+                .iter()
+                .map(|deposit| Ok(deposit.to_input_utxo()?.nullifier))
+                .collect::<Result<Vec<_>>>()?;
+            let spent = spent_nullifiers(indexer, &nullifiers)?;
+            Ok(deposits
+                .into_iter()
+                .zip(nullifiers)
+                .filter(|(_, nullifier)| !spent.contains(nullifier))
+                .map(|(deposit, _)| deposit)
+                .collect())
+        },
+        ready,
+    )
 }
 
 #[cfg(test)]
 mod tests {
+    use solana_signature::Signature;
+
     use super::*;
-    use crate::index::fixture::{deposit_fixture, keypair, terms_fixture};
+    use crate::index::fixture::{deposit_fixture, keypair, terms_fixture, FixtureIndexer};
 
     #[test]
     fn the_settlement_authority_finds_both_legs() {
@@ -212,6 +237,66 @@ mod tests {
                     .is_empty()
             );
         }
+    }
+
+    /// Both poll entry points return the deposits nobody spent: a spending
+    /// transaction for the delivery deposit drops it.
+    #[test]
+    fn indexing_drops_spent_deposits() {
+        let fixture = deposit_fixture();
+        let [delivery, payment] = fixture.deposits.clone();
+        let [seller, buyer] = &fixture.funders;
+        // A transaction that spends the delivery deposit and outputs nothing.
+        let [delivery_tx, _] = fixture.txs.clone();
+        let spend = ShieldedTransaction {
+            tx_signature: Signature::from([7; 64]),
+            output_slots: Vec::new(),
+            messages: Vec::new(),
+            nullifiers: vec![delivery.to_input_utxo().expect("input").nullifier],
+            ..delivery_tx
+        };
+        let unspent = |txs: Vec<ShieldedTransaction>| {
+            let indexer = FixtureIndexer { txs };
+            let ready = |_: &[Deposit]| true;
+            let index = |funder: &ShieldedKeypair| {
+                index_own_deposits(
+                    &fixture.terms,
+                    funder,
+                    &fixture.registry,
+                    &indexer,
+                    Duration::ZERO,
+                    ready,
+                )
+                .expect("index")
+            };
+            (
+                index_deposits(
+                    &fixture.terms,
+                    &fixture.authority,
+                    &fixture.registry,
+                    &indexer,
+                    Duration::ZERO,
+                    ready,
+                )
+                .expect("index"),
+                index(seller),
+                index(buyer),
+            )
+        };
+        assert_eq!(
+            unspent(fixture.txs.to_vec()),
+            (
+                vec![delivery.clone(), payment.clone()],
+                vec![delivery],
+                vec![payment.clone()],
+            )
+        );
+        let mut txs = fixture.txs.to_vec();
+        txs.push(spend);
+        assert_eq!(
+            unspent(txs),
+            (vec![payment.clone()], Vec::new(), vec![payment])
+        );
     }
 
     #[test]

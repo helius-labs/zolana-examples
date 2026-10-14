@@ -6,6 +6,8 @@ mod cancel_dvp;
 mod create_dvp;
 #[path = "failing/dispatch.rs"]
 mod dispatch;
+#[path = "failing/payer.rs"]
+mod payer;
 #[path = "failing/reclaim_dvp.rs"]
 mod reclaim_dvp;
 #[path = "failing/reject_dvp.rs"]

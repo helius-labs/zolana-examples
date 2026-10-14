@@ -9,7 +9,7 @@ use zolana_account_checks::error::AccountError;
 use zolana_test_utils::mollusk::expect_err_exact;
 
 use crate::common::{
-    create_dvp_data, create_dvp_fixture, dvp_authority, non_canonical_bump, off_curve_bump,
+    create_dvp_data, create_dvp_fixture, dvp_authority, non_canonical_bump, on_curve_bump,
     setup_mollusk, CREATOR, DVP_ID,
 };
 
@@ -61,22 +61,17 @@ fn unsigned_creator_is_rejected_exactly() {
     );
 }
 
-#[test]
-fn bump_without_a_pda_is_rejected_exactly() {
-    expect_create_dvp_err(
-        |instruction| instruction.data = create_dvp_data(DVP_ID, off_curve_bump()),
-        DvpError::InvalidDvpAuthority,
-    );
-}
-
-/// A non-canonical bump has a PDA of its own, whose address slot would let
-/// the same `(creator, dvp_id)` be created a second time.
+/// A bump other than the canonical one: on the curve it derives no PDA;
+/// below the canonical one it derives a PDA of its own, whose address slot
+/// would let the same `(creator, dvp_id)` be created a second time.
 #[test]
 fn non_canonical_bump_is_rejected_exactly() {
-    expect_create_dvp_err(
-        |instruction| instruction.data = create_dvp_data(DVP_ID, non_canonical_bump()),
-        DvpError::InvalidDvpAuthority,
-    );
+    for bump in [on_curve_bump(), non_canonical_bump()] {
+        expect_create_dvp_err(
+            |instruction| instruction.data = create_dvp_data(DVP_ID, bump),
+            DvpError::InvalidDvpAuthority,
+        );
+    }
 }
 
 #[test]

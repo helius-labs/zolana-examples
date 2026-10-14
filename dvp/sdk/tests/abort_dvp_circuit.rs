@@ -1,11 +1,7 @@
 use dvp_program::{
-    instructions::{
-        abort_dvp::{AbortDvpProof, AbortDvpPublicInput},
-        shared::u64_right_align,
-        verifier::{verify_groth16, CompressedGroth16Proof},
-    },
+    instructions::{abort_dvp::AbortDvpPublicInput, shared::u64_right_align},
     verifying_keys::abort_dvp::VERIFYINGKEY,
-    ABORT_MODE_REJECT, ABORT_TAG, CREATE_TAG, DVP_ADDRESS_TREE_ID,
+    ABORT_TAG,
 };
 use dvp_prover::{AbortDvpProofInputs, CircuitId, ProofInputUtxo, SwapDvpProofInput};
 use dvp_sdk::{
@@ -23,10 +19,13 @@ use zolana_transaction::{
     Mint, SOL_MINT,
 };
 
+#[path = "shared/dvp_utxo.rs"]
+mod dvp_utxo;
 mod shared;
+use dvp_utxo::dvp_utxo_blinding;
 use shared::{
-    ensure_keys, fe, generated_vk, pda_owner_hash, sample_terms, verify_with_generated_vk,
-    OUTPUT_TREE_ID,
+    assert_single_input_vk, assert_unsatisfied, assert_verifies, ensure_keys, fe, generated_vk,
+    pda_owner_hash, sample_terms, verify_with_generated_vk, OUTPUT_TREE_ID,
 };
 
 const CIRCUIT: CircuitId = CircuitId::AbortDvp;
@@ -141,24 +140,6 @@ fn sdk_inputs(aborter: Aborter, funded: Funded) -> AbortDvpProofInputs {
         .expect("sdk proof inputs")
 }
 
-/// The DvP UTXO's blinding: output 0 of the create transaction, whose first
-/// nullifier is the address the address slot creates.
-fn dvp_utxo_blinding(terms: &SwapDvp, owner_hash: &[u8; 32], dvp_id: &[u8; 32]) -> [u8; 32] {
-    let slot = ProofInputUtxo {
-        domain: u64_right_align(2),
-        tree_id: u64_right_align(u64::from(DVP_ADDRESS_TREE_ID)),
-        owner_hash: *owner_hash,
-        blinding: *dvp_id,
-        ..Default::default()
-    };
-    let address =
-        poseidon(&[&slot.hash().expect("slot hash"), dvp_id, &[0u8; 32]]).expect("address");
-    let create_seed =
-        poseidon(&[&u64_right_align(u64::from(CREATE_TAG)), &terms.blinding]).expect("create seed");
-    let seed = derive_output_blinding_seed(&address, &create_seed).expect("create output seed");
-    derive_transact_output_blinding(&address, &seed, 0).expect("dvp utxo blinding")
-}
-
 /// The abort witness of the sample terms, derived independently of
 /// `AbortDvpProofInputParams` and without its checks, so the negative tests
 /// can hand the circuit values the sdk would refuse. Deposits fill the input
@@ -213,7 +194,7 @@ fn derive_abort_inputs(aborter: Aborter, funded: Funded) -> AbortDvpProofInputs 
         dvp_id,
         dvp_authority_owner_hash: owner_hash,
         signer_id: solana_owner_identity(signer.as_array()).expect("signer id"),
-        mode: aborter.mode().value(),
+        mode: aborter.mode(),
         terms: SwapDvpProofInput::try_from(terms).expect("terms proof input"),
         leg: matches!(aborter, Aborter::Buyer),
         payment_first: !funded.delivery && funded.payment,
@@ -271,7 +252,7 @@ fn reseal(inputs: &mut AbortDvpProofInputs) {
         dvp_id: &inputs.dvp_id,
         dvp_authority_owner_hash: &inputs.dvp_authority_owner_hash,
         signer_id: &inputs.signer_id,
-        mode: inputs.mode,
+        mode: inputs.mode.value(),
     }
     .hash()
     .expect("public input hash");
@@ -289,7 +270,7 @@ fn assert_unprovable(
     let mut inputs = derive_abort_inputs(aborter, funded);
     tamper(&mut inputs);
     reseal(&mut inputs);
-    assert!(inputs.prove().is_err(), "proving must fail: {reason}");
+    assert_unsatisfied(inputs.prove(), reason);
 }
 
 /// Asserts the sdk refuses the tampered parameters.
@@ -309,33 +290,7 @@ fn assert_sdk_rejects(
 
 fn prove_and_verify(inputs: &AbortDvpProofInputs) {
     let proof = inputs.prove().expect("prove failed");
-    assert!(
-        proof.proof_a.iter().any(|byte| *byte != 0),
-        "proof_a must not be all zero"
-    );
-    assert!(
-        verify_with_generated_vk(
-            &generated_vk(CIRCUIT),
-            &proof.proof_a,
-            &proof.proof_b,
-            &proof.proof_c,
-            inputs.public_input_hash,
-        ),
-        "the proof must verify against the generated abort_dvp verifying key"
-    );
-
-    let proof: AbortDvpProof = proof.into();
-    verify_groth16(
-        CompressedGroth16Proof {
-            a: &proof.proof_a,
-            b: &proof.proof_b,
-            c: &proof.proof_c,
-            commitment: None,
-        },
-        inputs.public_input_hash,
-        &VERIFYINGKEY,
-    )
-    .expect("the committed abort_dvp VERIFYINGKEY must accept the proof; regenerate the keys");
+    assert_verifies(CIRCUIT, &proof, inputs.public_input_hash, &VERIFYINGKEY);
 }
 
 /// The slot layout and refund amounts of a witness:
@@ -352,16 +307,7 @@ fn layout(inputs: &AbortDvpProofInputs) -> (bool, bool, bool, [u8; 32], [u8; 32]
 
 #[test]
 fn program_vk_has_no_commitment() {
-    assert_eq!(VERIFYINGKEY.nr_pubinputs, 1);
-    assert!(
-        VERIFYINGKEY.vk_commitment.is_none(),
-        "abort_dvp circuit is standard Groth16: no BSB22 commitment"
-    );
-    assert_eq!(
-        VERIFYINGKEY.vk_ic.len(),
-        2,
-        "standard Groth16 vk_ic length must be public_inputs + 1"
-    );
+    assert_single_input_vk(&VERIFYINGKEY);
 }
 
 /// The sdk derivation matches the independent one for every funding state,
@@ -474,10 +420,7 @@ fn cancels_without_deposits() {
 fn rejects_by_the_seller() {
     ensure_keys(CIRCUIT);
     let inputs = sdk_inputs(Aborter::Seller, DELIVERY_ONLY);
-    assert_eq!(
-        (inputs.mode, inputs.leg),
-        (u64::from(ABORT_MODE_REJECT), false)
-    );
+    assert_eq!((inputs.mode, inputs.leg), (AbortMode::Reject, false));
     prove_and_verify(&inputs);
 }
 
@@ -485,10 +428,7 @@ fn rejects_by_the_seller() {
 fn rejects_by_the_buyer() {
     ensure_keys(CIRCUIT);
     let inputs = sdk_inputs(Aborter::Buyer, PAYMENT_ONLY);
-    assert_eq!(
-        (inputs.mode, inputs.leg),
-        (u64::from(ABORT_MODE_REJECT), true)
-    );
+    assert_eq!((inputs.mode, inputs.leg), (AbortMode::Reject, true));
     prove_and_verify(&inputs);
 }
 

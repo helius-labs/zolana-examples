@@ -88,6 +88,9 @@ pub fn scan_terms(
 fn committed_dvp_utxo(tx: &ShieldedTransaction, terms: SwapDvp) -> Option<(DvpUtxo, u64)> {
     let (pda, _) = terms.dvp_authority().ok()?;
     let pda_tag = pda.to_bytes();
+    // `DvpUtxo::hash` validates the terms first (`SwapDvp::validate`), so
+    // terms the create circuit accepts but the sdk refuses (D10) are not
+    // discovered. The binding ends the iterator's borrow of `pda_tag`.
     let committed = tagged_outputs(tx, &pda_tag).find_map(|slot| {
         let context = &slot.output_context;
         let dvp_utxo = DvpUtxo::new(terms.clone(), context.tree_id);
@@ -96,20 +99,26 @@ fn committed_dvp_utxo(tx: &ShieldedTransaction, terms: SwapDvp) -> Option<(DvpUt
     committed
 }
 
-/// Polls the indexer until it serves create transactions with a terms
-/// message for `keypair` ([`scan_terms`]), found by the keypair's own tag.
+/// Polls the indexer until the DvPs it serves with a terms message for
+/// `keypair` ([`scan_terms`]), found by the keypair's own tag, satisfy
+/// `ready` (for example: one with a given `dvp_id`). A party with older DvPs
+/// waits for the one it expects instead of returning the old ones.
 pub fn index_terms<I: Rpc>(
     keypair: &ShieldedKeypair,
     indexer: &I,
     timeout: Duration,
+    ready: impl Fn(&[DiscoveredDvp]) -> bool,
 ) -> Result<Vec<DiscoveredDvp>> {
     let own_tag = keypair
         .signing_pubkey()
         .confidential_view_tag()
         .map_err(err)?;
-    index_until(timeout, "DvP terms", || {
-        collect_tagged(own_tag, indexer, |tx| scan_terms(tx, keypair))
-    })
+    index_until(
+        timeout,
+        "DvP terms",
+        || collect_tagged(own_tag, indexer, |tx| scan_terms(tx, keypair)),
+        ready,
+    )
 }
 
 #[cfg(test)]

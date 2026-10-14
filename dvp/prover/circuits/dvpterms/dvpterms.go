@@ -10,6 +10,7 @@ import (
 	"github.com/consensys/gnark/std/math/cmp"
 
 	"zolana/gnarksdk"
+	spp "zolana/prover/circuits/spp_transaction/shared"
 )
 
 // Blinding seed domain tags, u32::from_be_bytes of "DVPC", "DVPS" and "DVPA"
@@ -20,12 +21,17 @@ const (
 	AbortTag      uint64 = 0x44565041
 )
 
-// utxoDomain is the domain tag of a spendable UTXO (spp.UtxoDomain).
-const utxoDomain = 3
-
 // solAssetField is zolana_interface::SOL_ASSET_FIELD, Poseidon(0, 0): the
 // asset of the zero-amount SOL DvP UTXO.
-var solAssetField, _ = new(big.Int).SetString("2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864", 16)
+var solAssetField = mustHex("2098f5fb9e239eab3ceac3f27b81e481dc3124d55ffed523a839ee8446b64864")
+
+func mustHex(value string) *big.Int {
+	field, ok := new(big.Int).SetString(value, 16)
+	if !ok {
+		panic("dvpterms: invalid hex constant " + value)
+	}
+	return field
+}
 
 // Destination is a shielded destination address as its compressed hash
 // preimage: the owner hash and hash_bytes of the 33-byte viewing pubkey.
@@ -109,7 +115,7 @@ func (t SwapDvp) CheckCreate(api frontend.API) {
 // a second time.
 func DvpUtxo(dvpID, ownerHash, blinding, treeID frontend.Variable) gnarksdk.Utxo {
 	return gnarksdk.Utxo{
-		Domain:        utxoDomain,
+		Domain:        spp.UtxoDomain,
 		Owner:         ownerHash,
 		Asset:         solAssetField,
 		Amount:        0,
@@ -122,8 +128,11 @@ func DvpUtxo(dvpID, ownerHash, blinding, treeID frontend.Variable) gnarksdk.Utxo
 }
 
 // AssertDvpUtxo asserts the witness u is the DvP UTXO of dvpID under
-// ownerHash. Only its blinding and tree id are free: the blinding is checked
-// by the caller's blinding derivation, the tree id by the transact proof.
+// ownerHash. Only its blinding and tree id are free. In create, where it is
+// the output, the blinding derivation checks the blinding and the transact
+// proof the tree id. In settle and abort, where it is the spent input, the
+// transact proof's inclusion check pins both: no other blinding or tree id
+// hashes to a leaf in the tree.
 func AssertDvpUtxo(api frontend.API, u gnarksdk.Utxo, dvpID, ownerHash frontend.Variable) {
 	expected := DvpUtxo(dvpID, ownerHash, u.Blinding, u.TreeID)
 	api.AssertIsEqual(u.Domain, expected.Domain)

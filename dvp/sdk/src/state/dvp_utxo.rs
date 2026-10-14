@@ -1,11 +1,13 @@
 use anyhow::{ensure, Result};
-use zolana_keypair::{NullifierKey, PublicKey};
+use zolana_keypair::PublicKey;
 use zolana_transaction::{
     utxo::{SppProofInputUtxo, Utxo},
     Data, Mint,
 };
 
-use crate::{err, instructions::create_dvp::CreateDvpDerivation, state::SwapDvp};
+use crate::{
+    err, instructions::create_dvp::CreateDvpDerivation, shared::zero_nullifier_key, state::SwapDvp,
+};
 
 /// The DvP UTXO the create transaction appends: a zero-amount SOL UTXO owned
 /// by the DvP authority PDA with the zero nullifier secret, whose data hash
@@ -62,11 +64,6 @@ impl DvpUtxo {
         );
         Ok(input)
     }
-}
-
-/// The public zero-secret nullifier key of every PDA-owned DvP UTXO.
-fn zero_nullifier_key() -> NullifierKey {
-    NullifierKey::from_secret([0u8; 31])
 }
 
 /// A PDA-owned `utxo` (the DvP UTXO or a deposit) as an SPP input under the

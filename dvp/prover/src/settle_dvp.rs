@@ -4,7 +4,7 @@ use dvp_program::instructions::shared::u64_right_align;
 use zolana_client::ProofInputUtxo;
 use zolana_gnark_ffi_prover::{decimal, utxo_proof_inputs, ProofInputMap};
 
-use crate::{CircuitId, DvpProof, SwapDvpProofInput, PROVER};
+use crate::{CircuitId, DvpProof, ProveError, SwapDvpProofInput};
 
 /// The settle_dvp witness. Its shape is the Go `settle_dvp.Circuit`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,11 +71,8 @@ impl SettleDvpProofInputs {
         map
     }
 
-    pub fn prove(&self) -> zolana_gnark_ffi_prover::Result<DvpProof> {
-        Ok(PROVER
-            .prove(CircuitId::SettleDvp, &self.witness())?
-            .compress()?
-            .into())
+    pub fn prove(&self) -> Result<DvpProof, ProveError> {
+        DvpProof::prove(CircuitId::SettleDvp, &self.witness())
     }
 }
 

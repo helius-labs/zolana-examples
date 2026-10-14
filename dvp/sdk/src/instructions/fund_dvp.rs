@@ -1,7 +1,6 @@
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use solana_address::Address;
 use solana_instruction::Instruction;
-use solana_pubkey::Pubkey;
 use zolana_interface::instruction::instruction_data::transact::TransactIxData;
 use zolana_keypair::{P256Pubkey, ShieldedKeypair};
 use zolana_program::instruction::Transact;
@@ -42,8 +41,17 @@ impl FundDvpParams {
     /// The encrypted transfer, ready to prove. The transaction viewing key
     /// derives from `funder`'s viewing key and the first input's nullifier,
     /// which is how the funder re-reads its deposit later
-    /// ([`crate::index::scan_own_deposits`]).
+    /// ([`crate::index::scan_own_deposits`]). An amount below the leg's could
+    /// never settle (the deposit would have to be reclaimed and the leg
+    /// funded again), so it is refused.
     pub fn build(self, funder: &ShieldedKeypair) -> Result<SppProofInputs> {
+        let leg_amount = self.leg.amount(&self.terms);
+        ensure!(
+            self.amount >= leg_amount,
+            "funding {:?} with {} below its amount {leg_amount}",
+            self.leg,
+            self.amount
+        );
         let recipient = Deposit::address(&self.terms, self.authority_viewing_pubkey)?;
         let mut transaction = ConfidentialTransaction::new(self.inputs, self.payer)
             .map_err(err)?
@@ -64,9 +72,9 @@ impl FundDvpParams {
 
 /// The SPP `transact` instruction of a proven funding transfer.
 pub struct FundDvp {
-    pub payer: Pubkey,
+    pub payer: Address,
     /// The SPP tree: output tree, and input tree of every tree context.
-    pub tree: Pubkey,
+    pub tree: Address,
     pub spp: TransactIxData,
 }
 
@@ -81,5 +89,44 @@ impl FundDvp {
             data: self.spp,
         }
         .instruction()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zolana_transaction::Mint;
+
+    use super::*;
+    use crate::index::fixture::{
+        fixture_parties, pubkey, sample_terms, wallet_utxo, FIXTURE_TREE_ID,
+    };
+
+    #[test]
+    fn build_refuses_less_than_the_leg_amount() {
+        let parties = fixture_parties();
+        let terms = sample_terms(&parties);
+        let [_, buyer, authority] = &parties;
+        let leg_amount = Leg::Payment.amount(&terms);
+        let params = |amount| FundDvpParams {
+            terms: terms.clone(),
+            leg: Leg::Payment,
+            amount,
+            authority_viewing_pubkey: authority.viewing_pubkey(),
+            inputs: vec![wallet_utxo(buyer, Mint::SOL, 10 * leg_amount)],
+            payer: pubkey(buyer),
+            tree_id: FIXTURE_TREE_ID,
+        };
+        let error = params(leg_amount - 1)
+            .build(buyer)
+            .err()
+            .expect("an underfunded leg");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "funding Payment with {} below its amount {leg_amount}",
+                leg_amount - 1
+            )
+        );
+        assert!(params(leg_amount).build(buyer).is_ok());
     }
 }

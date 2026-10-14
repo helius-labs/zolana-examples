@@ -9,17 +9,10 @@ autotests = false
 anyhow = { workspace = true }
 dvp-program = { path = "../program" }
 dvp-sdk = { path = "../sdk" }
-solana-address = { workspace = true }
-solana-instruction = { workspace = true }
-solana-keypair = { workspace = true }
+solana-clock = { workspace = true }
 solana-signature = { workspace = true }
-solana-signer = { workspace = true }
+wincode = { workspace = true }
 zolana-client = { workspace = true, features = ["indexer-api", "solana-rpc"] }
-zolana-interface = { workspace = true }
-zolana-keypair = { workspace = true }
-zolana-program-test = { workspace = true, features = ["localnet"] }
-zolana-test-utils = { workspace = true }
-zolana-transaction = { workspace = true }
 
 [dev-dependencies]
 dvp-prover = { path = "../prover" }
@@ -27,10 +20,18 @@ light-program-profiler = { workspace = true, features = ["mollusk"] }
 mollusk-svm = { workspace = true }
 num-bigint = { workspace = true }
 solana-account = { workspace = true }
-solana-pubkey = { workspace = true }
+solana-address = { workspace = true }
+solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
+solana-signer = { workspace = true }
 zolana-gnark-ffi-prover = { workspace = true }
 zolana-hasher = { workspace = true }
+zolana-interface = { workspace = true }
+zolana-keypair = { workspace = true }
 zolana-merkle-tree = { workspace = true }
+zolana-program-test = { workspace = true, features = ["localnet"] }
+zolana-test-utils = { workspace = true }
+zolana-transaction = { workspace = true }
 zolana-tree = { workspace = true }
 
 [[test]]

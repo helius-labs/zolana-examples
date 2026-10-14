@@ -1,9 +1,9 @@
-use anyhow::{ensure, Result};
+use anyhow::Result;
 use dvp_prover::AbortDvpProofInputs;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use zolana_client::ZolanaIndexer;
-use zolana_keypair::{NullifierKey, ShieldedKeypair};
+use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::{instructions::transact::SppProofInputs, Mint};
 
 use super::{AbortDvpDerivation, AbortDvpProofInputParams, AbortMode};
@@ -11,7 +11,7 @@ use crate::{
     encryption::encrypt_outputs,
     err,
     instructions::{cancel_dvp::CancelDvp, reject_dvp::RejectDvp},
-    prover::DvpProverClient,
+    shared::{ensure_output_tree, prove_pda_transact},
     state::{Deposit, DvpUtxo, SwapDvp},
 };
 
@@ -78,8 +78,9 @@ impl AbortDvpTransactionParams {
     /// nullifier.
     ///
     /// Errors unless `signer` may abort in `mode` (cancel: the settlement
-    /// authority; reject: the seller or the buyer) and each deposit funds
-    /// its leg of the terms.
+    /// authority; reject: the seller or the buyer), each deposit funds its
+    /// leg of the terms, and the DvP UTXO and the deposits sit in the tree
+    /// with id `tree_id`, which the instruction reads its inputs from.
     pub fn build(self, signer: &ShieldedKeypair) -> Result<AbortDvpTransaction> {
         let Self {
             terms,
@@ -93,6 +94,10 @@ impl AbortDvpTransactionParams {
             payer,
             tree_id,
         } = self;
+        ensure_output_tree("the DvP UTXO", dvp_utxo.tree_id, tree_id)?;
+        for deposit in delivery_deposit.iter().chain(payment_deposit.iter()) {
+            ensure_output_tree("a deposit", deposit.tree_id, tree_id)?;
+        }
         let signer_address = signer
             .shielded_address()
             .map_err(err)?
@@ -160,18 +165,8 @@ impl AbortDvpTransaction {
             proof_inputs,
         } = self;
         let payer = spp_proof_inputs.payer;
-        // Every real input is owned by the PDA with the public zero secret;
-        // the padding inputs carry their own random secrets.
-        let spp = indexer
-            .prove_transact(spp_proof_inputs, &NullifierKey::from_secret([0; 31]))
-            .map_err(err)?;
-        ensure!(
-            spp.private_tx_hash == proof_inputs.private_tx_hash,
-            "the SPP proof and the abort proof cover different transactions"
-        );
-        let abort_proof = DvpProverClient::new()
-            .prove_abort_dvp(&proof_inputs)?
-            .into();
+        let spp = prove_pda_transact(indexer, spp_proof_inputs, &proof_inputs.private_tx_hash)?;
+        let abort_proof = proof_inputs.prove().map_err(err)?.into();
         let dvp_id = proof_inputs.dvp_id;
         Ok(match mode {
             AbortMode::Cancel => AbortDvp::Cancel(CancelDvp {

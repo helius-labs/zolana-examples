@@ -4,11 +4,11 @@ use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
 use zolana_test_utils::mollusk::expect_err_exact;
 
-use crate::common::{program_id, setup_mollusk};
+use crate::common::setup_mollusk;
 
 fn expect_invalid_instruction_data(mollusk: &Mollusk, data: Vec<u8>) {
     let instruction = Instruction {
-        program_id: program_id(),
+        program_id: dvp_program::ID,
         accounts: Vec::new(),
         data,
     };

@@ -6,7 +6,8 @@ use dvp_sdk::{
     index::{index_deposits, index_own_deposits, index_terms, DiscoveredDvp},
     state::{Deposit, DvpUtxo, Leg},
 };
-use shared::{assert_dvp_error, setup, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT};
+use dvp_test::{assert_dvp_error, assert_spp_rejects, has_dvp, has_legs};
+use shared::{setup, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT};
 use zolana_transaction::SOL_MINT;
 
 /// What the seller sends above the delivery amount, refunded at settlement.
@@ -37,7 +38,12 @@ fn create_dvp_and_discover_terms() -> Result<()> {
     let expected_utxo = DvpUtxo::new(terms.clone(), env.localnet.tree_id);
     assert_eq!(expected_utxo.hash()?, dvp_utxo_hash);
     for (recipient_index, party) in (0u32..).zip(env.parties()) {
-        let found = index_terms(&party.shielded, &env.localnet.client, INDEX_TIMEOUT)?;
+        let found = index_terms(
+            &party.shielded,
+            &env.localnet.client,
+            INDEX_TIMEOUT,
+            has_dvp(&terms),
+        )?;
         let [discovered] = found.as_slice() else {
             anyhow::bail!("party {recipient_index} discovered {} DvPs", found.len());
         };
@@ -54,11 +60,12 @@ fn create_dvp_and_discover_terms() -> Result<()> {
 
     // The address is indexed now, so no second proof of its non-inclusion
     // exists: resend the same signed instruction instead, made distinct by a
-    // priority fee. Only failure is asserted, since the SPP error depends on
-    // whether the nullifier is still queued.
-    ensure!(
-        env.send(create_ix, &[&env.seller.solana], Some(1)).is_err(),
-        "duplicate create unexpectedly succeeded"
+    // priority fee. SPP refuses it on the address nullifier; its exact error
+    // depends on whether the nullifier is still queued, so only the absence
+    // of a DvP error is asserted.
+    assert_spp_rejects(
+        "duplicate create",
+        env.send(create_ix, &[&env.seller.solana], Some(1)),
     );
     Ok(())
 }
@@ -71,7 +78,9 @@ fn create_dvp_rejects_a_mismatched_dvp_id() -> Result<()> {
     let (other_pda, other_bump) = other_terms.dvp_authority()?;
     let mut create = env.prove_create(&terms)?;
     // The other terms' id with its own bump derives a valid PDA, but the
-    // create proof binds the original id and owner hash.
+    // create proof binds the original id and owner hash. Since the PDA
+    // follows from the id, this fails on either binding; it does not show
+    // the `dvp_id` public input alone is checked.
     create.dvp_id = other_terms.dvp_id()?;
     create.bump = other_bump;
     ensure!(
@@ -94,7 +103,7 @@ fn fund_dvp_and_discover_deposits() -> Result<()> {
     let create = env.prove_create(&terms)?;
     env.send(create.instruction()?, &[&env.seller.solana], None)?;
     let authority = &env.settlement_authority.shielded;
-    let discovered = index_terms(authority, client, INDEX_TIMEOUT)?;
+    let discovered = index_terms(authority, client, INDEX_TIMEOUT, has_dvp(&terms))?;
     let [discovered] = discovered.as_slice() else {
         bail!(
             "the settlement authority discovered {} DvPs",
@@ -126,7 +135,14 @@ fn fund_dvp_and_discover_deposits() -> Result<()> {
     // The settlement authority finds both deposits by the PDA tag and reads
     // them with its viewing key.
     let registry = env.assets()?;
-    let deposits = index_deposits(&terms, authority, &registry, client, INDEX_TIMEOUT)?;
+    let deposits = index_deposits(
+        &terms,
+        authority,
+        &registry,
+        client,
+        INDEX_TIMEOUT,
+        has_legs([Leg::Delivery, Leg::Payment]),
+    )?;
     let deposit = |leg: Leg| -> Result<&Deposit> {
         deposits
             .iter()
@@ -151,7 +167,14 @@ fn fund_dvp_and_discover_deposits() -> Result<()> {
     // Each funder re-reads exactly its own deposit through its transaction
     // viewing key, and sees the opening the authority sees.
     for (funder, expected) in [(&env.seller, delivery), (&env.buyer, payment)] {
-        let own = index_own_deposits(&terms, &funder.shielded, &registry, client, INDEX_TIMEOUT)?;
+        let own = index_own_deposits(
+            &terms,
+            &funder.shielded,
+            &registry,
+            client,
+            INDEX_TIMEOUT,
+            has_legs([expected.leg]),
+        )?;
         assert_eq!(own, vec![expected.clone()]);
     }
     Ok(())

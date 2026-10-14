@@ -10,8 +10,8 @@ use zolana_account_checks::error::AccountError;
 use zolana_test_utils::mollusk::expect_err_exact;
 
 use crate::common::{
-    dvp_authority, off_curve_bump, settle_dvp_data, settle_dvp_fixture, setup_mollusk, CREATOR,
-    DVP_ID, SETTLE_NOW,
+    dvp_authority, non_canonical_bump, on_curve_bump, settle_dvp_data, settle_dvp_fixture,
+    setup_mollusk, CREATOR, DVP_ID, SETTLE_NOW,
 };
 
 /// Runs the settle_dvp fixture after `edit` at clock `now` and expects
@@ -98,7 +98,9 @@ fn timestamp_older_than_the_window_is_rejected_exactly() {
 
 #[test]
 fn negative_timestamp_is_rejected_exactly() {
-    // D5: negative even where the window reaches below zero.
+    // D5: negative even where the window reaches below zero. Two checks
+    // refuse it with this error, the window check and the public input's
+    // u64 encoding; windows.rs pins the window check alone.
     expect_settle_dvp_err_at(
         TIME_WINDOW / 2,
         |instruction| instruction.data = settle_at(-1),
@@ -106,14 +108,16 @@ fn negative_timestamp_is_rejected_exactly() {
     );
 }
 
+/// A bump other than the canonical one: on the curve it derives no PDA;
+/// below the canonical one it derives a PDA of its own, which owns no DvP.
 #[test]
-fn bump_without_a_pda_is_rejected_exactly() {
-    expect_settle_dvp_err(
-        |instruction| {
-            instruction.data = settle_dvp_data(CREATOR, DVP_ID, off_curve_bump(), SETTLE_NOW)
-        },
-        DvpError::InvalidDvpAuthority,
-    );
+fn non_canonical_bump_is_rejected_exactly() {
+    for bump in [on_curve_bump(), non_canonical_bump()] {
+        expect_settle_dvp_err(
+            |instruction| instruction.data = settle_dvp_data(CREATOR, DVP_ID, bump, SETTLE_NOW),
+            DvpError::InvalidDvpAuthority,
+        );
+    }
 }
 
 #[test]

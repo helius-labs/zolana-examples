@@ -1,9 +1,5 @@
 use dvp_program::{
-    instructions::{
-        reclaim_dvp::{ReclaimDvpProof, ReclaimDvpPublicInput},
-        shared::u64_right_align,
-        verifier::{verify_groth16, CompressedGroth16Proof},
-    },
+    instructions::{reclaim_dvp::ReclaimDvpPublicInput, shared::u64_right_align},
     verifying_keys::reclaim_dvp::VERIFYINGKEY,
 };
 use dvp_prover::{CircuitId, ProofInputUtxo, ReclaimDvpProofInputs, SwapDvpProofInput};
@@ -21,8 +17,8 @@ use zolana_transaction::{
 
 mod shared;
 use shared::{
-    ensure_keys, fe, generated_vk, pda_owner_hash, sample_terms, verify_with_generated_vk,
-    OUTPUT_TREE_ID,
+    assert_single_input_vk, assert_unsatisfied, assert_verifies, ensure_keys, fe, generated_vk,
+    pda_owner_hash, sample_terms, verify_with_generated_vk, OUTPUT_TREE_ID,
 };
 
 const CIRCUIT: CircuitId = CircuitId::ReclaimDvp;
@@ -160,7 +156,7 @@ fn assert_unprovable(
     let mut inputs = derive_reclaim_inputs(signer, leg);
     tamper(&mut inputs);
     reseal(&mut inputs);
-    assert!(inputs.prove().is_err(), "proving must fail: {reason}");
+    assert_unsatisfied(inputs.prove(), reason);
 }
 
 /// Asserts the sdk refuses the tampered parameters.
@@ -180,47 +176,12 @@ fn assert_sdk_rejects(
 
 fn prove_and_verify(inputs: &ReclaimDvpProofInputs) {
     let proof = inputs.prove().expect("prove failed");
-    assert!(
-        proof.proof_a.iter().any(|byte| *byte != 0),
-        "proof_a must not be all zero"
-    );
-    assert!(
-        verify_with_generated_vk(
-            &generated_vk(CIRCUIT),
-            &proof.proof_a,
-            &proof.proof_b,
-            &proof.proof_c,
-            inputs.public_input_hash,
-        ),
-        "the proof must verify against the generated reclaim_dvp verifying key"
-    );
-
-    let proof: ReclaimDvpProof = proof.into();
-    verify_groth16(
-        CompressedGroth16Proof {
-            a: &proof.proof_a,
-            b: &proof.proof_b,
-            c: &proof.proof_c,
-            commitment: None,
-        },
-        inputs.public_input_hash,
-        &VERIFYINGKEY,
-    )
-    .expect("the committed reclaim_dvp VERIFYINGKEY must accept the proof; regenerate the keys");
+    assert_verifies(CIRCUIT, &proof, inputs.public_input_hash, &VERIFYINGKEY);
 }
 
 #[test]
 fn program_vk_has_no_commitment() {
-    assert_eq!(VERIFYINGKEY.nr_pubinputs, 1);
-    assert!(
-        VERIFYINGKEY.vk_commitment.is_none(),
-        "reclaim_dvp circuit is standard Groth16: no BSB22 commitment"
-    );
-    assert_eq!(
-        VERIFYINGKEY.vk_ic.len(),
-        2,
-        "standard Groth16 vk_ic length must be public_inputs + 1"
-    );
+    assert_single_input_vk(&VERIFYINGKEY);
 }
 
 /// The sdk derivation matches the independent one for both legs, so the

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use solana_address::Address;
 use zolana_keypair::{P256Pubkey, PublicKey, ShieldedAddress};
 use zolana_program::compression::ZERO_NULLIFIER_PUBKEY;
@@ -99,6 +99,18 @@ impl Deposit {
 
     pub fn hash(&self) -> Result<[u8; 32]> {
         Ok(self.to_input_utxo()?.utxo_hash)
+    }
+
+    /// Checks the deposit funds `leg` of `terms`: it belongs to those terms,
+    /// names that leg, and holds the leg's mint. Its amount is not checked.
+    pub(crate) fn check_leg(&self, terms: &SwapDvp, leg: Leg) -> Result<()> {
+        ensure!(&self.terms == terms, "{leg:?} deposit of other terms");
+        ensure!(self.leg == leg, "{leg:?} deposit funds the other leg");
+        ensure!(
+            self.mint.asset == leg.mint(terms),
+            "{leg:?} deposit mint is not the leg's mint"
+        );
+        Ok(())
     }
 }
 

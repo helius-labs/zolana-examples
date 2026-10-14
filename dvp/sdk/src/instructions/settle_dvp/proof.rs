@@ -204,12 +204,7 @@ impl SettleDvpProofInputParams {
 /// Checks `deposit` funds `leg` of `terms` with at least the leg amount and
 /// returns the surplus.
 fn leg_change(terms: &SwapDvp, deposit: &Deposit, leg: Leg) -> Result<u64> {
-    ensure!(&deposit.terms == terms, "{leg:?} deposit of other terms");
-    ensure!(deposit.leg == leg, "{leg:?} deposit funds the other leg");
-    ensure!(
-        deposit.mint.asset == leg.mint(terms),
-        "{leg:?} deposit mint is not the leg's mint"
-    );
+    deposit.check_leg(terms, leg)?;
     deposit
         .amount
         .checked_sub(leg.amount(terms))

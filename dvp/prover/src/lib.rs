@@ -6,9 +6,9 @@ pub mod reclaim_dvp;
 pub mod settle_dvp;
 pub mod swap_dvp;
 
-pub use abort_dvp::AbortDvpProofInputs;
+pub use abort_dvp::{AbortDvpProofInputs, AbortMode};
 pub use create_dvp::CreateDvpProofInputs;
-pub use proof::DvpProof;
+pub use proof::{DvpProof, ProveError};
 pub use reclaim_dvp::ReclaimDvpProofInputs;
 pub use settle_dvp::SettleDvpProofInputs;
 pub use swap_dvp::{DestinationProofInput, SwapDvpProofInput};

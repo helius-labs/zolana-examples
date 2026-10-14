@@ -37,11 +37,7 @@ impl ReclaimDvpProofInputParams {
     pub fn to_proof_inputs(&self) -> Result<ReclaimDvpProofInputs> {
         let terms = &self.terms;
         let deposit = &self.deposit;
-        ensure!(&deposit.terms == terms, "deposit belongs to other terms");
-        ensure!(
-            deposit.mint.asset == deposit.leg.mint(terms),
-            "deposit mint is not its leg's mint"
-        );
+        deposit.check_leg(terms, deposit.leg)?;
         let (party, leg) = match deposit.leg {
             Leg::Delivery => (terms.seller, false),
             Leg::Payment => (terms.buyer, true),

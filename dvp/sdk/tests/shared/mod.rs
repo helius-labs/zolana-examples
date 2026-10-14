@@ -1,11 +1,13 @@
-use dvp_prover::{CircuitId, PROVER};
+use dvp_program::instructions::verifier::{verify_groth16, CompressedGroth16Proof};
+use dvp_prover::{CircuitId, DvpProof, ProveError, PROVER};
 use dvp_sdk::state::SwapDvp;
 use groth16_solana::{
     decompression::{decompress_g1, decompress_g2},
-    groth16::Groth16Verifier,
+    groth16::{Groth16Verifier, Groth16Verifyingkey},
     vk::gnark::{parse_gnark_vk_bytes, Groth16VerifyingkeyOwned},
 };
 use solana_address::Address;
+use zolana_gnark_ffi_prover::Error as GnarkError;
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::{
     constants::BLINDING_LEN, hash::poseidon, NullifierKey, PublicKey, ShieldedAddress, ViewingKey,
@@ -51,6 +53,63 @@ pub fn verify_with_generated_vk(
     let borrowed = vk.as_borrowed();
     Groth16Verifier::new(&a, &b, &c, &public_inputs, &borrowed)
         .is_ok_and(|mut verifier| verifier.verify().is_ok())
+}
+
+/// A committed DvP verifying key is standard Groth16 over the one public
+/// input hash: no BSB22 commitment, so `vk_ic` has two points.
+pub fn assert_single_input_vk(vk: &Groth16Verifyingkey) {
+    assert_eq!(
+        (vk.nr_pubinputs, vk.vk_commitment.is_none(), vk.vk_ic.len()),
+        (1, true, 2)
+    );
+}
+
+/// Asserts `proof` of `circuit` over `public_input_hash` verifies against the
+/// key the setup generated and against `committed`, the program's.
+pub fn assert_verifies(
+    circuit: CircuitId,
+    proof: &DvpProof,
+    public_input_hash: [u8; 32],
+    committed: &Groth16Verifyingkey,
+) {
+    assert!(
+        proof.proof_a.iter().any(|byte| *byte != 0),
+        "proof_a must not be all zero"
+    );
+    assert!(
+        verify_with_generated_vk(
+            &generated_vk(circuit),
+            &proof.proof_a,
+            &proof.proof_b,
+            &proof.proof_c,
+            public_input_hash,
+        ),
+        "the proof must verify against the generated {circuit:?} verifying key"
+    );
+    verify_groth16(
+        CompressedGroth16Proof {
+            a: &proof.proof_a,
+            b: &proof.proof_b,
+            c: &proof.proof_c,
+            commitment: None,
+        },
+        public_input_hash,
+        committed,
+    )
+    .unwrap_or_else(|_| {
+        panic!("the committed {circuit:?} verifying key must accept the proof; regenerate the keys")
+    });
+}
+
+/// Asserts proving failed in gnark's prover, on a constraint the witness
+/// does not satisfy (the bridge reports those as `prove: ...`), not earlier
+/// on a malformed witness or a missing key.
+pub fn assert_unsatisfied(result: Result<DvpProof, ProveError>, reason: &str) {
+    match result {
+        Err(ProveError::Prover(GnarkError::Go(message))) if message.starts_with("prove: ") => {}
+        Err(error) => panic!("proving must fail on a constraint: {reason}: {error}"),
+        Ok(_) => panic!("proving must fail: {reason}"),
+    }
 }
 
 pub fn fe(byte: u8) -> [u8; 32] {

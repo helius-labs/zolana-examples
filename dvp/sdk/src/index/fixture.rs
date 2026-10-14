@@ -1,7 +1,10 @@
 use solana_address::Address;
 use solana_keypair::Keypair;
 use solana_signature::Signature;
-use zolana_client::{MerkleContext, NonInclusionProof};
+use zolana_client::{
+    rpc::GetShieldedTransactionsByNullifiersResponse, ClientError, Context,
+    GetShieldedTransactionsByTagsResponse, IndexerRpcConfig, MerkleContext, NonInclusionProof, Rpc,
+};
 use zolana_keypair::{P256Pubkey, ShieldedKeypair};
 use zolana_transaction::{
     instructions::transact::{OutputContext, OutputSlot, SppProofInputs},
@@ -32,7 +35,7 @@ pub(crate) fn keypair(seed: u8) -> ShieldedKeypair {
     ShieldedKeypair::from_keypair(&Keypair::new_from_array([seed; 32])).expect("keypair")
 }
 
-fn pubkey(keypair: &ShieldedKeypair) -> Address {
+pub(crate) fn pubkey(keypair: &ShieldedKeypair) -> Address {
     keypair
         .shielded_address()
         .expect("shielded address")
@@ -166,7 +169,7 @@ pub(crate) struct DepositFixture {
 
 /// A spendable note of `amount` of `mint` for `owner`, as a wallet sync
 /// would hold it.
-fn wallet_utxo(owner: &ShieldedKeypair, mint: Mint, amount: u64) -> WalletUtxo {
+pub(crate) fn wallet_utxo(owner: &ShieldedKeypair, mint: Mint, amount: u64) -> WalletUtxo {
     let utxo = Utxo {
         owner: owner.signing_pubkey(),
         asset: mint,
@@ -282,7 +285,10 @@ pub(crate) fn deposit_fixture() -> DepositFixture {
         }
         .build(funder)
         .expect("funding transaction");
-        let tx = shielded_transaction(&proof_inputs, first_leaf);
+        let tx = ShieldedTransaction {
+            tx_signature: Signature::from([u8::try_from(first_leaf).expect("small leaf"); 64]),
+            ..shielded_transaction(&proof_inputs, first_leaf)
+        };
         let (deposit_output, deposit_slot) = proof_inputs
             .output_utxos
             .iter()
@@ -309,5 +315,86 @@ pub(crate) fn deposit_fixture() -> DepositFixture {
         funders: [seller, buyer],
         txs: [delivery_tx, payment_tx],
         deposits: [delivery, payment],
+    }
+}
+
+/// An in-memory indexer over `txs`. A tag query serves the transactions
+/// with an output or a message so tagged, one per page, so callers follow
+/// the cursor; every page also repeats the previous page's transaction, the
+/// way overlapping pages do. A nullifier query serves the transactions that
+/// spent any of the nullifiers, in one page.
+pub(crate) struct FixtureIndexer {
+    pub(crate) txs: Vec<ShieldedTransaction>,
+}
+
+impl Rpc for FixtureIndexer {
+    fn get_shielded_transactions_by_tags(
+        &self,
+        tags: Vec<[u8; 32]>,
+        cursor: Option<Vec<u8>>,
+        _limit: Option<u32>,
+        _config: Option<IndexerRpcConfig>,
+    ) -> Result<GetShieldedTransactionsByTagsResponse, ClientError> {
+        let matching: Vec<&ShieldedTransaction> = self
+            .txs
+            .iter()
+            .filter(|tx| {
+                tx.output_slots
+                    .iter()
+                    .any(|slot| tags.contains(&slot.view_tag))
+                    || tx
+                        .messages
+                        .iter()
+                        .any(|message| tags.contains(&message.view_tag))
+            })
+            .collect();
+        let page = cursor
+            .as_deref()
+            .and_then(<[u8]>::first)
+            .map_or(0, |&page| usize::from(page));
+        let transactions = matching
+            .get(page.saturating_sub(1)..=page)
+            .unwrap_or_default()
+            .iter()
+            .map(|tx| (*tx).clone())
+            .collect();
+        let next_cursor = u8::try_from(page + 1)
+            .ok()
+            .filter(|&next| usize::from(next) < matching.len())
+            .map(|next| vec![next]);
+        Ok(GetShieldedTransactionsByTagsResponse {
+            context: Context {
+                block_time: 0,
+                slot: 0,
+            },
+            output_tree_id: Some(FIXTURE_TREE_ID),
+            transactions,
+            next_cursor,
+            scanned_through: None,
+        })
+    }
+
+    fn get_shielded_transactions_by_nullifiers(
+        &self,
+        nullifiers: Vec<[u8; 32]>,
+        _cursor: Option<Vec<u8>>,
+        _limit: Option<u32>,
+        _config: Option<IndexerRpcConfig>,
+    ) -> Result<GetShieldedTransactionsByNullifiersResponse, ClientError> {
+        Ok(GetShieldedTransactionsByNullifiersResponse {
+            context: Context {
+                block_time: 0,
+                slot: 0,
+            },
+            output_tree_id: Some(FIXTURE_TREE_ID),
+            transactions: self
+                .txs
+                .iter()
+                .filter(|tx| tx.nullifiers.iter().any(|n| nullifiers.contains(n)))
+                .cloned()
+                .collect(),
+            next_cursor: None,
+            scanned_through: None,
+        })
     }
 }

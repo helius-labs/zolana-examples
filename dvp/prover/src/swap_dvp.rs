@@ -87,8 +87,11 @@ impl SwapDvpProofInput {
     }
 }
 
-/// The witness keys one `dvpterms.SwapDvp` prefix must produce, spelled out
-/// from the Go field names for the exact-key-set tests.
+/// The witness keys one `dvpterms.SwapDvp` prefix must produce: a second,
+/// hand-written copy of the Go field names, so the key-set tests catch a
+/// builder key edited by mistake without the proving keys. They do not read
+/// the Go structs; the gnark bridge's exact key check when proving (every
+/// sdk circuit test) is what ties the keys to the circuits.
 #[cfg(test)]
 pub(crate) fn expected_swap_dvp_witness_keys(prefix: &str) -> Vec<String> {
     let scalars = [

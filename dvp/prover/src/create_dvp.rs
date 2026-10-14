@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use zolana_client::ProofInputUtxo;
 use zolana_gnark_ffi_prover::{decimal, utxo_proof_inputs, ProofInputMap};
 
-use crate::{CircuitId, DvpProof, SwapDvpProofInput, PROVER};
+use crate::{CircuitId, DvpProof, ProveError, SwapDvpProofInput};
 
 /// The create_dvp witness. Its shape is the Go `create_dvp.Circuit`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,11 +45,8 @@ impl CreateDvpProofInputs {
         map
     }
 
-    pub fn prove(&self) -> zolana_gnark_ffi_prover::Result<DvpProof> {
-        Ok(PROVER
-            .prove(CircuitId::CreateDvp, &self.witness())?
-            .compress()?
-            .into())
+    pub fn prove(&self) -> Result<DvpProof, ProveError> {
+        DvpProof::prove(CircuitId::CreateDvp, &self.witness())
     }
 }
 

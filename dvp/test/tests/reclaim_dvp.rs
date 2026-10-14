@@ -7,7 +7,8 @@ use dvp_sdk::{
     instructions::reclaim_dvp::ReclaimDvpTransactionParams,
     state::{Deposit, DvpUtxo, Leg},
 };
-use shared::{assert_dvp_error, setup, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT};
+use dvp_test::{assert_dvp_error, assert_spp_rejects, failure_text, has_legs};
+use shared::{setup, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT};
 use solana_signer::Signer;
 use zolana_client::Rpc;
 use zolana_test_utils::{
@@ -21,8 +22,9 @@ const SHIELD_AMOUNT: u64 = 600_000_000;
 /// Create a DvP, fund both legs, and let the seller reclaim its delivery
 /// deposit while the DvP is open: the refund lands in the seller's wallet,
 /// the deposit is spent, and the DvP UTXO and the payment deposit are not.
-/// The buyer cannot reclaim the seller's deposit, and the deposit cannot be
-/// reclaimed twice.
+/// The buyer cannot reclaim the seller's deposit, the proven reclaim does not
+/// run against other SPP accounts, and the deposit cannot be reclaimed
+/// twice.
 #[test]
 fn reclaim_dvp_while_open() -> Result<()> {
     let env = setup(14)?;
@@ -58,6 +60,7 @@ fn reclaim_dvp_while_open() -> Result<()> {
         &registry,
         client,
         INDEX_TIMEOUT,
+        has_legs([Leg::Delivery]),
     )?;
     let [delivery] = own.as_slice() else {
         bail!("the seller discovered {} own deposits", own.len());
@@ -68,6 +71,7 @@ fn reclaim_dvp_while_open() -> Result<()> {
         &registry,
         client,
         INDEX_TIMEOUT,
+        has_legs([Leg::Payment]),
     )?;
     let payment: &Deposit = deposits
         .iter()
@@ -108,6 +112,39 @@ fn reclaim_dvp_while_open() -> Result<()> {
         DvpError::ProofVerificationFailed,
     );
 
+    // The proof does not bind the forwarded SPP accounts; the program checks
+    // them after the proof, before its CPI. Account 4 is the SPP program and
+    // the last one the dvp_authority PDA (D8).
+    let mut wrong_program_ix = reclaim_ix.clone();
+    wrong_program_ix
+        .accounts
+        .get_mut(4)
+        .ok_or_else(|| anyhow!("reclaim has no SPP program account"))?
+        .pubkey = env.buyer.solana.pubkey();
+    assert_dvp_error(
+        "a reclaim forwarded to another program",
+        env.send(wrong_program_ix, &[&env.seller.solana], None),
+        DvpError::InvalidShieldedPoolProgram,
+    );
+    let mut no_pda_ix = reclaim_ix.clone();
+    no_pda_ix.accounts.pop();
+    assert_dvp_error(
+        "a reclaim without the dvp_authority account",
+        env.send(no_pda_ix, &[&env.seller.solana], None),
+        DvpError::MissingDvpAuthority,
+    );
+    let mut short_ix = reclaim_ix.clone();
+    short_ix.accounts.truncate(4);
+    let short_error = failure_text(
+        "a reclaim with two SPP accounts",
+        env.send(short_ix, &[&env.seller.solana], None),
+    );
+    // `ProgramError::NotEnoughAccountKeys`, as the RPC error prints it.
+    ensure!(
+        short_error.contains("insufficient account keys for instruction"),
+        "a reclaim with two SPP accounts: expected NotEnoughAccountKeys in: {short_error}"
+    );
+
     let reclaim_signature = env.send(reclaim_ix.clone(), &[&env.seller.solana], None)?;
     client.confirm_private_transaction_sync(reclaim_signature)?;
 
@@ -136,11 +173,11 @@ fn reclaim_dvp_while_open() -> Result<()> {
     assert_eq!(proofs.proofs.len(), unspent.len());
     assert_nullifier_pdas_absent(client, &tree, &unspent)?;
 
-    // A second reclaim of the same deposit fails: its nullifier exists.
-    ensure!(
-        env.send(reclaim_ix, &[&env.seller.solana], Some(1))
-            .is_err(),
-        "second reclaim of the delivery deposit unexpectedly succeeded"
+    // A second reclaim of the same deposit fails in SPP: its nullifier
+    // exists.
+    assert_spp_rejects(
+        "second reclaim of the delivery deposit",
+        env.send(reclaim_ix, &[&env.seller.solana], Some(1)),
     );
     Ok(())
 }

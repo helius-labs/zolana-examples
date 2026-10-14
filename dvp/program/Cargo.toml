@@ -44,8 +44,6 @@ mollusk-svm = { workspace = true }
 zolana-test-utils = { workspace = true, features = ["mollusk"] }
 solana-account = { workspace = true }
 solana-instruction = { workspace = true }
-solana-pubkey = { workspace = true }
-solana-program-error = { workspace = true }
 
 [lints.rust.unexpected_cfgs]
 level = "allow"

@@ -9,8 +9,8 @@ use dvp_sdk::{
     },
     state::{Deposit, Leg},
 };
-use dvp_test::cluster_time;
-use shared::{assert_dvp_error, setup, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT};
+use dvp_test::{assert_dvp_error, assert_spp_rejects, has_dvp, has_legs, settle_timestamp};
+use shared::{setup, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT};
 use solana_signer::Signer;
 use zolana_test_utils::test_validator_asserts::wait_for_nullifier_present;
 use zolana_transaction::SOL_MINT;
@@ -20,9 +20,6 @@ use zolana_transaction::SOL_MINT;
 const DELIVERY_SURPLUS: u64 = 50_000_000;
 /// What each funder shields into its private balance before funding.
 const SHIELD_AMOUNT: u64 = 600_000_000;
-/// Seconds the settle timestamp trails the cluster clock, well inside
-/// `TIME_WINDOW`, so the proving time does not push it out of the window.
-const TIMESTAMP_LAG: i64 = 2;
 
 /// Create a DvP, fund delivery with a surplus and payment exactly, and let
 /// the settlement authority settle it: the buyer receives the delivery
@@ -41,7 +38,7 @@ fn settle_dvp_full_flow() -> Result<()> {
     let create = env.prove_create(&terms)?;
     env.send(create.instruction()?, &[&env.seller.solana], None)?;
     let authority = &env.settlement_authority;
-    let discovered = index_terms(&authority.shielded, client, INDEX_TIMEOUT)?;
+    let discovered = index_terms(&authority.shielded, client, INDEX_TIMEOUT, has_dvp(&terms))?;
     let [discovered] = discovered.as_slice() else {
         bail!(
             "the settlement authority discovered {} DvPs",
@@ -73,6 +70,7 @@ fn settle_dvp_full_flow() -> Result<()> {
         &registry,
         client,
         INDEX_TIMEOUT,
+        has_legs([Leg::Delivery, Leg::Payment]),
     )?;
     let deposit = |leg: Leg| -> Result<Deposit> {
         deposits
@@ -86,7 +84,7 @@ fn settle_dvp_full_flow() -> Result<()> {
 
     // The settle timestamp is a recent cluster time, so it lies in the
     // program's window when the transaction lands.
-    let current_timestamp = cluster_time(client)? - TIMESTAMP_LAG;
+    let current_timestamp = settle_timestamp(client)?;
     let settle_ix = SettleDvpTransactionParams {
         terms: terms.clone(),
         current_timestamp,
@@ -117,6 +115,14 @@ fn settle_dvp_full_flow() -> Result<()> {
 
     let settle_signature = env.send(settle_ix.clone(), &[&authority.solana], None)?;
     client.confirm_private_transaction_sync(settle_signature)?;
+
+    // A second settle fails in SPP on the spent DvP UTXO. It is sent right
+    // away, so its timestamp is still in the window and only the nullifier
+    // can refuse it.
+    assert_spp_rejects(
+        "second settle",
+        env.send(settle_ix, &[&authority.solana], Some(1)),
+    );
 
     // Each party syncs its wallet: the settlement legs and the change are
     // spendable notes of the settle transaction.
@@ -153,12 +159,6 @@ fn settle_dvp_full_flow() -> Result<()> {
         wait_for_nullifier_present(client, tree, nullifier);
     }
 
-    // A second settle fails: the DvP UTXO's nullifier exists.
-    ensure!(
-        env.send(settle_ix, &[&authority.solana], Some(1)).is_err(),
-        "second settle unexpectedly succeeded"
-    );
-
     // A payment deposit that lands after settlement is not lost: the buyer
     // finds it through its transaction viewing key and reclaims it.
     let late_note = env.shield(&env.buyer, SOL_MINT, SHIELD_AMOUNT)?;
@@ -169,11 +169,13 @@ fn settle_dvp_full_flow() -> Result<()> {
         &registry,
         client,
         INDEX_TIMEOUT,
+        has_legs([Leg::Payment]),
     )?;
-    let late = own
-        .into_iter()
-        .find(|deposit| deposit != &payment)
-        .ok_or_else(|| anyhow!("the buyer did not discover its late deposit"))?;
+    // The settled payment deposit is spent, so only the late one is left.
+    let [late] = own.as_slice() else {
+        bail!("the buyer discovered {} unspent own deposits", own.len());
+    };
+    ensure!(late != &payment, "the settled payment deposit is unspent");
     let reclaim_ix = ReclaimDvpTransactionParams {
         deposit: late.clone(),
         payer: env.payer.pubkey(),

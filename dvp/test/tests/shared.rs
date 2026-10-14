@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use dvp_program::error::DvpError;
 use dvp_sdk::{
     encryption::TERMS_RECIPIENTS,
     instructions::{
@@ -297,23 +296,4 @@ impl TestEnv {
         client.confirm_private_transaction_sync(signature)?;
         Ok(signature)
     }
-}
-
-// A custom program error surfaces as `Custom(<decimal>)` or as the
-// program-log line `custom program error: 0x<hex>`; match only those
-// delimited forms.
-pub fn assert_dvp_error(context: &str, result: Result<Signature>, error: DvpError) {
-    let code = error as u32;
-    let text = match result {
-        Ok(signature) => panic!("{context}: unexpectedly succeeded ({signature})"),
-        Err(err) => format!("{err:?}"),
-    };
-    let hex = format!("0x{code:x}");
-    assert!(
-        text.contains(&format!("Custom({code})"))
-            || text
-                .split(|c: char| !c.is_ascii_alphanumeric())
-                .any(|word| word == hex),
-        "{context}: expected {error:?} ({code}) in: {text}"
-    );
 }

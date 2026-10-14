@@ -28,7 +28,6 @@ use super::{CreateDvp, CreateDvpDerivation};
 use crate::{
     encryption::{encrypt_terms_messages, TERMS_RECIPIENTS},
     err,
-    prover::DvpProverClient,
     state::SwapDvp,
 };
 
@@ -238,9 +237,7 @@ impl CreateDvpTransaction {
         spp.proof = ProofCompressed::try_from(proof)
             .map_err(err)?
             .to_transact_proof();
-        let create_proof = DvpProverClient::new()
-            .prove_create_dvp(&derivation.to_proof_inputs()?)?
-            .into();
+        let create_proof = derivation.to_proof_inputs()?.prove().map_err(err)?.into();
         Ok(CreateDvp {
             payer,
             creator,

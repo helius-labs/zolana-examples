@@ -10,12 +10,15 @@
 # `just example-circuits-go` does. Changes the command makes to the copy are
 # written back without the replace.
 #
-# ZOLANA_DIR is the zolana v0.4.0-alpha source tree the go.mod replaces point
-# at; it defaults to ../../../../zolana relative to the circuits module.
+# The bridge comes from the zolana v0.4.0-alpha source tree the go.mod
+# replaces of zolana/gnarksdk and zolana/prover point at,
+# ../../../../zolana relative to the circuits module (a `zolana` directory
+# next to this repository). The cargo build of dvp-prover uses those replaces
+# too, so the tree has no other location.
 set -euo pipefail
 
 circuits="$(cd "$(dirname "${BASH_SOURCE[0]}")/../prover/circuits" && pwd)"
-zolana="${ZOLANA_DIR:-$circuits/../../../../zolana}"
+zolana="$circuits/../../../../zolana"
 bridge="$(cd "$zolana/sdk-libs/gnark-ffi-prover/build-helper/go" && pwd)"
 
 export GOWORK=off

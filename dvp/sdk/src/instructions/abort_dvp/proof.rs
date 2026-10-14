@@ -1,9 +1,6 @@
 use anyhow::{bail, ensure, Result};
-use dvp_program::{
-    instructions::{abort_dvp::AbortDvpPublicInput, shared::dvp_authority_owner_hash},
-    ABORT_MODE_CANCEL, ABORT_MODE_REJECT,
-};
-use dvp_prover::{AbortDvpProofInputs, ProofInputUtxo, SwapDvpProofInput};
+use dvp_program::instructions::{abort_dvp::AbortDvpPublicInput, shared::dvp_authority_owner_hash};
+use dvp_prover::{AbortDvpProofInputs, AbortMode, ProofInputUtxo, SwapDvpProofInput};
 use solana_address::Address;
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_program::{derive_private_tx_blinding, PrivateTxHash};
@@ -14,25 +11,6 @@ use crate::{
     shared::assign_output_blindings,
     state::{Deposit, DvpUtxo, Leg, SwapDvp},
 };
-
-/// Which instruction aborts the DvP; the abort proof's public `mode`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AbortMode {
-    /// cancel_dvp: the settlement authority aborts.
-    Cancel,
-    /// reject_dvp: the seller or the buyer aborts.
-    Reject,
-}
-
-impl AbortMode {
-    /// `ABORT_MODE_CANCEL` or `ABORT_MODE_REJECT`, as the circuit takes it.
-    pub fn value(self) -> u64 {
-        u64::from(match self {
-            Self::Cancel => ABORT_MODE_CANCEL,
-            Self::Reject => ABORT_MODE_REJECT,
-        })
-    }
-}
 
 /// Everything the abort proof needs. The 3x2 transaction spends the DvP
 /// UTXO and whichever deposits exist and refunds each leg to its funder's
@@ -194,7 +172,7 @@ impl AbortDvpProofInputParams {
                 dvp_id,
                 dvp_authority_owner_hash: owner_hash,
                 signer_id,
-                mode,
+                mode: self.mode,
                 terms: SwapDvpProofInput::try_from(terms)?,
                 leg,
                 payment_first,
@@ -229,14 +207,12 @@ impl AbortDvpProofInputParams {
             Leg::Delivery => self.delivery_mint,
             Leg::Payment => self.payment_mint,
         };
-        ensure!(
-            deposit.terms == self.terms,
-            "{leg:?} deposit of other terms"
-        );
-        ensure!(deposit.leg == leg, "{leg:?} deposit funds the other leg");
+        deposit.check_leg(&self.terms, leg)?;
+        // The refund of a missing leg takes its pool asset id from the
+        // given mint, so a deposit must agree on it too.
         ensure!(
             deposit.mint == mint,
-            "{leg:?} deposit mint is not the leg's mint"
+            "{leg:?} deposit asset id is not the given mint's"
         );
         Ok(Some(deposit))
     }

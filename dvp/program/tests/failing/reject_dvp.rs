@@ -2,7 +2,8 @@
 // proof verification, so the placeholder proof these fixtures carry cannot
 // reach them. The abort proof's `mode` is set from the tag, so a cancel proof
 // fails as a reject; a placeholder proof cannot show that difference, which
-// the abort_dvp circuit tests and the e2e cover.
+// the abort_dvp circuit tests and the cancel e2e (its proof re-tagged as a
+// reject) cover.
 
 use dvp_program::{error::DvpError, tag};
 use solana_instruction::Instruction;
@@ -11,8 +12,8 @@ use zolana_account_checks::error::AccountError;
 use zolana_test_utils::mollusk::expect_err_exact;
 
 use crate::common::{
-    dvp_authority, off_curve_bump, reject_dvp_data, reject_dvp_fixture, setup_mollusk, CREATOR,
-    DVP_ID,
+    dvp_authority, non_canonical_bump, on_curve_bump, reject_dvp_data, reject_dvp_fixture,
+    setup_mollusk, CREATOR, DVP_ID,
 };
 
 /// Runs the reject_dvp fixture after `edit` and expects exactly `error`.
@@ -63,12 +64,16 @@ fn unsigned_signer_is_rejected_exactly() {
     );
 }
 
+/// A bump other than the canonical one: on the curve it derives no PDA;
+/// below the canonical one it derives a PDA of its own, which owns no DvP.
 #[test]
-fn bump_without_a_pda_is_rejected_exactly() {
-    expect_reject_dvp_err(
-        |instruction| instruction.data = reject_dvp_data(CREATOR, DVP_ID, off_curve_bump()),
-        DvpError::InvalidDvpAuthority,
-    );
+fn non_canonical_bump_is_rejected_exactly() {
+    for bump in [on_curve_bump(), non_canonical_bump()] {
+        expect_reject_dvp_err(
+            |instruction| instruction.data = reject_dvp_data(CREATOR, DVP_ID, bump),
+            DvpError::InvalidDvpAuthority,
+        );
+    }
 }
 
 #[test]

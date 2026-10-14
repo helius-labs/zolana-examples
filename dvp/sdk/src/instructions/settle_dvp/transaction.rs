@@ -1,15 +1,15 @@
-use anyhow::{ensure, Result};
+use anyhow::Result;
 use dvp_prover::SettleDvpProofInputs;
 use solana_address::Address;
 use zolana_client::ZolanaIndexer;
-use zolana_keypair::{NullifierKey, ShieldedKeypair};
+use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::instructions::transact::SppProofInputs;
 
 use super::{SettleDvp, SettleDvpDerivation, SettleDvpProofInputParams};
 use crate::{
     encryption::encrypt_outputs,
     err,
-    prover::DvpProverClient,
+    shared::{ensure_output_tree, prove_pda_transact},
     state::{Deposit, DvpUtxo, SwapDvp},
 };
 
@@ -58,8 +58,10 @@ impl SettleDvpTransactionParams {
     /// nullifier.
     ///
     /// Errors unless `settlement_authority` is the terms' settlement
-    /// authority, `current_timestamp` is in the settlement window and both
-    /// deposits fund their legs in full.
+    /// authority, `current_timestamp` is in the settlement window, both
+    /// deposits fund their legs in full, and the DvP UTXO and the deposits
+    /// sit in the tree with id `tree_id`, which the instruction reads its
+    /// inputs from.
     pub fn build(self, settlement_authority: &ShieldedKeypair) -> Result<SettleDvpTransaction> {
         let Self {
             terms,
@@ -71,6 +73,9 @@ impl SettleDvpTransactionParams {
             payer,
             tree_id,
         } = self;
+        ensure_output_tree("the DvP UTXO", dvp_utxo.tree_id, tree_id)?;
+        ensure_output_tree("the delivery deposit", delivery_deposit.tree_id, tree_id)?;
+        ensure_output_tree("the payment deposit", payment_deposit.tree_id, tree_id)?;
         let authority = settlement_authority
             .shielded_address()
             .map_err(err)?
@@ -134,17 +139,8 @@ impl SettleDvpTransaction {
             proof_inputs,
         } = self;
         let payer = spp_proof_inputs.payer;
-        // Every input is owned by the PDA with the public zero secret.
-        let spp = indexer
-            .prove_transact(spp_proof_inputs, &NullifierKey::from_secret([0; 31]))
-            .map_err(err)?;
-        ensure!(
-            spp.private_tx_hash == proof_inputs.private_tx_hash,
-            "the SPP proof and the settle proof cover different transactions"
-        );
-        let settle_proof = DvpProverClient::new()
-            .prove_settle_dvp(&proof_inputs)?
-            .into();
+        let spp = prove_pda_transact(indexer, spp_proof_inputs, &proof_inputs.private_tx_hash)?;
+        let settle_proof = proof_inputs.prove().map_err(err)?.into();
         Ok(SettleDvp {
             payer,
             settlement_authority,

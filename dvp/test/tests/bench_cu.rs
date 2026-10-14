@@ -6,7 +6,7 @@
 //! root:
 //!
 //! ```sh
-//! cargo build-sbf --manifest-path dvp/program/Cargo.toml \
+//! cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.53 \
 //!     --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program
 //! SHIELDED_POOL_PROGRAM_PATH=/path/to/shielded_pool_program.so \
 //! ZOLANA_CLI_BIN=/path/to/zolana \
@@ -47,7 +47,6 @@ use dvp_sdk::{
         reject_dvp::RejectDvp,
         settle_dvp::{SettleDvp, SettleDvpTransactionParams},
     },
-    prover::DvpProverClient,
     state::{Deposit, DvpUtxo, Leg, SwapDvp},
 };
 use light_program_profiler::{
@@ -60,7 +59,6 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
-use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use zolana_client::{
     transaction_size, ClientError, ComputeBudgetConfig, MerkleContext, MerkleProof,
@@ -113,17 +111,17 @@ const SURPLUS: u64 = 50_000_000;
 const DELIVERY_ASSET_ID: u64 = 2;
 
 fn system_owned_account(lamports: u64) -> Account {
-    Account::new(lamports, 0, &Pubkey::default())
+    Account::new(lamports, 0, &Address::default())
 }
 
-fn merkle_context(tree: &Pubkey) -> MerkleContext {
+fn merkle_context(tree: &Address) -> MerkleContext {
     MerkleContext {
         tree_type: 0,
         tree: *tree,
     }
 }
 
-fn build_tree_fixture(tree: &Pubkey, leaves: &[[u8; 32]]) -> (Account, [u8; 32], [u8; 32], u16) {
+fn build_tree_fixture(tree: &Address, leaves: &[[u8; 32]]) -> (Account, [u8; 32], [u8; 32], u16) {
     let mut tree_account_bytes = vec![0u8; tree_account_size()];
     let root_index = u16::try_from(leaves.len()).expect("leaf count fits a root index");
     let (utxo_root, nullifier_root) = {
@@ -152,7 +150,7 @@ fn build_tree_fixture(tree: &Pubkey, leaves: &[[u8; 32]]) -> (Account, [u8; 32],
     let fixture = Account {
         lamports: 1_000_000_000_000,
         data: tree_account_bytes,
-        owner: Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID),
+        owner: Address::new_from_array(SHIELDED_POOL_PROGRAM_ID),
         executable: false,
         rent_epoch: 0,
     };
@@ -168,7 +166,7 @@ fn local_state_tree(leaves: &[[u8; 32]]) -> MerkleTree<Poseidon> {
 }
 
 fn non_inclusion_proof(
-    tree: &Pubkey,
+    tree: &Address,
     nf_tree: &IndexedMerkleTree<Poseidon, usize>,
     leaf: [u8; 32],
 ) -> NonInclusionProof {
@@ -192,7 +190,7 @@ fn non_inclusion_proof(
 /// The tree account holding the inputs of `proof_inputs` and their spend
 /// proofs. The real inputs sit at leaves `0..n` in input order, which the
 /// callers pick as their leaf indices.
-fn spend_fixture(tree: &Pubkey, proof_inputs: &SppProofInputs) -> (Account, Vec<SpendProof>) {
+fn spend_fixture(tree: &Address, proof_inputs: &SppProofInputs) -> (Account, Vec<SpendProof>) {
     let commitments = proof_inputs.input_utxo_hashes().expect("input commitments");
     let leaves: Vec<[u8; 32]> = commitments.iter().map(|input| input.utxo_hash).collect();
     let (tree_account, utxo_root, nullifier_root, root_index) = build_tree_fixture(tree, &leaves);
@@ -227,8 +225,8 @@ fn spend_fixture(tree: &Pubkey, proof_inputs: &SppProofInputs) -> (Account, Vec<
     (tree_account, spend_proofs)
 }
 
-fn assemble_accounts(ix: &Instruction, fixtures: &[(Pubkey, Account)]) -> Vec<(Pubkey, Account)> {
-    let spp = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
+fn assemble_accounts(ix: &Instruction, fixtures: &[(Address, Account)]) -> Vec<(Address, Account)> {
+    let spp = Address::new_from_array(SHIELDED_POOL_PROGRAM_ID);
     ix.accounts
         .iter()
         .map(|meta| {
@@ -237,7 +235,7 @@ fn assemble_accounts(ix: &Instruction, fixtures: &[(Pubkey, Account)]) -> Vec<(P
                     spp,
                     mollusk_svm::program::create_program_account_loader_v3(&spp),
                 )
-            } else if meta.pubkey == Pubkey::default() {
+            } else if meta.pubkey == Address::default() {
                 mollusk_svm::program::keyed_account_for_system_program()
             } else if let Some((_, account)) = fixtures.iter().find(|(key, _)| *key == meta.pubkey)
             {
@@ -401,7 +399,7 @@ fn circuits_table(proof_times: &[(CircuitId, Duration)]) -> SectionTable {
 
 /// The version 1 transaction this instruction is sent as. Its compute
 /// ceilings live in the message header. Panics if it exceeds 4096 bytes.
-fn tx_size_table(ix: &Instruction, payer: &Pubkey) -> SectionTable {
+fn tx_size_table(ix: &Instruction, payer: &Address) -> SectionTable {
     let v1 = transaction_size(
         payer,
         std::slice::from_ref(ix),
@@ -425,7 +423,7 @@ fn tx_size_table(ix: &Instruction, payer: &Pubkey) -> SectionTable {
     }
 }
 
-fn pubkey(keypair: &ShieldedKeypair) -> Pubkey {
+fn pubkey(keypair: &ShieldedKeypair) -> Address {
     keypair
         .shielded_address()
         .expect("shielded address")
@@ -504,7 +502,7 @@ fn deposit(terms: &SwapDvp, leg: Leg, leaf_index: u64) -> Deposit {
 
 struct Bench {
     mollusk: Mollusk,
-    tree: Pubkey,
+    tree: Address,
     prover: ProverClient,
     report: CuBenchmark,
     /// The circuit proof time of the first instruction proving each circuit.
@@ -520,7 +518,7 @@ impl Bench {
         name: &str,
         circuit: CircuitId,
         ix: &Instruction,
-        payer: &Pubkey,
+        payer: &Address,
         tree_account: Account,
         (spp, circuit_dur): (Duration, Duration),
     ) {
@@ -552,8 +550,8 @@ impl Bench {
 fn bench_cu_dvp() {
     env::set_var("SBF_OUT_DIR", PROFILING_SBF_DIR);
 
-    let dvp_id = Pubkey::new_from_array(*dvp_program::ID.as_array());
-    let spp_id = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
+    let dvp_id = dvp_program::ID;
+    let spp_id = Address::new_from_array(SHIELDED_POOL_PROGRAM_ID);
 
     let mut mollusk = Mollusk::default();
     mollusk.compute_budget.compute_unit_limit = u64::from(TRANSACT_CU_LIMIT);
@@ -586,8 +584,8 @@ fn bench_cu_dvp() {
              verifying key sizes and its circuit proof time (abort_dvp, which serves cancel_dvp \
              and reject_dvp, as timed for cancel_dvp). The \
              profiled program must be built first: `cargo build-sbf --manifest-path \
-             dvp/program/Cargo.toml --sbf-out-dir dvp/target/bench -- --features \
-             bpf-entrypoint,profile-program`."
+             dvp/program/Cargo.toml --tools-version v1.53 --sbf-out-dir dvp/target/bench -- \
+             --features bpf-entrypoint,profile-program`."
                 .into(),
         output_path: OUTPUT_PATH.into(),
         regenerate_command: Some(
@@ -692,9 +690,7 @@ fn bench_reclaim_dvp(bench: &mut Bench) {
         proof_inputs.private_tx_hash,
     );
     let start = Instant::now();
-    let reclaim_proof = DvpProverClient::new()
-        .prove_reclaim_dvp(&proof_inputs)
-        .expect("reclaim prove");
+    let reclaim_proof = proof_inputs.prove().expect("reclaim prove");
     let circuit_dur = start.elapsed();
     let (_, bump) = terms.dvp_authority().expect("dvp authority");
 
@@ -745,9 +741,7 @@ fn bench_settle_dvp(bench: &mut Bench) {
         proof_inputs.private_tx_hash,
     );
     let start = Instant::now();
-    let settle_proof = DvpProverClient::new()
-        .prove_settle_dvp(&proof_inputs)
-        .expect("settle prove");
+    let settle_proof = proof_inputs.prove().expect("settle prove");
     let circuit_dur = start.elapsed();
     let (_, bump) = terms.dvp_authority().expect("dvp authority");
 
@@ -815,9 +809,7 @@ fn bench_abort_dvp(bench: &mut Bench, mode: AbortMode) {
         proof_inputs.private_tx_hash,
     );
     let start = Instant::now();
-    let abort_proof = DvpProverClient::new()
-        .prove_abort_dvp(&proof_inputs)
-        .expect("abort prove");
+    let abort_proof = proof_inputs.prove().expect("abort prove");
     let circuit_dur = start.elapsed();
     let (_, bump) = terms.dvp_authority().expect("dvp authority");
 

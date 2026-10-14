@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use dvp_program::instructions::shared::u64_right_align;
+use dvp_program::{instructions::shared::u64_right_align, ABORT_MODE_CANCEL, ABORT_MODE_REJECT};
 use zolana_client::ProofInputUtxo;
 use zolana_gnark_ffi_prover::{decimal, utxo_proof_inputs, ProofInputMap};
 
-use crate::{CircuitId, DvpProof, SwapDvpProofInput, PROVER};
+use crate::{CircuitId, DvpProof, ProveError, SwapDvpProofInput};
 
 /// The abort_dvp witness, shared by cancel_dvp and reject_dvp. Its shape is
 /// the Go `abort_dvp.Circuit`.
@@ -17,8 +17,8 @@ pub struct AbortDvpProofInputs {
     pub dvp_id: [u8; 32],
     pub dvp_authority_owner_hash: [u8; 32],
     pub signer_id: [u8; 32],
-    /// `ABORT_MODE_CANCEL` or `ABORT_MODE_REJECT`.
-    pub mode: u64,
+    /// The public `Mode`, which picks the signer rule.
+    pub mode: AbortMode,
     pub terms: SwapDvpProofInput,
     /// Reject mode: `false` for the seller, `true` for the buyer.
     pub leg: bool,
@@ -42,6 +42,26 @@ pub struct AbortDvpProofInputs {
     pub private_tx_blinding: [u8; 32],
 }
 
+/// Which instruction aborts the DvP; the abort proof's public `mode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AbortMode {
+    /// cancel_dvp: the settlement authority aborts.
+    Cancel,
+    /// reject_dvp: the seller or the buyer aborts.
+    Reject,
+}
+
+impl AbortMode {
+    /// `ABORT_MODE_CANCEL` or `ABORT_MODE_REJECT`, as the program puts it in
+    /// the public input.
+    pub fn value(self) -> u64 {
+        u64::from(match self {
+            Self::Cancel => ABORT_MODE_CANCEL,
+            Self::Reject => ABORT_MODE_REJECT,
+        })
+    }
+}
+
 impl AbortDvpProofInputs {
     fn witness(&self) -> ProofInputMap {
         let bit = |value: bool| u64_right_align(u64::from(value));
@@ -52,7 +72,7 @@ impl AbortDvpProofInputs {
             ("DvpID", self.dvp_id),
             ("DvpAuthorityOwnerHash", self.dvp_authority_owner_hash),
             ("SignerID", self.signer_id),
-            ("Mode", u64_right_align(self.mode)),
+            ("Mode", u64_right_align(self.mode.value())),
             ("Leg", bit(self.leg)),
             ("PaymentFirst", bit(self.payment_first)),
             ("Padding1", bit(self.padding1)),
@@ -80,11 +100,8 @@ impl AbortDvpProofInputs {
         map
     }
 
-    pub fn prove(&self) -> zolana_gnark_ffi_prover::Result<DvpProof> {
-        Ok(PROVER
-            .prove(CircuitId::AbortDvp, &self.witness())?
-            .compress()?
-            .into())
+    pub fn prove(&self) -> Result<DvpProof, ProveError> {
+        DvpProof::prove(CircuitId::AbortDvp, &self.witness())
     }
 }
 
@@ -109,7 +126,7 @@ mod tests {
             dvp_id: [4; 32],
             dvp_authority_owner_hash: [5; 32],
             signer_id: [6; 32],
-            mode: 1,
+            mode: AbortMode::Reject,
             terms: SwapDvpProofInput {
                 seller_id: [0; 32],
                 buyer_id: [6; 32],

@@ -1,13 +1,15 @@
-use anyhow::{bail, ensure, Result};
+use anyhow::{bail, Result};
 use dvp_prover::ReclaimDvpProofInputs;
 use solana_address::Address;
 use zolana_client::ZolanaIndexer;
-use zolana_keypair::{random_blinding, Curve, NullifierKey, ShieldedAddress, ShieldedKeypair};
+use zolana_keypair::{random_blinding, Curve, ShieldedAddress, ShieldedKeypair};
 use zolana_transaction::{instructions::transact::SppProofInputs, SppProofOutputUtxo};
 
 use super::{ReclaimDvp, ReclaimDvpProofInputParams};
 use crate::{
-    encryption::encrypt_outputs, err, prover::DvpProverClient, shared::assign_output_blindings,
+    encryption::encrypt_outputs,
+    err,
+    shared::{assign_output_blindings, ensure_output_tree, prove_pda_transact},
     state::Deposit,
 };
 
@@ -53,7 +55,9 @@ impl ReclaimDvpTransactionParams {
     /// derived from `signer`'s viewing key and that nullifier.
     ///
     /// Errors unless `signer` funds the deposit's leg, so the buyer cannot
-    /// build a reclaim of the seller's delivery deposit, or the other way.
+    /// build a reclaim of the seller's delivery deposit, or the other way,
+    /// and unless the deposit sits in the tree with id `tree_id`, which the
+    /// instruction reads its input from.
     pub fn build(self, signer: &ShieldedKeypair) -> Result<ReclaimDvpTransaction> {
         let Self {
             deposit,
@@ -61,6 +65,7 @@ impl ReclaimDvpTransactionParams {
             refund_destination,
             tree_id,
         } = self;
+        ensure_output_tree("the deposit", deposit.tree_id, tree_id)?;
         let signer_address = signer.shielded_address().map_err(err)?;
         let refund_destination = refund_destination.unwrap_or(signer_address);
         if refund_destination.signing_pubkey.curve().map_err(err)? == Curve::P256 {
@@ -131,17 +136,8 @@ impl ReclaimDvpTransaction {
             proof_inputs,
         } = self;
         let payer = spp_proof_inputs.payer;
-        // The deposit's owner is the PDA with the public zero secret.
-        let spp = indexer
-            .prove_transact(spp_proof_inputs, &NullifierKey::from_secret([0; 31]))
-            .map_err(err)?;
-        ensure!(
-            spp.private_tx_hash == proof_inputs.private_tx_hash,
-            "the SPP proof and the reclaim proof cover different transactions"
-        );
-        let reclaim_proof = DvpProverClient::new()
-            .prove_reclaim_dvp(&proof_inputs)?
-            .into();
+        let spp = prove_pda_transact(indexer, spp_proof_inputs, &proof_inputs.private_tx_hash)?;
+        let reclaim_proof = proof_inputs.prove().map_err(err)?.into();
         Ok(ReclaimDvp {
             payer,
             signer,
@@ -256,5 +252,28 @@ mod tests {
             ..seller.shielded_address().expect("address")
         };
         assert!(params(delivery, Some(p256)).build(seller).is_err());
+    }
+
+    /// The instruction reads its input from the output tree.
+    #[test]
+    fn build_refuses_a_deposit_outside_the_output_tree() {
+        let fixture = deposit_fixture();
+        let [seller, _] = &fixture.funders;
+        let [delivery, _] = &fixture.deposits;
+        let error = ReclaimDvpTransactionParams {
+            tree_id: delivery.tree_id + 1,
+            ..params(delivery, None)
+        }
+        .build(seller)
+        .err()
+        .expect("a deposit outside the output tree");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "the deposit is in tree {}, not in the output tree {}",
+                delivery.tree_id,
+                delivery.tree_id + 1
+            )
+        );
     }
 }

@@ -16,6 +16,39 @@ state and owns no accounts.
 See [`spec.md`](spec.md) for the full design: the privacy model, terms,
 instructions, and circuits.
 
+## Deviations from the spec
+
+`spec.md` is left as written. The implementation departs from it where SPP at
+`v0.4.0-alpha` requires it, or fills in details the spec leaves open. The code
+cites these by number.
+
+- **D1.** Create and reclaim prove at SPP shape 1x2 with a compact padding
+  output; SPP has no 1x1 shape.
+- **D2.** A change or refund output with no value is a zero-amount UTXO owned
+  by its refund destination, not an empty UTXO.
+- **D3.** Abort inputs put the deposits first and padding last, as SPP
+  requires of dummies. A private bit records which leg is in input slot 1. The
+  outputs stay fixed by leg.
+- **D4.** `dvp_id` is a nested Poseidon hash of the terms, since Poseidon
+  takes at most 12 inputs (see `sdk/src/state/swap_dvp.rs`).
+- **D5.** Timestamps must be non-negative: the circuits range-check them to 63
+  bits, and the program rejects a negative `current_timestamp`.
+- **D6.** The create address slot is pinned to tree id 0, so each
+  `(creator, dvp_id)` can be created once.
+- **D7.** Terms message `j` uses ciphertext slot `1 + j`, and its data is the
+  bare ciphertext. The AES-CTR message is not authenticated; a recipient
+  trusts it only after the terms hash to the committed DvP UTXO.
+- **D8.** `dvp_authority` is forwarded as the last SPP account (the
+  owner-signer run), as in the escrow and swap examples.
+- **D9.** The DvP UTXO output carries no ciphertext; the parties recompute it
+  from the terms.
+- **D10.** Settlement and refund destinations must have Ed25519 or PDA signing
+  keys; the sdk refuses P256 ones.
+
+The program also requires the canonical `dvp_authority` bump. The spec only
+says the program checks the bump; another bump would give another PDA, so the
+same `(creator, dvp_id)` could be created twice.
+
 ## Layout
 
 - [`program/`](program/) — the Pinocchio program with the `create_dvp`,
@@ -26,8 +59,8 @@ instructions, and circuits.
   `zolana-gnark-ffi-prover`. Go gnark circuits, their registration, and the
   `dvp-prover-setup` key-generation binary.
 - [`sdk/`](sdk/) — client library. Terms, instruction and proof-input
-  builders, UTXO hashing, deposit discovery, encryption codecs, and the prover
-  client.
+  builders, UTXO hashing, discovery of terms and unspent deposits, and
+  encryption codecs.
 - [`test/`](test/) — localnet end-to-end tests and CU benchmarks
   ([`BENCHMARK.md`](BENCHMARK.md)).
 
@@ -98,7 +131,7 @@ the benchmark reports with
 The program tests run under mollusk against the SBF build:
 
 ```bash
-cargo test-sbf -p dvp-program --features bpf-entrypoint
+cargo test-sbf --tools-version v1.53 -p dvp-program --features bpf-entrypoint
 ```
 
 The SDK tests prove and check each circuit with the test keys:
@@ -109,8 +142,8 @@ cargo test -p dvp-prover -p dvp-sdk
 
 The Go circuit tests run through [`scripts/circuits-go.sh`](scripts/circuits-go.sh),
 which adds the module replace for the gnark FFI bridge to a temporary copy of
-`go.mod`. Set `ZOLANA_DIR` if the zolana source is somewhere other than
-`../../zolana`.
+`go.mod`. The zolana source must be at `../../zolana`, where the `go.mod`
+replaces point.
 
 ```bash
 scripts/circuits-go.sh vet ./...
@@ -153,6 +186,6 @@ from `SHIELDED_POOL_PROGRAM_PATH` and gets the SPP proofs from a prover on
 [`BENCHMARK.md`](BENCHMARK.md).
 
 ```bash
-cargo build-sbf --manifest-path program/Cargo.toml --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program
+cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.53 --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program
 cargo test -p dvp-test --test bench_cu -- --ignored --nocapture
 ```

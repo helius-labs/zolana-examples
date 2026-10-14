@@ -2,10 +2,10 @@
 pub mod encryption;
 pub mod index;
 pub mod instructions;
-pub mod prover;
 mod shared;
 pub mod state;
 
+/// The program's wire types, which the instruction builders' fields name.
 pub use dvp_program::{
     instructions::{
         abort_dvp::AbortDvpProof,
@@ -15,7 +15,7 @@ pub use dvp_program::{
         reject_dvp::RejectDvpIxData,
         settle_dvp::{SettleDvpIxData, SettleDvpProof},
     },
-    tag, DVP_AUTHORITY_PDA_SEED,
+    tag,
 };
 
 pub(crate) fn err(e: impl core::fmt::Debug) -> anyhow::Error {

@@ -56,7 +56,15 @@ impl SwapDvp {
     /// D10 (settlement and refund destinations need an Ed25519 or PDA signing
     /// key, since the Eddsa rail binds every output owner to a Solana
     /// identity).
+    ///
+    /// It also requires the settlement authority to be a third party, as the
+    /// reference DvP program does. The circuits do not check this; it keeps a
+    /// party from settling or cancelling the trade alone.
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.settlement_authority != self.seller && self.settlement_authority != self.buyer,
+            "the settlement authority is a party"
+        );
         ensure!(self.delivery_amount != 0, "delivery amount is zero");
         ensure!(self.payment_amount != 0, "payment amount is zero");
         ensure!(
@@ -533,6 +541,9 @@ mod tests {
         assert_eq!(pda, derived);
     }
 
+    /// An edit that makes valid terms invalid.
+    type Mutation = fn(&mut SwapDvp);
+
     #[test]
     fn validate_rejects_bad_terms() {
         assert!(fixed_terms().validate().is_ok());
@@ -542,18 +553,36 @@ mod tests {
             ),
             ..destination(11)
         };
-        let invalid: [fn(&mut SwapDvp); 6] = [
-            |t| t.delivery_amount = 0,
-            |t| t.payment_amount = 0,
-            |t| t.payment_mint = t.delivery_mint,
-            |t| t.expiry_timestamp = -1,
-            |t| t.earliest_settlement_timestamp = Some(t.expiry_timestamp + 1),
-            |t| t.earliest_settlement_timestamp = Some(-1),
+        let invalid: [(Mutation, &str); 8] = [
+            (
+                |t| t.settlement_authority = t.seller,
+                "the settlement authority is a party",
+            ),
+            (
+                |t| t.settlement_authority = t.buyer,
+                "the settlement authority is a party",
+            ),
+            (|t| t.delivery_amount = 0, "delivery amount is zero"),
+            (|t| t.payment_amount = 0, "payment amount is zero"),
+            (
+                |t| t.payment_mint = t.delivery_mint,
+                "delivery and payment mints are equal",
+            ),
+            (|t| t.expiry_timestamp = -1, "expiry timestamp is negative"),
+            (
+                |t| t.earliest_settlement_timestamp = Some(t.expiry_timestamp + 1),
+                "earliest settlement timestamp is after expiry",
+            ),
+            (
+                |t| t.earliest_settlement_timestamp = Some(-1),
+                "earliest settlement timestamp is negative",
+            ),
         ];
-        for (i, mutate) in invalid.iter().enumerate() {
+        for (mutate, expected) in invalid {
             let mut terms = fixed_terms();
             mutate(&mut terms);
-            assert!(terms.validate().is_err(), "case {i}");
+            let error = terms.validate().expect_err(expected);
+            assert_eq!(error.to_string(), expected);
         }
         // D10: a P256 signing key in any destination is rejected; a PDA is
         // accepted.

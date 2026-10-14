@@ -11,8 +11,8 @@ use dvp_program::{
 };
 use mollusk_svm::Mollusk;
 use solana_account::Account;
+use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
-use solana_pubkey::Pubkey;
 use zolana_interface::{
     instruction::instruction_data::transact::{
         CircuitId, InputUtxo, OwnerTag, TransactIxData, TransactOutput, TransactProof, TreeContext,
@@ -24,14 +24,14 @@ use zolana_interface::{
 /// to `dvp/target/deploy`.
 const SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/deploy");
 
-const PAYER: Pubkey = Pubkey::new_from_array([21; 32]);
-pub const CREATOR: Pubkey = Pubkey::new_from_array([22; 32]);
-const TREE: Pubkey = Pubkey::new_from_array([23; 32]);
-const NULLIFIER_PDA: Pubkey = Pubkey::new_from_array([24; 32]);
+const PAYER: Address = Address::new_from_array([21; 32]);
+pub const CREATOR: Address = Address::new_from_array([22; 32]);
+const TREE: Address = Address::new_from_array([23; 32]);
+const NULLIFIER_PDA: Address = Address::new_from_array([24; 32]);
 /// The settlement authority, also the cancelling signer.
-const SETTLEMENT_AUTHORITY: Pubkey = Pubkey::new_from_array([26; 32]);
+const SETTLEMENT_AUTHORITY: Address = Address::new_from_array([26; 32]);
 /// The reclaiming or rejecting party.
-const SIGNER: Pubkey = Pubkey::new_from_array([25; 32]);
+const SIGNER: Address = Address::new_from_array([25; 32]);
 /// A field element (below the BN254 modulus).
 pub const DVP_ID: [u8; 32] = [1; 32];
 
@@ -48,21 +48,17 @@ fn account(lamports: u64) -> Account {
     Account {
         lamports,
         data: Vec::new(),
-        owner: Pubkey::new_from_array([0; 32]),
+        owner: Address::new_from_array([0; 32]),
         executable: false,
         rent_epoch: 0,
     }
 }
 
-pub fn program_id() -> Pubkey {
-    Pubkey::new_from_array(*dvp_program::ID.as_array())
-}
-
 /// The `dvp_authority` PDA and its bump for `creator` and `dvp_id`.
-pub fn dvp_authority(creator: &Pubkey, dvp_id: &[u8; 32]) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
+pub fn dvp_authority(creator: &Address, dvp_id: &[u8; 32]) -> (Address, u8) {
+    Address::find_program_address(
         &[DVP_AUTHORITY_PDA_SEED, creator.as_ref(), dvp_id],
-        &program_id(),
+        &dvp_program::ID,
     )
 }
 
@@ -114,18 +110,29 @@ pub fn create_dvp_data(dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
     data
 }
 
+/// Applies `edit` to every meta of the payer, which pays the transaction
+/// (account 0) and SPP (account 2): a privilege kept on one would hold for
+/// both.
+pub fn edit_payer(instruction: &mut Instruction, edit: impl Fn(&mut AccountMeta)) {
+    instruction
+        .accounts
+        .iter_mut()
+        .filter(|meta| meta.pubkey == PAYER)
+        .for_each(edit);
+}
+
 /// Whether `bump` gives the `(CREATOR, DVP_ID)` seeds a PDA.
 fn has_pda(bump: u8) -> bool {
-    Pubkey::create_program_address(
+    Address::create_program_address(
         &[DVP_AUTHORITY_PDA_SEED, CREATOR.as_ref(), &DVP_ID, &[bump]],
-        &program_id(),
+        &dvp_program::ID,
     )
     .is_ok()
 }
 
 /// A bump whose `(CREATOR, DVP_ID)` seeds hash onto the curve, so it has no
 /// PDA.
-pub fn off_curve_bump() -> u8 {
+pub fn on_curve_bump() -> u8 {
     (0..=u8::MAX)
         .find(|&bump| !has_pda(bump))
         .expect("some bump lands on the curve")
@@ -141,7 +148,7 @@ pub fn non_canonical_bump() -> u8 {
         .expect("some bump below the canonical one has a PDA")
 }
 
-pub fn reclaim_dvp_data(creator: Pubkey, dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
+pub fn reclaim_dvp_data(creator: Address, dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
     let body = wincode::serialize(&ReclaimDvpIxData {
         creator,
         dvp_id,
@@ -166,7 +173,7 @@ pub const SETTLE_NOW: i64 = 1_000;
 /// Settle data on the 1x2 placeholder transact: its shape is never checked,
 /// because the placeholder proof fails first.
 pub fn settle_dvp_data(
-    creator: Pubkey,
+    creator: Address,
     dvp_id: [u8; 32],
     bump: u8,
     current_timestamp: i64,
@@ -198,7 +205,7 @@ const ABORT_PROOF: AbortDvpProof = AbortDvpProof {
 
 /// Cancel data on the 1x2 placeholder transact: its shape is never checked,
 /// because the placeholder proof fails first.
-pub fn cancel_dvp_data(creator: Pubkey, dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
+pub fn cancel_dvp_data(creator: Address, dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
     let body = wincode::serialize(&CancelDvpIxData {
         creator,
         dvp_id,
@@ -213,7 +220,7 @@ pub fn cancel_dvp_data(creator: Pubkey, dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
 }
 
 /// Reject data on the 1x2 placeholder transact, as [`cancel_dvp_data`].
-pub fn reject_dvp_data(creator: Pubkey, dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
+pub fn reject_dvp_data(creator: Address, dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
     let body = wincode::serialize(&RejectDvpIxData {
         creator,
         dvp_id,
@@ -229,14 +236,14 @@ pub fn reject_dvp_data(creator: Pubkey, dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
 
 /// A create_dvp instruction with the builder's account layout: payer,
 /// creator, then the forwarded SPP list ending in `dvp_authority` (D8).
-pub fn create_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
+pub fn create_dvp_fixture() -> (Instruction, Vec<(Address, Account)>) {
     let (_, bump) = dvp_authority(&CREATOR, &DVP_ID);
     fixture(CREATOR, create_dvp_data(DVP_ID, bump))
 }
 
 /// A reclaim_dvp instruction by `SIGNER` with the builder's account layout:
 /// payer, signer, then the forwarded SPP list ending in `dvp_authority`.
-pub fn reclaim_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
+pub fn reclaim_dvp_fixture() -> (Instruction, Vec<(Address, Account)>) {
     let (_, bump) = dvp_authority(&CREATOR, &DVP_ID);
     fixture(SIGNER, reclaim_dvp_data(CREATOR, DVP_ID, bump))
 }
@@ -244,7 +251,7 @@ pub fn reclaim_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
 /// A settle_dvp instruction by `SETTLEMENT_AUTHORITY` at `SETTLE_NOW`, with
 /// the builder's account layout: payer, settlement authority, then the
 /// forwarded SPP list ending in `dvp_authority`.
-pub fn settle_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
+pub fn settle_dvp_fixture() -> (Instruction, Vec<(Address, Account)>) {
     let (_, bump) = dvp_authority(&CREATOR, &DVP_ID);
     fixture(
         SETTLEMENT_AUTHORITY,
@@ -255,22 +262,22 @@ pub fn settle_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
 /// A cancel_dvp instruction by `SETTLEMENT_AUTHORITY` with the builder's
 /// account layout: payer, settlement authority, then the forwarded SPP list
 /// ending in `dvp_authority`.
-pub fn cancel_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
+pub fn cancel_dvp_fixture() -> (Instruction, Vec<(Address, Account)>) {
     let (_, bump) = dvp_authority(&CREATOR, &DVP_ID);
     fixture(SETTLEMENT_AUTHORITY, cancel_dvp_data(CREATOR, DVP_ID, bump))
 }
 
 /// A reject_dvp instruction by `SIGNER` with the builder's account layout:
 /// payer, signer, then the forwarded SPP list ending in `dvp_authority`.
-pub fn reject_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
+pub fn reject_dvp_fixture() -> (Instruction, Vec<(Address, Account)>) {
     let (_, bump) = dvp_authority(&CREATOR, &DVP_ID);
     fixture(SIGNER, reject_dvp_data(CREATOR, DVP_ID, bump))
 }
 
 /// An instruction on `data` with the role signer `role` after the payer,
 /// and the `(CREATOR, DVP_ID)` PDA as the last forwarded SPP account.
-fn fixture(role: Pubkey, data: Vec<u8>) -> (Instruction, Vec<(Pubkey, Account)>) {
-    let spp_id = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
+fn fixture(role: Address, data: Vec<u8>) -> (Instruction, Vec<(Address, Account)>) {
+    let spp_id = Address::new_from_array(SHIELDED_POOL_PROGRAM_ID);
     let (dvp_authority, _) = dvp_authority(&CREATOR, &DVP_ID);
 
     let metas = vec![
@@ -279,7 +286,7 @@ fn fixture(role: Pubkey, data: Vec<u8>) -> (Instruction, Vec<(Pubkey, Account)>)
         AccountMeta::new(PAYER, true),
         AccountMeta::new(TREE, false),
         AccountMeta::new_readonly(spp_id, false),
-        AccountMeta::new_readonly(Pubkey::default(), false),
+        AccountMeta::new_readonly(Address::default(), false),
         AccountMeta::new(TREE, false),
         AccountMeta::new(NULLIFIER_PDA, false),
         AccountMeta::new_readonly(dvp_authority, false),
@@ -292,14 +299,14 @@ fn fixture(role: Pubkey, data: Vec<u8>) -> (Instruction, Vec<(Pubkey, Account)>)
             spp_id,
             mollusk_svm::program::create_program_account_loader_v3(&spp_id),
         ),
-        (Pubkey::default(), account(1_000_000_000)),
+        (Address::default(), account(1_000_000_000)),
         (NULLIFIER_PDA, account(0)),
         (dvp_authority, account(0)),
     ];
 
     (
         Instruction {
-            program_id: program_id(),
+            program_id: dvp_program::ID,
             accounts: metas,
             data,
         },

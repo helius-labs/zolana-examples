@@ -11,10 +11,8 @@ use dvp_sdk::{
     },
     state::{Deposit, Leg, SwapDvp},
 };
-use dvp_test::cluster_time;
-use shared::{
-    assert_dvp_error, setup, Actor, TestEnv, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT,
-};
+use dvp_test::{assert_dvp_error, assert_spp_rejects, has_dvp, has_legs, settle_timestamp};
+use shared::{setup, Actor, TestEnv, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT};
 use solana_signature::Signature;
 use solana_signer::Signer;
 use zolana_program_test::fixture;
@@ -26,16 +24,18 @@ use zolana_transaction::{Mint, SOL_MINT};
 const DELIVERY_SURPLUS: u64 = 50_000_000;
 /// What each funder shields into its private balance before funding.
 const SHIELD_AMOUNT: u64 = 600_000_000;
-/// Seconds the settle timestamp trails the cluster clock, as in the settle
-/// e2e.
-const TIMESTAMP_LAG: i64 = 2;
 
 /// The seller creates a DvP, and `discoverer` finds its terms and DvP UTXO.
 fn create(env: &TestEnv, discoverer: &Actor) -> Result<(SwapDvp, DiscoveredDvp)> {
     let terms = env.terms(1)?;
     let create = env.prove_create(&terms)?;
     env.send(create.instruction()?, &[&env.seller.solana], None)?;
-    let discovered = index_terms(&discoverer.shielded, &env.localnet.client, INDEX_TIMEOUT)?;
+    let discovered = index_terms(
+        &discoverer.shielded,
+        &env.localnet.client,
+        INDEX_TIMEOUT,
+        has_dvp(&terms),
+    )?;
     let [discovered] = discovered.as_slice() else {
         bail!("discovered {} DvPs", discovered.len());
     };
@@ -129,6 +129,7 @@ fn authority_cancels_with_both_deposits() -> Result<()> {
         &env.assets()?,
         client,
         INDEX_TIMEOUT,
+        has_legs([Leg::Delivery, Leg::Payment]),
     )?;
     let deposit = |leg: Leg| -> Result<Deposit> {
         deposits
@@ -139,21 +140,6 @@ fn authority_cancels_with_both_deposits() -> Result<()> {
     };
     let delivery = deposit(Leg::Delivery)?;
     let payment = deposit(Leg::Payment)?;
-
-    // A settle of the same DvP, proven while it is open.
-    let settle_ix = SettleDvpTransactionParams {
-        terms: terms.clone(),
-        current_timestamp: cluster_time(client)? - TIMESTAMP_LAG,
-        dvp_utxo: discovered.dvp_utxo.clone(),
-        dvp_utxo_leaf_index: discovered.leaf_index,
-        delivery_deposit: delivery.clone(),
-        payment_deposit: payment.clone(),
-        payer: env.payer.pubkey(),
-        tree_id: env.localnet.tree_id,
-    }
-    .build(&authority.shielded)?
-    .prove(client.indexer(), tree)?
-    .instruction()?;
 
     let cancel = prove_abort(
         &env,
@@ -183,19 +169,43 @@ fn authority_cancels_with_both_deposits() -> Result<()> {
         DvpError::ProofVerificationFailed,
     );
 
+    // The same proof re-tagged as a reject runs in reject mode, where the
+    // settlement authority is not a party.
+    let mut retagged_ix = cancel_ix.clone();
+    *retagged_ix
+        .data
+        .first_mut()
+        .ok_or_else(|| anyhow!("cancel has no instruction tag"))? = dvp_program::tag::REJECT_DVP;
+    assert_dvp_error(
+        "a cancel proof sent as a reject",
+        env.send(retagged_ix, &[&authority.solana], None),
+        DvpError::ProofVerificationFailed,
+    );
+
+    // A settle of the same DvP, proven while it is open, as late as possible:
+    // its timestamp window covers only the cancel and the settle send.
+    let settle_ix = SettleDvpTransactionParams {
+        terms: terms.clone(),
+        current_timestamp: settle_timestamp(client)?,
+        dvp_utxo: discovered.dvp_utxo.clone(),
+        dvp_utxo_leaf_index: discovered.leaf_index,
+        delivery_deposit: delivery.clone(),
+        payment_deposit: payment.clone(),
+        payer: env.payer.pubkey(),
+        tree_id: env.localnet.tree_id,
+    }
+    .build(&authority.shielded)?
+    .prove(client.indexer(), tree)?
+    .instruction()?;
+
     let cancel_signature = env.send(cancel_ix, &[&authority.solana], None)?;
     client.confirm_private_transaction_sync(cancel_signature)?;
 
-    // The settle fails on the spent DvP UTXO, not on its timestamp, which is
-    // still in the window.
-    let settle_error = match env.send(settle_ix, &[&authority.solana], None) {
-        Ok(signature) => bail!("settle after cancel unexpectedly succeeded ({signature})"),
-        Err(err) => format!("{err:?}"),
-    };
-    let timestamp_code = DvpError::TimestampOutOfWindow as u32;
-    ensure!(
-        !settle_error.contains(&format!("Custom({timestamp_code})")),
-        "settle after cancel left the timestamp window: {settle_error}"
+    // The settle fails in SPP on the spent DvP UTXO, not on its timestamp or
+    // its proof.
+    assert_spp_rejects(
+        "settle after cancel",
+        env.send(settle_ix, &[&authority.solana], None),
     );
 
     assert_eq!(
@@ -232,6 +242,7 @@ fn buyer_rejects_with_only_the_payment_deposit() -> Result<()> {
         &registry,
         client,
         INDEX_TIMEOUT,
+        has_legs([Leg::Payment]),
     )?;
     let [payment] = own.as_slice() else {
         bail!("the buyer discovered {} own deposits", own.len());
@@ -270,6 +281,7 @@ fn buyer_rejects_with_only_the_payment_deposit() -> Result<()> {
         &registry,
         client,
         INDEX_TIMEOUT,
+        has_legs([Leg::Delivery]),
     )?;
     let [delivery] = own.as_slice() else {
         bail!("the seller discovered {} own deposits", own.len());
