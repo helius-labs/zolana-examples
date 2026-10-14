@@ -6,3 +6,5 @@ mod create_dvp;
 mod dispatch;
 #[path = "failing/reclaim_dvp.rs"]
 mod reclaim_dvp;
+#[path = "failing/settle_dvp.rs"]
+mod settle_dvp;

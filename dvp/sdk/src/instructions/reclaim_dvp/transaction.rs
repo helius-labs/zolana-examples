@@ -158,10 +158,9 @@ impl ReclaimDvpTransaction {
 #[cfg(test)]
 mod tests {
     use zolana_keypair::{PublicKey, ViewingKey};
-    use zolana_transaction::{decrypt_spendable, AssetRegistry, ShieldedTransaction};
 
     use super::*;
-    use crate::index::fixture::{deposit_fixture, shielded_transaction};
+    use crate::index::fixture::{deposit_fixture, shielded_transaction, spendable_amounts};
 
     /// Leaf the fixture reclaim appends its refund at.
     const REFUND_LEAF: u64 = 30;
@@ -176,22 +175,6 @@ mod tests {
             refund_destination,
             tree_id: deposit.tree_id,
         }
-    }
-
-    /// The amounts of `owner`'s spendable notes of `mint` in `tx`.
-    fn spendable_amounts(
-        owner: &ShieldedKeypair,
-        tx: &ShieldedTransaction,
-        registry: &AssetRegistry,
-        mint: &Address,
-    ) -> Vec<u64> {
-        decrypt_spendable(owner, std::slice::from_ref(tx), registry)
-            .expect("decrypt")
-            .balances
-            .get_balance(*mint)
-            .into_iter()
-            .flat_map(|balance| balance.utxos.iter().map(|note| note.utxo.amount))
-            .collect()
     }
 
     #[test]

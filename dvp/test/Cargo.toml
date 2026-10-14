@@ -28,3 +28,7 @@ path = "tests/create_dvp.rs"
 [[test]]
 name = "reclaim_dvp"
 path = "tests/reclaim_dvp.rs"
+
+[[test]]
+name = "settle_dvp"
+path = "tests/settle_dvp.rs"

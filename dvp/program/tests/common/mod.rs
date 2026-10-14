@@ -2,6 +2,7 @@ use dvp_program::{
     instructions::{
         create_dvp::{CreateDvpIxData, CreateDvpProof},
         reclaim_dvp::{ReclaimDvpIxData, ReclaimDvpProof},
+        settle_dvp::{SettleDvpIxData, SettleDvpProof},
     },
     tag, DVP_AUTHORITY_PDA_SEED,
 };
@@ -24,6 +25,8 @@ const PAYER: Pubkey = Pubkey::new_from_array([21; 32]);
 pub const CREATOR: Pubkey = Pubkey::new_from_array([22; 32]);
 const TREE: Pubkey = Pubkey::new_from_array([23; 32]);
 const NULLIFIER_PDA: Pubkey = Pubkey::new_from_array([24; 32]);
+/// The settlement authority.
+const SETTLEMENT_AUTHORITY: Pubkey = Pubkey::new_from_array([26; 32]);
 /// The reclaiming party.
 const SIGNER: Pubkey = Pubkey::new_from_array([25; 32]);
 /// A field element (below the BN254 modulus).
@@ -140,6 +143,36 @@ pub fn reclaim_dvp_data(creator: Pubkey, dvp_id: [u8; 32], bump: u8) -> Vec<u8> 
     data
 }
 
+/// The clock the settle_dvp failing tests warp Mollusk to; the settle
+/// fixture's `current_timestamp` equals it.
+pub const SETTLE_NOW: i64 = 1_000;
+
+/// Settle data on the 1x2 placeholder transact: its shape is never checked,
+/// because the placeholder proof fails first.
+pub fn settle_dvp_data(
+    creator: Pubkey,
+    dvp_id: [u8; 32],
+    bump: u8,
+    current_timestamp: i64,
+) -> Vec<u8> {
+    let body = wincode::serialize(&SettleDvpIxData {
+        creator,
+        dvp_id,
+        bump,
+        current_timestamp,
+        settle_proof: SettleDvpProof {
+            proof_a: [10; 32],
+            proof_b: [11; 64],
+            proof_c: [12; 32],
+        },
+        spp: spp(),
+    })
+    .expect("serialize settle_dvp");
+    let mut data = vec![tag::SETTLE_DVP];
+    data.extend_from_slice(&body);
+    data
+}
+
 /// A create_dvp instruction with the builder's account layout: payer,
 /// creator, then the forwarded SPP list ending in `dvp_authority` (D8).
 pub fn create_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
@@ -152,6 +185,17 @@ pub fn create_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
 pub fn reclaim_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
     let (_, bump) = dvp_authority(&CREATOR, &DVP_ID);
     fixture(SIGNER, reclaim_dvp_data(CREATOR, DVP_ID, bump))
+}
+
+/// A settle_dvp instruction by `SETTLEMENT_AUTHORITY` at `SETTLE_NOW`, with
+/// the builder's account layout: payer, settlement authority, then the
+/// forwarded SPP list ending in `dvp_authority`.
+pub fn settle_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
+    let (_, bump) = dvp_authority(&CREATOR, &DVP_ID);
+    fixture(
+        SETTLEMENT_AUTHORITY,
+        settle_dvp_data(CREATOR, DVP_ID, bump, SETTLE_NOW),
+    )
 }
 
 /// An instruction on `data` with the role signer `role` after the payer,

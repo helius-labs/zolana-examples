@@ -10,6 +10,7 @@ pub use dvp_program::{
     instructions::{
         create_dvp::{CreateDvpIxData, CreateDvpProof},
         reclaim_dvp::{ReclaimDvpIxData, ReclaimDvpProof},
+        settle_dvp::{SettleDvpIxData, SettleDvpProof},
     },
     tag, DVP_AUTHORITY_PDA_SEED,
 };

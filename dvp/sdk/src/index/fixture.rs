@@ -239,6 +239,25 @@ pub(crate) fn shielded_transaction(
     }
 }
 
+/// The sorted amounts of `owner`'s spendable notes of `mint` in `tx`.
+pub(crate) fn spendable_amounts(
+    owner: &ShieldedKeypair,
+    tx: &ShieldedTransaction,
+    registry: &AssetRegistry,
+    mint: &Address,
+) -> Vec<u64> {
+    let mut amounts: Vec<u64> =
+        zolana_transaction::decrypt_spendable(owner, std::slice::from_ref(tx), registry)
+            .expect("decrypt")
+            .balances
+            .get_balance(*mint)
+            .into_iter()
+            .flat_map(|balance| balance.utxos.iter().map(|note| note.utxo.amount))
+            .collect();
+    amounts.sort_unstable();
+    amounts
+}
+
 /// The seller funds the delivery leg and the buyer the payment leg, each
 /// with [`FIXTURE_SURPLUS`] on top, through the sdk's own funding builder.
 pub(crate) fn deposit_fixture() -> DepositFixture {

@@ -1,14 +1,46 @@
-use pinocchio::error::ProgramError;
+use light_program_profiler::profile;
+use pinocchio::{
+    error::ProgramError,
+    sysvars::{clock::Clock, Sysvar},
+    AccountView, Address, ProgramResult,
+};
 use wincode::{SchemaRead, SchemaWrite};
-use zolana_hasher::{Hasher, Poseidon};
+use zolana_account_checks::AccountIterator;
+use zolana_hasher::{primitives::solana_owner_identity, Hasher, Poseidon};
+use zolana_interface::instruction::instruction_data::transact::TransactIxData;
 
-use crate::{error::DvpError, instructions::shared::u64_right_align};
+use crate::{
+    error::DvpError,
+    instructions::{
+        shared::{
+            check_settle_timestamp, cpi_spp_transact_signed, dvp_authority,
+            dvp_authority_owner_hash, u64_right_align,
+        },
+        verifier::{verify_groth16, CompressedGroth16Proof},
+    },
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct SettleDvpProof {
     pub proof_a: [u8; 32],
     pub proof_b: [u8; 64],
     pub proof_c: [u8; 32],
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
+pub struct SettleDvpIxData {
+    /// The terms' creator. With `dvp_id` and `bump` it seeds the PDA; the
+    /// settle proof checks it against the terms.
+    pub creator: Address,
+    pub dvp_id: [u8; 32],
+    /// Bump of `dvp_authority`, found off chain with `find_program_address`.
+    pub bump: u8,
+    /// Time the settle proof checks the terms' settlement window against.
+    /// The program requires `now - TIME_WINDOW <= current_timestamp <= now`
+    /// against the Clock, and a non-negative value (D5).
+    pub current_timestamp: i64,
+    pub settle_proof: SettleDvpProof,
+    pub spp: TransactIxData,
 }
 
 /// The settle proof's single public input. The program supplies every
@@ -44,4 +76,77 @@ impl SettleDvpPublicInput<'_> {
         ])
         .map_err(|_| DvpError::HashingFailed.into())
     }
+}
+
+/// Settles the DvP: the 3x4 SPP transact spends the DvP UTXO and both
+/// deposits, all owned by `dvp_authority`, and pays the delivery leg to the
+/// buyer, the payment leg to the seller, and each leg's surplus to its
+/// funder's refund destination. Spending the DvP UTXO closes the DvP, so a
+/// second settle (or an abort) fails on its nullifier.
+///
+/// The settle proof checks `current_timestamp` against the terms' window
+/// (`earliest_settlement_timestamp <= current_timestamp <= expiry_timestamp`),
+/// which stays private. The program ties `current_timestamp` to the Clock:
+/// it may trail `now` by at most `TIME_WINDOW` seconds, so a proof made
+/// against a recent time still lands, and a settle can land up to
+/// `TIME_WINDOW` after expiry. It may not be ahead of `now`, and it must be
+/// non-negative (D5). The PDA is forwarded as the last SPP account, the
+/// owner-signer run (D8).
+#[inline(never)]
+#[profile]
+pub fn process_settle_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
+    let mut iter = AccountIterator::new(accounts);
+    iter.next_signer_mut("payer")?;
+    // Only the terms' settlement authority may settle; its identity is a
+    // public input the settle proof checks against the terms.
+    let settlement_authority = iter.next_signer("settlement_authority")?.address();
+    let settlement_authority_id =
+        solana_owner_identity(settlement_authority.as_array()).map_err(DvpError::from)?;
+
+    let SettleDvpIxData {
+        creator,
+        dvp_id,
+        bump,
+        current_timestamp,
+        settle_proof,
+        spp,
+    } = wincode::deserialize_exact(data).map_err(|_| DvpError::InvalidInstructionData)?;
+    let now = Clock::get()?.unix_timestamp;
+    check_settle_timestamp(now, current_timestamp)?;
+    let creator_id = solana_owner_identity(creator.as_array()).map_err(DvpError::from)?;
+
+    let dvp_authority = dvp_authority(&creator, &dvp_id, bump)?;
+    let dvp_authority_owner_hash = dvp_authority_owner_hash(&dvp_authority)?;
+
+    verify_groth16(
+        CompressedGroth16Proof {
+            a: &settle_proof.proof_a,
+            b: &settle_proof.proof_b,
+            c: &settle_proof.proof_c,
+            commitment: None,
+        },
+        SettleDvpPublicInput {
+            private_tx_hash: &spp.private_tx_hash,
+            creator_id: &creator_id,
+            dvp_id: &dvp_id,
+            dvp_authority_owner_hash: &dvp_authority_owner_hash,
+            settlement_authority_id: &settlement_authority_id,
+            current_timestamp,
+        }
+        .hash()?,
+        &crate::verifying_keys::settle_dvp::VERIFYINGKEY,
+    )?;
+
+    let spp_bytes = spp
+        .serialize()
+        .map_err(|_| DvpError::InvalidInstructionData)?;
+    let spp_accounts = iter.remaining()?;
+    cpi_spp_transact_signed(
+        spp_accounts,
+        &spp_bytes,
+        &dvp_authority,
+        &creator,
+        &dvp_id,
+        bump,
+    )
 }
