@@ -927,7 +927,9 @@ name = "dvp-prover"
 version = "0.1.0"
 dependencies = [
  "dvp-program",
+ "zolana-client",
  "zolana-gnark-ffi-prover",
+ "zolana-gnark-ffi-prover-build",
 ]
 
 [[package]]
@@ -937,10 +939,12 @@ dependencies = [
  "anyhow",
  "dvp-program",
  "dvp-prover",
+ "groth16-solana",
  "solana-address",
  "zolana-gnark-ffi-prover",
  "zolana-hasher",
  "zolana-keypair",
+ "zolana-program",
  "zolana-transaction",
 ]
 
@@ -4454,6 +4458,11 @@ dependencies = [
  "thiserror 2.0.20",
  "zolana-client",
 ]
+
+[[package]]
+name = "zolana-gnark-ffi-prover-build"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?tag=v0.4.0-alpha#0fde5f1e1e209b85896362c9293ec0b60bbf7563"
 
 [[package]]
 name = "zolana-hasher"

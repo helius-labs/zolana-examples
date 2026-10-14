@@ -14,4 +14,8 @@ path = "src/bin/setup.rs"
 
 [dependencies]
 dvp-program = { path = "../program" }
+zolana-client = { workspace = true }
 zolana-gnark-ffi-prover = { workspace = true }
+
+[build-dependencies]
+zolana-gnark-ffi-prover-build = { workspace = true }

@@ -121,6 +121,20 @@ func DvpUtxo(dvpID, ownerHash, blinding, treeID frontend.Variable) gnarksdk.Utxo
 	}
 }
 
+// AssertDvpUtxo asserts the witness u is the DvP UTXO of dvpID under
+// ownerHash. Only its blinding and tree id are free: the blinding is checked
+// by the caller's blinding derivation, the tree id by the transact proof.
+func AssertDvpUtxo(api frontend.API, u gnarksdk.Utxo, dvpID, ownerHash frontend.Variable) {
+	expected := DvpUtxo(dvpID, ownerHash, u.Blinding, u.TreeID)
+	api.AssertIsEqual(u.Domain, expected.Domain)
+	api.AssertIsEqual(u.Owner, expected.Owner)
+	api.AssertIsEqual(u.Asset, expected.Asset)
+	api.AssertIsEqual(u.Amount, expected.Amount)
+	api.AssertIsEqual(u.DataHash, expected.DataHash)
+	api.AssertIsEqual(u.RingDataHash, expected.RingDataHash)
+	api.AssertIsEqual(u.RingProgramID, expected.RingProgramID)
+}
+
 // BlindingSeed is Poseidon(tag, Blinding), the seed of one instruction's
 // output blindings.
 func (t SwapDvp) BlindingSeed(api frontend.API, tag uint64) frontend.Variable {

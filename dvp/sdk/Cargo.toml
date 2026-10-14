@@ -11,7 +11,9 @@ dvp-prover = { path = "../prover" }
 solana-address = { workspace = true, features = ["curve25519"] }
 zolana-hasher = { workspace = true }
 zolana-keypair = { workspace = true }
+zolana-program = { workspace = true, features = ["compression"] }
 zolana-transaction = { workspace = true }
 
 [dev-dependencies]
+groth16-solana = { workspace = true }
 zolana-gnark-ffi-prover = { workspace = true }

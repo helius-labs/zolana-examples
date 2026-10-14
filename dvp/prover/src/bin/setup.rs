@@ -1,6 +1,5 @@
-//! Key setup for the DvP circuits. The circuits are not registered yet.
+use std::process::ExitCode;
 
-fn main() {
-    eprintln!("dvp-prover-setup: no circuits are registered yet");
-    std::process::exit(1);
+fn main() -> ExitCode {
+    zolana_gnark_ffi_prover::setup_cli::main(&dvp_prover::PROVER)
 }
