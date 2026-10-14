@@ -224,8 +224,8 @@ fn authority_cancels_with_both_deposits() -> Result<()> {
 
 /// Create a DvP and fund both legs, then let the buyer reject it knowing
 /// only its own payment deposit: the payment deposit fills input slot 1
-/// (leg-order bit `PaymentFirst`, D3) and comes back in full, the seller gets
-/// a zero-amount delivery refund (D2), and the DvP is closed. The seller's
+/// (leg-order bit `PaymentFirst`) and comes back in full, the seller gets
+/// a zero-amount delivery refund, and the DvP is closed. The seller's
 /// delivery deposit, which the abort did not spend, stays reclaimable.
 #[test]
 fn buyer_rejects_with_only_the_payment_deposit() -> Result<()> {

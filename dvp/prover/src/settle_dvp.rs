@@ -16,7 +16,7 @@ pub struct SettleDvpProofInputs {
     pub dvp_id: [u8; 32],
     pub dvp_authority_owner_hash: [u8; 32],
     pub settlement_authority_id: [u8; 32],
-    /// Non-negative (D5), so it is the u64 the program right-aligns.
+    /// Non-negative, so it is the u64 the program right-aligns.
     pub current_timestamp: u64,
     pub terms: SwapDvpProofInput,
     /// Input 0, committed under the tree it is spent from.

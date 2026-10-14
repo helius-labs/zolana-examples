@@ -22,7 +22,7 @@ pub struct CreateDvpProof {
 
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct CreateDvpIxData {
-    /// The terms hash (D4). Seeds the PDA and the address slot.
+    /// The terms hash. Seeds the PDA and the address slot.
     pub dvp_id: [u8; 32],
     /// Canonical bump of `dvp_authority` (`find_program_address`).
     pub bump: u8,
@@ -61,8 +61,8 @@ impl CreateDvpPublicInput<'_> {
 /// `dvp_id` and the PDA's owner hash.
 ///
 /// The `dvp_authority` PDA is not a separate account here: it is forwarded
-/// as the last SPP account, the owner-signer run, as in escrow and swap
-/// (D8). The program does not check the transact's messages; the parties'
+/// as the last SPP account, the owner-signer run, as in escrow and swap.
+/// The program does not check the transact's messages; the parties'
 /// terms ciphertexts are only bound by the recipients' own checks.
 #[inline(never)]
 #[profile]

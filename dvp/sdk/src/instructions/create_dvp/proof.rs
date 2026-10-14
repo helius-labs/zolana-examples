@@ -39,7 +39,7 @@ pub struct CreateDvpDerivation {
     /// `Poseidon(id(dvp_authority), ZERO_NULLIFIER_PUBKEY)`: owner of the
     /// address slot and the DvP UTXO.
     pub owner_hash: [u8; 32],
-    /// The address slot `{AddressDomain, DVP_ADDRESS_TREE_ID (D6), owner_hash,
+    /// The address slot `{AddressDomain, DVP_ADDRESS_TREE_ID, owner_hash,
     /// blinding dvp_id}` the 1x2 transaction spends in input slot 0.
     pub address_slot: ProofInputUtxo,
     /// `Poseidon(address_slot, dvp_id, 0)`: the slot's nullifier, and the
@@ -62,7 +62,7 @@ impl CreateDvpDerivation {
     /// Validates the terms, then derives:
     /// - `dvp_id`, the DvP authority PDA with its bump, and its owner hash;
     /// - the address the 1x2 transaction's address slot creates (seed `dvp_id`,
-    ///   tree `DVP_ADDRESS_TREE_ID`, D6), which is its first nullifier;
+    ///   tree `DVP_ADDRESS_TREE_ID`), which is its first nullifier;
     /// - both output blindings and the private tx blinding, from the create
     ///   seed `Poseidon(CREATE_TAG, terms.blinding)` and that address;
     /// - the DvP UTXO and `private_tx_hash`.

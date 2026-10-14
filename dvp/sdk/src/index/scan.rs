@@ -34,7 +34,7 @@ pub(crate) fn tagged_outputs<'a>(
 /// ciphertext, with the ciphertext body and the slot index it was encrypted
 /// under. The index is the slot's position among all outputs, as the sender
 /// encrypts it and as `zolana_transaction::decrypt` reads it. A slot without
-/// data, such as the DvP UTXO (D9), is skipped.
+/// data, such as the DvP UTXO, is skipped.
 pub(crate) fn tagged_confidential_outputs<'a>(
     tx: &'a ShieldedTransaction,
     tag: &'a [u8; 32],

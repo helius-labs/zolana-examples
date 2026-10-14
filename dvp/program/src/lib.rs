@@ -31,7 +31,7 @@ pub const ABORT_TAG: u32 = u32::from_be_bytes(*b"DVPA");
 /// Seconds a settlement's `current_timestamp` may trail the cluster clock.
 pub const TIME_WINDOW: i64 = 24;
 
-/// Tree id the create circuit pins the DvP address slot to (D6): address
+/// Tree id the create circuit pins the DvP address slot to: address
 /// uniqueness is per (owner, seed, tree), so a fixed tree makes a
 /// `(creator, dvp_id)` pair creatable once.
 pub const DVP_ADDRESS_TREE_ID: u16 = 0;

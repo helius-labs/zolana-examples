@@ -96,7 +96,7 @@ const V1_TX_LIMIT: usize = 4096;
 
 /// Raw id of the fixture tree. `build_tree_fixture` initializes the account
 /// with this id, and every UTXO commitment folds it in. It is also
-/// `DVP_ADDRESS_TREE_ID`, the tree D6 pins the create to.
+/// `DVP_ADDRESS_TREE_ID`, the tree the create is pinned to.
 const BENCH_TREE_ID: u16 = 0;
 /// The mollusk slot, past every fixture leaf's append slot.
 const BENCH_SLOT: u64 = 1_000;

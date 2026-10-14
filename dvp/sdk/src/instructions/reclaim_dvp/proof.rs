@@ -14,8 +14,8 @@ use crate::{
 };
 
 /// Everything the reclaim proof needs. The 1x2 transaction spends `deposit`
-/// in input 0 and writes `refund` in output 0; output 1 is compact padding
-/// (D1). The blindings are the caller's (random, not derived from the terms).
+/// in input 0 and writes `refund` in output 0; output 1 is compact padding.
+/// The blindings are the caller's (random, not derived from the terms).
 pub struct ReclaimDvpProofInputParams {
     pub terms: SwapDvp,
     /// The reclaiming party: the seller for the delivery leg, the buyer for

@@ -12,7 +12,7 @@ pub struct DestinationProofInput {
 
 /// The `SwapDvp` terms as field elements, in the shape of `dvpterms.SwapDvp`.
 /// Party fields are `solana_owner_identity(pk)`, assets are `hash_bytes(mint)`,
-/// and timestamps are non-negative (D5) so they fit a u64.
+/// and timestamps are non-negative so they fit a u64.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SwapDvpProofInput {
     pub seller_id: [u8; 32],

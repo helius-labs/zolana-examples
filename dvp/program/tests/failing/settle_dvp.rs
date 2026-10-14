@@ -98,7 +98,7 @@ fn timestamp_older_than_the_window_is_rejected_exactly() {
 
 #[test]
 fn negative_timestamp_is_rejected_exactly() {
-    // D5: negative even where the window reaches below zero. Two checks
+    // Negative even where the window reaches below zero. Two checks
     // refuse it with this error, the window check and the public input's
     // u64 encoding; windows.rs pins the window check alone.
     expect_settle_dvp_err_at(

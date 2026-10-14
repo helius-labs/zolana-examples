@@ -25,7 +25,7 @@ pub struct AbortDvpTransactionParams {
     /// Leaf index of the DvP UTXO in its tree (`DiscoveredDvp::leaf_index`).
     pub dvp_utxo_leaf_index: u64,
     /// The delivery and payment mints with their pool asset ids; a leg
-    /// without a deposit still gets a zero-amount refund in its mint (D2).
+    /// without a deposit still gets a zero-amount refund in its mint.
     pub delivery_mint: Mint,
     pub payment_mint: Mint,
     /// The deposits the signer knows of. Each one given is refunded in full;
@@ -69,7 +69,7 @@ impl AbortDvp {
 impl AbortDvpTransactionParams {
     /// Builds the abort `transact` at SPP shape 3x2 from
     /// [`AbortDvpProofInputParams::derive`]: the DvP UTXO and the known
-    /// deposits in (padding last, D3), the seller's and the buyer's refunds
+    /// deposits in (padding last), the seller's and the buyer's refunds
     /// out, every blinding derived from the terms' abort seed.
     ///
     /// Both refunds are encrypted to their refund destinations, a

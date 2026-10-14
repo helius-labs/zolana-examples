@@ -22,7 +22,7 @@ pub struct AbortDvpProofInputs {
     pub terms: SwapDvpProofInput,
     /// Reject mode: `false` for the seller, `true` for the buyer.
     pub leg: bool,
-    /// Input slot 1 holds the payment leg and slot 2 the delivery leg (D3).
+    /// Input slot 1 holds the payment leg and slot 2 the delivery leg.
     pub payment_first: bool,
     /// Input slot 1 is padding; then slot 2 is too.
     pub padding1: bool,

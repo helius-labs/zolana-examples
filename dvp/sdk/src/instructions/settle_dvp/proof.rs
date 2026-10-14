@@ -23,7 +23,7 @@ pub struct SettleDvpProofInputParams {
     /// The signer; must be the terms' settlement authority.
     pub settlement_authority: Address,
     /// The settle instruction's timestamp. It must lie in the settlement
-    /// window of the terms and be non-negative (D5).
+    /// window of the terms and be non-negative.
     pub current_timestamp: i64,
     pub dvp_utxo: DvpUtxo,
     /// Leaf index of the DvP UTXO in its tree (`DiscoveredDvp::leaf_index`).
@@ -61,7 +61,7 @@ impl SettleDvpProofInputParams {
     /// - output 3: the payment surplus to the buyer's refund destination.
     ///
     /// A change output without surplus is a zero-amount UTXO, owned by the
-    /// refund destination with the leg's mint, not a dummy (D2). The output
+    /// refund destination with the leg's mint, not a dummy. The output
     /// blindings and the private tx blinding derive from the settlement seed
     /// and the DvP UTXO's nullifier, the transaction's first nullifier.
     pub fn derive(&self) -> Result<SettleDvpDerivation> {
@@ -72,8 +72,8 @@ impl SettleDvpProofInputParams {
             self.settlement_authority == terms.settlement_authority,
             "the signer is not the settlement authority"
         );
-        let current_timestamp = u64::try_from(self.current_timestamp)
-            .map_err(|_| anyhow!("negative timestamp (D5)"))?;
+        let current_timestamp =
+            u64::try_from(self.current_timestamp).map_err(|_| anyhow!("negative timestamp"))?;
         ensure!(
             self.current_timestamp <= terms.expiry_timestamp,
             "the DvP has expired"

@@ -25,7 +25,7 @@ pub struct AbortDvpProofInputParams {
     /// Leaf index of the DvP UTXO in its tree (`DiscoveredDvp::leaf_index`).
     pub dvp_utxo_leaf_index: u64,
     /// The delivery and payment mints with their pool asset ids. A leg
-    /// without a deposit still gets a zero-amount refund in its mint (D2),
+    /// without a deposit still gets a zero-amount refund in its mint,
     /// whose ciphertext carries the asset id.
     pub delivery_mint: Mint,
     pub payment_mint: Mint,
@@ -45,7 +45,7 @@ pub struct AbortDvpProofInputParams {
 /// abort witness over the same values.
 pub struct AbortDvpDerivation {
     /// `[DvP UTXO, slot 1, slot 2]`: the deposits first, random padding
-    /// (`SppProofInputUtxo::dummy`) last (D3).
+    /// (`SppProofInputUtxo::dummy`) last.
     pub inputs: [SppProofInputUtxo; 3],
     /// `[seller refund, buyer refund]`.
     pub outputs: [SppProofOutputUtxo; 2],
@@ -59,7 +59,7 @@ impl AbortDvpProofInputParams {
     /// legs, then derives the transaction:
     ///
     /// - input 0: the DvP UTXO;
-    /// - inputs 1 and 2: the deposits, padding last (D3). With only the
+    /// - inputs 1 and 2: the deposits, padding last. With only the
     ///   payment deposit, it fills slot 1 and the leg-order bit
     ///   `payment_first` is set;
     /// - output 0: the delivery deposit (or 0) to the seller's refund

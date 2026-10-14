@@ -65,7 +65,7 @@ func (c *Circuit) Define(api frontend.API) error {
 	api.AssertIsEqual(c.SettlementAuthorityID, c.Terms.SettlementAuthorityID)
 
 	// Settlement window: not after expiry and, when set, not before the
-	// earliest settlement timestamp. 63 bits (D5) keeps the comparisons
+	// earliest settlement timestamp. 63 bits keeps the comparisons
 	// meaningful for a non-negative i64.
 	api.ToBinary(c.CurrentTimestamp, 63)
 	api.AssertIsEqual(cmp.IsLessOrEqual(api, c.CurrentTimestamp, c.Terms.ExpiryTimestamp), 1)
@@ -84,7 +84,7 @@ func (c *Circuit) Define(api frontend.API) error {
 
 	// Each leg's amount goes to the counterparty's settlement destination and
 	// the surplus back to the funder's refund destination. A change output
-	// without surplus is a zero-amount UTXO, not a dummy (D2).
+	// without surplus is a zero-amount UTXO, not a dummy.
 	buyerSettlementHash := assertOutput(
 		api, c.BuyerSettlement, c.Terms.BuyerSettlementDestination,
 		c.Terms.DeliveryAsset, c.Terms.DeliveryAmount,

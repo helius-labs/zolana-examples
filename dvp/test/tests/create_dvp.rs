@@ -19,7 +19,7 @@ const SHIELD_AMOUNT: u64 = 600_000_000;
 #[test]
 fn create_dvp_and_discover_terms() -> Result<()> {
     let env = setup(11)?;
-    // D6: the create circuit pins the address slot to tree 0, so the
+    // The create circuit pins the address slot to tree 0, so the
     // localnet tree the address is proven against must be tree 0.
     assert_eq!(env.localnet.tree_id, DVP_ADDRESS_TREE_ID);
     let terms = env.terms(1)?;

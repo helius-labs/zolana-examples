@@ -45,7 +45,7 @@ Delivery-versus-payment (DvP) settles a trade between two parties atomically: th
 9. The seller, buyer, and settlement authority read the terms from the create messages.
 10. Anyone sees that a transfer to the DvP PDA happened. Only the settlement authority reads the deposit's asset and amount, from the funder's recipient ciphertext.
 11. The transactions of one DvP are linkable through `dvp_id` and the DvP PDA. A funder is linked to the DvP through its signer and the PDA owner tag. A single-use creator keypair keeps the creator unlinked from its other activity.
-12. A change output with no surplus is an empty UTXO, which looks like a real output, so settle does not reveal whether a deposit was overfunded.
+12. A change output with no surplus is a zero-amount UTXO to its refund destination, which looks like a real output, so settle does not reveal whether a deposit was overfunded.
 
 ## Constants
 
@@ -62,10 +62,21 @@ Each four-letter tag is its ASCII bytes read as a big-endian 32-bit integer, as 
 
 `SwapDvp` is not stored in an account. Its hash is the DvP UTXO's `data_hash`, and its plaintext is published encrypted in transaction messages. It keeps the field types and order of the reference program (`program/src/state/swap_dvp.rs`), except `bump`, which is removed: the PDA is derived from `dvp_id`, so its bump cannot be part of the hashed data. `delivery_token_program`, `payment_token_program`, `delivery_mint_authority`, and `payment_mint_authority` are removed. `seller_refund_destination`, `buyer_refund_destination`, `creator`, and `blinding` are added at the end. The settlement destinations are zolana `ShieldedAddress`es instead of `Pubkey`s. Fields are renamed: `user_a` -> `seller`, `user_b` -> `buyer`, `*_a` -> `delivery_*`, `*_b` -> `payment_*`.
 
-- `dvp_id = hash(SwapDvp)`, computed over the plaintext terms.
-- The DvP UTXO's `data_hash` is `dvp_id`, and its `utxo_data` is empty. Its asset is SOL and its amount is `0`: it holds no funds. SPP spends only UTXOs with a nonzero asset, so the SOL asset lets settle, reject, and cancel spend the DvP UTXO to close the DvP.
+- `dvp_id = hash(SwapDvp)`, computed over the plaintext terms. Poseidon takes at most 12 inputs, so the hash is nested. `id` is the Solana owner identity, `asset` the mint's `hash_bytes`, and `dest` the compressed shielded address hash `Poseidon(owner_hash, hash_bytes(viewing_pubkey))`. An unset `earliest_settlement_timestamp` hashes as `has_earliest = 0` and `0`.
+
+  ```
+  parties      = Poseidon(id(seller), id(buyer), id(settlement_authority), id(creator))
+  legs         = Poseidon(asset(delivery_mint), asset(payment_mint), delivery_amount, payment_amount)
+  schedule     = Poseidon(expiry_timestamp, has_earliest, earliest_settlement_timestamp, nonce)
+  destinations = Poseidon(dest(seller_settlement_destination), dest(buyer_settlement_destination),
+                          dest(seller_refund_destination), dest(buyer_refund_destination))
+  dvp_id       = Poseidon(parties, legs, schedule, destinations, hash_bytes(ref_string), blinding)
+  ```
+
+- Timestamps are non-negative: the proofs range-check them to 63 bits. The four destinations have Ed25519 or PDA signing keys.
+- The DvP UTXO's `data_hash` is `dvp_id`, and its `utxo_data` is empty. Its asset is SOL and its amount is `0`: it holds no funds. SPP spends only UTXOs with a nonzero asset, so the SOL asset lets settle, reject, and cancel spend the DvP UTXO to close the DvP. It has no ciphertext; the parties recompute it from the terms.
 - The DvP UTXO and the deposit UTXOs are owned by the PDA with seeds `[b"dvp", creator, dvp_id]`.
-- The creator knows the viewing public keys of the seller, buyer, and settlement authority. It encrypts the plaintext `SwapDvp` to each of them and publishes the three ciphertexts as messages in the create `transact` (`TransactIxData::messages`, one `MessageData { view_tag, data }` per recipient). Each message's `view_tag` is the recipient's pubkey (`seller`, `buyer`, or `settlement_authority`), the way default-ring outputs are tagged by their owner pubkey. A recipient finds its message by querying the indexer for its own pubkey. Encryption follows the zolana AES key derivation; message slots continue the ciphertext numbering after the outputs.
+- The creator knows the viewing public keys of the seller, buyer, and settlement authority. It encrypts the plaintext `SwapDvp` to each of them and publishes the three ciphertexts as messages in the create `transact` (`TransactIxData::messages`, one `MessageData { view_tag, data }` per recipient). Each message's `view_tag` is the recipient's pubkey (`seller`, `buyer`, or `settlement_authority`), the way default-ring outputs are tagged by their owner pubkey. A recipient finds its message by querying the indexer for its own pubkey. Encryption follows the zolana AES key derivation; message slots continue the ciphertext numbering after the outputs, so message `j` uses slot `1 + j`. A message's `data` is the bare ciphertext.
 - A recipient decrypts its message, recomputes `hash(SwapDvp)`, and checks it against `dvp_id`.
 - A deposit UTXO is an output of a plain SPP transfer from the funder. It is owned by the DvP PDA with `nullifier_secret = 0`, has the leg's mint as asset and at least the leg's amount, and has `data_hash = 0`. SPP requires a signing owner for an output with a nonzero `data_hash`, and the PDA does not sign a plain transfer. The PDA is unique per DvP, so ownership alone ties the deposit to the DvP. Surplus and refunds go to the refund destinations in the terms. The transfer's recipient ciphertext is encrypted to the settlement authority's viewing key, and its owner tag is the DvP PDA, so the settlement authority finds deposits by querying the indexer for the PDA.
 - SPP derives every `transact` output blinding as `Poseidon("TXOB", first_nullifier, output_blinding_seed, i)` from the transaction's `blinding_seed`. Create and settle derive their `blinding_seed` from `SwapDvp.blinding` (see [Constants](#constants)):
@@ -128,22 +139,21 @@ Creates the DvP address and the DvP UTXO, and publishes the terms encrypted to t
 
 1. `payer` — pays transaction fees; signer, writable.
 2. `creator` — `SwapDvp.creator`; signer.
-3. `dvp_authority` — the DvP PDA `[b"dvp", creator, dvp_id]`; owner of the DvP address and the DvP UTXO; signs the SPP CPI through the program.
-4. `spp_accounts` — the SPP `transact` account list, including its program, output tree, input trees, nullifier PDAs, and required owner signers.
+3. `spp_accounts` — the SPP `transact` account list (program, output tree, input trees, and nullifier PDAs), ending in `dvp_authority`, the DvP PDA `[b"dvp", creator, dvp_id]`: owner of the DvP address and the DvP UTXO, and the owner signer the program signs for in the SPP CPI.
 
 **Instruction data**
 
 ```rust
 struct CreateDvpIxData {
     dvp_id: [u8; 32],
-    /// Bump of `dvp_authority`; the program checks it with `create_program_address`.
+    /// Canonical bump of `dvp_authority`; the program rejects any other.
     bump: u8,
     create_proof: CreateDvpProof,
     spp: SppTransactIxData,
 }
 ```
 
-The create `transact` has shape `1 × 1`. The input is an SPP address (`AddressDomain`) owned by `dvp_authority` with address seed `dvp_id`. Its nullifier is the address, so each `(creator, dvp_id)` can be created once. The DvP UTXO is the only output. `spp.messages[0..3]` are the terms encrypted to the seller, buyer, and settlement authority, in that order.
+The create `transact` has shape `1 × 2`. The input is an SPP address (`AddressDomain`) in tree `0`, owned by `dvp_authority` with address seed `dvp_id`. Its nullifier is the address, and an address exists once per owner, seed, and tree, so each `(creator, dvp_id)` can be created once. Output `0` is the DvP UTXO. Output `1` is compact padding, since SPP has no `1 × 1` shape; it has no ciphertext slot. `spp.messages[0..3]` are the terms encrypted to the seller, buyer, and settlement authority, in that order.
 
 **UTXO data**
 
@@ -154,9 +164,9 @@ The DvP UTXO's `utxo_data` is empty and its `data_hash` is `dvp_id = hash(SwapDv
 The create proof checks:
 
 1. `dvp_id = hash(SwapDvp)` for the `SwapDvp` witness, and `SwapDvp.creator` equals the public `creator`.
-2. Input `0` is the address owned by `dvp_authority` with seed `dvp_id`.
+2. Input `0` is the address in tree `0` owned by `dvp_authority` with seed `dvp_id`.
 3. Output `0` is owned by `dvp_authority` with `nullifier_secret = 0`, has asset SOL and amount `0`, and its `data_hash` equals `dvp_id`.
-4. `delivery_amount > 0`, `payment_amount > 0`, `delivery_mint != payment_mint`, and `earliest_settlement_timestamp <= expiry_timestamp` if set.
+4. `delivery_amount > 0`, `payment_amount > 0`, `delivery_mint != payment_mint`, the timestamps are non-negative, and `earliest_settlement_timestamp <= expiry_timestamp` if set.
 5. The SPP `blinding_seed` is `Poseidon(CREATE_TAG, SwapDvp.blinding)`.
 6. The address nullifier and output hash match the submitted SPP transaction. The proof checks the same `private_tx_hash` passed to SPP.
 
@@ -172,8 +182,7 @@ Returns one deposit UTXO of the signer's leg to the signer, whatever its amount.
 
 1. `payer` — pays transaction fees; signer, writable.
 2. `signer` — `SwapDvp.seller` or `SwapDvp.buyer`; signer. Its identity selects the leg: the seller reclaims a delivery deposit, the buyer a payment deposit.
-3. `dvp_authority` — the DvP PDA `[b"dvp", creator, dvp_id]`; owner of the deposit UTXO; signs the SPP CPI through the program.
-4. `spp_accounts` — the SPP `transact` account list.
+3. `spp_accounts` — the SPP `transact` account list, ending in `dvp_authority`, the DvP PDA `[b"dvp", creator, dvp_id]`: owner of the deposit UTXO, and the owner signer the program signs for in the SPP CPI.
 
 **Instruction data**
 
@@ -181,14 +190,14 @@ Returns one deposit UTXO of the signer's leg to the signer, whatever its amount.
 struct ReclaimDvpIxData {
     creator: Pubkey,
     dvp_id: [u8; 32],
-    /// Bump of `dvp_authority`; the program checks it with `create_program_address`.
+    /// Canonical bump of `dvp_authority`; the program rejects any other.
     bump: u8,
     reclaim_proof: ReclaimDvpProof,
     spp: SppTransactIxData,
 }
 ```
 
-The reclaim `transact` has shape `1 × 1`: the deposit UTXO in, the refund UTXO out.
+The reclaim `transact` has shape `1 × 2`: the deposit UTXO in, the refund UTXO and compact padding out.
 
 **Proof**
 
@@ -212,8 +221,7 @@ Spends the DvP UTXO and both deposit UTXOs. Pays the delivery leg to `buyer_sett
 
 1. `payer` — pays transaction fees; signer, writable.
 2. `settlement_authority` — `SwapDvp.settlement_authority`; signer.
-3. `dvp_authority` — the DvP PDA `[b"dvp", creator, dvp_id]`; owner of the DvP UTXO and the deposit UTXOs; signs the SPP CPI through the program.
-4. `spp_accounts` — the SPP `transact` account list.
+3. `spp_accounts` — the SPP `transact` account list, ending in `dvp_authority`, the DvP PDA `[b"dvp", creator, dvp_id]`: owner of the DvP UTXO and the deposit UTXOs, and the owner signer the program signs for in the SPP CPI.
 
 **Instruction data**
 
@@ -221,7 +229,7 @@ Spends the DvP UTXO and both deposit UTXOs. Pays the delivery leg to `buyer_sett
 struct SettleDvpIxData {
     creator: Pubkey,
     dvp_id: [u8; 32],
-    /// Bump of `dvp_authority`; the program checks it with `create_program_address`.
+    /// Canonical bump of `dvp_authority`; the program rejects any other.
     bump: u8,
     /// Time the proof checks the terms against. The program requires it to be
     /// within `TIME_WINDOW` of the Clock.
@@ -243,11 +251,11 @@ The settle proof checks:
 4. Input `0` is the DvP UTXO: owned by `dvp_authority` with `nullifier_secret = 0`, asset SOL, amount `0`, and `data_hash = dvp_id`.
 5. Input `1` is owned by `dvp_authority` with `nullifier_secret = 0`, `data_hash = 0`, asset `delivery_mint`, and amount at least `delivery_amount`. Input `2` is the same with `payment_mint` and `payment_amount`.
 6. Output `0` has owner `buyer_settlement_destination`, asset `delivery_mint`, amount `delivery_amount`, and `data_hash = 0`. Output `1` has owner `seller_settlement_destination`, asset `payment_mint`, amount `payment_amount`, and `data_hash = 0`.
-7. Output `2` has owner `seller_refund_destination`, asset `delivery_mint`, and amount `input_1.amount - delivery_amount`. Output `3` has owner `buyer_refund_destination`, asset `payment_mint`, and amount `input_2.amount - payment_amount`. A change output with no surplus is an empty UTXO.
+7. Output `2` has owner `seller_refund_destination`, asset `delivery_mint`, and amount `input_1.amount - delivery_amount`. Output `3` has owner `buyer_refund_destination`, asset `payment_mint`, and amount `input_2.amount - payment_amount`. A change output with no surplus has amount `0`.
 8. The SPP `blinding_seed` is `Poseidon(SETTLEMENT_TAG, SwapDvp.blinding)`.
 9. The input nullifiers and output hashes match the submitted SPP transaction. The proof checks the same `private_tx_hash` passed to SPP.
 
-The program checks `now - TIME_WINDOW <= current_timestamp <= now` against the Clock, derives `dvp_authority` from `creator`, `dvp_id`, and `bump`, verifies the proof, and invokes SPP signing as `dvp_authority`.
+The program checks `0 <= current_timestamp` and `now - TIME_WINDOW <= current_timestamp <= now` against the Clock, derives `dvp_authority` from `creator`, `dvp_id`, and `bump`, verifies the proof, and invokes SPP signing as `dvp_authority`.
 
 A leg funded with less than its amount is reclaimed and funded again.
 
@@ -261,8 +269,7 @@ Spends the DvP UTXO and up to one deposit per leg, and refunds each deposit in f
 
 1. `payer` — pays transaction fees; signer, writable.
 2. `settlement_authority` — `SwapDvp.settlement_authority`; signer.
-3. `dvp_authority` — the DvP PDA `[b"dvp", creator, dvp_id]`; owner of the DvP UTXO and the deposit UTXOs; signs the SPP CPI through the program.
-4. `spp_accounts` — the SPP `transact` account list.
+3. `spp_accounts` — the SPP `transact` account list, ending in `dvp_authority`, the DvP PDA `[b"dvp", creator, dvp_id]`: owner of the DvP UTXO and the deposit UTXOs, and the owner signer the program signs for in the SPP CPI.
 
 **Instruction data**
 
@@ -270,14 +277,14 @@ Spends the DvP UTXO and up to one deposit per leg, and refunds each deposit in f
 struct CancelDvpIxData {
     creator: Pubkey,
     dvp_id: [u8; 32],
-    /// Bump of `dvp_authority`; the program checks it with `create_program_address`.
+    /// Canonical bump of `dvp_authority`; the program rejects any other.
     bump: u8,
     cancel_proof: AbortDvpProof,
     spp: SppTransactIxData,
 }
 ```
 
-The cancel `transact` has shape `3 × 2`. Inputs: the DvP UTXO (slot `0`), the delivery deposit or padding (slot `1`), and the payment deposit or padding (slot `2`). Outputs: the delivery refund (slot `0`) and the payment refund (slot `1`).
+The cancel `transact` has shape `3 × 2`. Inputs: the DvP UTXO (slot `0`), then the deposits in slots `1` and `2`, padding last, as SPP requires. A private leg-order bit says which leg is in slot `1`, so the transaction does not show which legs were funded. Outputs: the delivery refund (slot `0`) and the payment refund (slot `1`).
 
 **Proof**
 
@@ -286,8 +293,8 @@ The abort proof checks:
 1. `dvp_id = hash(SwapDvp)` for the `SwapDvp` witness, and `SwapDvp.creator` equals the public `creator`.
 2. The public signer equals `SwapDvp.settlement_authority`.
 3. Input `0` is the DvP UTXO: owned by `dvp_authority` with `nullifier_secret = 0`, asset SOL, amount `0`, and `data_hash = dvp_id`.
-4. Input `1` is padding or a deposit owned by `dvp_authority` with `nullifier_secret = 0`, `data_hash = 0`, and asset `delivery_mint`. Input `2` is the same for the payment leg. Deposit amounts are not checked.
-5. Output `0` refunds input `1`: owner `seller_refund_destination`, the input's asset and amount, and `data_hash = 0`. Output `1` refunds input `2` to `buyer_refund_destination` the same way. A refund for a padding input is an empty UTXO.
+4. Inputs `1` and `2` are the delivery and payment deposits, in the order the leg-order bit gives, with padding last. A deposit is owned by `dvp_authority` with `nullifier_secret = 0`, has `data_hash = 0`, and has its leg's mint. Deposit amounts are not checked.
+5. Output `0` refunds the delivery deposit: owner `seller_refund_destination`, the deposit's asset and amount, and `data_hash = 0`. Output `1` refunds the payment deposit to `buyer_refund_destination` the same way. A leg without a deposit gets a refund of amount `0`.
 6. The SPP `blinding_seed` is `Poseidon(ABORT_TAG, SwapDvp.blinding)`.
 7. The input nullifiers and output hashes match the submitted SPP transaction. The proof checks the same `private_tx_hash` passed to SPP.
 
@@ -303,8 +310,7 @@ Same as `cancel_dvp`, signed by a party instead of the settlement authority.
 
 1. `payer` — pays transaction fees; signer, writable.
 2. `signer` — `SwapDvp.seller` or `SwapDvp.buyer`; signer.
-3. `dvp_authority` — the DvP PDA `[b"dvp", creator, dvp_id]`; owner of the DvP UTXO and the deposit UTXOs; signs the SPP CPI through the program.
-4. `spp_accounts` — the SPP `transact` account list.
+3. `spp_accounts` — the SPP `transact` account list, ending in `dvp_authority`, the DvP PDA `[b"dvp", creator, dvp_id]`: owner of the DvP UTXO and the deposit UTXOs, and the owner signer the program signs for in the SPP CPI.
 
 **Instruction data**
 
@@ -312,7 +318,7 @@ Same as `cancel_dvp`, signed by a party instead of the settlement authority.
 struct RejectDvpIxData {
     creator: Pubkey,
     dvp_id: [u8; 32],
-    /// Bump of `dvp_authority`; the program checks it with `create_program_address`.
+    /// Canonical bump of `dvp_authority`; the program rejects any other.
     bump: u8,
     reject_proof: AbortDvpProof,
     spp: SppTransactIxData,

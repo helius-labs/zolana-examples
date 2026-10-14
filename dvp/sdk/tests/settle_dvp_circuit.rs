@@ -274,7 +274,7 @@ fn sdk_inputs_match_independent_derivation() {
     }
 }
 
-/// Exact funding: both change outputs are zero-amount UTXOs (D2).
+/// Exact funding: both change outputs are zero-amount UTXOs.
 #[test]
 fn settles_exact_funding() {
     ensure_keys(CIRCUIT);

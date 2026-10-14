@@ -1,5 +1,5 @@
 // Package reclaim_dvp is the reclaim_dvp circuit: a party takes back its own
-// deposit while the DvP is open. Its SPP transaction has shape 1x2 (D1):
+// deposit while the DvP is open. Its SPP transaction has shape 1x2:
 // input 0 is the deposit, output 0 is the refund and output 1 is compact
 // padding, so the private transaction hash folds [deposit] inputs and
 // [refund, 0] outputs.

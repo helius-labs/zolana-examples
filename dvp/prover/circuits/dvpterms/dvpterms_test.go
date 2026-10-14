@@ -79,7 +79,7 @@ func (c *dvpIDCircuit) Define(api frontend.API) error {
 	return nil
 }
 
-// TestDvpIDMatchesRust is the cross-language check of the D4 layout.
+// TestDvpIDMatchesRust is the cross-language check of the dvp_id layout.
 func TestDvpIDMatchesRust(t *testing.T) {
 	v := loadVector(t)
 	assignment := &dvpIDCircuit{Terms: v.terms(t), DvpID: v.DvpID, CreateBlindingSeed: v.CreateBlindingSeed}

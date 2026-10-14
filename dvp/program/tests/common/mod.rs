@@ -235,7 +235,7 @@ pub fn reject_dvp_data(creator: Address, dvp_id: [u8; 32], bump: u8) -> Vec<u8> 
 }
 
 /// A create_dvp instruction with the builder's account layout: payer,
-/// creator, then the forwarded SPP list ending in `dvp_authority` (D8).
+/// creator, then the forwarded SPP list ending in `dvp_authority`.
 pub fn create_dvp_fixture() -> (Instruction, Vec<(Address, Account)>) {
     let (_, bump) = dvp_authority(&CREATOR, &DVP_ID);
     fixture(CREATOR, create_dvp_data(DVP_ID, bump))

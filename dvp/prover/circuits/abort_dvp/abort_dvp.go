@@ -4,11 +4,11 @@
 // deposits or random padding, output 0 refunds the delivery leg to the
 // seller's refund destination and output 1 the payment leg to the buyer's.
 //
-// D3: the deposits fill the input slots first and padding comes last, as
+// The deposits fill the input slots first and padding comes last, as
 // SPP's dummies-last rule requires. Which leg sits in slot 1 is the private
 // bit PaymentFirst, so the slot order does not reveal which legs were funded.
 // The outputs stay fixed by leg; a leg without a deposit gets a zero-amount
-// refund (D2). With both deposits PaymentFirst may take either value; with
+// refund. With both deposits PaymentFirst may take either value; with
 // only the payment deposit it is 1 and slot 2 is padding.
 package abort_dvp
 
@@ -43,7 +43,7 @@ type Circuit struct {
 	// the buyer can still reject. Unused in cancel mode.
 	Leg frontend.Variable
 	// PaymentFirst is 1 when input slot 1 carries the payment leg and slot 2
-	// the delivery leg, 0 for the reverse (D3).
+	// the delivery leg, 0 for the reverse.
 	PaymentFirst frontend.Variable
 	// Padding1 and Padding2 mark input slots 1 and 2 as random padding.
 	Padding1 frontend.Variable

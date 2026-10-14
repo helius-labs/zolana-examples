@@ -1,5 +1,5 @@
 // Package create_dvp is the create_dvp circuit. Its SPP transaction has shape
-// 1x2 (D1): input 0 is the address slot that reserves the DvP's address,
+// 1x2: input 0 is the address slot that reserves the DvP's address,
 // output 0 is the DvP UTXO and output 1 is compact padding, so the private
 // transaction hash folds [0] inputs, [DvP UTXO, 0] outputs and [address].
 package create_dvp
@@ -14,7 +14,7 @@ import (
 )
 
 // DvpAddressTreeID is dvp_program::DVP_ADDRESS_TREE_ID. Pinning the address
-// slot's tree (D6) makes the address unique per DvP: an address exists once
+// slot's tree makes the address unique per DvP: an address exists once
 // per owner, seed and tree, so with a free tree id the same terms could be
 // created once per tree.
 const DvpAddressTreeID = 0

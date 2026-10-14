@@ -35,8 +35,7 @@ struct DvpAccounts {
 /// A DvP instruction: `tag` and the serialized `ix_data`, whose SPP transact
 /// is `spp`. The payer and the signer come first; everything after them is
 /// the forwarded SPP transact list, with a nullifier PDA for each spent
-/// input, ending in the `dvp_authority` owner signer the program signs for
-/// (D8).
+/// input, ending in the `dvp_authority` owner signer the program signs for.
 fn dvp_instruction<T>(
     tag: u8,
     accounts: DvpAccounts,

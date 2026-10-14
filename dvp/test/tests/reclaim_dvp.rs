@@ -114,7 +114,7 @@ fn reclaim_dvp_while_open() -> Result<()> {
 
     // The proof does not bind the forwarded SPP accounts; the program checks
     // them after the proof, before its CPI. Account 4 is the SPP program and
-    // the last one the dvp_authority PDA (D8).
+    // the last one the dvp_authority PDA.
     let mut wrong_program_ix = reclaim_ix.clone();
     wrong_program_ix
         .accounts

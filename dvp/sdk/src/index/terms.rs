@@ -41,7 +41,7 @@ pub struct DiscoveredDvp {
 ///    the terms' DvP authority PDA, equals that output's committed hash.
 ///
 /// The hash check is the only integrity check: the AES-CTR message is not
-/// authenticated (D7). It also proves the terms hash to the output's
+/// authenticated. It also proves the terms hash to the output's
 /// `dvp_id`, since the DvP UTXO's data hash is `dvp_id`.
 pub fn scan_terms(
     tx: &ShieldedTransaction,
@@ -89,7 +89,7 @@ fn committed_dvp_utxo(tx: &ShieldedTransaction, terms: SwapDvp) -> Option<(DvpUt
     let (pda, _) = terms.dvp_authority().ok()?;
     let pda_tag = pda.to_bytes();
     // `DvpUtxo::hash` validates the terms first (`SwapDvp::validate`), so
-    // terms the create circuit accepts but the sdk refuses (D10) are not
+    // terms the create circuit accepts but the sdk refuses are not
     // discovered. The binding ends the iterator's borrow of `pda_tag`.
     let committed = tagged_outputs(tx, &pda_tag).find_map(|slot| {
         let context = &slot.output_context;

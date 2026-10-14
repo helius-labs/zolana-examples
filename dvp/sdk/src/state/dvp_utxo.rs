@@ -12,7 +12,7 @@ use crate::{
 /// The DvP UTXO the create transaction appends: a zero-amount SOL UTXO owned
 /// by the DvP authority PDA with the zero nullifier secret, whose data hash
 /// is `dvp_id` and whose blinding is derived from the create seed. It carries
-/// no ciphertext (D9): every party recomputes it from the terms and the tree
+/// no ciphertext: every party recomputes it from the terms and the tree
 /// it was appended to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DvpUtxo {

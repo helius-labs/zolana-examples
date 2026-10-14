@@ -23,7 +23,7 @@ pub struct ReclaimDvpTransactionParams {
     /// proof binds.
     pub payer: Address,
     /// Where the refund goes; the signer's own shielded address when `None`.
-    /// It needs an Ed25519 or PDA signing key (D10).
+    /// It needs an Ed25519 or PDA signing key.
     pub refund_destination: Option<ShieldedAddress>,
     /// Raw id of the tree the refund is appended to.
     pub tree_id: u16,
@@ -40,7 +40,7 @@ pub struct ReclaimDvpTransaction {
 }
 
 impl ReclaimDvpTransactionParams {
-    /// Builds the reclaim `transact` at SPP shape 1x2 (D1: there is no 1x1
+    /// Builds the reclaim `transact` at SPP shape 1x2 (there is no 1x1
     /// shape, so output slot 1 is compact padding, as in escrow `withdraw`):
     ///
     /// - input 0: the deposit, owned by `dvp_authority` under the zero
@@ -69,7 +69,7 @@ impl ReclaimDvpTransactionParams {
         let signer_address = signer.shielded_address().map_err(err)?;
         let refund_destination = refund_destination.unwrap_or(signer_address);
         if refund_destination.signing_pubkey.curve().map_err(err)? == Curve::P256 {
-            bail!("refund destination has a P256 signing key (D10)");
+            bail!("refund destination has a P256 signing key");
         }
 
         let input = deposit.to_input_utxo()?;

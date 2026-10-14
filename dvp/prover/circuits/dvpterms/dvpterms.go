@@ -1,5 +1,5 @@
 // Package dvpterms holds the SwapDvp terms every DvP circuit takes as private
-// witnesses, the dvp_id hash over them (D4) and the checks the circuits share.
+// witnesses, the dvp_id hash over them and the checks the circuits share.
 // The Rust twin is dvp-sdk's state/swap_dvp.rs.
 package dvpterms
 
@@ -70,7 +70,7 @@ type SwapDvp struct {
 	Blinding                    frontend.Variable
 }
 
-// DvpID is the D4 layout, nested because Poseidon takes at most 12 inputs.
+// DvpID is the dvp_id hash, nested because Poseidon takes at most 12 inputs.
 func (t SwapDvp) DvpID(api frontend.API) frontend.Variable {
 	parties := gnarksdk.Poseidon(api, t.SellerID, t.BuyerID, t.SettlementAuthorityID, t.CreatorID)
 	legs := gnarksdk.Poseidon(api, t.DeliveryAsset, t.PaymentAsset, t.DeliveryAmount, t.PaymentAmount)
@@ -86,7 +86,7 @@ func (t SwapDvp) DvpID(api frontend.API) frontend.Variable {
 }
 
 // CheckRanges bounds the amounts to 64 bits and the timestamps to 63 bits
-// (D5: non-negative i64), so the comparisons below are well defined and the
+// (non-negative i64), so the comparisons below are well defined and the
 // amounts match the u64 the shielded pool commits. An unset earliest
 // settlement timestamp must be 0, so the flag fully determines it.
 func (t SwapDvp) CheckRanges(api frontend.API) {
@@ -109,7 +109,7 @@ func (t SwapDvp) CheckCreate(api frontend.API) {
 	api.AssertIsEqual(api.Select(t.HasEarliestSettlement, earliestBeforeExpiry, 1), 1)
 }
 
-// DvpUtxo is the DvP UTXO (D9: no ciphertext): a zero-amount SOL UTXO owned
+// DvpUtxo is the DvP UTXO (no ciphertext): a zero-amount SOL UTXO owned
 // by the dvp_authority owner hash whose data hash is dvp_id. It takes the
 // dvp_id the circuit already computed with DvpID instead of hashing the terms
 // a second time.

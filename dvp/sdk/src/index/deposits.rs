@@ -18,7 +18,7 @@ use crate::state::{Deposit, Leg, SwapDvp};
 /// the terms' DvP authority PDA whose ciphertext decrypts under the
 /// authority's viewing key into a deposit of one of the legs
 /// ([`committed_deposits`]). The DvP UTXO shares the tag but carries no
-/// ciphertext (D9), so it is skipped.
+/// ciphertext, so it is skipped.
 pub fn scan_deposits(
     tx: &ShieldedTransaction,
     terms: &SwapDvp,

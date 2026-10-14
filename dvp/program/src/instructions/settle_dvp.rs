@@ -37,7 +37,7 @@ pub struct SettleDvpIxData {
     pub bump: u8,
     /// Time the settle proof checks the terms' settlement window against.
     /// The program requires `now - TIME_WINDOW <= current_timestamp <= now`
-    /// against the Clock, and a non-negative value (D5).
+    /// against the Clock, and a non-negative value.
     pub current_timestamp: i64,
     pub settle_proof: SettleDvpProof,
     pub spp: TransactIxData,
@@ -58,7 +58,7 @@ pub struct SettleDvpPublicInput<'a> {
     pub settlement_authority_id: &'a [u8; 32],
     /// The instruction's timestamp, already checked against the clock with
     /// `check_settle_timestamp`. It enters the hash as a right-aligned u64,
-    /// so a negative value is refused (D5).
+    /// so a negative value is refused.
     pub current_timestamp: i64,
 }
 
@@ -90,8 +90,8 @@ impl SettleDvpPublicInput<'_> {
 /// it may trail `now` by at most `TIME_WINDOW` seconds, so a proof made
 /// against a recent time still lands, and a settle can land up to
 /// `TIME_WINDOW` after expiry. It may not be ahead of `now`, and it must be
-/// non-negative (D5). The PDA is forwarded as the last SPP account, the
-/// owner-signer run (D8).
+/// non-negative. The PDA is forwarded as the last SPP account, the
+/// owner-signer run.
 #[inline(never)]
 #[profile]
 pub fn process_settle_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {

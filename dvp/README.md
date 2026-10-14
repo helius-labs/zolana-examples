@@ -16,38 +16,9 @@ state and owns no accounts.
 See [`spec.md`](spec.md) for the full design: the privacy model, terms,
 instructions, and circuits.
 
-## Deviations from the spec
-
-`spec.md` is left as written. The implementation departs from it where SPP at
-`v0.4.0-alpha` requires it, or fills in details the spec leaves open. The code
-cites these by number.
-
-- **D1.** Create and reclaim prove at SPP shape 1x2 with a compact padding
-  output; SPP has no 1x1 shape.
-- **D2.** A change or refund output with no value is a zero-amount UTXO owned
-  by its refund destination, not an empty UTXO.
-- **D3.** Abort inputs put the deposits first and padding last, as SPP
-  requires of dummies. A private bit records which leg is in input slot 1. The
-  outputs stay fixed by leg.
-- **D4.** `dvp_id` is a nested Poseidon hash of the terms, since Poseidon
-  takes at most 12 inputs (see `sdk/src/state/swap_dvp.rs`).
-- **D5.** Timestamps must be non-negative: the circuits range-check them to 63
-  bits, and the program rejects a negative `current_timestamp`.
-- **D6.** The create address slot is pinned to tree id 0, so each
-  `(creator, dvp_id)` can be created once.
-- **D7.** Terms message `j` uses ciphertext slot `1 + j`, and its data is the
-  bare ciphertext. The AES-CTR message is not authenticated; a recipient
-  trusts it only after the terms hash to the committed DvP UTXO.
-- **D8.** `dvp_authority` is forwarded as the last SPP account (the
-  owner-signer run), as in the escrow and swap examples.
-- **D9.** The DvP UTXO output carries no ciphertext; the parties recompute it
-  from the terms.
-- **D10.** Settlement and refund destinations must have Ed25519 or PDA signing
-  keys; the sdk refuses P256 ones.
-
-The program also requires the canonical `dvp_authority` bump. The spec only
-says the program checks the bump; another bump would give another PDA, so the
-same `(creator, dvp_id)` could be created twice.
+For the full flow in code, see
+[`settle_dvp_full_flow`](test/tests/settle_dvp.rs): create, fund both legs,
+discover the deposits, and settle.
 
 ## Layout
 
@@ -62,7 +33,8 @@ same `(creator, dvp_id)` could be created twice.
   builders, UTXO hashing, discovery of terms and unspent deposits, and
   encryption codecs.
 - [`test/`](test/) — localnet end-to-end tests and CU benchmarks
-  ([`BENCHMARK.md`](BENCHMARK.md)).
+  ([`BENCHMARK.md`](BENCHMARK.md)). The full flow is
+  [`settle_dvp_full_flow`](test/tests/settle_dvp.rs).
 
 ## Prerequisites
 

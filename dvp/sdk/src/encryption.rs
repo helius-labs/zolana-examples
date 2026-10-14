@@ -17,7 +17,7 @@ use crate::{err, state::SwapDvp};
 /// Recipients of the terms messages, in message order.
 pub const TERMS_RECIPIENTS: usize = 3;
 
-/// Ciphertext slot of the first terms message (D7). Messages continue the
+/// Ciphertext slot of the first terms message. Messages continue the
 /// slot numbering after the instruction's outputs; the create transaction
 /// publishes one output (the DvP UTXO), its compact padding is omitted.
 const FIRST_TERMS_MESSAGE_SLOT: u32 = 1;
@@ -29,7 +29,7 @@ pub(crate) fn terms_recipients(terms: &SwapDvp) -> [solana_address::Address; TER
 }
 
 /// One message per recipient `j`, encrypted under the transaction viewing key
-/// into slot `1 + j` (D7). `data` is the bare AES-CTR ciphertext: a viewing
+/// into slot `1 + j`. `data` is the bare AES-CTR ciphertext: a viewing
 /// key prefix would publish the parties' viewing keys. The view tag is the
 /// recipient's pubkey, as for a default-ring output.
 ///

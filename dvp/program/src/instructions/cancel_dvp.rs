@@ -25,8 +25,7 @@ pub struct CancelDvpIxData {
 /// The settlement authority cancels the DvP and refunds every deposit (see
 /// `process_abort_dvp`). The signer account is the settlement authority; the
 /// abort proof runs in `ABORT_MODE_CANCEL`, which requires the signer to be
-/// the terms' settlement authority. No expiry check (per spec); slot order
-/// as in D3.
+/// the terms' settlement authority. No expiry check (per spec).
 #[inline(never)]
 #[profile]
 pub fn process_cancel_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {

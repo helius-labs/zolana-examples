@@ -16,7 +16,7 @@ pub fn u64_right_align(value: u64) -> [u8; 32] {
     bytes
 }
 
-/// Accepts a settlement `current_timestamp` that is non-negative (D5), not
+/// Accepts a settlement `current_timestamp` that is non-negative, not
 /// in the future, and at most `TIME_WINDOW` seconds behind the clock `now`.
 #[inline(always)]
 pub fn check_settle_timestamp(now: i64, current_timestamp: i64) -> ProgramResult {
@@ -53,7 +53,7 @@ pub fn dvp_authority_owner_hash(dvp_authority: &Address) -> Result<[u8; 32], Pro
 
 /// CPIs SPP transact through `spp_accounts`, signing for `dvp_authority`
 /// with the seeds `[b"dvp", creator, dvp_id, [bump]]`. The PDA must be in
-/// the forwarded account list (D8).
+/// the forwarded account list.
 #[cfg(any(target_os = "solana", target_arch = "bpf"))]
 #[inline(never)]
 #[profile]

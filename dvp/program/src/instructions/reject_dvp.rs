@@ -25,8 +25,7 @@ pub struct RejectDvpIxData {
 /// A party rejects the DvP and refunds every deposit (see
 /// `process_abort_dvp`). The signer account is the seller or the buyer; the
 /// abort proof runs in `ABORT_MODE_REJECT`, which requires the signer to be
-/// one of the terms' parties. No expiry check (per spec); slot order as in
-/// D3.
+/// one of the terms' parties. No expiry check (per spec).
 #[inline(never)]
 #[profile]
 pub fn process_reject_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {

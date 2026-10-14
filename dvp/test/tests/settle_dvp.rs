@@ -25,7 +25,7 @@ const SHIELD_AMOUNT: u64 = 600_000_000;
 /// the settlement authority settle it: the buyer receives the delivery
 /// amount, the seller the payment amount, the seller's refund destination
 /// the delivery surplus and the buyer's refund destination a zero-amount
-/// payment change (D2). Another signer cannot submit the authority's proven
+/// payment change. Another signer cannot submit the authority's proven
 /// settle. The DvP UTXO and both deposits are spent, so a
 /// second settle fails, and a deposit that lands after settlement stays
 /// reclaimable by its funder.

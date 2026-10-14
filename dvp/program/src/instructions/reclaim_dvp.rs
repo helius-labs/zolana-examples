@@ -70,7 +70,7 @@ impl ReclaimDvpPublicInput<'_> {
 /// As the spec says, there is no expiry check and no check that the DvP is
 /// open: the DvP UTXO is not an input, so a deposit is reclaimable before or
 /// after expiry, settlement or abort. The PDA is forwarded as the last SPP
-/// account, the owner-signer run (D8).
+/// account, the owner-signer run.
 #[inline(never)]
 #[profile]
 pub fn process_reclaim_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {

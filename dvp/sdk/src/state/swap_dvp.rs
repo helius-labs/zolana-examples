@@ -52,10 +52,9 @@ pub struct SwapDvp {
 // `dvp_id` from them.
 impl SwapDvp {
     /// Rejects terms no create, settle or abort proof can accept, before any
-    /// proving work: the create checks, D5 (timestamps are non-negative) and
-    /// D10 (settlement and refund destinations need an Ed25519 or PDA signing
-    /// key, since the Eddsa rail binds every output owner to a Solana
-    /// identity).
+    /// proving work: the create checks, non-negative timestamps and
+    /// settlement and refund destinations with Ed25519 or PDA signing keys
+    /// (the Eddsa rail binds every output owner to a Solana identity).
     ///
     /// It also requires the settlement authority to be a third party, as the
     /// reference DvP program does. The circuits do not check this; it keeps a
@@ -82,7 +81,7 @@ impl SwapDvp {
         for destination in self.destinations() {
             match destination.signing_pubkey.curve().map_err(err)? {
                 Curve::Ed25519 | Curve::Pda => {}
-                Curve::P256 => bail!("destination has a P256 signing key (D10)"),
+                Curve::P256 => bail!("destination has a P256 signing key"),
             }
         }
         Ok(())
@@ -98,7 +97,7 @@ impl SwapDvp {
         ]
     }
 
-    /// The DvP id (D4), nested because Poseidon takes at most 12 inputs:
+    /// The DvP id, nested because Poseidon takes at most 12 inputs:
     ///
     /// ```text
     /// dvp_id = Poseidon(parties_hash, legs_hash, schedule_hash,
@@ -140,7 +139,7 @@ impl SwapDvp {
     }
 }
 
-/// `dvp_id` from the circuit-side terms (D4). The Go twin is
+/// `dvp_id` from the circuit-side terms. The Go twin is
 /// `dvpterms.SwapDvp.DvpID`.
 ///
 /// ```text
@@ -201,10 +200,10 @@ fn destination_proof_input(address: &ShieldedAddress) -> Result<DestinationProof
     })
 }
 
-/// D5: timestamps enter the circuits as 63-bit values, so negative ones are
+/// Timestamps enter the circuits as 63-bit values, so negative ones are
 /// rejected here rather than wrapped.
 fn timestamp(value: i64) -> Result<u64> {
-    u64::try_from(value).map_err(|_| anyhow::anyhow!("timestamp {value} is negative (D5)"))
+    u64::try_from(value).map_err(|_| anyhow::anyhow!("timestamp {value} is negative"))
 }
 
 fn identity(address: &Address) -> Result<[u8; 32]> {
@@ -584,7 +583,7 @@ mod tests {
             let error = terms.validate().expect_err(expected);
             assert_eq!(error.to_string(), expected);
         }
-        // D10: a P256 signing key in any destination is rejected; a PDA is
+        // A P256 signing key in any destination is rejected; a PDA is
         // accepted.
         let destinations: [fn(&mut SwapDvp) -> &mut ShieldedAddress; 4] = [
             |t| &mut t.seller_settlement_destination,

@@ -372,7 +372,7 @@ fn cancels_with_both_deposits() {
     prove_and_verify(&inputs);
 }
 
-/// The payment leg's refund is a zero-amount UTXO (D2).
+/// The payment leg's refund is a zero-amount UTXO.
 #[test]
 fn cancels_with_delivery_only() {
     ensure_keys(CIRCUIT);
@@ -390,7 +390,7 @@ fn cancels_with_delivery_only() {
     prove_and_verify(&inputs);
 }
 
-/// The payment deposit fills slot 1 under the leg-order bit (D3).
+/// The payment deposit fills slot 1 under the leg-order bit.
 #[test]
 fn cancels_with_payment_only() {
     ensure_keys(CIRCUIT);

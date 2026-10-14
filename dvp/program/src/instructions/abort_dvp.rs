@@ -73,7 +73,7 @@ impl AbortDvpPublicInput<'_> {
 /// 3x2 SPP transact spends the DvP UTXO and up to two deposits, all owned by
 /// `dvp_authority`, and refunds each leg in full to its funder's refund
 /// destination (output 0 the seller's delivery leg, output 1 the buyer's
-/// payment leg; a leg without a deposit gets a zero-amount refund, D2).
+/// payment leg; a leg without a deposit gets a zero-amount refund).
 /// Spending the DvP UTXO closes the DvP, so a later settle or abort fails on
 /// its nullifier. Deposits that arrive after the abort stay reclaimable.
 ///
@@ -81,12 +81,12 @@ impl AbortDvpPublicInput<'_> {
 /// the signer rule the abort proof enforces: `ABORT_MODE_CANCEL` requires the
 /// terms' settlement authority, `ABORT_MODE_REJECT` the seller or the buyer.
 /// The deposits fill input slots 1 and 2 first and padding (random dummies)
-/// last; a private leg-order bit says which leg sits in slot 1 (D3), so the
+/// last; a private leg-order bit says which leg sits in slot 1, so the
 /// transact shows neither how many legs were funded nor which.
 ///
 /// As the spec says, there is no expiry check: an abort is valid before or
 /// after expiry. The PDA is forwarded as the last SPP account, the
-/// owner-signer run (D8).
+/// owner-signer run.
 pub(crate) fn process_abort_dvp(
     accounts: &mut [AccountView],
     data: &[u8],

@@ -19,7 +19,7 @@ use crate::{
     state::{Deposit, DvpUtxo, Leg, SwapDvp},
 };
 
-/// Tree the fixture's DvP UTXO is appended to (D6 pins the create to 0).
+/// Tree the fixture's DvP UTXO is appended to (the create is pinned to tree 0).
 pub(crate) const FIXTURE_TREE_ID: u16 = 0;
 /// Leaf index the fixture's DvP UTXO lands at.
 pub(crate) const FIXTURE_LEAF_INDEX: u64 = 5;

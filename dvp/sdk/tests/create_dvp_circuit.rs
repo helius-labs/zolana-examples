@@ -262,7 +262,7 @@ fn create_dvp_rejects_wrong_data_hash() {
 #[test]
 fn create_dvp_rejects_wrong_address_tree() {
     // Every hash and blinding is consistent with an address in tree 1; only
-    // the D6 pin to DVP_ADDRESS_TREE_ID refuses it.
+    // the pin to DVP_ADDRESS_TREE_ID refuses it.
     assert_unprovable(
         "the address slot is not in DVP_ADDRESS_TREE_ID",
         DVP_ADDRESS_TREE_ID + 1,

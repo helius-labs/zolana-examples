@@ -41,7 +41,7 @@ pub struct CreateDvpTransactionParams {
     /// their viewing keys receive the terms messages.
     pub recipients: [ShieldedAddress; TERMS_RECIPIENTS],
     /// Raw id of the SPP tree: the DvP UTXO's output tree and the address
-    /// slot's input tree. It must be `DVP_ADDRESS_TREE_ID` (D6).
+    /// slot's input tree. It must be `DVP_ADDRESS_TREE_ID`.
     pub tree_id: u16,
     /// Non-inclusion of the DvP address ([`CreateDvpDerivation::address`]) in
     /// the tree's nullifier tree.
@@ -59,21 +59,21 @@ pub struct CreateDvpTransaction {
 }
 
 impl CreateDvpTransactionParams {
-    /// Builds the create `transact` at SPP shape 1x2 (D1: there is no 1x1
+    /// Builds the create `transact` at SPP shape 1x2 (there is no 1x1
     /// shape, so output slot 1 is compact padding, as in escrow `withdraw`):
     ///
     /// - input 0: the address slot, owned by `dvp_authority` with seed
     ///   `dvp_id` in tree `DVP_ADDRESS_TREE_ID`; its nullifier is the address,
     ///   so a `(creator, dvp_id)` pair is created once. Its tree is declared
     ///   with no UTXO root (`NO_UTXO_ROOT`) and the proof's nullifier root;
-    /// - output 0: the DvP UTXO, tagged with the PDA, with no ciphertext (D9);
+    /// - output 0: the DvP UTXO, tagged with the PDA, with no ciphertext;
     /// - output 1: compact padding, left out of the instruction. SPP still
     ///   checks its derived blinding;
-    /// - messages 0..3: the terms encrypted to the recipients (D7) under a
+    /// - messages 0..3: the terms encrypted to the recipients under a
     ///   fresh transaction viewing key and a random salt.
     ///
     /// The public signer vector is `[payer, dvp_authority]`: the PDA is the
-    /// only owner signer, which the program signs for (D8).
+    /// only owner signer, which the program signs for.
     pub fn build(self) -> Result<CreateDvpTransaction> {
         let Self {
             terms,
@@ -84,7 +84,7 @@ impl CreateDvpTransactionParams {
         } = self;
         ensure!(
             tree_id == DVP_ADDRESS_TREE_ID,
-            "the address slot is pinned to tree {DVP_ADDRESS_TREE_ID} (D6), not tree {tree_id}"
+            "the address slot is pinned to tree {DVP_ADDRESS_TREE_ID}, not tree {tree_id}"
         );
         let derivation = CreateDvpDerivation::new(&terms, tree_id)?;
         ensure!(
