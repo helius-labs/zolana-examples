@@ -1,4 +1,6 @@
-use dvp_program::instructions::{create_dvp::CreateDvpProof, reclaim_dvp::ReclaimDvpProof};
+use dvp_program::instructions::{
+    create_dvp::CreateDvpProof, reclaim_dvp::ReclaimDvpProof, settle_dvp::SettleDvpProof,
+};
 use zolana_gnark_ffi_prover::CompressedProof;
 
 #[derive(Debug, Clone, Copy)]
@@ -19,6 +21,16 @@ impl From<DvpProof> for CreateDvpProof {
 }
 
 impl From<DvpProof> for ReclaimDvpProof {
+    fn from(proof: DvpProof) -> Self {
+        Self {
+            proof_a: proof.proof_a,
+            proof_b: proof.proof_b,
+            proof_c: proof.proof_c,
+        }
+    }
+}
+
+impl From<DvpProof> for SettleDvpProof {
     fn from(proof: DvpProof) -> Self {
         Self {
             proof_a: proof.proof_a,

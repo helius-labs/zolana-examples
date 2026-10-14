@@ -9,6 +9,7 @@ import (
 
 	"circuits/create_dvp"
 	"circuits/reclaim_dvp"
+	"circuits/settle_dvp"
 	"zolana/gnarkffiprover"
 )
 
@@ -18,6 +19,9 @@ func init() {
 	})
 	gnarkffiprover.Register("reclaim_dvp", gnarkffiprover.Circuit{
 		New: func() frontend.Circuit { return &reclaim_dvp.Circuit{} },
+	})
+	gnarkffiprover.Register("settle_dvp", gnarkffiprover.Circuit{
+		New: func() frontend.Circuit { return &settle_dvp.Circuit{} },
 	})
 }
 

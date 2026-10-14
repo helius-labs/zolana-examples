@@ -2,11 +2,13 @@
 pub mod create_dvp;
 pub mod proof;
 pub mod reclaim_dvp;
+pub mod settle_dvp;
 pub mod swap_dvp;
 
 pub use create_dvp::CreateDvpProofInputs;
 pub use proof::DvpProof;
 pub use reclaim_dvp::ReclaimDvpProofInputs;
+pub use settle_dvp::SettleDvpProofInputs;
 pub use swap_dvp::{DestinationProofInput, SwapDvpProofInput};
 pub use zolana_client::ProofInputUtxo;
 
@@ -14,15 +16,17 @@ pub use zolana_client::ProofInputUtxo;
 pub enum CircuitId {
     CreateDvp,
     ReclaimDvp,
+    SettleDvp,
 }
 
 impl zolana_gnark_ffi_prover::Circuit for CircuitId {
-    const ALL: &'static [Self] = &[Self::CreateDvp, Self::ReclaimDvp];
+    const ALL: &'static [Self] = &[Self::CreateDvp, Self::ReclaimDvp, Self::SettleDvp];
 
     fn name(self) -> &'static str {
         match self {
             Self::CreateDvp => "create_dvp",
             Self::ReclaimDvp => "reclaim_dvp",
+            Self::SettleDvp => "settle_dvp",
         }
     }
 }
