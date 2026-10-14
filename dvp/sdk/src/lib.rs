@@ -8,8 +8,11 @@ pub mod state;
 
 pub use dvp_program::{
     instructions::{
+        abort_dvp::AbortDvpProof,
+        cancel_dvp::CancelDvpIxData,
         create_dvp::{CreateDvpIxData, CreateDvpProof},
         reclaim_dvp::{ReclaimDvpIxData, ReclaimDvpProof},
+        reject_dvp::RejectDvpIxData,
         settle_dvp::{SettleDvpIxData, SettleDvpProof},
     },
     tag, DVP_AUTHORITY_PDA_SEED,

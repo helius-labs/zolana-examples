@@ -1,18 +1,19 @@
 use dvp_program::tag;
+use mollusk_svm::Mollusk;
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
 use zolana_test_utils::mollusk::expect_err_exact;
 
 use crate::common::{program_id, setup_mollusk};
 
-fn expect_invalid_instruction_data(data: Vec<u8>) {
+fn expect_invalid_instruction_data(mollusk: &Mollusk, data: Vec<u8>) {
     let instruction = Instruction {
         program_id: program_id(),
         accounts: Vec::new(),
         data,
     };
     expect_err_exact(
-        &setup_mollusk(),
+        mollusk,
         &instruction,
         &[],
         ProgramError::InvalidInstructionData,
@@ -21,17 +22,14 @@ fn expect_invalid_instruction_data(data: Vec<u8>) {
 
 #[test]
 fn missing_instruction_tag_is_rejected_exactly() {
-    expect_invalid_instruction_data(Vec::new());
+    expect_invalid_instruction_data(&setup_mollusk(), Vec::new());
 }
 
 #[test]
-fn unknown_instruction_tag_is_rejected_exactly() {
-    expect_invalid_instruction_data(vec![0xff]);
-}
-
-#[test]
-fn unrouted_instruction_tags_are_rejected_exactly() {
-    for ix_tag in [tag::CANCEL_DVP, tag::REJECT_DVP] {
-        expect_invalid_instruction_data(vec![ix_tag]);
+fn every_unassigned_instruction_tag_is_rejected_exactly() {
+    // All five tags are routed; every tag past the last one is unknown.
+    let mollusk = setup_mollusk();
+    for ix_tag in (tag::REJECT_DVP + 1)..=u8::MAX {
+        expect_invalid_instruction_data(&mollusk, vec![ix_tag]);
     }
 }

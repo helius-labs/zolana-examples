@@ -22,6 +22,10 @@ zolana-test-utils = { workspace = true }
 zolana-transaction = { workspace = true }
 
 [[test]]
+name = "abort_dvp"
+path = "tests/abort_dvp.rs"
+
+[[test]]
 name = "create_dvp"
 path = "tests/create_dvp.rs"
 

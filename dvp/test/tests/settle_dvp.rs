@@ -9,10 +9,9 @@ use dvp_sdk::{
     },
     state::{Deposit, Leg},
 };
+use dvp_test::cluster_time;
 use shared::{assert_dvp_error, setup, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT};
-use solana_address::Address;
 use solana_signer::Signer;
-use zolana_client::Rpc;
 use zolana_test_utils::test_validator_asserts::wait_for_nullifier_present;
 use zolana_transaction::SOL_MINT;
 
@@ -24,21 +23,6 @@ const SHIELD_AMOUNT: u64 = 600_000_000;
 /// Seconds the settle timestamp trails the cluster clock, well inside
 /// `TIME_WINDOW`, so the proving time does not push it out of the window.
 const TIMESTAMP_LAG: i64 = 2;
-
-/// The cluster clock's `unix_timestamp`, read from the Clock sysvar account
-/// (`slot, epoch_start_timestamp, epoch, leader_schedule_epoch,
-/// unix_timestamp`, little-endian).
-fn cluster_time(client: &impl Rpc) -> Result<i64> {
-    let clock: Address = "SysvarC1ock11111111111111111111111111111111".parse()?;
-    let account = client
-        .get_account(clock)?
-        .ok_or_else(|| anyhow!("no Clock sysvar account"))?;
-    let unix_timestamp = account
-        .data
-        .get(32..40)
-        .ok_or_else(|| anyhow!("short Clock sysvar account"))?;
-    Ok(i64::from_le_bytes(unix_timestamp.try_into()?))
-}
 
 /// Create a DvP, fund delivery with a surplus and payment exactly, and let
 /// the settlement authority settle it: the buyer receives the delivery

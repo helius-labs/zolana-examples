@@ -1,7 +1,10 @@
 use dvp_program::{
     instructions::{
+        abort_dvp::AbortDvpProof,
+        cancel_dvp::CancelDvpIxData,
         create_dvp::{CreateDvpIxData, CreateDvpProof},
         reclaim_dvp::{ReclaimDvpIxData, ReclaimDvpProof},
+        reject_dvp::RejectDvpIxData,
         settle_dvp::{SettleDvpIxData, SettleDvpProof},
     },
     tag, DVP_AUTHORITY_PDA_SEED,
@@ -25,9 +28,9 @@ const PAYER: Pubkey = Pubkey::new_from_array([21; 32]);
 pub const CREATOR: Pubkey = Pubkey::new_from_array([22; 32]);
 const TREE: Pubkey = Pubkey::new_from_array([23; 32]);
 const NULLIFIER_PDA: Pubkey = Pubkey::new_from_array([24; 32]);
-/// The settlement authority.
+/// The settlement authority, also the cancelling signer.
 const SETTLEMENT_AUTHORITY: Pubkey = Pubkey::new_from_array([26; 32]);
-/// The reclaiming party.
+/// The reclaiming or rejecting party.
 const SIGNER: Pubkey = Pubkey::new_from_array([25; 32]);
 /// A field element (below the BN254 modulus).
 pub const DVP_ID: [u8; 32] = [1; 32];
@@ -173,6 +176,44 @@ pub fn settle_dvp_data(
     data
 }
 
+/// The placeholder abort proof cancel and reject data carry.
+const ABORT_PROOF: AbortDvpProof = AbortDvpProof {
+    proof_a: [10; 32],
+    proof_b: [11; 64],
+    proof_c: [12; 32],
+};
+
+/// Cancel data on the 1x2 placeholder transact: its shape is never checked,
+/// because the placeholder proof fails first.
+pub fn cancel_dvp_data(creator: Pubkey, dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
+    let body = wincode::serialize(&CancelDvpIxData {
+        creator,
+        dvp_id,
+        bump,
+        cancel_proof: ABORT_PROOF,
+        spp: spp(),
+    })
+    .expect("serialize cancel_dvp");
+    let mut data = vec![tag::CANCEL_DVP];
+    data.extend_from_slice(&body);
+    data
+}
+
+/// Reject data on the 1x2 placeholder transact, as [`cancel_dvp_data`].
+pub fn reject_dvp_data(creator: Pubkey, dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
+    let body = wincode::serialize(&RejectDvpIxData {
+        creator,
+        dvp_id,
+        bump,
+        reject_proof: ABORT_PROOF,
+        spp: spp(),
+    })
+    .expect("serialize reject_dvp");
+    let mut data = vec![tag::REJECT_DVP];
+    data.extend_from_slice(&body);
+    data
+}
+
 /// A create_dvp instruction with the builder's account layout: payer,
 /// creator, then the forwarded SPP list ending in `dvp_authority` (D8).
 pub fn create_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
@@ -196,6 +237,21 @@ pub fn settle_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
         SETTLEMENT_AUTHORITY,
         settle_dvp_data(CREATOR, DVP_ID, bump, SETTLE_NOW),
     )
+}
+
+/// A cancel_dvp instruction by `SETTLEMENT_AUTHORITY` with the builder's
+/// account layout: payer, settlement authority, then the forwarded SPP list
+/// ending in `dvp_authority`.
+pub fn cancel_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
+    let (_, bump) = dvp_authority(&CREATOR, &DVP_ID);
+    fixture(SETTLEMENT_AUTHORITY, cancel_dvp_data(CREATOR, DVP_ID, bump))
+}
+
+/// A reject_dvp instruction by `SIGNER` with the builder's account layout:
+/// payer, signer, then the forwarded SPP list ending in `dvp_authority`.
+pub fn reject_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
+    let (_, bump) = dvp_authority(&CREATOR, &DVP_ID);
+    fixture(SIGNER, reject_dvp_data(CREATOR, DVP_ID, bump))
 }
 
 /// An instruction on `data` with the role signer `role` after the payer,
