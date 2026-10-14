@@ -1493,10 +1493,14 @@ dependencies = [
  "dvp-program",
  "dvp-prover",
  "groth16-solana",
+ "num-bigint 0.4.8",
  "solana-address 2.6.1",
  "solana-instruction",
+ "solana-keypair",
  "solana-pubkey 4.2.1",
+ "solana-signature",
  "wincode",
+ "zolana-client",
  "zolana-gnark-ffi-prover",
  "zolana-hasher",
  "zolana-interface",
@@ -1509,9 +1513,18 @@ dependencies = [
 name = "dvp-test"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "dvp-program",
- "dvp-prover",
  "dvp-sdk",
+ "solana-instruction",
+ "solana-keypair",
+ "solana-signature",
+ "solana-signer",
+ "zolana-client",
+ "zolana-keypair",
+ "zolana-program-test",
+ "zolana-test-utils",
+ "zolana-transaction",
 ]
 
 [[package]]

@@ -6,6 +6,19 @@ publish = false
 autotests = false
 
 [dependencies]
+anyhow = { workspace = true }
 dvp-program = { path = "../program" }
-dvp-prover = { path = "../prover" }
 dvp-sdk = { path = "../sdk" }
+solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
+solana-signature = { workspace = true }
+solana-signer = { workspace = true }
+zolana-client = { workspace = true, features = ["indexer-api", "solana-rpc"] }
+zolana-keypair = { workspace = true }
+zolana-program-test = { workspace = true, features = ["localnet"] }
+zolana-test-utils = { workspace = true }
+zolana-transaction = { workspace = true }
+
+[[test]]
+name = "create_dvp"
+path = "tests/create_dvp.rs"

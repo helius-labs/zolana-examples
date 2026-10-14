@@ -1,4 +1,6 @@
 //! Client SDK for the DvP program: terms, proofs, instruction builders and discovery.
+pub mod encryption;
+pub mod index;
 pub mod instructions;
 pub mod prover;
 pub mod state;
