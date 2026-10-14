@@ -334,3 +334,8 @@ Funding is a plain SPP transfer that the DvP program does not check. A UTXO sent
 ### Confidential, not anonymous
 
 The DvP hides the mints, amounts, and time bounds. It does not hide the participants. As in the zolana default ring, the create transaction tags its messages with the seller, buyer, and settlement authority pubkeys, and the settle, cancel, and reject outputs are tagged with the destinations' signing pubkeys.
+
+An anonymous version changes two things:
+
+1. The proofs enforce view tags instead of pubkeys for the create messages and for the settlement, change, and refund outputs.
+2. A relayer submits every transaction and pays its fees. The seller, buyer, creator, and settlement authority authorize inside the proofs instead of signing the transaction.
