@@ -34,7 +34,8 @@ instructions, and circuits.
 ## Prerequisites
 
 - Rust stable.
-- The Agave tools with `cargo-build-sbf` and platform tools v1.54.
+- The Agave tools with `cargo-build-sbf` and platform tools v1.53 or v1.52,
+  not v1.54 (see [Build](#build)).
 - Go 1.27.1 or newer. The prover compiles Go gnark circuits, so building
   `prover`, `sdk` or `test` needs it.
 - The zolana `v0.4.0-alpha` source. The Rust crates come from that tag by git.
@@ -54,13 +55,16 @@ instructions, and circuits.
 The crates share one workspace. Run the commands below from `dvp/`.
 
 ```bash
-cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 -- --features bpf-entrypoint
+cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.53 -- --features bpf-entrypoint
 cargo build --workspace
 ```
 
 Build the program with `--features bpf-entrypoint`. Without it `cargo
 build-sbf` writes a `.so` with no entrypoint to `target/deploy`, and the
 end-to-end tests then fail with `AccountNotFound` for the program id.
+Do not use platform tools v1.54: its build fails every instruction on chain
+with `InvalidInstructionData`, because serializing the SPP transact data
+reports a `PreallocationSizeLimit` error.
 
 ## Test keys
 
