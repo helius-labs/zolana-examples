@@ -1,0 +1,9 @@
+[package]
+name = "dvp-sdk"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+dvp-program = { path = "../program" }
+dvp-prover = { path = "../prover" }
