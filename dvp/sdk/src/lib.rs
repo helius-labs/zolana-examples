@@ -3,10 +3,14 @@ pub mod encryption;
 pub mod index;
 pub mod instructions;
 pub mod prover;
+mod shared;
 pub mod state;
 
 pub use dvp_program::{
-    instructions::create_dvp::{CreateDvpIxData, CreateDvpProof},
+    instructions::{
+        create_dvp::{CreateDvpIxData, CreateDvpProof},
+        reclaim_dvp::{ReclaimDvpIxData, ReclaimDvpProof},
+    },
     tag, DVP_AUTHORITY_PDA_SEED,
 };
 

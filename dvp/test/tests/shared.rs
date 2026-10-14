@@ -231,8 +231,22 @@ impl TestEnv {
         let client = &self.localnet.client;
         let signature = deposit.send(client, &self.payer, self.localnet.tree, &self.payer)?;
         client.confirm_private_transaction_sync(signature)?;
-        let transactions = client
-            .get_shielded_transactions_by_tags(vec![deposit.view_tag()], None, None, None)?
+        self.received_note(actor, deposit.view_tag(), mint, signature)
+    }
+
+    /// `actor`'s spendable note of `mint` that transaction `signature`
+    /// created, found by `view_tag` and decrypted the way a wallet syncs.
+    pub fn received_note(
+        &self,
+        actor: &Actor,
+        view_tag: [u8; 32],
+        mint: Address,
+        signature: Signature,
+    ) -> Result<WalletUtxo> {
+        let transactions = self
+            .localnet
+            .client
+            .get_shielded_transactions_by_tags(vec![view_tag], None, None, None)?
             .transactions;
         decrypt_spendable(&actor.shielded, &transactions, &self.assets()?)
             .map_err(|e| anyhow!("decrypt shielded notes: {e:?}"))?

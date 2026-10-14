@@ -24,3 +24,7 @@ zolana-transaction = { workspace = true }
 [[test]]
 name = "create_dvp"
 path = "tests/create_dvp.rs"
+
+[[test]]
+name = "reclaim_dvp"
+path = "tests/reclaim_dvp.rs"

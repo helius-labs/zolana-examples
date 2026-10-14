@@ -2,15 +2,15 @@
 // proof verification, so the placeholder proof these fixtures carry cannot
 // reach them.
 
-use dvp_program::{error::DvpError, tag, DVP_AUTHORITY_PDA_SEED};
+use dvp_program::{error::DvpError, tag};
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
-use solana_pubkey::Pubkey;
 use zolana_account_checks::error::AccountError;
 use zolana_test_utils::mollusk::expect_err_exact;
 
 use crate::common::{
-    create_dvp_data, create_dvp_fixture, dvp_authority, program_id, setup_mollusk, CREATOR, DVP_ID,
+    create_dvp_data, create_dvp_fixture, dvp_authority, off_curve_bump, setup_mollusk, CREATOR,
+    DVP_ID,
 };
 
 /// Runs the create_dvp fixture after `edit` and expects exactly `error`.
@@ -63,18 +63,8 @@ fn unsigned_creator_is_rejected_exactly() {
 
 #[test]
 fn bump_without_a_pda_is_rejected_exactly() {
-    // A bump whose seeds hash onto the curve has no PDA.
-    let bump = (0..=u8::MAX)
-        .find(|bump| {
-            Pubkey::create_program_address(
-                &[DVP_AUTHORITY_PDA_SEED, CREATOR.as_ref(), &DVP_ID, &[*bump]],
-                &program_id(),
-            )
-            .is_err()
-        })
-        .expect("some bump lands on the curve");
     expect_create_dvp_err(
-        |instruction| instruction.data = create_dvp_data(DVP_ID, bump),
+        |instruction| instruction.data = create_dvp_data(DVP_ID, off_curve_bump()),
         DvpError::InvalidDvpAuthority,
     );
 }

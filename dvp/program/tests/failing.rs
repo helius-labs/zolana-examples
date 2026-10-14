@@ -4,3 +4,5 @@ mod common;
 mod create_dvp;
 #[path = "failing/dispatch.rs"]
 mod dispatch;
+#[path = "failing/reclaim_dvp.rs"]
+mod reclaim_dvp;

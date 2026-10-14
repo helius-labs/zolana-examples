@@ -200,7 +200,10 @@ fn wallet_utxo(owner: &ShieldedKeypair, mint: Mint, amount: u64) -> WalletUtxo {
 
 /// An encrypted transaction as the indexer serves it, its outputs appended
 /// from leaf `first_leaf`.
-fn shielded_transaction(proof_inputs: &SppProofInputs, first_leaf: u64) -> ShieldedTransaction {
+pub(crate) fn shielded_transaction(
+    proof_inputs: &SppProofInputs,
+    first_leaf: u64,
+) -> ShieldedTransaction {
     let external = &proof_inputs.external_data;
     let output_slots = external
         .outputs

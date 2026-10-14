@@ -1,9 +1,16 @@
-//! The create transaction's terms messages: the plaintext `SwapDvp`
-//! encrypted to the seller, the buyer and the settlement authority.
+//! The create transaction's terms messages (the plaintext `SwapDvp`
+//! encrypted to the seller, the buyer and the settlement authority), and the
+//! output ciphertexts of the transactions that spend DvP UTXOs.
 
-use anyhow::{ensure, Result};
-use zolana_interface::instruction::instruction_data::transact::MessageData;
-use zolana_keypair::{P256Pubkey, ShieldedAddress, ViewingKey};
+use anyhow::{anyhow, ensure, Result};
+use zolana_interface::instruction::instruction_data::transact::{
+    MessageData, OwnerTag, TransactOutput,
+};
+use zolana_keypair::{random_salt, P256Pubkey, ShieldedAddress, ViewingKey};
+use zolana_transaction::{
+    serialization::confidential::{Confidential, ConfidentialEncode, ConfidentialOutputPlaintext},
+    ExternalData, SppProofOutputUtxo, UtxoSerialization,
+};
 
 use crate::{err, state::SwapDvp};
 
@@ -70,4 +77,61 @@ pub fn decrypt_terms_message(
         .decrypt_utxo(data, tx_viewing_pk, salt, slot)
         .map_err(err)?;
     SwapDvp::from_bytes(&plaintext)
+}
+
+/// The external data of a transaction whose `outputs` carry their final
+/// blindings: every output but compact padding is encrypted to its owner
+/// address under `tx_viewing_key` and a fresh salt, in its slot, and tagged
+/// with the owner's view tag. Compact padding is the trailing suffix SPP
+/// fills back in, so it publishes nothing. The ciphertext is what a wallet
+/// decrypts as a spendable note (the `ConfidentialTransaction::encrypt`
+/// layout, without its ring and dummy-ciphertext cases).
+pub(crate) fn encrypt_outputs(
+    outputs: &[SppProofOutputUtxo],
+    tx_viewing_key: &ViewingKey,
+    output_tree_id: u16,
+) -> Result<ExternalData> {
+    let salt = random_salt();
+    let mut transact_outputs = Vec::with_capacity(outputs.len());
+    let mut view_tags = Vec::with_capacity(outputs.len());
+    for (slot_index, output) in (0u32..).zip(outputs).filter(|(_, output)| !output.compact) {
+        let owner = output
+            .owner_address
+            .ok_or_else(|| anyhow!("output {slot_index} has no owner address"))?;
+        ensure!(
+            output.ring_program_id.is_none(),
+            "output {slot_index} is a ring output"
+        );
+        let view_tag = owner.confidential_view_tag().map_err(err)?;
+        let message = Confidential::encode_plaintext(
+            &ConfidentialOutputPlaintext {
+                asset_id: output.asset.asset_id,
+                amount: output.amount,
+                blinding: output.blinding,
+                ring_program_id: None,
+                data: output.data.clone(),
+            },
+            view_tag,
+            &ConfidentialEncode {
+                tx: tx_viewing_key.clone(),
+                recipient_pubkey: owner.viewing_pubkey,
+                salt,
+                slot_index,
+            },
+        )
+        .map_err(err)?;
+        transact_outputs.push(TransactOutput {
+            utxo_hash: output.hash(output_tree_id).map_err(err)?,
+            owner_tag: OwnerTag::Inline(view_tag),
+            data: Some(message.data),
+        });
+        view_tags.push(view_tag);
+    }
+    Ok(ExternalData::new(
+        *tx_viewing_key.pubkey().as_bytes(),
+        salt,
+        transact_outputs,
+        view_tags,
+        Vec::new(),
+    ))
 }

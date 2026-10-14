@@ -1,5 +1,8 @@
 use dvp_program::{
-    instructions::create_dvp::{CreateDvpIxData, CreateDvpProof},
+    instructions::{
+        create_dvp::{CreateDvpIxData, CreateDvpProof},
+        reclaim_dvp::{ReclaimDvpIxData, ReclaimDvpProof},
+    },
     tag, DVP_AUTHORITY_PDA_SEED,
 };
 use mollusk_svm::Mollusk;
@@ -21,6 +24,8 @@ const PAYER: Pubkey = Pubkey::new_from_array([21; 32]);
 pub const CREATOR: Pubkey = Pubkey::new_from_array([22; 32]);
 const TREE: Pubkey = Pubkey::new_from_array([23; 32]);
 const NULLIFIER_PDA: Pubkey = Pubkey::new_from_array([24; 32]);
+/// The reclaiming party.
+const SIGNER: Pubkey = Pubkey::new_from_array([25; 32]);
 /// A field element (below the BN254 modulus).
 pub const DVP_ID: [u8; 32] = [1; 32];
 
@@ -55,8 +60,9 @@ pub fn dvp_authority(creator: &Pubkey, dvp_id: &[u8; 32]) -> (Pubkey, u8) {
     )
 }
 
-/// A wire-valid 1x2 transact: one address input slot, the DvP UTXO and a
-/// compact padding output.
+/// A wire-valid 1x2 transact: one input slot (the create address or the
+/// reclaimed deposit), one output (the DvP UTXO or the refund) and a compact
+/// padding output.
 fn spp() -> TransactIxData {
     TransactIxData {
         expiry_unix_ts: u64::MAX,
@@ -102,15 +108,61 @@ pub fn create_dvp_data(dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
     data
 }
 
+/// A bump whose `(CREATOR, DVP_ID)` seeds hash onto the curve, so it has no
+/// PDA.
+pub fn off_curve_bump() -> u8 {
+    (0..=u8::MAX)
+        .find(|bump| {
+            Pubkey::create_program_address(
+                &[DVP_AUTHORITY_PDA_SEED, CREATOR.as_ref(), &DVP_ID, &[*bump]],
+                &program_id(),
+            )
+            .is_err()
+        })
+        .expect("some bump lands on the curve")
+}
+
+pub fn reclaim_dvp_data(creator: Pubkey, dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
+    let body = wincode::serialize(&ReclaimDvpIxData {
+        creator,
+        dvp_id,
+        bump,
+        reclaim_proof: ReclaimDvpProof {
+            proof_a: [10; 32],
+            proof_b: [11; 64],
+            proof_c: [12; 32],
+        },
+        spp: spp(),
+    })
+    .expect("serialize reclaim_dvp");
+    let mut data = vec![tag::RECLAIM_DVP];
+    data.extend_from_slice(&body);
+    data
+}
+
 /// A create_dvp instruction with the builder's account layout: payer,
 /// creator, then the forwarded SPP list ending in `dvp_authority` (D8).
 pub fn create_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
+    let (_, bump) = dvp_authority(&CREATOR, &DVP_ID);
+    fixture(CREATOR, create_dvp_data(DVP_ID, bump))
+}
+
+/// A reclaim_dvp instruction by `SIGNER` with the builder's account layout:
+/// payer, signer, then the forwarded SPP list ending in `dvp_authority`.
+pub fn reclaim_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
+    let (_, bump) = dvp_authority(&CREATOR, &DVP_ID);
+    fixture(SIGNER, reclaim_dvp_data(CREATOR, DVP_ID, bump))
+}
+
+/// An instruction on `data` with the role signer `role` after the payer,
+/// and the `(CREATOR, DVP_ID)` PDA as the last forwarded SPP account.
+fn fixture(role: Pubkey, data: Vec<u8>) -> (Instruction, Vec<(Pubkey, Account)>) {
     let spp_id = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
-    let (dvp_authority, bump) = dvp_authority(&CREATOR, &DVP_ID);
+    let (dvp_authority, _) = dvp_authority(&CREATOR, &DVP_ID);
 
     let metas = vec![
         AccountMeta::new(PAYER, true),
-        AccountMeta::new_readonly(CREATOR, true),
+        AccountMeta::new_readonly(role, true),
         AccountMeta::new(PAYER, true),
         AccountMeta::new(TREE, false),
         AccountMeta::new_readonly(spp_id, false),
@@ -121,7 +173,7 @@ pub fn create_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
     ];
     let accounts = vec![
         (PAYER, account(1_000_000_000)),
-        (CREATOR, account(1_000_000_000)),
+        (role, account(1_000_000_000)),
         (TREE, account(1_000_000_000)),
         (
             spp_id,
@@ -136,7 +188,7 @@ pub fn create_dvp_fixture() -> (Instruction, Vec<(Pubkey, Account)>) {
         Instruction {
             program_id: program_id(),
             accounts: metas,
-            data: create_dvp_data(DVP_ID, bump),
+            data,
         },
         accounts,
     )

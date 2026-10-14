@@ -4,7 +4,7 @@ pub mod verifying_keys;
 
 use pinocchio::{address::address_eq, error::ProgramError, AccountView, Address, ProgramResult};
 
-use crate::instructions::create_dvp::process_create_dvp_ix;
+use crate::instructions::{create_dvp::process_create_dvp_ix, reclaim_dvp::process_reclaim_dvp_ix};
 
 /// Instruction discriminators, matching the reference DvP program.
 pub mod tag {
@@ -58,6 +58,7 @@ pub fn process_instruction(
 
     match *ix_tag {
         tag::CREATE_DVP => process_create_dvp_ix(accounts, ix_data),
+        tag::RECLAIM_DVP => process_reclaim_dvp_ix(accounts, ix_data),
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }
