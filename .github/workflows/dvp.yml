@@ -21,53 +21,45 @@ permissions:
 
 env:
   AGAVE_VERSION: v4.0.2
-  ZOLANA_TAG: v0.4.0-alpha
+  ZOLANA_TAG: test-dvp-pr-41-20261017-48dd150
   SURFPOOL_RELEASE_TAG: v1.6.0-light
-  # A program built with platform tools v1.54 fails on chain: after the first
-  # wincode serialize, every later serialize of the SPP transact data errors
-  # with PreallocationSizeLimit, so each instruction returns
-  # InvalidInstructionData before its CPI. v1.53, the default of the Agave
-  # release above, and v1.52 work.
   SBF_TOOLS_VERSION: v1.53
 
 jobs:
   dvp-test:
     name: test / dvp
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: dvp
     steps:
       - uses: actions/checkout@v4
 
-      # The circuits' go.mod replaces zolana/prover and zolana/gnarksdk with a
-      # zolana directory next to the checkout; unpack the release source
-      # archive there.
-      - name: Download zolana source
-        run: |
-          src="$GITHUB_WORKSPACE/../zolana"
-          mkdir -p "$src"
-          curl -sSfL "https://github.com/helius-labs/zolana/archive/refs/tags/${ZOLANA_TAG}.tar.gz" \
-            | tar -xz -C "$src" --strip-components=1
-
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.27.1"
-          cache-dependency-path: dvp/prover/circuits/go.sum
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: dvp
 
-      - name: Install Anza (Solana) CLI
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: dvp/typescript/package-lock.json
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Install Anza CLI
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
@@ -76,94 +68,79 @@ jobs:
         working-directory: dvp/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
 
-      # The zolana CLI, prover, Photon and shielded pool program attached to
-      # the release the crates are pinned to; surfpool from the fork the zolana
-      # CLI runs.
-      - name: Download zolana release binaries
+      - name: Download test release binaries
         run: |
           bin="$RUNNER_TEMP/zolana-bin"
           mkdir -p "$bin"
           base="https://github.com/helius-labs/zolana/releases/download/${ZOLANA_TAG}"
+          curl -sSfL --retry 5 "${base}/SHA256SUMS" -o "$bin/SHA256SUMS"
           for name in zolana prover photon; do
-            curl -sSfL "${base}/${name}-linux-x64-${ZOLANA_TAG}" -o "$bin/$name"
-            chmod +x "$bin/$name"
+            asset="${name}-linux-x64-${ZOLANA_TAG}"
+            curl -sSfL --retry 5 "${base}/${asset}" -o "$bin/$asset"
+            (cd "$bin" && grep "  ${asset}$" SHA256SUMS | sha256sum --check --strict)
+            chmod +x "$bin/$asset"
+            ln -s "$asset" "$bin/$name"
           done
-          curl -sSfL "${base}/shielded_pool_program-${ZOLANA_TAG}.so" -o "$bin/shielded_pool_program.so"
-          curl -sSfL "https://github.com/Lightprotocol/surfpool/releases/download/${SURFPOOL_RELEASE_TAG}/surfpool-linux-x64.tar.gz" \
-            | tar -xz -C "$bin"
+          asset="shielded_pool_program-${ZOLANA_TAG}.so"
+          curl -sSfL --retry 5 "${base}/${asset}" -o "$bin/$asset"
+          (cd "$bin" && grep "  ${asset}$" SHA256SUMS | sha256sum --check --strict)
+          curl -sSfL --retry 5 "https://github.com/Lightprotocol/surfpool/releases/download/${SURFPOOL_RELEASE_TAG}/surfpool-linux-x64.tar.gz" | tar -xz -C "$bin"
           test -x "$bin/surfpool"
           {
             echo "ZOLANA_CLI_BIN=$bin/zolana"
             echo "PROVER_BIN=$bin/prover"
             echo "ZOLANA_PHOTON_BIN=$bin/photon"
             echo "SURFPOOL_BIN=$bin/surfpool"
-            echo "SHIELDED_POOL_PROGRAM_PATH=$bin/shielded_pool_program.so"
+            echo "SHIELDED_POOL_PROGRAM_PATH=$bin/$asset"
           } >> "$GITHUB_ENV"
 
-      # The prover downloads the SPP proving keys it is missing on first start.
       - name: Cache SPP proving keys
         uses: actions/cache@v4
         with:
           path: ~/.config/zolana/proving-keys
           key: zolana-proving-keys-${{ env.ZOLANA_TAG }}
 
-      # The key hashes every input of the key generation: the circuits, the
-      # zolana gadgets (by tag), the setup binary and its locked
-      # dependencies, and the committed verifying keys and key hashes. A
-      # cache is saved only by a passing job, after the regeneration check
-      # below, so a hit holds keys that reproduced the committed ones from
-      # these same inputs.
-      - name: Cache DvP circuit keys
+      - name: Cache DvP proving keys
         uses: actions/cache@v4
         with:
-          path: dvp/build/gnark
-          key: dvp-gnark-keys-${{ env.ZOLANA_TAG }}-${{ hashFiles('dvp/prover/circuits/**', 'dvp/prover/src/**', 'dvp/prover/build.rs', 'dvp/prover/Cargo.toml', 'dvp/Cargo.lock', 'dvp/program/src/verifying_keys/**', 'dvp/dvp-keys.CHECKSUM') }}
+          path: dvp/target/zk/dvp-program
+          key: dvp-zk-keys-${{ env.ZOLANA_TAG }}-${{ hashFiles('dvp/program/src/circuits/**', 'dvp/program/Cargo.toml', 'dvp/Cargo.lock', 'dvp/program/src/verifier/**', 'dvp/dvp-keys.CHECKSUM') }}
 
-      - name: Check formatting
+      - name: Check Rust formatting
         run: cargo fmt --all -- --check
+
+      - name: Check generated verifiers and circuit keys
+        run: |
+          "$ZOLANA_CLI_BIN" zk compile --manifest-path program/Cargo.toml --check
+          scripts/check-keys.sh
+
+      - name: Build Node.js circuits
+        run: '"$ZOLANA_CLI_BIN" zk compile --manifest-path program/Cargo.toml --skip-r1cs --skip-keys --wasm-target nodejs --verifier'
 
       - name: Run clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      - name: Vet circuits
-        run: scripts/circuits-go.sh vet ./...
-
-      - name: Test circuits
-        run: scripts/circuits-go.sh test -timeout 30m ./...
-
-      # Regenerating the insecure test keys must reproduce the committed
-      # verifying keys and the key hashes in dvp-keys.CHECKSUM. On a cache
-      # hit the keys come from a run with the same inputs that passed this
-      # check (see the cache key).
-      - name: Generate missing circuit keys
+      - name: Check and test TypeScript
+        working-directory: dvp/typescript
         run: |
-          for c in create_dvp reclaim_dvp settle_dvp abort_dvp; do
-            if [[ ! -f "build/gnark/$c/pk.bin" ]]; then
-              cargo run --locked -p dvp-prover --bin dvp-prover-setup -- \
-                "$c" "build/gnark/$c" --rust-vk "program/src/verifying_keys/$c.rs" --insecure-test-keys
-            fi
-          done
-          git diff --exit-code program/src/verifying_keys
+          npm ci
+          npm run check
+          npm test
 
-      - name: Check circuit key checksums
-        run: scripts/check-keys.sh
-
-      # Without bpf-entrypoint the .so in target/deploy has no entrypoint and
-      # the e2e tests cannot load the program.
-      - name: Build DvP program (SBF)
+      - name: Build DvP program
         working-directory: dvp/program
-        run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --features bpf-entrypoint
+        run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --locked --features bpf-entrypoint
 
       - name: Run program tests
-        run: cargo test-sbf --tools-version "$SBF_TOOLS_VERSION" -p dvp-program --features bpf-entrypoint
+        run: cargo test-sbf --tools-version "$SBF_TOOLS_VERSION" -p dvp-program --features bpf-entrypoint -- --locked
 
-      - name: Run prover and SDK tests
-        run: cargo test --locked -p dvp-prover -p dvp-sdk
+      - name: Run Rust SDK tests
+        run: cargo test --release --locked -p dvp-sdk
 
-      # Localnet e2e; the CU benchmark is #[ignore] and does not run. The
-      # prover downloads missing SPP keys into the keys dir, but requires its
-      # parent to exist, which a fresh runner without a cache hit lacks.
-      - name: Run e2e tests
+      - name: Run Rust end-to-end tests
         run: |
           mkdir -p ~/.config/zolana/proving-keys
-          cargo test --locked -p dvp-test
+          cargo test --release --locked -p dvp-test
+
+      - name: Run Node.js end-to-end examples
+        run: cargo test --release --locked -p dvp-test --test create_dvp node_client_lifecycles -- --ignored --nocapture

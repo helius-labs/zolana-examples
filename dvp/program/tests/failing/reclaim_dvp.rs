@@ -1,7 +1,3 @@
-// The SPP account checks (`SppTransactAccounts::new`) and the CPI run after
-// proof verification, so the placeholder proof these fixtures carry cannot
-// reach them.
-
 use dvp_program::{error::DvpError, tag};
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
@@ -12,13 +8,6 @@ use crate::common::{
     dvp_authority, non_canonical_bump, on_curve_bump, reclaim_dvp_data, reclaim_dvp_fixture,
     setup_mollusk, CREATOR, DVP_ID,
 };
-
-/// Runs the reclaim_dvp fixture after `edit` and expects exactly `error`.
-fn expect_reclaim_dvp_err(edit: impl FnOnce(&mut Instruction), error: impl Into<ProgramError>) {
-    let (mut instruction, accounts) = reclaim_dvp_fixture();
-    edit(&mut instruction);
-    expect_err_exact(&setup_mollusk(), &instruction, &accounts, error.into());
-}
 
 #[test]
 fn truncated_instruction_data_is_rejected_exactly() {
@@ -88,4 +77,11 @@ fn over_modulus_dvp_id_fails_hashing_exactly() {
 #[test]
 fn invalid_reclaim_proof_is_rejected_exactly() {
     expect_reclaim_dvp_err(|_| {}, DvpError::ProofVerificationFailed);
+}
+
+/// Runs the reclaim_dvp fixture after `edit` and expects exactly `error`.
+fn expect_reclaim_dvp_err(edit: impl FnOnce(&mut Instruction), error: impl Into<ProgramError>) {
+    let (mut instruction, accounts) = reclaim_dvp_fixture();
+    edit(&mut instruction);
+    expect_err_exact(&setup_mollusk(), &instruction, &accounts, error.into());
 }

@@ -7,15 +7,14 @@ autotests = false
 
 [dependencies]
 anyhow = { workspace = true }
-dvp-program = { path = "../program" }
+dvp-program = { path = "../program", features = ["circuits", "parallel"] }
 dvp-sdk = { path = "../sdk" }
 solana-clock = { workspace = true }
 solana-signature = { workspace = true }
 wincode = { workspace = true }
-zolana-client = { workspace = true, features = ["indexer-api", "solana-rpc"] }
+zolana-client = { workspace = true, features = ["reqwest", "solana-rpc"] }
 
 [dev-dependencies]
-dvp-prover = { path = "../prover" }
 light-program-profiler = { workspace = true, features = ["mollusk"] }
 mollusk-svm = { workspace = true }
 num-bigint = { workspace = true }
@@ -24,7 +23,6 @@ solana-address = { workspace = true }
 solana-instruction = { workspace = true }
 solana-keypair = { workspace = true }
 solana-signer = { workspace = true }
-zolana-gnark-ffi-prover = { workspace = true }
 zolana-hasher = { workspace = true }
 zolana-interface = { workspace = true }
 zolana-keypair = { workspace = true }

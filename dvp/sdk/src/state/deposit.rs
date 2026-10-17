@@ -1,13 +1,9 @@
 use anyhow::{ensure, Result};
 use solana_address::Address;
-use zolana_keypair::{P256Pubkey, PublicKey, ShieldedAddress};
-use zolana_program::compression::ZERO_NULLIFIER_PUBKEY;
-use zolana_transaction::{
-    utxo::{SppProofInputUtxo, Utxo},
-    Data, Mint,
-};
+use zolana_keypair::{P256Pubkey, ShieldedAddress, ViewingKey};
+use zolana_program::ProgramOwner;
+use zolana_transaction::{Mint, SppProofOutputUtxo, WalletUtxo};
 
-use super::dvp_utxo::pda_input_utxo;
 use crate::state::SwapDvp;
 
 /// The two legs of a DvP.
@@ -75,26 +71,30 @@ impl Deposit {
         authority_viewing_pubkey: P256Pubkey,
     ) -> Result<ShieldedAddress> {
         let (pda, _) = terms.dvp_authority()?;
-        Ok(ShieldedAddress::for_pda(
-            &pda,
-            ZERO_NULLIFIER_PUBKEY,
-            authority_viewing_pubkey,
-        ))
+        ProgramOwner::new(pda)
+            .address(authority_viewing_pubkey)
+            .map_err(crate::err)
     }
 
-    /// The deposit as an SPP input. Anyone holding the opening can build it;
+    /// The deposit as an SPP input. Anyone holding the UTXO fields can build it;
     /// spending needs the PDA signature only the program gives.
-    pub fn to_input_utxo(&self) -> Result<SppProofInputUtxo> {
+    pub fn to_input_utxo(&self) -> Result<WalletUtxo> {
         let (pda, _) = self.terms.dvp_authority()?;
-        let utxo = Utxo {
-            owner: PublicKey::from_pda(&pda),
+        let owner = ProgramOwner::new(pda);
+        let output = SppProofOutputUtxo {
             asset: self.mint,
             amount: self.amount,
             blinding: self.blinding,
-            ring_program_id: None,
-            data: Data::default(),
+            owner_address: Some(
+                owner
+                    .address(ViewingKey::new().pubkey())
+                    .map_err(crate::err)?,
+            ),
+            ..Default::default()
         };
-        pda_input_utxo(utxo, None, self.tree_id, self.leaf_index)
+        owner
+            .input(&output, self.tree_id, self.leaf_index)
+            .map_err(crate::err)
     }
 
     pub fn hash(&self) -> Result<[u8; 32]> {
@@ -176,7 +176,7 @@ mod tests {
             ),
             (
                 sent.hash(1).unwrap(),
-                ZERO_NULLIFIER_PUBKEY,
+                ProgramOwner::nullifier_pubkey().unwrap(),
                 *zolana_program::compression::PdaOwner::new(&pda)
                     .unwrap()
                     .owner_hash(),

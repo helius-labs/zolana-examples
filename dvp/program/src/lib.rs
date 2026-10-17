@@ -1,9 +1,19 @@
-pub mod error;
-pub mod instructions;
-pub mod verifying_keys;
+#[cfg(all(not(feature = "r1cs-export"), not(feature = "insecure-test-setup")))]
+compile_error!("DvP verifying keys require the insecure-test-setup feature");
 
+#[cfg(feature = "circuits")]
+pub mod circuits;
+
+pub mod error;
+#[cfg(not(feature = "r1cs-export"))]
+pub mod instructions;
+#[cfg(not(feature = "r1cs-export"))]
+pub mod verifier;
+
+#[cfg(not(feature = "r1cs-export"))]
 use pinocchio::{address::address_eq, error::ProgramError, AccountView, Address, ProgramResult};
 
+#[cfg(not(feature = "r1cs-export"))]
 use crate::instructions::{
     cancel_dvp::process_cancel_dvp_ix, create_dvp::process_create_dvp_ix,
     reclaim_dvp::process_reclaim_dvp_ix, reject_dvp::process_reject_dvp_ix,
@@ -29,7 +39,7 @@ pub const SETTLEMENT_TAG: u32 = u32::from_be_bytes(*b"DVPS");
 pub const ABORT_TAG: u32 = u32::from_be_bytes(*b"DVPA");
 
 /// Seconds a settlement's `current_timestamp` may trail the cluster clock.
-pub const TIME_WINDOW: i64 = 24;
+pub const TIME_WINDOW: i64 = 90;
 
 /// Tree id the create circuit pins the DvP address slot to: address
 /// uniqueness is per (owner, seed, tree), so a fixed tree makes a
@@ -40,13 +50,18 @@ pub const DVP_ADDRESS_TREE_ID: u16 = 0;
 pub const ABORT_MODE_CANCEL: u8 = 0;
 pub const ABORT_MODE_REJECT: u8 = 1;
 
-#[cfg(all(feature = "bpf-entrypoint", not(feature = "no-entrypoint")))]
+#[cfg(all(
+    feature = "bpf-entrypoint",
+    not(feature = "no-entrypoint"),
+    not(feature = "r1cs-export")
+))]
 mod entrypoint {
     pinocchio::entrypoint!(crate::process_instruction);
 }
 
 pinocchio::address::declare_id!("8ErdEhvg1NgRzzZRSw3Lx4z4rDEruc6Bjwzn7WVooUMx");
 
+#[cfg(not(feature = "r1cs-export"))]
 pub fn process_instruction(
     program_id: &Address,
     accounts: &mut [AccountView],

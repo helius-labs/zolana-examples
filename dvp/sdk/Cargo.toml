@@ -3,24 +3,30 @@ name = "dvp-sdk"
 version = "0.1.0"
 edition.workspace = true
 publish = false
+autotests = false
 
 [dependencies]
 anyhow = { workspace = true }
-dvp-program = { path = "../program" }
-dvp-prover = { path = "../prover" }
+thiserror = { workspace = true }
+dvp-program = { path = "../program", features = ["circuits", "parallel"] }
 num-bigint = { workspace = true }
 solana-address = { workspace = true, features = ["curve25519"] }
 solana-instruction = { workspace = true }
 solana-signature = { workspace = true }
 wincode = { workspace = true }
-zolana-client = { workspace = true, features = ["indexer-api"] }
+zolana-client = { workspace = true, features = ["reqwest"] }
 zolana-hasher = { workspace = true }
 zolana-interface = { workspace = true }
 zolana-keypair = { workspace = true }
-zolana-program = { workspace = true, features = ["compression"] }
+zolana-program = { workspace = true, features = ["compression", "client", "parallel"] }
 zolana-transaction = { workspace = true }
 
+
 [dev-dependencies]
+zolana-program = { workspace = true, features = ["test-support"] }
 groth16-solana = { workspace = true }
 solana-keypair = { workspace = true }
-zolana-gnark-ffi-prover = { workspace = true }
+
+[[test]]
+name = "circuits"
+path = "tests/circuits.rs"

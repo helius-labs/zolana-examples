@@ -158,7 +158,7 @@ impl TestEnv {
 
     /// The create instruction of `terms`, with both proofs: the SPP proof
     /// from the localnet prover against a fresh non-inclusion proof of the
-    /// DvP address, and the create proof from the local gnark prover.
+    /// DvP address, and the create proof from the program prover.
     pub fn prove_create(&self, terms: &SwapDvp) -> Result<CreateDvp> {
         let tree_id = self.localnet.tree_id;
         let address = CreateDvpDerivation::new(terms, tree_id)?.address;
@@ -215,7 +215,7 @@ impl TestEnv {
 
     /// Shields `amount` of `mint` from the payer's public balance (its SOL
     /// or its fixture SPL token account) into `actor`'s private balance, and
-    /// returns the note once the indexer serves it.
+    /// returns the utxo once the indexer serves it.
     pub fn shield(&self, actor: &Actor, mint: Address, amount: u64) -> Result<WalletUtxo> {
         let recipient = actor.address()?;
         let spl = mint != SOL_MINT;
@@ -230,12 +230,12 @@ impl TestEnv {
         let client = &self.localnet.client;
         let signature = deposit.send(client, &self.payer, self.localnet.tree, &self.payer)?;
         client.confirm_private_transaction_sync(signature)?;
-        self.received_note(actor, deposit.view_tag(), mint, signature)
+        self.received_utxo(actor, deposit.view_tag(), mint, signature)
     }
 
-    /// `actor`'s spendable note of `mint` that transaction `signature`
+    /// `actor`'s spendable utxo of `mint` that transaction `signature`
     /// created, found by `view_tag` and decrypted the way a wallet syncs.
-    pub fn received_note(
+    pub fn received_utxo(
         &self,
         actor: &Actor,
         view_tag: [u8; 32],
@@ -248,17 +248,17 @@ impl TestEnv {
             .get_shielded_transactions_by_tags(vec![view_tag], None, None, None)?
             .transactions;
         decrypt_spendable(&actor.shielded, &transactions, &self.assets()?)
-            .map_err(|e| anyhow!("decrypt shielded notes: {e:?}"))?
+            .map_err(|e| anyhow!("decrypt shielded UTXOs: {e:?}"))?
             .balances
             .get_balance(mint)
             .into_iter()
             .flat_map(|balance| balance.utxos.iter())
-            .find(|note| note.tx_signature == signature)
+            .find(|utxo| utxo.tx_signature == signature)
             .cloned()
-            .ok_or_else(|| anyhow!("shielded note of {signature} not found"))
+            .ok_or_else(|| anyhow!("shielded utxo of {signature} not found"))
     }
 
-    /// `funder` sends `amount` of `leg`'s mint from `note` to the DvP's
+    /// `funder` sends `amount` of `leg`'s mint from `utxo` to the DvP's
     /// deposit address in a plain SPP transfer it pays and signs, and waits
     /// until the indexer serves it.
     pub fn fund(
@@ -267,7 +267,7 @@ impl TestEnv {
         terms: &SwapDvp,
         leg: Leg,
         amount: u64,
-        note: WalletUtxo,
+        utxo: WalletUtxo,
     ) -> Result<Signature> {
         let client = &self.localnet.client;
         let proof_inputs = FundDvpParams {
@@ -275,7 +275,7 @@ impl TestEnv {
             leg,
             amount,
             authority_viewing_pubkey: self.settlement_authority.shielded.viewing_pubkey(),
-            inputs: vec![note],
+            inputs: vec![utxo],
             payer: funder.solana.pubkey(),
             tree_id: self.localnet.tree_id,
         }

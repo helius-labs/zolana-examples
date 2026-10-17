@@ -10,8 +10,7 @@ use crate::{
 
 pub struct CancelDvp {
     pub payer: Address,
-    /// The terms' settlement authority, a readonly signer whose identity the
-    /// abort proof binds in cancel mode.
+    /// Settlement authority checked by the proof.
     pub settlement_authority: Address,
     /// The SPP tree: output tree, and input tree of every tree context.
     pub tree: Address,
@@ -25,7 +24,10 @@ pub struct CancelDvp {
 }
 
 impl CancelDvp {
+    /// 1. Encode the instruction data.
+    /// 2. Add the DvP and SPP accounts.
     pub fn instruction(self) -> Result<Instruction> {
+        // 1. Encode the instruction data.
         let Self {
             payer,
             settlement_authority,
@@ -43,6 +45,7 @@ impl CancelDvp {
             cancel_proof,
             spp,
         };
+        // 2. Add the DvP and SPP accounts.
         dvp_instruction(
             tag::CANCEL_DVP,
             DvpAccounts {

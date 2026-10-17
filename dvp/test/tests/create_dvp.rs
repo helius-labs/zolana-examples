@@ -13,14 +13,13 @@ use zolana_transaction::SOL_MINT;
 /// What the seller sends above the delivery amount, refunded at settlement.
 const DELIVERY_SURPLUS: u64 = 50_000_000;
 /// What each funder shields into its private balance before funding; the
-/// rest of the note returns as change.
+/// rest of the utxo returns as change.
 const SHIELD_AMOUNT: u64 = 600_000_000;
 
 #[test]
 fn create_dvp_and_discover_terms() -> Result<()> {
     let env = setup(11)?;
-    // The create circuit pins the address slot to tree 0, so the
-    // localnet tree the address is proven against must be tree 0.
+    // 1. Check the pinned address tree and create the DvP.
     assert_eq!(env.localnet.tree_id, DVP_ADDRESS_TREE_ID);
     let terms = env.terms(1)?;
     let create = env.prove_create(&terms)?;
@@ -33,8 +32,7 @@ fn create_dvp_and_discover_terms() -> Result<()> {
     let create_ix = create.instruction()?;
     let create_signature = env.send(create_ix.clone(), &[&env.seller.solana], None)?;
 
-    // Each party finds its message by its own pubkey, decrypts the terms and
-    // recomputes the DvP UTXO the transaction committed.
+    // 2. Check all three parties discover the committed terms.
     let expected_utxo = DvpUtxo::new(terms.clone(), env.localnet.tree_id);
     assert_eq!(expected_utxo.hash()?, dvp_utxo_hash);
     for (recipient_index, party) in (0u32..).zip(env.parties()) {
@@ -58,11 +56,7 @@ fn create_dvp_and_discover_terms() -> Result<()> {
         );
     }
 
-    // The address is indexed now, so no second proof of its non-inclusion
-    // exists: resend the same signed instruction instead, made distinct by a
-    // priority fee. SPP refuses it on the address nullifier; its exact error
-    // depends on whether the nullifier is still queued, so only the absence
-    // of a DvP error is asserted.
+    // 3. Check replay fails on the reserved address.
     assert_spp_rejects(
         "duplicate create",
         env.send(create_ix, &[&env.seller.solana], Some(1)),
@@ -77,10 +71,7 @@ fn create_dvp_rejects_a_mismatched_dvp_id() -> Result<()> {
     let other_terms = env.terms(2)?;
     let (other_pda, other_bump) = other_terms.dvp_authority()?;
     let mut create = env.prove_create(&terms)?;
-    // The other terms' id with its own bump derives a valid PDA, but the
-    // create proof binds the original id and owner hash. Since the PDA
-    // follows from the id, this fails on either binding; it does not show
-    // the `dvp_id` public input alone is checked.
+    // 1. Check another DvP ID and valid PDA fail verification.
     create.dvp_id = other_terms.dvp_id()?;
     create.bump = other_bump;
     ensure!(
@@ -112,28 +103,26 @@ fn fund_dvp_and_discover_deposits() -> Result<()> {
     };
     assert_eq!(discovered.dvp_utxo.terms, terms);
 
-    // The seller funds delivery (SPL, `transfer`) with a surplus; the buyer
-    // funds payment (SOL, `transfer_sol`) exactly.
-    let delivery_note = env.shield(&env.seller, terms.delivery_mint, SHIELD_AMOUNT)?;
-    let payment_note = env.shield(&env.buyer, SOL_MINT, SHIELD_AMOUNT)?;
+    // 1. Fund delivery with surplus and payment exactly.
+    let delivery_utxo = env.shield(&env.seller, terms.delivery_mint, SHIELD_AMOUNT)?;
+    let payment_utxo = env.shield(&env.buyer, SOL_MINT, SHIELD_AMOUNT)?;
     let delivery_amount = DELIVERY_AMOUNT + DELIVERY_SURPLUS;
     env.fund(
         &env.seller,
         &terms,
         Leg::Delivery,
         delivery_amount,
-        delivery_note,
+        delivery_utxo,
     )?;
     env.fund(
         &env.buyer,
         &terms,
         Leg::Payment,
         PAYMENT_AMOUNT,
-        payment_note,
+        payment_utxo,
     )?;
 
-    // The settlement authority finds both deposits by the PDA tag and reads
-    // them with its viewing key.
+    // 2. Check the settlement authority decrypts both deposits.
     let registry = env.assets()?;
     let deposits = index_deposits(
         &terms,
@@ -164,8 +153,7 @@ fn fund_dvp_and_discover_deposits() -> Result<()> {
         )
     );
 
-    // Each funder re-reads exactly its own deposit through its transaction
-    // viewing key, and sees the opening the authority sees.
+    // 3. Check each funder decrypts only its own deposit.
     for (funder, expected) in [(&env.seller, delivery), (&env.buyer, payment)] {
         let own = index_own_deposits(
             &terms,
@@ -176,6 +164,42 @@ fn fund_dvp_and_discover_deposits() -> Result<()> {
             has_legs([expected.leg]),
         )?;
         assert_eq!(own, vec![expected.clone()]);
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires the Node WASM build and npm ci; run explicitly after the Rust flows"]
+fn node_client_lifecycles() -> anyhow::Result<()> {
+    use anyhow::ensure;
+    use std::{path::Path, process::Command};
+    use zolana_program_test::{fixture, localnet::LocalnetPorts};
+    use zolana_transaction::SOL_MINT;
+    let env = shared::setup(12)?;
+    env.shield(&env.seller, fixture::spl_mint(), 900_000_000)?;
+    env.shield(&env.buyer, SOL_MINT, 50_000_000)?;
+    let ports = LocalnetPorts::for_test(12)?;
+    let seed = |key: &solana_keypair::Keypair| -> String {
+        key.to_bytes()
+            .iter()
+            .take(32)
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    };
+    for flow in ["settle", "reclaim", "cancel", "reject"] {
+        let status = Command::new("npm")
+            .args(["run", "example", "--", &format!("examples/{flow}.ts")])
+            .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../typescript"))
+            .env("ZOLANA_LOCALNET_URL", ports.rpc_url())
+            .env("ZOLANA_INDEXER_URL", ports.photon_url())
+            .env("ZOLANA_PROVER_URL", "http://127.0.0.1:3001")
+            .env("DVP_SELLER_SEED", seed(&env.seller.solana))
+            .env("DVP_BUYER_SEED", seed(&env.buyer.solana))
+            .env("DVP_AUTHORITY_SEED", seed(&env.settlement_authority.solana))
+            .env("DVP_DELIVERY_MINT", fixture::spl_mint().to_string())
+            .env("DVP_DELIVERY_ASSET_ID", fixture::SPL_ASSET_ID.to_string())
+            .status()?;
+        ensure!(status.success(), "Node {flow} example failed: {status}");
     }
     Ok(())
 }

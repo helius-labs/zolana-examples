@@ -10,8 +10,7 @@ use crate::{
 
 pub struct SettleDvp {
     pub payer: Address,
-    /// The terms' settlement authority, a readonly signer whose identity the
-    /// settle proof binds.
+    /// Settlement authority checked by the proof.
     pub settlement_authority: Address,
     /// The SPP tree: output tree, and input tree of every tree context.
     pub tree: Address,
@@ -29,7 +28,10 @@ pub struct SettleDvp {
 }
 
 impl SettleDvp {
+    /// 1. Encode the instruction data.
+    /// 2. Add the DvP and SPP accounts.
     pub fn instruction(self) -> Result<Instruction> {
+        // 1. Encode the instruction data.
         let Self {
             payer,
             settlement_authority,
@@ -49,6 +51,7 @@ impl SettleDvp {
             settle_proof,
             spp,
         };
+        // 2. Add the DvP and SPP accounts.
         dvp_instruction(
             tag::SETTLE_DVP,
             DvpAccounts {

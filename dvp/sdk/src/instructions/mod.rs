@@ -6,23 +6,19 @@ pub mod reclaim_dvp;
 pub mod reject_dvp;
 pub mod settle_dvp;
 
-use anyhow::Result;
-use dvp_program::instructions::shared::dvp_authority;
+use anyhow::{ensure, Result};
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use wincode::{config::DefaultConfig, SchemaWrite};
-use zolana_interface::{
-    instruction::instruction_data::transact::TransactIxData, SHIELDED_POOL_PROGRAM_ID,
-};
-use zolana_program::instruction::nullifier_pda_accounts;
+use zolana_interface::instruction::instruction_data::transact::TransactIxData;
+use zolana_program::instruction::Transact;
 
 use crate::err;
 
 /// The accounts every DvP instruction takes besides its SPP list.
 struct DvpAccounts {
     payer: Address,
-    /// The instruction's readonly signer, whose identity its proof binds
-    /// (the creator, the settlement authority or a party).
+    /// Signer checked by the instruction proof.
     signer: Address,
     /// The SPP tree: output tree, and input tree of every tree context.
     tree: Address,
@@ -32,10 +28,9 @@ struct DvpAccounts {
     bump: u8,
 }
 
-/// A DvP instruction: `tag` and the serialized `ix_data`, whose SPP transact
-/// is `spp`. The payer and the signer come first; everything after them is
-/// the forwarded SPP transact list, with a nullifier PDA for each spent
-/// input, ending in the `dvp_authority` owner signer the program signs for.
+/// 1. Check the DvP authority bump.
+/// 2. Forward the SDK's SPP account list.
+/// 3. Encode the DvP instruction.
 fn dvp_instruction<T>(
     tag: u8,
     accounts: DvpAccounts,
@@ -53,23 +48,43 @@ where
         dvp_id,
         bump,
     } = accounts;
-    let dvp_authority = dvp_authority(&creator, &dvp_id, bump).map_err(err)?;
-    let nullifier_pdas =
-        nullifier_pda_accounts(&tree, spp.inputs.iter().map(|input| &input.nullifier_hash));
-    let input_trees = std::iter::repeat_n(AccountMeta::new(tree, false), spp.tree_contexts.len());
-
+    // 1. Check the DvP authority bump.
+    let (dvp_authority, canonical_bump) = Address::try_find_program_address(
+        &[
+            dvp_program::DVP_AUTHORITY_PDA_SEED,
+            creator.as_ref(),
+            &dvp_id,
+        ],
+        &dvp_program::ID,
+    )
+    .ok_or_else(|| anyhow::anyhow!("cannot derive the DvP authority"))?;
+    ensure!(
+        bump == canonical_bump,
+        "the DvP authority bump is not canonical"
+    );
+    // 2. Forward the SDK's SPP account list.
+    let mut forwarded = Transact {
+        payer,
+        input_trees: vec![tree; spp.tree_contexts.len()],
+        output_tree: tree,
+        owner_signers: vec![dvp_authority],
+        interface_transfer_accounts: Vec::new(),
+        data: spp.clone(),
+    }
+    .instruction()
+    .accounts;
+    for account in &mut forwarded {
+        if account.pubkey == dvp_authority {
+            account.is_signer = false;
+        }
+    }
     let mut metas = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new_readonly(signer, true),
-        AccountMeta::new(payer, true),
-        AccountMeta::new(tree, false),
-        AccountMeta::new_readonly(Address::new_from_array(SHIELDED_POOL_PROGRAM_ID), false),
-        AccountMeta::new_readonly(Address::default(), false),
     ];
-    metas.extend(input_trees);
-    metas.extend(nullifier_pdas);
-    metas.push(AccountMeta::new_readonly(dvp_authority, false));
+    metas.extend(forwarded);
 
+    // 3. Encode the DvP instruction.
     let mut data = vec![tag];
     data.extend_from_slice(&wincode::serialize(ix_data).map_err(err)?);
     Ok(Instruction {

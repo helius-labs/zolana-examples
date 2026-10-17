@@ -29,7 +29,7 @@ pub struct FundDvpParams {
     /// terms name only its Solana address). The deposit ciphertext is
     /// encrypted to it.
     pub authority_viewing_pubkey: P256Pubkey,
-    /// The funder's spendable notes, the first one real.
+    /// The funder's spendable UTXOs, the first one real.
     pub inputs: Vec<WalletUtxo>,
     /// Fee payer and SPP payer; the funder's Solana key, since an Ed25519
     /// input owner must sign the transaction.

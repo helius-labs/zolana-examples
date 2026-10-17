@@ -10,21 +10,19 @@
 //!     --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program
 //! SHIELDED_POOL_PROGRAM_PATH=/path/to/shielded_pool_program.so \
 //! ZOLANA_CLI_BIN=/path/to/zolana \
-//!     cargo test --manifest-path dvp/Cargo.toml -p dvp-test --test bench_cu -- --ignored --nocapture
+//!     cargo test --release --locked --manifest-path dvp/Cargo.toml -p dvp-test --test bench_cu -- --ignored --nocapture
 //! ```
 //!
-//! - The shielded pool program is the plain v0.4.0-alpha release build, read
+//! - The shielded pool program is read
 //!   from `SHIELDED_POOL_PROGRAM_PATH`, else from
 //!   `dvp/target/bench/shielded_pool_program.so`.
 //! - The SPP proofs come from the local prover server: one already serving
 //!   `ZOLANA_PROVER_URL` is reused, else the `zolana` CLI
 //!   (`ZOLANA_CLI_BIN`) starts one with the keys in `ZOLANA_PROVER_KEYS_DIR`,
 //!   else `~/.config/zolana/proving-keys`.
-//! - The DvP circuit proofs come from the in-process gnark prover with the
-//!   keys in `dvp/build/gnark`.
-//! - The circuit constraint counts come from
-//!   `dvp/prover/circuits/testdata/constraints.txt`, which the circuits'
-//!   Go test `TestConstraintCounts` checks against the compiled circuits.
+//! - The DvP circuit proofs come from the program prover with the
+//!   keys in `dvp/target/zk/dvp-program`.
+//! - Circuit constraint counts come from the compiled program circuits.
 //!
 //! The SPP tree account is built directly: the program's tree init, then the
 //! input UTXO hashes appended. The SPP proofs prove against local copies of
@@ -37,7 +35,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use dvp_prover::{CircuitId, PROVER};
+use dvp_sdk::proof::CircuitId;
 use dvp_sdk::{
     instructions::{
         abort_dvp::{AbortDvp, AbortDvpTransactionParams, AbortMode},
@@ -65,7 +63,6 @@ use zolana_client::{
     NonInclusionProof, Proof, ProveRequest, Prover, ProverClient, ProverExt, SpendProof,
     STATE_TREE_HEIGHT,
 };
-use zolana_gnark_ffi_prover::Circuit;
 use zolana_hasher::Poseidon;
 use zolana_interface::{
     instruction::instruction_data::transact::TransactIxData,
@@ -83,12 +80,6 @@ use zolana_tree::TreeAccount;
 
 const PROFILING_SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/bench");
 const OUTPUT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../BENCHMARK.md");
-/// `<circuit> <constraints>` per DvP circuit, kept current by the circuits'
-/// Go test `TestConstraintCounts`.
-const CONSTRAINTS_PATH: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../prover/circuits/testdata/constraints.txt"
-);
 /// The whole per-transaction budget, which every instruction must fit.
 const TRANSACT_CU_LIMIT: u32 = 1_400_000;
 /// The version 1 transaction size limit.
@@ -109,6 +100,62 @@ const SURPLUS: u64 = 50_000_000;
 /// Pool asset id of the delivery mint. No instruction moves public funds, so
 /// the mint needs no registration.
 const DELIVERY_ASSET_ID: u64 = 2;
+
+#[test]
+#[ignore = "CU benchmark; slow, needs the profiling SBF build and a prover. See the module docs"]
+/// 1. Configure the program runtime and fixture clock.
+/// 2. Start the prover and check all program keys.
+/// 3. Measure every instruction and write the report.
+fn bench_cu_dvp() {
+    // 1. Configure the program runtime and fixture clock.
+    env::set_var("SBF_OUT_DIR", PROFILING_SBF_DIR);
+
+    let dvp_id = dvp_program::ID;
+    let spp_id = Address::new_from_array(SHIELDED_POOL_PROGRAM_ID);
+
+    let mut mollusk = Mollusk::default();
+    mollusk.compute_budget.compute_unit_limit = u64::from(TRANSACT_CU_LIMIT);
+    // Keep the runtime slot after every fixture append.
+    mollusk.warp_to_slot(BENCH_SLOT);
+    mollusk.sysvars.clock.unix_timestamp = NOW;
+    register_profiling_syscalls(&mut mollusk);
+    mollusk.add_program(&dvp_id, "dvp_program");
+    mollusk.add_program_with_loader_and_elf(&spp_id, &LOADER_V3, &shielded_pool_elf());
+
+    let report = CuBenchmark::new(ReadmeConfig {
+        title: "Private DvP -- CU Benchmark".into(),
+        description: "1. Measure the five DvP instructions under Mollusk using the test release shielded-pool program. Each DvP handler verifies its generated program proof and invokes SPP directly. Cancellation and rejection share process_abort_dvp.\n\n2. Record SPP and program proving times, consumed compute units, and serialized v1 transaction sizes. Create/reclaim use 1x2 with compact output padding; settle uses 3x4; cancel/reject use 3x2 with real optional deposits before random input padding.\n\n3. Report compiled program constraints, checksummed proving-key image sizes, and the total bytes of verifying-key curve points. Release-profile program proof timings include loading the checked key image. Build the profiling program first with cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.53 --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program.".into(),
+        output_path: OUTPUT_PATH.into(),
+        regenerate_command: Some(
+            "cargo test --release --locked -p dvp-test --test bench_cu -- --ignored --nocapture".into(),
+        ),
+        ..Default::default()
+    });
+
+    // 2. Start the prover and check all program keys.
+    start_prover();
+    for circuit in CircuitId::ALL {
+        dvp_sdk::proof::verifying_key(circuit).expect("preload DvP keys");
+    }
+
+    let mut bench = Bench {
+        mollusk,
+        tree: zolana_interface::pda::tree(BENCH_TREE_ID),
+        prover: ProverClient::local(),
+        report,
+        circuit_proof_times: Vec::new(),
+    };
+    // 3. Measure every instruction and write the report.
+    bench_create_dvp(&mut bench);
+    bench_reclaim_dvp(&mut bench);
+    bench_settle_dvp(&mut bench);
+    bench_abort_dvp(&mut bench, AbortMode::Cancel);
+    bench_abort_dvp(&mut bench, AbortMode::Reject);
+    let circuits = circuits_table(&bench.circuit_proof_times);
+    bench.report.add_table("circuits", circuits);
+
+    bench.report.generate().expect("write BENCHMARK.md");
+}
 
 fn system_owned_account(lamports: u64) -> Account {
     Account::new(lamports, 0, &Address::default())
@@ -247,11 +294,7 @@ fn assemble_accounts(ix: &Instruction, fixtures: &[(Address, Account)]) -> Vec<(
         .collect()
 }
 
-/// Builds the tree account holding the inputs of `proof_inputs`, then proves
-/// the SPP transaction against it, once to warm the prover and once timed.
-/// Every real DvP input is owned by the DvP authority PDA under the public
-/// zero nullifier secret. Checks the proof covers the same transaction as the
-/// DvP circuit proof, whose private tx hash is `private_tx_hash`.
+/// Prove the PDA transaction against fixture trees after warming the prover.
 fn prove_spp(
     bench: &Bench,
     proof_inputs: SppProofInputs,
@@ -274,9 +317,7 @@ fn prove_spp(
     (tree_account, transact, elapsed)
 }
 
-/// A prover that times the requests it forwards. The create transaction
-/// proves its SPP transfer inside `CreateDvpTransaction::prove`, so this is
-/// how the create SPP proof time is told apart from the create proof's.
+/// Measure SPP request time separately from the create program proof.
 struct TimedProver {
     inner: ProverClient,
     elapsed: Mutex<Duration>,
@@ -297,9 +338,7 @@ impl Prover for TimedProver {
     }
 }
 
-/// Starts the prover with the keys in `ZOLANA_PROVER_KEYS_DIR`, else in
-/// `~/.config/zolana/proving-keys`, the directory `zolana test-env` keeps
-/// them in. The prover the CLI starts inherits the variable.
+/// Start the shared prover using the configured keys directory.
 fn start_prover() {
     if env::var_os("ZOLANA_PROVER_KEYS_DIR").is_none() {
         let home = env::var("HOME").expect("HOME is set");
@@ -355,21 +394,14 @@ fn format_size(bytes: u64) -> String {
 /// Each DvP circuit's constraint count, key sizes and the circuit proof time
 /// of the first instruction proving it (cancel_dvp for abort_dvp).
 fn circuits_table(proof_times: &[(CircuitId, Duration)]) -> SectionTable {
-    let constraints = fs::read_to_string(CONSTRAINTS_PATH)
-        .unwrap_or_else(|e| panic!("read {CONSTRAINTS_PATH}: {e}"));
     let rows = CircuitId::ALL
         .iter()
         .map(|&circuit| {
             let name = circuit.name();
-            let count = constraints
-                .lines()
-                .find_map(|line| {
-                    line.split_once(' ')
-                        .filter(|(circuit_name, _)| *circuit_name == name)
-                        .map(|(_, count)| count)
-                })
-                .unwrap_or_else(|| panic!("no constraint count for {name} in {CONSTRAINTS_PATH}"));
-            let keys_dir = PROVER.keys_dir(circuit);
+            let count = dvp_sdk::proof::constraint_count(circuit)
+                .expect("constraint count")
+                .to_string();
+            let keys_dir = dvp_sdk::proof::keys_dir();
             let proof_time = proof_times
                 .iter()
                 .find(|(proven, _)| *proven == circuit)
@@ -377,9 +409,19 @@ fn circuits_table(proof_times: &[(CircuitId, Duration)]) -> SectionTable {
                 .unwrap_or_else(|| panic!("no proof time for {name}"));
             vec![
                 name.into(),
-                count.into(),
-                format_size(file_size(&keys_dir.join("pk.bin"))),
-                format_size(file_size(&keys_dir.join("vk.bin"))),
+                count,
+                format_size(file_size(&keys_dir.join(format!("{name}.pk")))),
+                format_size({
+                    let key = dvp_sdk::proof::verifying_key(circuit).expect("verifying key");
+                    u64::try_from(
+                        key.alpha_g1.len()
+                            + key.beta_g2.len()
+                            + key.gamma_g2.len()
+                            + key.delta_g2.len()
+                            + key.ic.iter().map(|point| point.len()).sum::<usize>(),
+                    )
+                    .expect("verifying-key size")
+                }),
                 format!("{} ms", proof_time.as_millis()),
             ]
         })
@@ -390,7 +432,7 @@ fn circuits_table(proof_times: &[(CircuitId, Duration)]) -> SectionTable {
             "Circuit".into(),
             "Constraints".into(),
             "Proving key".into(),
-            "Verifying key".into(),
+            "VK points".into(),
             "Proof time".into(),
         ],
         rows,
@@ -442,8 +484,7 @@ struct Parties {
 }
 
 impl Parties {
-    /// The terms deliver an SPL mint against SOL, settled and refunded to
-    /// the parties' own addresses, expiring an hour after [`NOW`].
+    /// Build signer fixtures and private SPL/SOL terms.
     fn new() -> Self {
         let shielded = || ShieldedKeypair::from_keypair(&Keypair::new()).expect("shielded keypair");
         let (seller, buyer, settlement_authority) = (shielded(), shielded(), shielded());
@@ -510,9 +551,7 @@ struct Bench {
 }
 
 impl Bench {
-    /// Runs `ix` against `tree_account`, checks it succeeds (mollusk caps it
-    /// at the transaction budget), and records its profile, proving times
-    /// and size, and the proof time of `circuit` if not yet recorded.
+    /// Check the instruction fits its budget and record its measurements.
     fn record(
         &mut self,
         name: &str,
@@ -545,86 +584,13 @@ impl Bench {
     }
 }
 
-#[test]
-#[ignore = "CU benchmark; slow, needs the profiling SBF build and a prover. See the module docs"]
-fn bench_cu_dvp() {
-    env::set_var("SBF_OUT_DIR", PROFILING_SBF_DIR);
-
-    let dvp_id = dvp_program::ID;
-    let spp_id = Address::new_from_array(SHIELDED_POOL_PROGRAM_ID);
-
-    let mut mollusk = Mollusk::default();
-    mollusk.compute_budget.compute_unit_limit = u64::from(TRANSACT_CU_LIMIT);
-    // The fixture tree appends its leaves at slots 1..=n; SPP rejects a tree
-    // updated after the current slot.
-    mollusk.warp_to_slot(BENCH_SLOT);
-    mollusk.sysvars.clock.unix_timestamp = NOW;
-    register_profiling_syscalls(&mut mollusk);
-    mollusk.add_program(&dvp_id, "dvp_program");
-    mollusk.add_program_with_loader_and_elf(&spp_id, &LOADER_V3, &shielded_pool_elf());
-
-    let report = CuBenchmark::new(ReadmeConfig {
-        title: "Private DvP -- CU Benchmark".into(),
-        description:
-            "Compute unit profiling for the private DvP create_dvp/reclaim_dvp/settle_dvp/\
-             cancel_dvp/reject_dvp instructions, replayed under mollusk. The shielded-pool tree \
-             account is built directly (the program's `create_tree` init plus the input utxo \
-             hashes appended), and each instruction verifies its own Groth16 proof, then CPIs \
-             SPP `transact` (the `cpi_spp_transact*` row). Only the DvP program is profiled; the \
-             shielded-pool program is the plain v0.4.0-alpha release build, so the CU its CPI \
-             consumes is charged to the `cpi_spp_transact*` row as a black box and its internal \
-             functions do not appear here. The SPP shapes are 1x2 for create_dvp (the address \
-             slot in, the DvP UTXO and compact padding out) and reclaim_dvp (a deposit in, the \
-             refund and compact padding out), 3x4 for settle_dvp, and 3x2 for cancel_dvp (both \
-             deposits) and reject_dvp (the payment deposit only, so one padding input). Each \
-             instruction section also records its proving times (SPP proof plus the DvP circuit \
-             proof) and the serialized size of the version 1 transaction it is sent as, which \
-             states its compute ceilings in the message header and may run to 4096 bytes. The \
-             Circuits section lists each DvP circuit's R1CS constraint count, its proving and \
-             verifying key sizes and its circuit proof time (abort_dvp, which serves cancel_dvp \
-             and reject_dvp, as timed for cancel_dvp). The \
-             profiled program must be built first: `cargo build-sbf --manifest-path \
-             dvp/program/Cargo.toml --tools-version v1.53 --sbf-out-dir dvp/target/bench -- \
-             --features bpf-entrypoint,profile-program`."
-                .into(),
-        output_path: OUTPUT_PATH.into(),
-        regenerate_command: Some(
-            "cargo test -p dvp-test --test bench_cu -- --ignored --nocapture".into(),
-        ),
-        ..Default::default()
-    });
-
-    start_prover();
-    for &circuit in CircuitId::ALL {
-        PROVER.preload(circuit).expect("preload DvP keys");
-    }
-
-    let mut bench = Bench {
-        mollusk,
-        tree: zolana_interface::pda::tree(BENCH_TREE_ID),
-        prover: ProverClient::local(),
-        report,
-        circuit_proof_times: Vec::new(),
-    };
-    bench_create_dvp(&mut bench);
-    bench_reclaim_dvp(&mut bench);
-    bench_settle_dvp(&mut bench);
-    bench_abort_dvp(&mut bench, AbortMode::Cancel);
-    bench_abort_dvp(&mut bench, AbortMode::Reject);
-    let circuits = circuits_table(&bench.circuit_proof_times);
-    bench.report.add_table("circuits", circuits);
-
-    bench.report.generate().expect("write BENCHMARK.md");
-}
-
 fn bench_create_dvp(bench: &mut Bench) {
     let parties = Parties::new();
     let terms = &parties.terms;
     let address = CreateDvpDerivation::new(terms, BENCH_TREE_ID)
         .expect("derivation")
         .address;
-    // The address slot has no UTXO root: an empty state tree serves, and the
-    // address is proven absent from the empty nullifier tree.
+    // 1. Prove the reserved address is absent from the nullifier tree.
     let (tree_account, _, nullifier_root, _) = build_tree_fixture(&bench.tree, &[]);
     let nf_tree = nullifier_tree().expect("nullifier tree");
     assert_eq!(nf_tree.root(), nullifier_root, "nullifier root gate");
@@ -645,7 +611,7 @@ fn bench_create_dvp(bench: &mut Bench) {
         inner: ProverClient::local(),
         elapsed: Mutex::new(Duration::ZERO),
     };
-    // Warm the SPP prover, as the other instructions do.
+    // 2. Warm the SPP prover before measuring.
     params()
         .build()
         .expect("build create")
@@ -686,11 +652,15 @@ fn bench_reclaim_dvp(bench: &mut Bench) {
     let proof_inputs = transaction.proof_inputs;
     let (tree_account, spp, spp_dur) = prove_spp(
         bench,
-        transaction.spp_proof_inputs,
-        proof_inputs.private_tx_hash,
+        transaction.spp_proof_inputs.clone(),
+        transaction
+            .spp_proof_inputs
+            .padding_independent_private_tx_hash()
+            .expect("private transaction hash"),
     );
     let start = Instant::now();
-    let reclaim_proof = proof_inputs.prove().expect("reclaim prove");
+    let reclaim_proof =
+        dvp_sdk::proof::prove(CircuitId::ReclaimDvp, &proof_inputs).expect("reclaim prove");
     let circuit_dur = start.elapsed();
     let (_, bump) = terms.dvp_authority().expect("dvp authority");
 
@@ -699,9 +669,9 @@ fn bench_reclaim_dvp(bench: &mut Bench) {
         signer: pubkey(&parties.seller),
         tree: bench.tree,
         creator: terms.creator,
-        dvp_id: proof_inputs.dvp_id,
+        dvp_id: proof_inputs.public.dvp_id,
         bump,
-        reclaim_proof: reclaim_proof.into(),
+        reclaim_proof,
         spp,
     }
     .instruction()
@@ -720,7 +690,7 @@ fn bench_reclaim_dvp(bench: &mut Bench) {
 fn bench_settle_dvp(bench: &mut Bench) {
     let parties = Parties::new();
     let terms = &parties.terms;
-    // A timestamp a little behind the cluster clock, inside TIME_WINDOW.
+    // 1. Choose a recent timestamp inside TIME_WINDOW.
     let current_timestamp = NOW - 2;
     let transaction = SettleDvpTransactionParams {
         terms: terms.clone(),
@@ -737,11 +707,15 @@ fn bench_settle_dvp(bench: &mut Bench) {
     let proof_inputs = transaction.proof_inputs;
     let (tree_account, spp, spp_dur) = prove_spp(
         bench,
-        transaction.spp_proof_inputs,
-        proof_inputs.private_tx_hash,
+        transaction.spp_proof_inputs.clone(),
+        transaction
+            .spp_proof_inputs
+            .padding_independent_private_tx_hash()
+            .expect("private transaction hash"),
     );
     let start = Instant::now();
-    let settle_proof = proof_inputs.prove().expect("settle prove");
+    let settle_proof =
+        dvp_sdk::proof::prove(CircuitId::SettleDvp, &proof_inputs).expect("settle prove");
     let circuit_dur = start.elapsed();
     let (_, bump) = terms.dvp_authority().expect("dvp authority");
 
@@ -750,10 +724,10 @@ fn bench_settle_dvp(bench: &mut Bench) {
         settlement_authority: pubkey(&parties.settlement_authority),
         tree: bench.tree,
         creator: terms.creator,
-        dvp_id: proof_inputs.dvp_id,
+        dvp_id: proof_inputs.public.dvp_id,
         bump,
         current_timestamp,
-        settle_proof: settle_proof.into(),
+        settle_proof,
         spp,
     }
     .instruction()
@@ -770,7 +744,7 @@ fn bench_settle_dvp(bench: &mut Bench) {
 }
 
 /// Cancel by the settlement authority with both legs funded, or reject by
-/// the buyer with only the payment leg funded (so input slot 2 is padding).
+/// the buyer with payment only, before input padding.
 fn bench_abort_dvp(bench: &mut Bench, mode: AbortMode) {
     let parties = Parties::new();
     let terms = &parties.terms;
@@ -805,11 +779,15 @@ fn bench_abort_dvp(bench: &mut Bench, mode: AbortMode) {
     let proof_inputs = transaction.proof_inputs;
     let (tree_account, spp, spp_dur) = prove_spp(
         bench,
-        transaction.spp_proof_inputs,
-        proof_inputs.private_tx_hash,
+        transaction.spp_proof_inputs.clone(),
+        transaction
+            .spp_proof_inputs
+            .padding_independent_private_tx_hash()
+            .expect("private transaction hash"),
     );
     let start = Instant::now();
-    let abort_proof = proof_inputs.prove().expect("abort prove");
+    let abort_proof =
+        dvp_sdk::proof::prove(CircuitId::AbortDvp, &proof_inputs).expect("abort prove");
     let circuit_dur = start.elapsed();
     let (_, bump) = terms.dvp_authority().expect("dvp authority");
 
@@ -820,9 +798,9 @@ fn bench_abort_dvp(bench: &mut Bench, mode: AbortMode) {
             settlement_authority: pubkey(signer),
             tree: bench.tree,
             creator: terms.creator,
-            dvp_id: proof_inputs.dvp_id,
+            dvp_id: proof_inputs.public.dvp_id,
             bump,
-            cancel_proof: abort_proof.into(),
+            cancel_proof: abort_proof,
             spp,
         }),
         AbortMode::Reject => AbortDvp::Reject(RejectDvp {
@@ -830,9 +808,9 @@ fn bench_abort_dvp(bench: &mut Bench, mode: AbortMode) {
             signer: pubkey(signer),
             tree: bench.tree,
             creator: terms.creator,
-            dvp_id: proof_inputs.dvp_id,
+            dvp_id: proof_inputs.public.dvp_id,
             bump,
-            reject_proof: abort_proof.into(),
+            reject_proof: abort_proof,
             spp,
         }),
     };

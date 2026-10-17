@@ -57,37 +57,6 @@ pub fn scan_own_deposits(
     })
 }
 
-/// The deposits the PDA-tagged ciphertext slots of `tx` open under
-/// `decrypt`: those whose asset is one of the legs and whose PDA-owned,
-/// data-free UTXO hashes to the slot's committed leaf. The hash check is
-/// what makes an opening spendable: a slot with data, another owner or a
-/// wrong amount fails it.
-fn committed_deposits(
-    tx: &ShieldedTransaction,
-    terms: &SwapDvp,
-    registry: &AssetRegistry,
-    decrypt: impl Fn(u32, &[u8]) -> Option<ConfidentialOutputPlaintext>,
-) -> Result<Vec<Deposit>> {
-    let pda_tag = terms.dvp_authority()?.0.to_bytes();
-    Ok(tagged_confidential_outputs(tx, &pda_tag)
-        .filter_map(|(slot_index, slot, body)| {
-            let plaintext = decrypt(slot_index, &body)?;
-            let mint = resolve_mint(registry, plaintext.asset_id).ok()?;
-            let context = &slot.output_context;
-            let deposit = Deposit {
-                terms: terms.clone(),
-                leg: Leg::of_mint(terms, &mint.asset)?,
-                mint,
-                amount: plaintext.amount,
-                blinding: plaintext.blinding,
-                tree_id: context.tree_id,
-                leaf_index: context.leaf_index,
-            };
-            (deposit.hash().ok()? == context.hash).then_some(deposit)
-        })
-        .collect())
-}
-
 /// Polls the indexer until the unspent deposits of `terms` the settlement
 /// authority can read ([`scan_deposits`]), found by the PDA tag, satisfy
 /// `ready` (for example: both legs present).
@@ -150,6 +119,37 @@ fn index_unspent<I: Rpc>(
         },
         ready,
     )
+}
+
+/// The deposits the PDA-tagged ciphertext slots of `tx` decrypt under
+/// `decrypt`: those whose asset is one of the legs and whose PDA-owned,
+/// data-free UTXO hashes to the slot's committed leaf. The hash check is
+/// what makes a deposit spendable: a slot with data, another owner or a
+/// wrong amount fails it.
+fn committed_deposits(
+    tx: &ShieldedTransaction,
+    terms: &SwapDvp,
+    registry: &AssetRegistry,
+    decrypt: impl Fn(u32, &[u8]) -> Option<ConfidentialOutputPlaintext>,
+) -> Result<Vec<Deposit>> {
+    let pda_tag = terms.dvp_authority()?.0.to_bytes();
+    Ok(tagged_confidential_outputs(tx, &pda_tag)
+        .filter_map(|(slot_index, slot, body)| {
+            let plaintext = decrypt(slot_index, &body)?;
+            let mint = resolve_mint(registry, plaintext.asset_id).ok()?;
+            let context = &slot.output_context;
+            let deposit = Deposit {
+                terms: terms.clone(),
+                leg: Leg::of_mint(terms, &mint.asset)?,
+                mint,
+                amount: plaintext.amount,
+                blinding: plaintext.blinding,
+                tree_id: context.tree_id,
+                leaf_index: context.leaf_index,
+            };
+            (deposit.hash().ok()? == context.hash).then_some(deposit)
+        })
+        .collect())
 }
 
 #[cfg(test)]

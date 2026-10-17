@@ -9,19 +9,24 @@ name = "dvp_program"
 crate-type = ["cdylib", "lib"]
 
 [features]
-# The committed verifying keys come from an insecure test setup
-# (SetupKind::InsecureTest): the setup randomness is a fixed public seed, so
-# the keys are reproducible and need no trusted setup ceremony. That is the
-# recommended setup for integration tests, and it is secure there because a
-# test validator holds nothing a forged proof could take. The keys do not
-# compile without this feature, which is on by default because this program is
-# an example, never a devnet or mainnet deployment.
+# Deterministic test keys are guarded by the insecure-test-setup feature.
 default = ["insecure-test-setup"]
 insecure-test-setup = []
 bpf-entrypoint = []
 no-entrypoint = []
 cpi = ["no-entrypoint"]
 test-sbf = []
+circuits = [
+    "dep:zolana-keypair",
+    "dep:zolana-transaction",
+    "zolana-program/client",
+    "zolana-program/setup",
+    "zolana-program/serde",
+]
+parallel = ["zolana-program/parallel"]
+r1cs-export = ["circuits", "zolana-program/r1cs-export"]
+wasm = ["circuits", "zolana-program/wasm"]
+
 profile-program = ["light-program-profiler/profile-program"]
 
 [dependencies]
@@ -37,7 +42,9 @@ wincode = { workspace = true }
 zolana-account-checks = { workspace = true }
 zolana-hasher = { workspace = true }
 zolana-interface = { workspace = true }
-zolana-program = { workspace = true, features = ["cpi", "compression"] }
+zolana-program = { workspace = true, features = ["cpi", "compression", "verifier"] }
+zolana-keypair = { workspace = true, optional = true }
+zolana-transaction = { workspace = true, optional = true }
 
 [dev-dependencies]
 mollusk-svm = { workspace = true }

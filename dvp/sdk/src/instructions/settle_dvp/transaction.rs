@@ -1,123 +1,106 @@
-use anyhow::Result;
-use dvp_prover::SettleDvpProofInputs;
+use anyhow::{ensure, Result};
+use dvp_program::circuits::{
+    SettleDvp as SettleDvpInputs, SettleDvpPrivateInputs, SettleDvpPublicInputs,
+};
 use solana_address::Address;
 use zolana_client::ZolanaIndexer;
+use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::ShieldedKeypair;
+use zolana_program::{ProgramOwner, TxContext, ZkProgram};
 use zolana_transaction::instructions::transact::SppProofInputs;
 
-use super::{SettleDvp, SettleDvpDerivation, SettleDvpProofInputParams};
+use super::SettleDvp;
 use crate::{
-    encryption::encrypt_outputs,
     err,
     shared::{ensure_output_tree, prove_pda_transact},
-    state::{Deposit, DvpUtxo, SwapDvp},
+    state::{Deposit, DvpUtxo, Leg, SwapDvp},
 };
 
-/// Everything the settle transaction needs besides the settlement
-/// authority's keys and the prover.
 pub struct SettleDvpTransactionParams {
     pub terms: SwapDvp,
-    /// The time the settle proof checks the terms' window against. The
-    /// program accepts it while it trails the cluster clock by at most
-    /// `TIME_WINDOW` seconds and is not ahead of it, so take a recent
-    /// cluster time, a few seconds back.
     pub current_timestamp: i64,
     pub dvp_utxo: DvpUtxo,
-    /// Leaf index of the DvP UTXO in its tree (`DiscoveredDvp::leaf_index`).
     pub dvp_utxo_leaf_index: u64,
     pub delivery_deposit: Deposit,
     pub payment_deposit: Deposit,
-    /// Pays the transaction and is the SPP payer, the first signer the SPP
-    /// proof binds.
     pub payer: Address,
-    /// Raw id of the tree the four outputs are appended to.
     pub tree_id: u16,
 }
 
-/// The settle transaction before its proofs: the SPP proof inputs and the
-/// settle proof inputs over the same transaction.
 pub struct SettleDvpTransaction {
     settlement_authority: Address,
     creator: Address,
     bump: u8,
     current_timestamp: i64,
     pub spp_proof_inputs: SppProofInputs,
-    pub proof_inputs: SettleDvpProofInputs,
+    pub proof_inputs: SettleDvpInputs,
 }
 
 impl SettleDvpTransactionParams {
-    /// Builds the settle `transact` at SPP shape 3x4 from
-    /// [`SettleDvpProofInputParams::derive`]: the DvP UTXO and both deposits
-    /// in, the two settlement legs and the two change outputs out, every
-    /// blinding derived from the terms' settlement seed.
-    ///
-    /// Each output is encrypted to its destination, so the buyer, the seller
-    /// and the refund destinations find their notes with their own viewing
-    /// keys. The transaction viewing key is derived from the settlement
-    /// authority's viewing key and the DvP UTXO's nullifier, the first
-    /// nullifier.
-    ///
-    /// Errors unless `settlement_authority` is the terms' settlement
-    /// authority, `current_timestamp` is in the settlement window, both
-    /// deposits fund their legs in full, and the DvP UTXO and the deposits
-    /// sit in the tree with id `tree_id`, which the instruction reads its
-    /// inputs from.
-    pub fn build(self, settlement_authority: &ShieldedKeypair) -> Result<SettleDvpTransaction> {
-        let Self {
-            terms,
-            current_timestamp,
-            dvp_utxo,
-            dvp_utxo_leaf_index,
-            delivery_deposit,
-            payment_deposit,
-            payer,
-            tree_id,
-        } = self;
-        ensure_output_tree("the DvP UTXO", dvp_utxo.tree_id, tree_id)?;
-        ensure_output_tree("the delivery deposit", delivery_deposit.tree_id, tree_id)?;
-        ensure_output_tree("the payment deposit", payment_deposit.tree_id, tree_id)?;
-        let authority = settlement_authority
-            .shielded_address()
-            .map_err(err)?
-            .solana_address()
-            .map_err(err)?;
-        let creator = terms.creator;
-        let (_, bump) = terms.dvp_authority()?;
-        let SettleDvpDerivation {
-            inputs,
-            outputs,
-            blinding_seed,
-            proof_inputs,
-        } = SettleDvpProofInputParams {
-            terms,
-            settlement_authority: authority,
-            current_timestamp,
-            dvp_utxo,
-            dvp_utxo_leaf_index,
-            delivery_deposit,
-            payment_deposit,
-            output_tree_id: tree_id,
-        }
-        .derive()?;
-
-        let [dvp_input, ..] = &inputs;
-        let tx_viewing_key = settlement_authority
-            .get_transaction_viewing_key(&dvp_input.nullifier)
-            .map_err(err)?;
-        let spp_proof_inputs = SppProofInputs {
-            external_data: encrypt_outputs(&outputs, &tx_viewing_key, tree_id)?,
-            input_utxos: inputs.into(),
-            output_utxos: outputs.into(),
-            payer,
-            blinding_seed,
-            output_tree_id: tree_id,
-            cache_accounts: Default::default(),
+    /// 1. Check the terms, deposits, and input trees.
+    /// 2. Build the program transaction.
+    /// 3. Encrypt the settlement and change UTXOs.
+    pub fn build(self, authority: &ShieldedKeypair) -> Result<SettleDvpTransaction> {
+        // 1. Check the terms, deposits, and input trees.
+        self.terms.validate()?;
+        ensure!(self.dvp_utxo.terms == self.terms, "DvP UTXO of other terms");
+        self.delivery_deposit
+            .check_leg(&self.terms, Leg::Delivery)?;
+        self.payment_deposit.check_leg(&self.terms, Leg::Payment)?;
+        ensure_output_tree("the DvP UTXO", self.dvp_utxo.tree_id, self.tree_id)?;
+        ensure_output_tree(
+            "the delivery deposit",
+            self.delivery_deposit.tree_id,
+            self.tree_id,
+        )?;
+        ensure_output_tree(
+            "the payment deposit",
+            self.payment_deposit.tree_id,
+            self.tree_id,
+        )?;
+        let signer = authority.shielded_address().map_err(err)?;
+        let settlement_authority = signer.solana_address().map_err(err)?;
+        let creator = self.terms.creator;
+        let (pda, bump) = self.terms.dvp_authority()?;
+        // 2. Build the program transaction.
+        let proof_inputs = SettleDvpInputs {
+            private: SettleDvpPrivateInputs {
+                tx_context: TxContext::new()
+                    .with_blinding_seed(self.terms.settle_blinding_seed()?)
+                    .with_output_tree_id(Some(self.tree_id)),
+                terms: self
+                    .terms
+                    .circuit_terms(self.delivery_deposit.mint, self.payment_deposit.mint)?,
+                dvp_utxo: self.dvp_utxo.to_input_utxo(self.dvp_utxo_leaf_index)?,
+                delivery_deposit: self.delivery_deposit.to_input_utxo()?,
+                payment_deposit: self.payment_deposit.to_input_utxo()?,
+            },
+            public: SettleDvpPublicInputs {
+                creator_identity: solana_owner_identity(creator.as_array()).map_err(err)?,
+                dvp_id: self.terms.dvp_id()?,
+                dvp_owner: ProgramOwner::new(pda)
+                    .address(authority.viewing_pubkey())
+                    .map_err(err)?,
+                settlement_authority_identity: solana_owner_identity(
+                    settlement_authority.as_array(),
+                )
+                .map_err(err)?,
+                current_timestamp: u64::try_from(self.current_timestamp)?,
+            },
         };
+        let finalized = proof_inputs
+            .create_finalized_transaction(&signer, self.payer)
+            .map_err(err)?;
+        // 3. Encrypt the settlement and change UTXOs.
+        let key = authority
+            .get_transaction_viewing_key(&finalized.first_nullifier().map_err(err)?)
+            .map_err(err)?;
+        let spp_proof_inputs = finalized.encrypt_with_viewing_key(&key).map_err(err)?;
         Ok(SettleDvpTransaction {
-            settlement_authority: authority,
+            settlement_authority,
             creator,
             bump,
-            current_timestamp,
+            current_timestamp: self.current_timestamp,
             spp_proof_inputs,
             proof_inputs,
         })
@@ -125,30 +108,27 @@ impl SettleDvpTransactionParams {
 }
 
 impl SettleDvpTransaction {
-    /// Proves the SPP transaction through `indexer` (which serves the
-    /// inclusion proofs of the DvP UTXO and the deposits) and the settle
-    /// proof locally, and returns the instruction builder for `tree`, the
-    /// account of the tree with id `tree_id`.
+    /// 1. Prove the SPP transaction.
+    /// 2. Prove settle_dvp and build the instruction.
     pub fn prove(self, indexer: &ZolanaIndexer, tree: Address) -> Result<SettleDvp> {
-        let Self {
-            settlement_authority,
-            creator,
-            bump,
-            current_timestamp,
-            spp_proof_inputs,
-            proof_inputs,
-        } = self;
-        let payer = spp_proof_inputs.payer;
-        let spp = prove_pda_transact(indexer, spp_proof_inputs, &proof_inputs.private_tx_hash)?;
-        let settle_proof = proof_inputs.prove().map_err(err)?.into();
+        let private_tx_hash = self
+            .spp_proof_inputs
+            .padding_independent_private_tx_hash()
+            .map_err(err)?;
+        let payer = self.spp_proof_inputs.payer;
+        // 1. Prove the SPP transaction.
+        let spp = prove_pda_transact(indexer, self.spp_proof_inputs, &private_tx_hash)?;
+        // 2. Prove settle_dvp and build the instruction.
+        let settle_proof =
+            crate::proof::prove(crate::proof::CircuitId::SettleDvp, &self.proof_inputs)?;
         Ok(SettleDvp {
             payer,
-            settlement_authority,
+            settlement_authority: self.settlement_authority,
             tree,
-            creator,
-            dvp_id: proof_inputs.dvp_id,
-            bump,
-            current_timestamp,
+            creator: self.creator,
+            dvp_id: self.proof_inputs.public.dvp_id,
+            bump: self.bump,
+            current_timestamp: self.current_timestamp,
             settle_proof,
             spp,
         })
@@ -163,8 +143,40 @@ mod tests {
         FIXTURE_LEAF_INDEX, FIXTURE_SURPLUS,
     };
 
-    /// Leaf the fixture settle appends its first output at.
-    const SETTLE_LEAF: u64 = 40;
+    #[test]
+    fn parties_decrypt_only_their_settlement_and_change() {
+        // 1. Build and encrypt the settlement.
+        let fixture = deposit_fixture();
+        let transaction = params(&fixture).build(&fixture.authority).unwrap();
+        let tx = shielded_transaction(&transaction.spp_proof_inputs, 40);
+        let [seller, buyer] = &fixture.funders;
+        // 2. Check each party receives its agreed asset and surplus.
+        assert_eq!(
+            (
+                spendable_amounts(seller, &tx, &fixture.registry, &fixture.terms.delivery_mint),
+                spendable_amounts(seller, &tx, &fixture.registry, &fixture.terms.payment_mint),
+                spendable_amounts(buyer, &tx, &fixture.registry, &fixture.terms.delivery_mint),
+                spendable_amounts(buyer, &tx, &fixture.registry, &fixture.terms.payment_mint),
+            ),
+            (
+                vec![FIXTURE_SURPLUS],
+                vec![fixture.terms.payment_amount],
+                vec![fixture.terms.delivery_amount],
+                vec![FIXTURE_SURPLUS]
+            )
+        );
+    }
+
+    #[test]
+    fn builder_rejects_the_wrong_authority_and_input_tree() {
+        // 1. Check authorization before proving.
+        let fixture = deposit_fixture();
+        assert!(params(&fixture).build(&fixture.funders[0]).is_err());
+        // 2. Check the instruction's single tree contains every input.
+        let mut params = params(&fixture);
+        params.tree_id += 1;
+        assert!(params.build(&fixture.authority).is_err());
+    }
 
     fn params(fixture: &DepositFixture) -> SettleDvpTransactionParams {
         let [delivery, payment] = &fixture.deposits;
@@ -175,51 +187,8 @@ mod tests {
             dvp_utxo_leaf_index: FIXTURE_LEAF_INDEX,
             delivery_deposit: delivery.clone(),
             payment_deposit: payment.clone(),
-            payer: Address::new_from_array([7; 32]),
+            payer: fixture.terms.creator,
             tree_id: delivery.tree_id,
         }
-    }
-
-    #[test]
-    fn build_pays_both_legs_and_returns_the_surplus() {
-        let fixture = deposit_fixture();
-        let [seller, buyer] = &fixture.funders;
-        let terms = &fixture.terms;
-        let transaction = params(&fixture).build(&fixture.authority).expect("build");
-        let inputs = &transaction.spp_proof_inputs;
-        let tx = shielded_transaction(inputs, SETTLE_LEAF);
-        let amounts = |owner: &ShieldedKeypair, mint: &Address| {
-            spendable_amounts(owner, &tx, &fixture.registry, mint)
-        };
-        assert_eq!(
-            (
-                inputs.input_utxos.len(),
-                inputs.external_data.outputs.len(),
-                inputs.private_tx_blinding().expect("blinding"),
-                amounts(buyer, &terms.delivery_mint),
-                amounts(seller, &terms.payment_mint),
-                amounts(seller, &terms.delivery_mint),
-                amounts(buyer, &terms.payment_mint),
-                amounts(&fixture.authority, &terms.delivery_mint),
-            ),
-            (
-                3,
-                4,
-                transaction.proof_inputs.private_tx_blinding,
-                vec![terms.delivery_amount],
-                vec![terms.payment_amount],
-                vec![FIXTURE_SURPLUS],
-                vec![FIXTURE_SURPLUS],
-                Vec::new(),
-            )
-        );
-    }
-
-    #[test]
-    fn build_refuses_a_signer_other_than_the_settlement_authority() {
-        let fixture = deposit_fixture();
-        let [seller, buyer] = &fixture.funders;
-        assert!(params(&fixture).build(seller).is_err());
-        assert!(params(&fixture).build(buyer).is_err());
     }
 }

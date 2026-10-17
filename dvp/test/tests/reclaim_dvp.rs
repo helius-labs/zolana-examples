@@ -19,14 +19,9 @@ use zolana_transaction::SOL_MINT;
 /// What each funder shields into its private balance before funding.
 const SHIELD_AMOUNT: u64 = 600_000_000;
 
-/// Create a DvP, fund both legs, and let the seller reclaim its delivery
-/// deposit while the DvP is open: the refund lands in the seller's wallet,
-/// the deposit is spent, and the DvP UTXO and the payment deposit are not.
-/// The buyer cannot reclaim the seller's deposit, the proven reclaim does not
-/// run against other SPP accounts, and the deposit cannot be reclaimed
-/// twice.
+/// Reclaim delivery while leaving the DvP and payment deposit active.
 #[test]
-fn reclaim_dvp_while_open() -> Result<()> {
+fn reclaim_dvp_without_closing_the_dvp() -> Result<()> {
     let env = setup(14)?;
     let client = &env.localnet.client;
     let tree = env.localnet.tree;
@@ -34,25 +29,24 @@ fn reclaim_dvp_while_open() -> Result<()> {
     let create = env.prove_create(&terms)?;
     env.send(create.instruction()?, &[&env.seller.solana], None)?;
 
-    let delivery_note = env.shield(&env.seller, terms.delivery_mint, SHIELD_AMOUNT)?;
-    let payment_note = env.shield(&env.buyer, SOL_MINT, SHIELD_AMOUNT)?;
+    let delivery_utxo = env.shield(&env.seller, terms.delivery_mint, SHIELD_AMOUNT)?;
+    let payment_utxo = env.shield(&env.buyer, SOL_MINT, SHIELD_AMOUNT)?;
     env.fund(
         &env.seller,
         &terms,
         Leg::Delivery,
         DELIVERY_AMOUNT,
-        delivery_note,
+        delivery_utxo,
     )?;
     env.fund(
         &env.buyer,
         &terms,
         Leg::Payment,
         PAYMENT_AMOUNT,
-        payment_note,
+        payment_utxo,
     )?;
 
-    // The seller re-reads its own deposit through its transaction viewing
-    // key; the settlement authority sees the payment deposit.
+    // 1. Discover each deposit with the appropriate viewing key.
     let registry = env.assets()?;
     let own = index_own_deposits(
         &terms,
@@ -78,7 +72,7 @@ fn reclaim_dvp_while_open() -> Result<()> {
         .find(|deposit| deposit.leg == Leg::Payment)
         .ok_or_else(|| anyhow!("no payment deposit"))?;
 
-    // Refunds go to the signer's own address.
+    // 2. Build and prove the seller’s refund.
     let reclaim = || ReclaimDvpTransactionParams {
         deposit: delivery.clone(),
         payer: env.payer.pubkey(),
@@ -86,8 +80,7 @@ fn reclaim_dvp_while_open() -> Result<()> {
         tree_id: env.localnet.tree_id,
     };
 
-    // The sdk refuses to build the buyer's reclaim of the delivery deposit:
-    // the reclaim circuit ties the delivery leg to the seller.
+    // 3. Check the buyer cannot reclaim the delivery deposit.
     ensure!(
         reclaim().build(&env.buyer.shielded).is_err(),
         "the sdk built the buyer's reclaim of the delivery deposit"
@@ -98,8 +91,7 @@ fn reclaim_dvp_while_open() -> Result<()> {
         .prove(client.indexer(), tree)?
         .instruction()?;
 
-    // Bypassing the sdk, the buyer submits the seller's proven reclaim as
-    // its own signer: the proof binds the seller's identity.
+    // 4. Check the buyer cannot submit the seller’s proof.
     let mut forged_ix = reclaim_ix.clone();
     forged_ix
         .accounts
@@ -112,9 +104,7 @@ fn reclaim_dvp_while_open() -> Result<()> {
         DvpError::ProofVerificationFailed,
     );
 
-    // The proof does not bind the forwarded SPP accounts; the program checks
-    // them after the proof, before its CPI. Account 4 is the SPP program and
-    // the last one the dvp_authority PDA.
+    // 5. Check the forwarded SPP program and authority accounts.
     let mut wrong_program_ix = reclaim_ix.clone();
     wrong_program_ix
         .accounts
@@ -139,7 +129,7 @@ fn reclaim_dvp_while_open() -> Result<()> {
         "a reclaim with two SPP accounts",
         env.send(short_ix, &[&env.seller.solana], None),
     );
-    // `ProgramError::NotEnoughAccountKeys`, as the RPC error prints it.
+    // 6. Check a missing forwarded account fails.
     ensure!(
         short_error.contains("insufficient account keys for instruction"),
         "a reclaim with two SPP accounts: expected NotEnoughAccountKeys in: {short_error}"
@@ -148,9 +138,8 @@ fn reclaim_dvp_while_open() -> Result<()> {
     let reclaim_signature = env.send(reclaim_ix.clone(), &[&env.seller.solana], None)?;
     client.confirm_private_transaction_sync(reclaim_signature)?;
 
-    // The refund is a spendable note of the whole deposit in the seller's
-    // wallet.
-    let refund = env.received_note(
+    // 7. Check the seller receives the entire deposit.
+    let refund = env.received_utxo(
         &env.seller,
         env.seller.address()?.confidential_view_tag()?,
         terms.delivery_mint,
@@ -161,8 +150,7 @@ fn reclaim_dvp_while_open() -> Result<()> {
         (terms.delivery_mint, DELIVERY_AMOUNT)
     );
 
-    // The deposit is spent; the DvP UTXO and the payment deposit are not,
-    // so the DvP stays open.
+    // 8. Check the DvP and payment deposit remain unspent.
     let delivery_nullifier = delivery.to_input_utxo()?.nullifier;
     wait_for_nullifier_present(client, tree, delivery_nullifier);
     let unspent = [
@@ -173,8 +161,7 @@ fn reclaim_dvp_while_open() -> Result<()> {
     assert_eq!(proofs.proofs.len(), unspent.len());
     assert_nullifier_pdas_absent(client, &tree, &unspent)?;
 
-    // A second reclaim of the same deposit fails in SPP: its nullifier
-    // exists.
+    // 9. Check reclaim replay fails on the spent deposit.
     assert_spp_rejects(
         "second reclaim of the delivery deposit",
         env.send(reclaim_ix, &[&env.seller.solana], Some(1)),

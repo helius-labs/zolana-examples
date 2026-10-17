@@ -21,14 +21,7 @@ const DELIVERY_SURPLUS: u64 = 50_000_000;
 /// What each funder shields into its private balance before funding.
 const SHIELD_AMOUNT: u64 = 600_000_000;
 
-/// Create a DvP, fund delivery with a surplus and payment exactly, and let
-/// the settlement authority settle it: the buyer receives the delivery
-/// amount, the seller the payment amount, the seller's refund destination
-/// the delivery surplus and the buyer's refund destination a zero-amount
-/// payment change. Another signer cannot submit the authority's proven
-/// settle. The DvP UTXO and both deposits are spent, so a
-/// second settle fails, and a deposit that lands after settlement stays
-/// reclaimable by its funder.
+/// Settle both legs with surplus and reclaim a late deposit.
 #[test]
 fn settle_dvp_full_flow() -> Result<()> {
     let env = setup(15)?;
@@ -46,21 +39,21 @@ fn settle_dvp_full_flow() -> Result<()> {
         );
     };
 
-    let delivery_note = env.shield(&env.seller, terms.delivery_mint, SHIELD_AMOUNT)?;
-    let payment_note = env.shield(&env.buyer, SOL_MINT, SHIELD_AMOUNT)?;
+    let delivery_utxo = env.shield(&env.seller, terms.delivery_mint, SHIELD_AMOUNT)?;
+    let payment_utxo = env.shield(&env.buyer, SOL_MINT, SHIELD_AMOUNT)?;
     env.fund(
         &env.seller,
         &terms,
         Leg::Delivery,
         DELIVERY_AMOUNT + DELIVERY_SURPLUS,
-        delivery_note,
+        delivery_utxo,
     )?;
     env.fund(
         &env.buyer,
         &terms,
         Leg::Payment,
         PAYMENT_AMOUNT,
-        payment_note,
+        payment_utxo,
     )?;
 
     let registry = env.assets()?;
@@ -82,8 +75,7 @@ fn settle_dvp_full_flow() -> Result<()> {
     let delivery = deposit(Leg::Delivery)?;
     let payment = deposit(Leg::Payment)?;
 
-    // The settle timestamp is a recent cluster time, so it lies in the
-    // program's window when the transaction lands.
+    // 1. Prove settlement against a recent cluster timestamp.
     let current_timestamp = settle_timestamp(client)?;
     let settle_ix = SettleDvpTransactionParams {
         terms: terms.clone(),
@@ -99,8 +91,7 @@ fn settle_dvp_full_flow() -> Result<()> {
     .prove(client.indexer(), tree)?
     .instruction()?;
 
-    // Bypassing the sdk, the buyer submits the proven settle as its own
-    // signer: the proof binds the settlement authority's identity.
+    // 2. Check the buyer cannot submit the authority’s proof.
     let mut forged_ix = settle_ix.clone();
     forged_ix
         .accounts
@@ -116,24 +107,21 @@ fn settle_dvp_full_flow() -> Result<()> {
     let settle_signature = env.send(settle_ix.clone(), &[&authority.solana], None)?;
     client.confirm_private_transaction_sync(settle_signature)?;
 
-    // A second settle fails in SPP on the spent DvP UTXO. It is sent right
-    // away, so its timestamp is still in the window and only the nullifier
-    // can refuse it.
+    // 3. Check settlement replay fails on spent inputs.
     assert_spp_rejects(
         "second settle",
         env.send(settle_ix, &[&authority.solana], Some(1)),
     );
 
-    // Each party syncs its wallet: the settlement legs and the change are
-    // spendable notes of the settle transaction.
+    // 4. Check the parties receive settlement and change.
     let settled = |actor, mint| -> Result<(_, u64)> {
-        let note = env.received_note(
+        let utxo = env.received_utxo(
             actor,
             actor.address()?.confidential_view_tag()?,
             mint,
             settle_signature,
         )?;
-        Ok((note.utxo.asset.asset, note.utxo.amount))
+        Ok((utxo.utxo.asset.asset, utxo.utxo.amount))
     };
     assert_eq!(
         (
@@ -150,7 +138,7 @@ fn settle_dvp_full_flow() -> Result<()> {
         )
     );
 
-    // The DvP UTXO and both deposits are spent: the DvP is closed.
+    // 5. Check the DvP UTXO and both deposits are spent.
     for nullifier in [
         discovered.dvp_utxo.nullifier()?,
         delivery.to_input_utxo()?.nullifier,
@@ -159,10 +147,9 @@ fn settle_dvp_full_flow() -> Result<()> {
         wait_for_nullifier_present(client, tree, nullifier);
     }
 
-    // A payment deposit that lands after settlement is not lost: the buyer
-    // finds it through its transaction viewing key and reclaims it.
-    let late_note = env.shield(&env.buyer, SOL_MINT, SHIELD_AMOUNT)?;
-    env.fund(&env.buyer, &terms, Leg::Payment, PAYMENT_AMOUNT, late_note)?;
+    // 6. Fund payment again after settlement.
+    let late_utxo = env.shield(&env.buyer, SOL_MINT, SHIELD_AMOUNT)?;
+    env.fund(&env.buyer, &terms, Leg::Payment, PAYMENT_AMOUNT, late_utxo)?;
     let own = index_own_deposits(
         &terms,
         &env.buyer.shielded,
@@ -171,7 +158,7 @@ fn settle_dvp_full_flow() -> Result<()> {
         INDEX_TIMEOUT,
         has_legs([Leg::Payment]),
     )?;
-    // The settled payment deposit is spent, so only the late one is left.
+    // 7. Discover and reclaim the late payment deposit.
     let [late] = own.as_slice() else {
         bail!("the buyer discovered {} unspent own deposits", own.len());
     };
@@ -187,7 +174,7 @@ fn settle_dvp_full_flow() -> Result<()> {
     .instruction()?;
     let reclaim_signature = env.send(reclaim_ix, &[&env.buyer.solana], None)?;
     client.confirm_private_transaction_sync(reclaim_signature)?;
-    let refund = env.received_note(
+    let refund = env.received_utxo(
         &env.buyer,
         env.buyer.address()?.confidential_view_tag()?,
         SOL_MINT,

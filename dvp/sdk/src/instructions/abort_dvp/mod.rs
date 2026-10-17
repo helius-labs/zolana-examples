@@ -1,6 +1,8 @@
-mod proof;
 mod transaction;
 
-pub use dvp_prover::AbortMode;
-pub use proof::{AbortDvpDerivation, AbortDvpProofInputParams};
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AbortMode {
+    Cancel,
+    Reject,
+}
 pub use transaction::{AbortDvp, AbortDvpTransaction, AbortDvpTransactionParams};

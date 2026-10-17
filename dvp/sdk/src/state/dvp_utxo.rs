@@ -1,13 +1,8 @@
 use anyhow::{ensure, Result};
-use zolana_keypair::PublicKey;
-use zolana_transaction::{
-    utxo::{SppProofInputUtxo, Utxo},
-    Data, Mint,
-};
+use zolana_program::ProgramOwner;
+use zolana_transaction::WalletUtxo;
 
-use crate::{
-    err, instructions::create_dvp::CreateDvpDerivation, shared::zero_nullifier_key, state::SwapDvp,
-};
+use crate::{err, instructions::create_dvp::CreateDvpDerivation, state::SwapDvp};
 
 /// The DvP UTXO the create transaction appends: a zero-amount SOL UTXO owned
 /// by the DvP authority PDA with the zero nullifier secret, whose data hash
@@ -40,24 +35,18 @@ impl DvpUtxo {
     /// transactions that spend it.
     pub fn nullifier(&self) -> Result<[u8; 32]> {
         let derivation = self.derivation()?;
-        zero_nullifier_key()
+        ProgramOwner::nullifier_key()
             .nullifier(&derivation.dvp_utxo_hash, &derivation.dvp_utxo.blinding)
             .map_err(err)
     }
 
     /// The UTXO as an SPP input at `leaf_index`. Anyone holding the terms can
     /// build it; spending needs the PDA signature only the program gives.
-    pub fn to_input_utxo(&self, leaf_index: u64) -> Result<SppProofInputUtxo> {
+    pub fn to_input_utxo(&self, leaf_index: u64) -> Result<WalletUtxo> {
         let derivation = self.derivation()?;
-        let utxo = Utxo {
-            owner: PublicKey::from_pda(&derivation.dvp_authority),
-            asset: Mint::SOL,
-            amount: 0,
-            blinding: derivation.dvp_utxo.blinding,
-            ring_program_id: None,
-            data: Data::default(),
-        };
-        let input = pda_input_utxo(utxo, Some(derivation.dvp_id), self.tree_id, leaf_index)?;
+        let input = ProgramOwner::new(derivation.dvp_authority)
+            .input(&derivation.dvp_utxo, self.tree_id, leaf_index)
+            .map_err(err)?;
         ensure!(
             input.utxo_hash == derivation.dvp_utxo_hash,
             "DvP input utxo does not hash to the created DvP UTXO"
@@ -66,42 +55,9 @@ impl DvpUtxo {
     }
 }
 
-/// A PDA-owned `utxo` (the DvP UTXO or a deposit) as an SPP input under the
-/// zero nullifier key, at `leaf_index` of the tree with raw id `tree_id`.
-pub(crate) fn pda_input_utxo(
-    utxo: Utxo,
-    data_hash: Option<[u8; 32]>,
-    tree_id: u16,
-    leaf_index: u64,
-) -> Result<SppProofInputUtxo> {
-    let key = zero_nullifier_key();
-    let nullifier_pubkey = key.pubkey().map_err(err)?;
-    let utxo_hash = utxo
-        .hash(
-            &nullifier_pubkey,
-            &data_hash.unwrap_or_default(),
-            &[0; 32],
-            tree_id,
-        )
-        .map_err(err)?;
-    let nullifier = key.nullifier(&utxo_hash, &utxo.blinding).map_err(err)?;
-    Ok(SppProofInputUtxo {
-        utxo,
-        utxo_hash,
-        nullifier,
-        nullifier_pubkey,
-        data_hash,
-        ring_data_hash: None,
-        tree_id,
-        leaf_index,
-        cache_slot: None,
-        compact: false,
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use zolana_program::compression::ZERO_NULLIFIER_PUBKEY;
+    use zolana_program::ProgramOwner;
 
     use super::*;
     use crate::index::fixture::terms_fixture;
@@ -121,7 +77,7 @@ mod tests {
             (
                 derivation.dvp_utxo_hash,
                 dvp_utxo.nullifier().expect("nullifier"),
-                ZERO_NULLIFIER_PUBKEY,
+                ProgramOwner::nullifier_pubkey().unwrap(),
                 9
             )
         );

@@ -115,7 +115,7 @@ pub(crate) fn terms_fixture() -> TermsFixture {
         .build()
         .expect("create transaction");
     let address = transaction.derivation.address;
-    let spp = transaction.spp;
+    let spp = transaction.spp_proof_inputs.external_data;
     let pda_tag = transaction.derivation.dvp_authority.to_bytes();
     let output_slots = spp
         .outputs
@@ -167,7 +167,7 @@ pub(crate) struct DepositFixture {
     pub(crate) deposits: [Deposit; 2],
 }
 
-/// A spendable note of `amount` of `mint` for `owner`, as a wallet sync
+/// A spendable utxo of `amount` of `mint` for `owner`, as a wallet sync
 /// would hold it.
 pub(crate) fn wallet_utxo(owner: &ShieldedKeypair, mint: Mint, amount: u64) -> WalletUtxo {
     let utxo = Utxo {
@@ -195,9 +195,11 @@ pub(crate) fn wallet_utxo(owner: &ShieldedKeypair, mint: Mint, amount: u64) -> W
         ring_data_hash: None,
         tree_id: FIXTURE_TREE_ID,
         leaf_index: 0,
+        latest_tree_id: None,
         slot: 0,
         tx_signature: Signature::default(),
         slot_index: 0,
+        tx_viewing_key: None,
     }
 }
 
@@ -242,7 +244,7 @@ pub(crate) fn shielded_transaction(
     }
 }
 
-/// The sorted amounts of `owner`'s spendable notes of `mint` in `tx`.
+/// The sorted amounts of `owner`'s spendable UTXOs of `mint` in `tx`.
 pub(crate) fn spendable_amounts(
     owner: &ShieldedKeypair,
     tx: &ShieldedTransaction,
@@ -255,7 +257,7 @@ pub(crate) fn spendable_amounts(
             .balances
             .get_balance(*mint)
             .into_iter()
-            .flat_map(|balance| balance.utxos.iter().map(|note| note.utxo.amount))
+            .flat_map(|balance| balance.utxos.iter().map(|utxo| utxo.utxo.amount))
             .collect();
     amounts.sort_unstable();
     amounts

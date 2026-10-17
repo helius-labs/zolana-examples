@@ -98,9 +98,9 @@ pub fn create_dvp_data(dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
         dvp_id,
         bump,
         create_proof: CreateDvpProof {
-            proof_a: [10; 32],
-            proof_b: [11; 64],
-            proof_c: [12; 32],
+            a: [10; 32],
+            b: [11; 64],
+            c: [12; 32],
         },
         spp: spp(),
     })
@@ -154,9 +154,9 @@ pub fn reclaim_dvp_data(creator: Address, dvp_id: [u8; 32], bump: u8) -> Vec<u8>
         dvp_id,
         bump,
         reclaim_proof: ReclaimDvpProof {
-            proof_a: [10; 32],
-            proof_b: [11; 64],
-            proof_c: [12; 32],
+            a: [10; 32],
+            b: [11; 64],
+            c: [12; 32],
         },
         spp: spp(),
     })
@@ -184,9 +184,9 @@ pub fn settle_dvp_data(
         bump,
         current_timestamp,
         settle_proof: SettleDvpProof {
-            proof_a: [10; 32],
-            proof_b: [11; 64],
-            proof_c: [12; 32],
+            a: [10; 32],
+            b: [11; 64],
+            c: [12; 32],
         },
         spp: spp(),
     })
@@ -198,9 +198,9 @@ pub fn settle_dvp_data(
 
 /// The placeholder abort proof cancel and reject data carry.
 const ABORT_PROOF: AbortDvpProof = AbortDvpProof {
-    proof_a: [10; 32],
-    proof_b: [11; 64],
-    proof_c: [12; 32],
+    a: [10; 32],
+    b: [11; 64],
+    c: [12; 32],
 };
 
 /// Cancel data on the 1x2 placeholder transact: its shape is never checked,

@@ -10,8 +10,7 @@ use crate::{
 
 pub struct CreateDvp {
     pub payer: Address,
-    /// The terms' creator, a readonly signer whose identity the create proof
-    /// binds. It also seeds `dvp_authority`.
+    /// Creator checked by the proof and used in the PDA seeds.
     pub creator: Address,
     /// The SPP tree: output tree, and input tree of every tree context.
     pub tree: Address,
@@ -23,7 +22,10 @@ pub struct CreateDvp {
 }
 
 impl CreateDvp {
+    /// 1. Encode the instruction data.
+    /// 2. Add the DvP and SPP accounts.
     pub fn instruction(self) -> Result<Instruction> {
+        // 1. Encode the instruction data.
         let Self {
             payer,
             creator,
@@ -39,6 +41,7 @@ impl CreateDvp {
             create_proof,
             spp,
         };
+        // 2. Add the DvP and SPP accounts.
         dvp_instruction(
             tag::CREATE_DVP,
             DvpAccounts {

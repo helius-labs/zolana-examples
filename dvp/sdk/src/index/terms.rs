@@ -83,22 +83,6 @@ pub fn scan_terms(
     Ok(None)
 }
 
-/// The DvP UTXO of `terms` and its leaf index, if `tx` commits it in an
-/// output tagged with the terms' PDA.
-fn committed_dvp_utxo(tx: &ShieldedTransaction, terms: SwapDvp) -> Option<(DvpUtxo, u64)> {
-    let (pda, _) = terms.dvp_authority().ok()?;
-    let pda_tag = pda.to_bytes();
-    // `DvpUtxo::hash` validates the terms first (`SwapDvp::validate`), so
-    // terms the create circuit accepts but the sdk refuses are not
-    // discovered. The binding ends the iterator's borrow of `pda_tag`.
-    let committed = tagged_outputs(tx, &pda_tag).find_map(|slot| {
-        let context = &slot.output_context;
-        let dvp_utxo = DvpUtxo::new(terms.clone(), context.tree_id);
-        (dvp_utxo.hash().ok()? == context.hash).then_some((dvp_utxo, context.leaf_index))
-    });
-    committed
-}
-
 /// Polls the indexer until the DvPs it serves with a terms message for
 /// `keypair` ([`scan_terms`]), found by the keypair's own tag, satisfy
 /// `ready` (for example: one with a given `dvp_id`). A party with older DvPs
@@ -119,6 +103,22 @@ pub fn index_terms<I: Rpc>(
         || collect_tagged(own_tag, indexer, |tx| scan_terms(tx, keypair)),
         ready,
     )
+}
+
+/// The DvP UTXO of `terms` and its leaf index, if `tx` commits it in an
+/// output tagged with the terms' PDA.
+fn committed_dvp_utxo(tx: &ShieldedTransaction, terms: SwapDvp) -> Option<(DvpUtxo, u64)> {
+    let (pda, _) = terms.dvp_authority().ok()?;
+    let pda_tag = pda.to_bytes();
+    // `DvpUtxo::hash` validates the terms first (`SwapDvp::validate`), so
+    // terms the create circuit accepts but the sdk refuses are not
+    // discovered. Collect before returning the PDA tag.
+    let committed = tagged_outputs(tx, &pda_tag).find_map(|slot| {
+        let context = &slot.output_context;
+        let dvp_utxo = DvpUtxo::new(terms.clone(), context.tree_id);
+        (dvp_utxo.hash().ok()? == context.hash).then_some((dvp_utxo, context.leaf_index))
+    });
+    committed
 }
 
 #[cfg(test)]

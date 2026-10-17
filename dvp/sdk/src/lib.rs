@@ -2,6 +2,7 @@
 pub mod encryption;
 pub mod index;
 pub mod instructions;
+pub mod proof;
 mod shared;
 pub mod state;
 

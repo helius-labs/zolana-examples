@@ -1,20 +1,18 @@
 use anyhow::{bail, ensure, Result};
-use dvp_program::{
-    instructions::shared::u64_right_align, ABORT_TAG, CREATE_TAG, DVP_AUTHORITY_PDA_SEED,
-    SETTLEMENT_TAG,
-};
-use dvp_prover::{DestinationProofInput, SwapDvpProofInput};
+use dvp_program::circuits::{DvpDestination, SwapDvpTerms};
+use dvp_program::{ABORT_TAG, CREATE_TAG, DVP_AUTHORITY_PDA_SEED, SETTLEMENT_TAG};
 use solana_address::Address;
-use zolana_hasher::primitives::{hash_bytes, solana_owner_identity};
+use zolana_hasher::primitives::{hash_bytes, right_align, solana_owner_identity};
 use zolana_keypair::{hash::poseidon, shielded::SHIELDED_ADDRESS_LEN, Curve, ShieldedAddress};
-use zolana_transaction::instructions::transact::asset_field;
+use zolana_program::conversion::{to_bytes, Allocator, ProofInput};
+use zolana_transaction::Mint;
 
 use crate::err;
 
 /// Byte length of [`SwapDvp::to_bytes`].
 pub const SWAP_DVP_LEN: usize = 5 * 32 + 4 * 8 + 64 + 4 * SHIELDED_ADDRESS_LEN + 1 + 8 + 2 * 32;
 
-/// The DvP terms (spec "Terms"). Every party learns them from the encrypted
+/// The DvP terms (spec "SwapDvpTerms"). Every party learns them from the encrypted
 /// create messages; the program only ever sees `dvp_id`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SwapDvp {
@@ -54,7 +52,7 @@ impl SwapDvp {
     /// Rejects terms no create, settle or abort proof can accept, before any
     /// proving work: the create checks, non-negative timestamps and
     /// settlement and refund destinations with Ed25519 or PDA signing keys
-    /// (the Eddsa rail binds every output owner to a Solana identity).
+    /// (the Eddsa rail checks a Solana identity for every output owner).
     ///
     /// It also requires the settlement authority to be a third party, as the
     /// reference DvP program does. The circuits do not check this; it keeps a
@@ -106,16 +104,17 @@ impl SwapDvp {
     ///
     /// See [`swap_dvp_id`] for the inner hashes.
     pub fn dvp_id(&self) -> Result<[u8; 32]> {
-        swap_dvp_id(&SwapDvpProofInput::try_from(self)?)
+        swap_dvp_id(&SwapDvpTerms::try_from(self)?)
     }
 
     /// The per-DvP authority PDA `[b"dvp", creator, dvp_id]` and its bump.
     pub fn dvp_authority(&self) -> Result<(Address, u8)> {
         let dvp_id = self.dvp_id()?;
-        Ok(Address::find_program_address(
+        Address::try_find_program_address(
             &[DVP_AUTHORITY_PDA_SEED, self.creator.as_ref(), &dvp_id],
             &dvp_program::ID,
-        ))
+        )
+        .ok_or_else(|| anyhow::anyhow!("cannot derive the DvP authority"))
     }
 
     /// Seed of the create transaction's output blindings.
@@ -135,112 +134,63 @@ impl SwapDvp {
 
     /// `Poseidon(tag, blinding)`, the tag right-aligned in a field element.
     fn blinding_seed(&self, tag: u32) -> Result<[u8; 32]> {
-        poseidon(&[&u64_right_align(u64::from(tag)), &self.blinding]).map_err(err)
+        poseidon(&[&right_align(&tag.to_be_bytes()), &self.blinding]).map_err(err)
     }
 }
 
-/// `dvp_id` from the circuit-side terms. The Go twin is
-/// `dvpterms.SwapDvp.DvpID`.
-///
-/// ```text
-/// parties_hash      = Poseidon(id(seller), id(buyer), id(settlement_authority), id(creator))
-/// legs_hash         = Poseidon(asset(delivery_mint), asset(payment_mint), delivery_amount, payment_amount)
-/// schedule_hash     = Poseidon(expiry_timestamp, has_earliest, earliest_settlement_timestamp, nonce)
-/// destinations_hash = Poseidon(dest(seller_settlement), dest(buyer_settlement), dest(seller_refund), dest(buyer_refund))
-/// ```
-fn swap_dvp_id(input: &SwapDvpProofInput) -> Result<[u8; 32]> {
-    let parties_hash = poseidon(&[
-        &input.seller_id,
-        &input.buyer_id,
-        &input.settlement_authority_id,
-        &input.creator_id,
-    ])
-    .map_err(err)?;
-    let legs_hash = poseidon(&[
-        &input.delivery_asset,
-        &input.payment_asset,
-        &u64_right_align(input.delivery_amount),
-        &u64_right_align(input.payment_amount),
-    ])
-    .map_err(err)?;
-    let schedule_hash = poseidon(&[
-        &u64_right_align(input.expiry_timestamp),
-        &u64_right_align(u64::from(input.has_earliest_settlement)),
-        &u64_right_align(input.earliest_settlement_timestamp),
-        &u64_right_align(input.nonce),
-    ])
-    .map_err(err)?;
-    let destinations_hash = poseidon(&[
-        &destination_hash(&input.seller_settlement_destination)?,
-        &destination_hash(&input.buyer_settlement_destination)?,
-        &destination_hash(&input.seller_refund_destination)?,
-        &destination_hash(&input.buyer_refund_destination)?,
-    ])
-    .map_err(err)?;
-    poseidon(&[
-        &parties_hash,
-        &legs_hash,
-        &schedule_hash,
-        &destinations_hash,
-        &input.ref_string_hash,
-        &input.blinding,
-    ])
-    .map_err(err)
-}
-
-/// `CompressedShieldedAddress::hash()`: `Poseidon(owner_hash, viewing_pk_hash)`.
-fn destination_hash(destination: &DestinationProofInput) -> Result<[u8; 32]> {
-    poseidon(&[&destination.owner_hash, &destination.viewing_pk_hash]).map_err(err)
-}
-
-fn destination_proof_input(address: &ShieldedAddress) -> Result<DestinationProofInput> {
-    Ok(DestinationProofInput {
-        owner_hash: address.owner_hash().map_err(err)?,
-        viewing_pk_hash: hash_bytes(address.viewing_pubkey.as_bytes()).map_err(err)?,
-    })
-}
-
-/// Timestamps enter the circuits as 63-bit values, so negative ones are
-/// rejected here rather than wrapped.
-fn timestamp(value: i64) -> Result<u64> {
-    u64::try_from(value).map_err(|_| anyhow::anyhow!("timestamp {value} is negative"))
-}
-
-fn identity(address: &Address) -> Result<[u8; 32]> {
-    solana_owner_identity(address.as_array()).map_err(err)
-}
-
-// All instructions: the terms enter the circuits in this form.
-impl TryFrom<&SwapDvp> for SwapDvpProofInput {
-    type Error = anyhow::Error;
-
-    fn try_from(terms: &SwapDvp) -> Result<Self> {
-        Ok(Self {
-            seller_id: identity(&terms.seller)?,
-            buyer_id: identity(&terms.buyer)?,
-            settlement_authority_id: identity(&terms.settlement_authority)?,
-            creator_id: identity(&terms.creator)?,
-            delivery_asset: asset_field(&terms.delivery_mint).map_err(err)?,
-            payment_asset: asset_field(&terms.payment_mint).map_err(err)?,
-            delivery_amount: terms.delivery_amount,
-            payment_amount: terms.payment_amount,
-            expiry_timestamp: timestamp(terms.expiry_timestamp)?,
-            has_earliest_settlement: terms.earliest_settlement_timestamp.is_some(),
-            earliest_settlement_timestamp: terms
+impl SwapDvp {
+    pub fn circuit_terms(&self, delivery_mint: Mint, payment_mint: Mint) -> Result<SwapDvpTerms> {
+        ensure!(
+            delivery_mint.asset == self.delivery_mint,
+            "delivery mint differs from the terms"
+        );
+        ensure!(
+            payment_mint.asset == self.payment_mint,
+            "payment mint differs from the terms"
+        );
+        Ok(SwapDvpTerms {
+            seller_identity: solana_owner_identity(self.seller.as_array()).map_err(err)?,
+            buyer_identity: solana_owner_identity(self.buyer.as_array()).map_err(err)?,
+            settlement_authority_identity: solana_owner_identity(
+                self.settlement_authority.as_array(),
+            )
+            .map_err(err)?,
+            creator_identity: solana_owner_identity(self.creator.as_array()).map_err(err)?,
+            delivery_mint,
+            payment_mint,
+            delivery_amount: self.delivery_amount,
+            payment_amount: self.payment_amount,
+            expiry_timestamp: timestamp(self.expiry_timestamp)?,
+            has_earliest_settlement: self.earliest_settlement_timestamp.is_some(),
+            earliest_settlement_timestamp: self
                 .earliest_settlement_timestamp
                 .map_or(Ok(0), timestamp)?,
-            nonce: terms.nonce,
-            ref_string_hash: hash_bytes(&terms.ref_string).map_err(err)?,
+            nonce: self.nonce,
+            reference_hash: hash_bytes(&self.ref_string).map_err(err)?,
             seller_settlement_destination: destination_proof_input(
-                &terms.seller_settlement_destination,
+                &self.seller_settlement_destination,
             )?,
             buyer_settlement_destination: destination_proof_input(
-                &terms.buyer_settlement_destination,
+                &self.buyer_settlement_destination,
             )?,
-            seller_refund_destination: destination_proof_input(&terms.seller_refund_destination)?,
-            buyer_refund_destination: destination_proof_input(&terms.buyer_refund_destination)?,
-            blinding: terms.blinding,
+            seller_refund_destination: destination_proof_input(&self.seller_refund_destination)?,
+            buyer_refund_destination: destination_proof_input(&self.buyer_refund_destination)?,
+            blinding: self.blinding,
         })
+    }
+}
+
+impl TryFrom<&SwapDvp> for SwapDvpTerms {
+    type Error = anyhow::Error;
+    fn try_from(terms: &SwapDvp) -> Result<Self> {
+        let mint = |asset| {
+            if asset == zolana_transaction::SOL_MINT {
+                Mint::SOL
+            } else {
+                Mint::new(asset, 0)
+            }
+        };
+        terms.circuit_terms(mint(terms.delivery_mint), mint(terms.payment_mint))
     }
 }
 
@@ -329,6 +279,30 @@ impl SwapDvp {
     }
 }
 
+/// Compute the spec commitment from the circuit terms.
+///
+/// ```text
+/// parties_hash      = Poseidon(id(seller), id(buyer), id(settlement_authority), id(creator))
+/// legs_hash         = Poseidon(asset(delivery_mint), asset(payment_mint), delivery_amount, payment_amount)
+/// schedule_hash     = Poseidon(expiry_timestamp, has_earliest, earliest_settlement_timestamp, nonce)
+/// destinations_hash = Poseidon(dest(seller_settlement), dest(buyer_settlement), dest(seller_refund), dest(buyer_refund))
+/// ```
+fn swap_dvp_id(input: &SwapDvpTerms) -> Result<[u8; 32]> {
+    let terms = input.instantiate(&Allocator::native()).map_err(err)?;
+    to_bytes(&terms.hash().map_err(err)?).map_err(err)
+}
+
+fn destination_proof_input(address: &ShieldedAddress) -> Result<DvpDestination> {
+    Ok(DvpDestination {
+        address: *address,
+        viewing_key_hash: hash_bytes(address.viewing_pubkey.as_bytes()).map_err(err)?,
+    })
+}
+
+fn timestamp(value: i64) -> Result<u64> {
+    u64::try_from(value).map_err(|_| anyhow::anyhow!("timestamp {value} is negative"))
+}
+
 struct Reader<'a>(&'a [u8]);
 
 impl Reader<'_> {
@@ -348,79 +322,9 @@ impl Reader<'_> {
 
 #[cfg(test)]
 mod tests {
-    use zolana_gnark_ffi_prover::decimal;
     use zolana_keypair::{NullifierKey, PublicKey, ViewingKey};
 
     use super::*;
-
-    /// The cross-language vector: the Go test `dvpterms_test.go` assigns these
-    /// witness values and checks `DvpID` against `dvp_id`.
-    const VECTOR_PATH: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../prover/circuits/dvpterms/testdata/swap_dvp_vector.json"
-    );
-    const VECTOR_DVP_ID: &str =
-        "19284217639585534903980865803314903667065340572521528256377547822764170087020";
-
-    fn destination(seed: u8) -> ShieldedAddress {
-        ShieldedAddress {
-            signing_pubkey: PublicKey::from_ed25519(&[seed; 32]),
-            nullifier_pubkey: NullifierKey::from_secret([seed; 31]).pubkey().unwrap(),
-            viewing_pubkey: ViewingKey::from_bytes(&[seed; 32]).unwrap().pubkey(),
-        }
-    }
-
-    fn fixed_terms() -> SwapDvp {
-        let mut ref_string = [0u8; 64];
-        ref_string
-            .iter_mut()
-            .zip(b"dvp vector")
-            .for_each(|(dst, src)| *dst = *src);
-        let mut blinding = [0u8; 32];
-        blinding
-            .iter_mut()
-            .skip(1)
-            .enumerate()
-            .for_each(|(i, byte)| *byte = i as u8 + 1);
-        SwapDvp {
-            seller: Address::new_from_array([1; 32]),
-            buyer: Address::new_from_array([2; 32]),
-            delivery_mint: Address::new_from_array([3; 32]),
-            payment_mint: Address::new_from_array([0; 32]),
-            settlement_authority: Address::new_from_array([4; 32]),
-            delivery_amount: 1_000,
-            payment_amount: 2_500_000_000,
-            expiry_timestamp: 1_800_000_000,
-            nonce: 7,
-            ref_string,
-            seller_settlement_destination: destination(11),
-            buyer_settlement_destination: destination(12),
-            earliest_settlement_timestamp: Some(1_700_000_000),
-            seller_refund_destination: destination(13),
-            buyer_refund_destination: destination(14),
-            creator: Address::new_from_array([5; 32]),
-            blinding,
-        }
-    }
-
-    fn vector_json(terms: &SwapDvp) -> String {
-        let entries = SwapDvpProofInput::try_from(terms)
-            .unwrap()
-            .witness_entries("Terms");
-        let witness: Vec<String> = entries
-            .iter()
-            .map(|(key, values)| {
-                let values: Vec<String> = values.iter().map(|v| format!("\"{v}\"")).collect();
-                format!("    \"{key}\": [{}]", values.join(", "))
-            })
-            .collect();
-        format!(
-            "{{\n  \"dvp_id\": \"{}\",\n  \"create_blinding_seed\": \"{}\",\n  \"witness\": {{\n{}\n  }}\n}}\n",
-            decimal(&terms.dvp_id().unwrap()),
-            decimal(&terms.create_blinding_seed().unwrap()),
-            witness.join(",\n")
-        )
-    }
 
     #[test]
     fn to_bytes_round_trip() {
@@ -456,16 +360,10 @@ mod tests {
     #[test]
     fn dvp_id_vector() {
         let terms = fixed_terms();
-        let dvp_id = terms.dvp_id().unwrap();
-        println!("dvp_id = {}", decimal(&dvp_id));
-        assert_eq!(decimal(&dvp_id), VECTOR_DVP_ID);
-
-        let json = vector_json(&terms);
-        if std::env::var_os("DVP_UPDATE_VECTORS").is_some() {
-            std::fs::write(VECTOR_PATH, &json).unwrap();
-        }
-        let committed = std::fs::read_to_string(VECTOR_PATH).unwrap();
-        assert_eq!(committed, json, "rerun with DVP_UPDATE_VECTORS=1");
+        assert_eq!(
+            decimal(&terms.dvp_id().unwrap()),
+            "19284217639585534903980865803314903667065340572521528256377547822764170087020"
+        );
     }
 
     #[test]
@@ -523,7 +421,7 @@ mod tests {
         assert_ne!(settle, abort);
         assert_eq!(
             create,
-            poseidon(&[&u64_right_align(u64::from(CREATE_TAG)), &terms.blinding]).unwrap()
+            poseidon(&[&right_align(&CREATE_TAG.to_be_bytes()), &terms.blinding]).unwrap()
         );
     }
 
@@ -531,10 +429,14 @@ mod tests {
     fn dvp_authority_matches_program() {
         let terms = fixed_terms();
         let (pda, bump) = terms.dvp_authority().unwrap();
-        let derived = dvp_program::instructions::shared::dvp_authority(
-            &terms.creator,
-            &terms.dvp_id().unwrap(),
-            bump,
+        let derived = Address::create_program_address(
+            &[
+                DVP_AUTHORITY_PDA_SEED,
+                terms.creator.as_ref(),
+                &terms.dvp_id().unwrap(),
+                &[bump],
+            ],
+            &dvp_program::ID,
         )
         .unwrap();
         assert_eq!(pda, derived);
@@ -602,6 +504,51 @@ mod tests {
                 p256.viewing_pubkey,
             );
             assert!(terms.validate().is_ok(), "PDA destination {i}");
+        }
+    }
+
+    fn decimal(bytes: &[u8; 32]) -> String {
+        num_bigint::BigUint::from_bytes_be(bytes).to_string()
+    }
+
+    fn destination(seed: u8) -> ShieldedAddress {
+        ShieldedAddress {
+            signing_pubkey: PublicKey::from_ed25519(&[seed; 32]),
+            nullifier_pubkey: NullifierKey::from_secret([seed; 31]).pubkey().unwrap(),
+            viewing_pubkey: ViewingKey::from_bytes(&[seed; 32]).unwrap().pubkey(),
+        }
+    }
+
+    fn fixed_terms() -> SwapDvp {
+        let mut ref_string = [0u8; 64];
+        ref_string
+            .iter_mut()
+            .zip(b"dvp vector")
+            .for_each(|(dst, src)| *dst = *src);
+        let mut blinding = [0u8; 32];
+        blinding
+            .iter_mut()
+            .skip(1)
+            .enumerate()
+            .for_each(|(i, byte)| *byte = i as u8 + 1);
+        SwapDvp {
+            seller: Address::new_from_array([1; 32]),
+            buyer: Address::new_from_array([2; 32]),
+            delivery_mint: Address::new_from_array([3; 32]),
+            payment_mint: Address::new_from_array([0; 32]),
+            settlement_authority: Address::new_from_array([4; 32]),
+            delivery_amount: 1_000,
+            payment_amount: 2_500_000_000,
+            expiry_timestamp: 1_800_000_000,
+            nonce: 7,
+            ref_string,
+            seller_settlement_destination: destination(11),
+            buyer_settlement_destination: destination(12),
+            earliest_settlement_timestamp: Some(1_700_000_000),
+            seller_refund_destination: destination(13),
+            buyer_refund_destination: destination(14),
+            creator: Address::new_from_array([5; 32]),
+            blinding,
         }
     }
 }

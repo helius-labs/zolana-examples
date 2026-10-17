@@ -31,7 +31,10 @@ pub fn settle_timestamp(client: &impl Rpc) -> Result<i64> {
         .get_account(solana_clock::sysvar::ID)?
         .ok_or_else(|| anyhow!("no Clock sysvar account"))?;
     let clock: Clock = wincode::deserialize(&account.data)?;
-    Ok(clock.unix_timestamp - 2)
+    clock
+        .unix_timestamp
+        .checked_sub(2)
+        .ok_or_else(|| anyhow!("cluster timestamp underflows"))
 }
 
 /// `index_terms` readiness: the DvP of `terms` is among those found.
@@ -64,6 +67,10 @@ pub fn assert_dvp_error(context: &str, result: Result<Signature>, error: DvpErro
 #[track_caller]
 pub fn assert_spp_rejects(context: &str, result: Result<Signature>) {
     let text = failure_text(context, result);
+    assert!(
+        text.contains("Custom(") || text.contains("custom program error:"),
+        "{context}: expected an SPP program error, received {text}"
+    );
     if let Some(error) = DVP_ERRORS.into_iter().find(|error| mentions(&text, *error)) {
         panic!("{context}: failed with {error:?} instead of in SPP: {text}");
     }

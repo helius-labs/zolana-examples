@@ -10,8 +10,7 @@ use crate::{
 
 pub struct RejectDvp {
     pub payer: Address,
-    /// The rejecting party (seller or buyer), a readonly signer whose
-    /// identity the abort proof binds in reject mode.
+    /// Seller or buyer checked by the reject proof.
     pub signer: Address,
     /// The SPP tree: output tree, and input tree of every tree context.
     pub tree: Address,
@@ -25,7 +24,10 @@ pub struct RejectDvp {
 }
 
 impl RejectDvp {
+    /// 1. Encode the instruction data.
+    /// 2. Add the DvP and SPP accounts.
     pub fn instruction(self) -> Result<Instruction> {
+        // 1. Encode the instruction data.
         let Self {
             payer,
             signer,
@@ -43,6 +45,7 @@ impl RejectDvp {
             reject_proof,
             spp,
         };
+        // 2. Add the DvP and SPP accounts.
         dvp_instruction(
             tag::REJECT_DVP,
             DvpAccounts {

@@ -10,9 +10,7 @@ use crate::{
 
 pub struct ReclaimDvp {
     pub payer: Address,
-    /// The reclaiming party, a readonly signer whose identity the reclaim
-    /// proof binds: the seller for a delivery deposit, the buyer for a
-    /// payment deposit.
+    /// Seller for delivery, or buyer for payment.
     pub signer: Address,
     /// The SPP tree: output tree, and input tree of every tree context.
     pub tree: Address,
@@ -26,7 +24,10 @@ pub struct ReclaimDvp {
 }
 
 impl ReclaimDvp {
+    /// 1. Encode the instruction data.
+    /// 2. Add the DvP and SPP accounts.
     pub fn instruction(self) -> Result<Instruction> {
+        // 1. Encode the instruction data.
         let Self {
             payer,
             signer,
@@ -44,6 +45,7 @@ impl ReclaimDvp {
             reclaim_proof,
             spp,
         };
+        // 2. Add the DvP and SPP accounts.
         dvp_instruction(
             tag::RECLAIM_DVP,
             DvpAccounts {

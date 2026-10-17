@@ -54,7 +54,7 @@ Delivery-versus-payment (DvP) settles a trade between two parties atomically: th
 | `CREATE_TAG` | `"DVPC"` | Domain tag of the create `blinding_seed`. |
 | `SETTLEMENT_TAG` | `"DVPS"` | Domain tag of the settle `blinding_seed`. |
 | `ABORT_TAG` | `"DVPA"` | Domain tag of the cancel and reject `blinding_seed`. |
-| `TIME_WINDOW` | `24` seconds (about 60 slots) | Maximum age of the `current_timestamp` a settle transaction proves against. |
+| `TIME_WINDOW` | `90` seconds (about 225 slots) | Maximum age of the `current_timestamp` a settle transaction proves against. |
 
 Each four-letter tag is its ASCII bytes read as a big-endian 32-bit integer, as in zolana.
 
