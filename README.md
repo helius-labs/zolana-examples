@@ -26,6 +26,7 @@
 |---------|-------------|
 | [`swap-program/`](swap-program/) | A confidential swap between a maker and a taker. |
 | [`escrow-program/`](escrow-program/) | A timelock escrow on SPP: lock a private balance until a deadline, then release or reclaim. |
+| [`dvp/`](dvp/) | A private delivery-versus-payment trade on SPP: both legs settle atomically or each party is refunded. |
 
 ## Documentation
 - [Demo](https://helius-privacy-demo.fly.dev/)
