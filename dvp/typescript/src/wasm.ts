@@ -1,11 +1,15 @@
-import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import init, * as runtime from "../../target/zk/dvp-program/wasm/node.mjs";
+import type { NodeWasmOptions } from "../../target/zk/dvp-program/wasm/node.mjs";
 
 export type * from "../../target/zk/dvp-program/wasm/dvp_program.js";
-export const wasm: typeof import("../../target/zk/dvp-program/wasm/dvp_program.js") = createRequire(
-  import.meta.url,
-)("../../target/zk/dvp-program/wasm/dvp_program.js");
+export type { NodeWasmOptions } from "../../target/zk/dvp-program/wasm/node.mjs";
+
+export async function initWasm(options?: NodeWasmOptions) {
+  await init(options);
+  return runtime;
+}
 
 export function provingKey(name: "create_dvp" | "reclaim_dvp" | "settle_dvp" | "abort_dvp") {
   const manifest = readFileSync(new URL("../../dvp-keys.CHECKSUM", import.meta.url), "utf8");

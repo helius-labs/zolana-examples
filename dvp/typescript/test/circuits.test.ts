@@ -34,9 +34,10 @@ import {
   PROGRAM_ID,
   type SwapDvp,
 } from "../src/terms.js";
-import { provingKey, wasm, type WalletUtxo } from "../src/wasm.js";
+import { provingKey, initWasm, type WalletUtxo } from "../src/wasm.js";
 
 await initializePoseidon();
+const wasm = await initWasm();
 
 test("terms keep the existing golden Rust commitment and exact wire encoding", () => {
   const destination = (seed: number) => {

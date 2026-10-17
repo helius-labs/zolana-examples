@@ -49,3 +49,22 @@ the payment refund.
 The package pins a test SDK artifact attached to the Zolana test release for
 this PR. The circuit keys are checked against `../dvp-keys.CHECKSUM` before
 loading. These deterministic keys are for local tests.
+
+## WASM threads
+
+Initialize the generated Node module before creating a prover:
+
+```ts
+const wasm = await initWasm({ threads: 4 });
+```
+
+Omit `threads` to use all cores available to Node. The limit is set when the
+module's pool initializes and cannot be changed afterward. Node builds use a
+shared-memory Rayon pool; `--single-threaded` builds a package without it.
+
+Use a CLI built from the Zolana source containing Node thread support. It emits
+`node.mjs`, whose default initializer accepts `{ threads }`. The earlier PR test
+release CLI predates that entry point.
+
+The [WASM benchmark](BENCHMARK.md) records separate measurements for 1, 4, 8,
+and all available threads.

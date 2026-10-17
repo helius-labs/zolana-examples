@@ -6,7 +6,7 @@ import { cpus, platform, arch } from "node:os";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
-import { provingKey, wasm, type Proof } from "../src/wasm.js";
+import { provingKey, initWasm, type Proof } from "../src/wasm.js";
 
 const CIRCUITS = ["create_dvp", "reclaim_dvp", "settle_dvp", "abort_dvp"] as const;
 const SAMPLES = 5;
@@ -30,6 +30,10 @@ interface ProverClass<P extends Prover> {
 }
 
 async function main(): Promise<void> {
+  const threads = process.env.DVP_WASM_THREADS;
+  const wasm = await initWasm(
+    threads === undefined || threads === "all" ? {} : { threads: Number(threads) },
+  );
   // 1. Record the machine and exact compiled WASM artifact.
   const artifact = new URL("../../target/zk/dvp-program/wasm/dvp_program_bg.wasm", import.meta.url);
   const artifactHash = sha256(readFileSync(artifact));
@@ -43,6 +47,7 @@ async function main(): Promise<void> {
     machine: `${platform()} ${arch()}; ${cpus().at(0)?.model ?? "unknown CPU"}; ${cpus().length} logical CPUs`,
     wasmSha256: artifactHash,
     samples: SAMPLES,
+    threads: wasm.proverThreads,
   };
   const timings: Record<CircuitName, Timings> = {
     create_dvp: newTimings(),
@@ -138,14 +143,21 @@ function sha256(bytes: Uint8Array): string {
 }
 
 function report(
-  metadata: { date: string; commit: string; node: string; machine: string; wasmSha256: string },
+  metadata: {
+    date: string;
+    commit: string;
+    node: string;
+    machine: string;
+    wasmSha256: string;
+    threads: number;
+  },
   timings: Record<CircuitName, Timings>,
 ): string {
   const rows = CIRCUITS.map((name) => {
     const measured = timings[name];
     return `| ${name} | ${median(measured.keyReadAndChecksumMs).toFixed(1)} | ${measured.fromKeyMs?.toFixed(1)} | ${measured.firstProofMs?.toFixed(1)} | ${median(measured.warmProofMs).toFixed(1)} | ${Math.min(...measured.warmProofMs).toFixed(1)}–${Math.max(...measured.warmProofMs).toFixed(1)} |`;
   });
-  return `# TypeScript WASM proof timings\n\nMeasured ${metadata.date} at commit \`${metadata.commit}\`.\n\n${metadata.machine}; Node.js ${metadata.node}. The generated Node.js WASM build uses the release profile and one thread.\n\n| Circuit | Key read + SHA-256 (ms) | First fromKey (ms) | First prove (ms) | Warm prove median (ms) | Warm prove range (ms) |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${rows.join("\n")}\n\nEach warm figure uses five samples after one additional warm-up, with the same loaded prover and proof inputs. The fixtures cover create, a full delivery reclaim, a settlement with surplus, and cancellation with both deposits. Abort's first call uses an unfunded cancellation; its warm samples use both deposits.\n\n\`fromKey\` includes WASM checksum validation, key decoding, and initial circuit preparation. \`prove\` includes proof generation and the prover's internal verification. Key read figures include the TypeScript loader's checksum check and use the warmed filesystem cache. Transaction construction, SDK encryption, WASM module loading, SPP proofs, and network requests are excluded. The existing circuit tests and public-input assertions must pass before this report is written.\n\nMachine timings can vary with background load. Raw samples are in \`../target/wasm-proof-benchmark.json\`. WASM SHA-256: \`${metadata.wasmSha256}\`.\n\nReproduce from \`dvp/typescript\`:\n\n\`\`\`sh\nnpx --no-install tsx bench/proofs.ts\n\`\`\`\n`;
+  return `# TypeScript WASM — ${metadata.threads} threads\n\nMeasured ${metadata.date} at commit \`${metadata.commit}\`.\n\n${metadata.machine}; Node.js ${metadata.node}. The generated Node.js WASM build uses the release profile and ${metadata.threads} prover threads.\n\n| Circuit | Key read + SHA-256 (ms) | First fromKey (ms) | First prove (ms) | Warm prove median (ms) | Warm prove range (ms) |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${rows.join("\n")}\n\nEach warm figure uses five samples after one additional warm-up, with the same loaded prover and proof inputs. The fixtures cover create, a full delivery reclaim, a settlement with surplus, and cancellation with both deposits. Abort's first call uses an unfunded cancellation; its warm samples use both deposits.\n\n\`fromKey\` includes WASM checksum validation, key decoding, and initial circuit preparation. \`prove\` includes proof generation and the prover's internal verification. Key read figures include the TypeScript loader's checksum check and use the warmed filesystem cache. Transaction construction, SDK encryption, WASM module and worker-pool loading, SPP proofs, and network requests are excluded. The existing circuit tests and public-input assertions must pass before this report is written.\n\nMachine timings can vary with background load. Raw samples are in \`../target/wasm-proof-benchmark.json\`. WASM SHA-256: \`${metadata.wasmSha256}\`.\n\nReproduce from \`dvp/typescript\`:\n\n\`\`\`sh\nnpx --no-install tsx bench/proofs.ts\n\`\`\`\n`;
 }
 
 await main();

@@ -53,11 +53,12 @@ import {
   type SwapDvp,
 } from "../src/terms.js";
 import { createDvpInstruction, settleDvpInstruction } from "../src/instructions.js";
-import { provingKey, wasm, type WalletUtxo } from "../src/wasm.js";
+import { provingKey, initWasm, type WalletUtxo } from "../src/wasm.js";
 
 async function main(): Promise<void> {
   // 1. Connect the seller, buyer, and settlement authority.
   await initializePoseidon();
+  const wasm = await initWasm();
   const seller = keypair("DVP_SELLER_SEED");
   const buyer = keypair("DVP_BUYER_SEED");
   const settlementAuthority = keypair("DVP_AUTHORITY_SEED");
