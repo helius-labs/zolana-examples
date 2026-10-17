@@ -86,10 +86,17 @@ jobs:
           (cd "$bin" && grep "  ${asset}$" SHA256SUMS | sha256sum --check --strict)
           curl -sSfL --retry 5 "https://github.com/Lightprotocol/surfpool/releases/download/${SURFPOOL_RELEASE_TAG}/surfpool-linux-x64.tar.gz" | tar -xz -C "$bin"
           test -x "$bin/surfpool"
+          # Keep temporary SQLite migrations on one connection.
+          cat > "$bin/photon-localnet" <<'PHOTON'
+          #!/usr/bin/env bash
+          exec "${DVP_PHOTON_BIN:?}" --max-db-conn 1 "$@"
+          PHOTON
+          chmod +x "$bin/photon-localnet"
           {
             echo "ZOLANA_CLI_BIN=$bin/zolana"
             echo "PROVER_BIN=$bin/prover"
-            echo "ZOLANA_PHOTON_BIN=$bin/photon"
+            echo "DVP_PHOTON_BIN=$bin/photon"
+            echo "ZOLANA_PHOTON_BIN=$bin/photon-localnet"
             echo "SURFPOOL_BIN=$bin/surfpool"
             echo "SHIELDED_POOL_PROGRAM_PATH=$bin/$asset"
           } >> "$GITHUB_ENV"
