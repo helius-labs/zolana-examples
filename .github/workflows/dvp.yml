@@ -132,7 +132,7 @@ jobs:
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --locked --features bpf-entrypoint
 
       - name: Run program tests
-        run: cargo test-sbf --tools-version "$SBF_TOOLS_VERSION" -p dvp-program --features bpf-entrypoint -- --locked
+        run: cargo test --locked -p dvp-program --features bpf-entrypoint
 
       - name: Run Rust SDK tests
         run: cargo test --release --locked -p dvp-sdk

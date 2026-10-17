@@ -80,7 +80,7 @@ script at another directory containing the same verified keys.
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test-sbf --tools-version v1.53 -p dvp-program --features bpf-entrypoint -- --locked
+cargo test --locked -p dvp-program --features bpf-entrypoint
 cargo test --release --locked -p dvp-sdk
 ```
 
