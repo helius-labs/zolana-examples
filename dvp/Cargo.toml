@@ -39,3 +39,31 @@ solana-signer = "3.0"
 
 [profile.release]
 overflow-checks = true
+
+# Devnet still runs the Zolana v0.4.0 pool (nullifier root history 100).
+# zolana-dvp-compat is 7770e164e with #428 reverted so the client accepts it.
+[patch."https://github.com/helius-labs/zolana"]
+zolana-account-checks = { path = "../../zolana-dvp-compat/program-libs/account-checks" }
+zolana-api = { path = "../../zolana-dvp-compat/sdk-libs/zolana-api" }
+zolana-client = { path = "../../zolana-dvp-compat/sdk-libs/client" }
+zolana-event = { path = "../../zolana-dvp-compat/program-libs/event" }
+zolana-event-parser = { path = "../../zolana-dvp-compat/sdk-libs/event" }
+zolana-hasher = { path = "../../zolana-dvp-compat/program-libs/hasher" }
+zolana-indexed-array = { path = "../../zolana-dvp-compat/program-libs/indexed-array" }
+zolana-indexer-api = { path = "../../zolana-dvp-compat/sdk-libs/indexer-api" }
+zolana-instruction = { path = "../../zolana-dvp-compat/sdk-libs/instruction" }
+zolana-interface = { path = "../../zolana-dvp-compat/program-libs/interface" }
+zolana-keypair = { path = "../../zolana-dvp-compat/sdk-libs/keypair" }
+zolana-macros = { path = "../../zolana-dvp-compat/sdk-libs/macros" }
+zolana-merkle-tree = { path = "../../zolana-dvp-compat/sdk-libs/merkle-tree" }
+zolana-program = { path = "../../zolana-dvp-compat/sdk-libs/program" }
+zolana-program-test = { path = "../../zolana-dvp-compat/sdk-libs/program-test" }
+zolana-smart-account-client = { path = "../../zolana-dvp-compat/sdk-libs/smart-account-client" }
+zolana-test-utils = { path = "../../zolana-dvp-compat/program-tests/test-utils" }
+zolana-transaction = { path = "../../zolana-dvp-compat/sdk-libs/transaction" }
+zolana-tree = { path = "../../zolana-dvp-compat/program-libs/tree" }
+zolana-user-registry-interface = { path = "../../zolana-dvp-compat/program-libs/user-registry-interface" }
+zolana-zk-dsl = { path = "../../zolana-dvp-compat/zk/dsl" }
+zolana-zk-gadgets = { path = "../../zolana-dvp-compat/zk/gadgets" }
+zolana-zk-macros = { path = "../../zolana-dvp-compat/zk/macros" }
+zolana-zk-macros-core = { path = "../../zolana-dvp-compat/zk/macros-core" }
