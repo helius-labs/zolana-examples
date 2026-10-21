@@ -128,7 +128,7 @@ fn main() -> Result<()> {
             payer: sender.pubkey(),
             input_trees: vec![tree],
             output_tree: tree,
-            owner_signers: Vec::new(),
+            owner_signers: vec![sender.pubkey()],
             interface_transfer_accounts: Vec::new(),
             data: transfer_data,
         }
@@ -195,7 +195,7 @@ fn main() -> Result<()> {
             payer: sender.pubkey(),
             input_trees: vec![tree],
             output_tree: tree,
-            owner_signers: Vec::new(),
+            owner_signers: vec![sender.pubkey()],
             interface_transfer_accounts: vec![TransactInterfaceTransferAccounts::Sol(
                 TransactSolTransferAccounts {
                     recipient: sender.pubkey(),

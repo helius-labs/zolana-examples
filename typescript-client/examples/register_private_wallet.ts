@@ -1,11 +1,12 @@
 import {
+  MergeEncryptionScheme,
   ShieldedKeypair,
   SigningKey,
   createZolanaClient,
 } from "@heliuslabs/zolana";
 import {
   getRegisterInstructionAsync,
-  getSetMergingEnabledInstructionAsync,
+  getSetMergeEncryptionInstructionAsync,
 } from "@heliuslabs/zolana/instructions";
 import { isWalletRegistered } from "@heliuslabs/zolana/wallet";
 
@@ -59,9 +60,9 @@ async function main(): Promise<void> {
       viewingPublicKey:
         senderAddress.viewingPublicKey.toBytes(),
     }),
-    await getSetMergingEnabledInstructionAsync({
+    await getSetMergeEncryptionInstructionAsync({
       owner: senderSigner,
-      enabled: true,
+      scheme: MergeEncryptionScheme.PoseidonCtrV1,
     }),
   ]);
 

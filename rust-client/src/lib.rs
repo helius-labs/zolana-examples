@@ -14,7 +14,7 @@ use zolana_interface::{pda, SPL_TOKEN_ACCOUNT_LEN, SPL_TOKEN_MINT_ACCOUNT_LEN};
 /// The RPC, Photon indexer, and prover the examples talk to.
 pub const RPC_URL: &str = "https://devnet.helius-rpc.com";
 pub const INDEXER_URL: &str = "https://d2xah7tnhdhcom.cloudfront.net";
-pub const PROVER_URL: &str = "https://d21ni15goiip6l.cloudfront.net";
+pub const PROVER_URL: &str = "https://d55y5ksdsm1vw.cloudfront.net";
 // localnet: pub const RPC_URL: &str = "http://127.0.0.1:8899";
 // localnet: pub const INDEXER_URL: &str = "http://127.0.0.1:8784";
 // localnet: pub const PROVER_URL: &str = "http://127.0.0.1:3001";

@@ -7,8 +7,8 @@ use zolana_client::user_registry::is_wallet_registered_sync;
 use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
 use zolana_user_registry_interface::{
-    instruction::{register, set_merging_enabled, RegisterData},
-    user_record_pda,
+    instruction::{register, set_merge_encryption, RegisterData},
+    user_record_pda, MergeEncryptionScheme,
 };
 
 const FUND_LAMPORTS: u64 = 10_000_000;
@@ -46,12 +46,15 @@ fn main() -> Result<()> {
                 sender.pubkey(),
                 sender.pubkey(),
                 RegisterData {
-                    owner_p256: None,
                     nullifier_pubkey: sender_address.nullifier_pubkey,
                     viewing_pubkey: *sender_address.viewing_pubkey.as_bytes(),
                 },
             ),
-            set_merging_enabled(user_record, sender.pubkey(), true),
+            set_merge_encryption(
+                user_record,
+                sender.pubkey(),
+                MergeEncryptionScheme::PoseidonCtrV1,
+            ),
         ],
         sender.pubkey(),
         &[&sender],

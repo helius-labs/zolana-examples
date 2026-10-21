@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rust_client_example::{cli_keypair, setup, SetupContext};
 use solana_signer::Signer;
-use zolana_client::{SolanaRpc, SpendableUtxos, ZolanaClient};
+use zolana_client::{SolanaRpc, UtxoScan, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::AssetRegistry;
 
@@ -23,7 +23,7 @@ fn main() -> Result<()> {
     let assets = AssetRegistry::default();
 
     // Fetch the transactions tagged for this wallet and decrypt its spendable UTXOs.
-    let spendable = SpendableUtxos::new(&sender, &assets).fetch(&client)?;
+    let spendable = UtxoScan::new(&sender, &assets).fetch(&client)?.spendable;
     anyhow::ensure!(
         spendable.unknown_asset_ids.is_empty(),
         "could not resolve SPL asset registrations"
