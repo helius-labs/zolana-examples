@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use rust_client_example::{cli_keypair, landed_slot, setup, SetupContext};
+use solana_address::Address;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 use zolana_client::{IndexerRpcConfig, ProofDataSource, Rpc, SolanaRpc, ZolanaClient};
@@ -28,6 +29,10 @@ fn main() -> Result<()> {
     let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?
         .with_proof_data_source(ProofDataSource::Client);
 
+    run(&client, tree, &cli_keypair()?)
+}
+
+pub fn run(client: &ZolanaClient<SolanaRpc>, tree: Address, payer: &Keypair) -> Result<()> {
     // Mints that are registered with Solana Rings for privacy.
     let assets = AssetRegistry::default();
     // SPL: assets.insert(spl.asset_id, spl.mint)?;
@@ -35,7 +40,7 @@ fn main() -> Result<()> {
     // Initialize the sender's private wallet and local authority
     // to decrypt transactions and sync balances.
     // The Solana signer and private wallet are derived from the same Ed25519 seed.
-    let sender = ShieldedKeypair::from_keypair(&cli_keypair()?)?;
+    let sender = ShieldedKeypair::from_keypair(payer)?;
     let recipient = ShieldedKeypair::from_keypair(&Keypair::new())?;
     let sender_shielded_address = sender.shielded_address()?;
 
@@ -72,7 +77,7 @@ fn main() -> Result<()> {
             &[&sender],
             client.compute_budget(),
         )?;
-        let slot = landed_slot(&client, signature)?;
+        let slot = landed_slot(client, signature)?;
 
         // 3. Fetch this transaction's outputs, gated on its confirmed slot.
         let response = client.get_shielded_transactions_by_signature(
@@ -142,7 +147,7 @@ fn main() -> Result<()> {
             &[&sender],
             client.compute_budget(),
         )?;
-        let slot = landed_slot(&client, signature)?;
+        let slot = landed_slot(client, signature)?;
 
         // 7. Fetch this transaction's outputs, gated on its confirmed slot.
         let response = client.get_shielded_transactions_by_signature(
@@ -223,7 +228,7 @@ fn main() -> Result<()> {
             &[&sender],
             client.compute_budget(),
         )?;
-        let slot = landed_slot(&client, signature)?;
+        let slot = landed_slot(client, signature)?;
 
         // 7. Fetch this transaction's outputs, gated on its confirmed slot.
         let response = client.get_shielded_transactions_by_signature(

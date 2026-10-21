@@ -2,6 +2,8 @@ use anyhow::{anyhow, Result};
 use rust_client_example::{
     cli_keypair, landed_slot, setup, setup_test_token, SetupContext, TestToken,
 };
+use solana_address::Address;
+use solana_keypair::Keypair;
 use solana_signer::Signer;
 use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::{pda, state::SplAssetRegistry};
@@ -21,13 +23,15 @@ fn main() -> Result<()> {
         tree,
     } = setup()?;
     let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
-    let sender_solana_keypair = cli_keypair()?;
-    let sender = ShieldedKeypair::from_keypair(&sender_solana_keypair)?;
-    let sender_pubkey = sender_solana_keypair.pubkey();
+    run(&client, tree, &cli_keypair()?).map(|_| ())
+}
+
+pub fn run(client: &ZolanaClient<SolanaRpc>, tree: Address, payer: &Keypair) -> Result<Address> {
+    let sender = ShieldedKeypair::from_keypair(payer)?;
+    let sender_pubkey = payer.pubkey();
     let sender_shielded_address = sender.shielded_address()?;
 
-    let TestToken { mint, source_token } =
-        setup_test_token(&client, &sender_solana_keypair, DEPOSIT_AMOUNT)?;
+    let TestToken { mint, source_token } = setup_test_token(client, payer, DEPOSIT_AMOUNT)?;
     let token_program = pda::spl_token_program_id();
 
     // 1. Check whether the mint already has an interface PDA, the escrow that holds deposited tokens.
@@ -72,10 +76,10 @@ fn main() -> Result<()> {
     let signature = client.create_and_send_transaction(
         &instructions,
         sender_pubkey,
-        &[&sender_solana_keypair],
+        &[payer],
         client.compute_budget(),
     )?;
-    let slot = landed_slot(&client, signature)?;
+    let slot = landed_slot(client, signature)?;
 
     // 5. Register the assigned asset ID for the SDK's balance lookup.
     let registry_account = client
@@ -108,5 +112,5 @@ fn main() -> Result<()> {
         "deposit mint={} private_balance={} tx={signature}",
         mint, deposit_balance.amount,
     );
-    Ok(())
+    Ok(mint)
 }

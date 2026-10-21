@@ -33,25 +33,19 @@ pub struct SetupContext {
 }
 
 /// Read the environment settings and the `API_KEY` for the Helius devnet RPC.
-/// Defaults are Helius plus the Photon/prover HTTPS endpoints. Override them with
-/// `ZOLANA_ENDPOINT`, `ZOLANA_INDEXER_URL`, and `ZOLANA_PROVER_URL` for localnet.
+/// Defaults are Helius plus the Photon/prover HTTPS endpoints. Toggle the `localnet:`
+/// lines to run against a local stack instead.
 pub fn setup() -> Result<SetupContext> {
     dotenvy::dotenv().ok();
     let tree = pda::tree(0);
-    let rpc_url = match std::env::var("ZOLANA_ENDPOINT") {
-        Ok(endpoint) if !endpoint.trim().is_empty() => endpoint,
-        _ => {
-            let api_key =
-                std::env::var("API_KEY").map_err(|_| anyhow!("set API_KEY or ZOLANA_ENDPOINT"))?;
-            format!("{RPC_URL}/?api-key={api_key}")
-        }
-    };
+    let api_key = std::env::var("API_KEY").map_err(|_| anyhow!("set API_KEY"))?;
+    let rpc_url = format!("{RPC_URL}/?api-key={api_key}");
+    // localnet: let rpc_url = RPC_URL.to_string();
 
     Ok(SetupContext {
         rpc_url,
-        indexer_url: std::env::var("ZOLANA_INDEXER_URL")
-            .unwrap_or_else(|_| INDEXER_URL.to_string()),
-        prover_url: std::env::var("ZOLANA_PROVER_URL").unwrap_or_else(|_| PROVER_URL.to_string()),
+        indexer_url: INDEXER_URL.to_string(),
+        prover_url: PROVER_URL.to_string(),
         tree,
     })
 }

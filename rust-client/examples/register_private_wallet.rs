@@ -24,17 +24,20 @@ fn main() -> Result<()> {
     // Connect to the RPC, indexer, and prover.
     let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
 
+    run(&client, &cli_keypair()?)
+}
+
+pub fn run(client: &ZolanaClient<SolanaRpc>, payer: &Keypair) -> Result<()> {
     // Initialize the sender's private wallet and local authority
     // to decrypt transactions and sync balances.
     // The Solana signer and private wallet are derived from the same Ed25519 seed.
     let sender = ShieldedKeypair::from_keypair(&Keypair::new())?;
 
     // The SDK hands back a message; the CLI functions as sponsor to sign and send.
-    let payer = cli_keypair()?;
     client.create_and_send_transaction(
         &[transfer(&payer.pubkey(), &sender.pubkey(), FUND_LAMPORTS)],
         payer.pubkey(),
-        &[&payer],
+        &[payer],
         client.compute_budget(),
     )?;
     let sender_address = sender.shielded_address()?;
@@ -61,7 +64,7 @@ fn main() -> Result<()> {
         client.compute_budget(),
     )?;
 
-    assert!(is_wallet_registered_sync(&client, sender.pubkey())?);
+    assert!(is_wallet_registered_sync(client, sender.pubkey())?);
 
     println!("ok private wallet solana_address={}", sender.pubkey());
     Ok(())

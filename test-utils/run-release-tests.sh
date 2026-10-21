@@ -56,6 +56,5 @@ cargo test --manifest-path swap-program/test/Cargo.toml \
     --test swap --test cancel --test take_verifiable_encryption -- --nocapture --test-threads=1
 cargo test --manifest-path escrow-program/Cargo.toml -p timelock-escrow-test \
     --test escrow -- --nocapture --test-threads=1
-cargo build --manifest-path rust-client/Cargo.toml --examples --locked
 cargo test --manifest-path rust-client/Cargo.toml --test client_localnet --locked \
     -- --nocapture --test-threads=1
