@@ -8,8 +8,13 @@ use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_system_interface::instruction::create_account;
 use spl_token_interface::instruction::{initialize_account3, initialize_mint2, mint_to};
-use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
-use zolana_interface::{pda, SPL_TOKEN_ACCOUNT_LEN, SPL_TOKEN_MINT_ACCOUNT_LEN};
+use zolana_client::{ProgramAccountsFilter, Rpc, SolanaRpc, ZolanaClient};
+use zolana_interface::{
+    pda,
+    state::{discriminator::SPL_ASSET_REGISTRY, SplAssetRegistry},
+    PROGRAM_ID_PUBKEY, SPL_TOKEN_ACCOUNT_LEN, SPL_TOKEN_MINT_ACCOUNT_LEN,
+};
+use zolana_transaction::AssetRegistry;
 
 /// The RPC, Photon indexer, and prover the examples talk to.
 pub const RPC_URL: &str = "https://devnet.helius-rpc.com";
@@ -28,19 +33,25 @@ pub struct SetupContext {
 }
 
 /// Read the environment settings and the `API_KEY` for the Helius devnet RPC.
-/// Defaults are Helius plus the Photon/prover HTTPS endpoints. Toggle the `localnet:`
-/// lines to run against a local stack instead.
+/// Defaults are Helius plus the Photon/prover HTTPS endpoints. Override them with
+/// `ZOLANA_ENDPOINT`, `ZOLANA_INDEXER_URL`, and `ZOLANA_PROVER_URL` for localnet.
 pub fn setup() -> Result<SetupContext> {
     dotenvy::dotenv().ok();
     let tree = pda::tree(0);
-    let api_key = std::env::var("API_KEY").map_err(|_| anyhow!("set API_KEY"))?;
-    let rpc_url = format!("{RPC_URL}/?api-key={api_key}");
-    // localnet: let rpc_url = RPC_URL.to_string();
+    let rpc_url = match std::env::var("ZOLANA_ENDPOINT") {
+        Ok(endpoint) if !endpoint.trim().is_empty() => endpoint,
+        _ => {
+            let api_key =
+                std::env::var("API_KEY").map_err(|_| anyhow!("set API_KEY or ZOLANA_ENDPOINT"))?;
+            format!("{RPC_URL}/?api-key={api_key}")
+        }
+    };
 
     Ok(SetupContext {
         rpc_url,
-        indexer_url: INDEXER_URL.to_string(),
-        prover_url: PROVER_URL.to_string(),
+        indexer_url: std::env::var("ZOLANA_INDEXER_URL")
+            .unwrap_or_else(|_| INDEXER_URL.to_string()),
+        prover_url: std::env::var("ZOLANA_PROVER_URL").unwrap_or_else(|_| PROVER_URL.to_string()),
         tree,
     })
 }
@@ -52,6 +63,27 @@ pub fn cli_keypair() -> Result<Keypair> {
         .unwrap_or_else(|_| "~/.config/solana/id.json".to_string());
     let path = shellexpand::tilde(&path).into_owned();
     read_keypair_file(&path).map_err(|e| anyhow!("load keypair {path}: {e}"))
+}
+
+/// Load the registered SPL mints before scanning notes that carry a mint address.
+pub fn asset_registry(client: &ZolanaClient<SolanaRpc>) -> Result<AssetRegistry> {
+    let mut assets = AssetRegistry::default();
+    let filter =
+        ProgramAccountsFilter::new(SplAssetRegistry::SIZE).with_memcmp(0, vec![SPL_ASSET_REGISTRY]);
+    for (address, account) in client
+        .rpc()
+        .get_program_accounts_filtered(PROGRAM_ID_PUBKEY, &filter)?
+    {
+        let registry = SplAssetRegistry::from_account_bytes(&account.data)
+            .map_err(|error| anyhow!("decode SPL asset registry: {error:?}"))?;
+        anyhow::ensure!(
+            account.owner == PROGRAM_ID_PUBKEY
+                && address == pda::spl_asset_registry(&registry.mint),
+            "invalid SPL asset registry account"
+        );
+        assets.insert(registry.asset_id, registry.mint)?;
+    }
+    Ok(assets)
 }
 
 /// Test mint and the payer's funded token account.

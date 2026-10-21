@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use rust_client_example::{cli_keypair, landed_slot, setup, SetupContext};
 use solana_keypair::Keypair;
 use solana_signer::Signer;
-use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::{IndexerRpcConfig, ProofDataSource, Rpc, SolanaRpc, ZolanaClient};
 use zolana_keypair::ShieldedKeypair;
 use zolana_program::instruction::{
     AssetDeposit, Deposit, DepositAsset, Transact, TransactInterfaceTransferAccounts,
@@ -25,7 +25,8 @@ fn main() -> Result<()> {
     } = setup()?;
 
     // Connect to the RPC, indexer, and prover.
-    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
+    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?
+        .with_proof_data_source(ProofDataSource::Client);
 
     // Mints that are registered with Solana Rings for privacy.
     let assets = AssetRegistry::default();

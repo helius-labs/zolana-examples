@@ -108,6 +108,7 @@ function clientConfigFromEnv(): ZolanaClientConfig {
   }
   return Object.freeze({
     solanaRpcUrl,
+    proofDataSource: "client",
     indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || INDEXER_URL,
     proverUrl: process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL,
   });

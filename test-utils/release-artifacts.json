@@ -1,0 +1,85 @@
+{
+  "release_tag": "v0.5.0-alpha",
+  "surfpool_tag": "v1.6.0-light",
+  "surfpool_version": "1.6.0",
+  "programs": [
+    {
+      "asset": "shielded_pool_program-v0.5.0-alpha.so",
+      "size": 599976,
+      "sha256": "af30bd0d9e08853da19ca63771cf31733568cd2b7e56cf97f3c351d93248091c",
+      "role": "shielded_pool"
+    },
+    {
+      "asset": "zolana_user_registry-v0.5.0-alpha.so",
+      "size": 47896,
+      "sha256": "a6c9694f6a2e1b9a10e3f72139bef1dbf7a49ec66261d10cf6a9960ff42eeeb6",
+      "role": "user_registry"
+    }
+  ],
+  "binaries": [
+    {
+      "role": "prover",
+      "os": "darwin",
+      "arch": "arm64",
+      "asset": "prover-darwin-arm64-v0.5.0-alpha",
+      "size": 31940354,
+      "sha256": "d26aaa17e36651531281fdb72c63b696b9d42ad87e63ca71d7c3c938fa6a410d"
+    },
+    {
+      "role": "photon",
+      "os": "darwin",
+      "arch": "arm64",
+      "asset": "photon-darwin-arm64-v0.5.0-alpha",
+      "size": 27835888,
+      "sha256": "972efa204a04e735721b972730c5d36eb5ae00c7e0c2e9dcbab1bd901d7040da"
+    },
+    {
+      "role": "prover",
+      "os": "linux",
+      "arch": "x64",
+      "asset": "prover-linux-x64-v0.5.0-alpha",
+      "size": 34508924,
+      "sha256": "cd2b92e76a2cc1611faa07262b19ab0851c46be64302f27111b4e56ff5ddee4f"
+    },
+    {
+      "role": "photon",
+      "os": "linux",
+      "arch": "x64",
+      "asset": "photon-linux-x64-v0.5.0-alpha",
+      "size": 33055272,
+      "sha256": "95410be63e6d51719b7aa9f81a7adc4a2c81b430b3e8f36f8eff7990218f7b63"
+    },
+    {
+      "role": "cli",
+      "os": "darwin",
+      "arch": "arm64",
+      "asset": "zolana-darwin-arm64-v0.5.0-alpha",
+      "size": 14167200,
+      "sha256": "7d00702cd65debab0933d7f1383f7725fa63ccfa1ba77b2cd0097724ca3e6607"
+    },
+    {
+      "role": "cli",
+      "os": "linux",
+      "arch": "x64",
+      "asset": "zolana-linux-x64-v0.5.0-alpha",
+      "size": 17544552,
+      "sha256": "46dcb9459d6ec9df732149d29ec05d3e00c622812dcb35d40048044a4f393140"
+    },
+    {
+      "role": "surfpool",
+      "os": "darwin",
+      "arch": "arm64",
+      "asset": "surfpool-darwin-arm64.tar.gz",
+      "size": 28318530,
+      "sha256": "c87f6e1f7911e94720cad586c9295934ba6a32e2aecfb062d7d6c057de2e9531"
+    },
+    {
+      "role": "surfpool",
+      "os": "linux",
+      "arch": "x64",
+      "asset": "surfpool-linux-x64.tar.gz",
+      "size": 30488543,
+      "sha256": "acf0ccb172ea0208bbbf3583a98ae39b39cabf43bddf30221e5ec0040db37409"
+    }
+  ]
+}

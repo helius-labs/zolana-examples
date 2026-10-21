@@ -24,6 +24,9 @@ zolana-test-utils = { git = "https://github.com/helius-labs/zolana", tag = "v0.5
 zolana-transaction = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha" }
 zolana-user-registry-interface = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha", features = ["solana"] }
 
+[dev-dependencies]
+zolana-program-test = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha", features = ["localnet"] }
+
 [[example]]
 name = "register_private_wallet"
 path = "examples/register_private_wallet.rs"

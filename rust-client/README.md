@@ -18,7 +18,9 @@ cp .env.example .env
 
 By default, the examples use your CLI wallet as `payer`. Make sure it's funded with [devnet SOL](https://faucet.solana.com/).
 
-To run on localnet, toggle `localnet` in [`src/lib.rs`](src/lib.rs).
+To run on localnet, set `ZOLANA_ENDPOINT=http://127.0.0.1:8899`,
+`ZOLANA_INDEXER_URL=http://127.0.0.1:8784`, and
+`ZOLANA_PROVER_URL=http://127.0.0.1:3001`.
 
 ## Run
 
