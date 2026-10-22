@@ -56,8 +56,8 @@ export interface ConfirmedTransaction {
 
 // Will be exposed through a single devnet URL. Currently exposed as they are.
 const RPC_URL = "https://devnet.helius-rpc.com";
-const INDEXER_URL = "https://d2xah7tnhdhcom.cloudfront.net";
-const PROVER_URL = "https://d55y5ksdsm1vw.cloudfront.net";
+const INDEXER_URL = "https://d21d98xh5lgv3b.cloudfront.net";
+const PROVER_URL = "https://d1unet9hn0mci0.cloudfront.net";
 // localnet: const RPC_URL = "http://127.0.0.1:8899";
 // localnet: const INDEXER_URL = "http://127.0.0.1:8784";
 // localnet: const PROVER_URL = "http://127.0.0.1:3001";
