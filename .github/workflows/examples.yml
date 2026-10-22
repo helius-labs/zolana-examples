@@ -8,6 +8,7 @@ on:
       - "typescript-client/**"
       - "swap-program/**"
       - "escrow-program/**"
+      - "test-utils/**"
       - ".github/workflows/examples.yml"
   pull_request:
     paths:
@@ -15,6 +16,7 @@ on:
       - "typescript-client/**"
       - "swap-program/**"
       - "escrow-program/**"
+      - "test-utils/**"
       - ".github/workflows/examples.yml"
   workflow_dispatch:
 
@@ -135,3 +137,85 @@ jobs:
       - name: Build escrow program (SBF)
         working-directory: escrow-program/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --features bpf-entrypoint
+
+  release-integration:
+    name: test / release binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: examples
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: examples
+
+      # The Go circuits import modules from a sibling release checkout.
+      - uses: actions/checkout@v4
+        with:
+          repository: helius-labs/zolana
+          ref: v0.5.0-alpha
+          path: zolana
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+          cache-dependency-path: |
+            examples/swap-program/prover/circuits/go.sum
+            examples/escrow-program/prover/circuits/go.sum
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            examples/swap-program/test -> ../../target/integration
+            examples/swap-program/program
+            examples/escrow-program
+
+      - name: Cache release binaries and proving keys
+        uses: actions/cache@v4
+        with:
+          path: |
+            examples/target/release-tests/*v0.5.0-alpha*
+            examples/target/release-tests/surfpool-*.tar.gz
+            examples/target/release-tests/proving-keys
+          key: release-integration-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('examples/test-utils/release-artifacts.json') }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: examples/typescript-client/pnpm-lock.yaml
+
+      - name: Install TypeScript client dependencies
+        working-directory: examples/typescript-client
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Anza (Solana) CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Run client, swap, and escrow integration tests against the release binaries
+        run: bash test-utils/run-release-tests.sh
+
+      - name: Upload localnet logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-integration-logs
+          path: |
+            examples/target/release-tests/localnet/**/logs/**
+            examples/target/release-tests/processes/logs/**
+            examples/target/logs/**
+          if-no-files-found: ignore

@@ -162,6 +162,7 @@ async function main(): Promise<void> {
   const transferInstruction =
     await transactInstruction({
       payer: senderSigner,
+      ownerSigners: [senderSigner],
       inputTree: client.tree,
       outputTree: client.tree,
       data: transferData,
@@ -248,6 +249,7 @@ async function main(): Promise<void> {
   const withdrawalInstruction =
     await transactInstruction({
       payer: senderSigner,
+      ownerSigners: [senderSigner],
       inputTree: client.tree,
       outputTree: client.tree,
       withdrawal: TransactWithdrawal.sol({

@@ -8,12 +8,14 @@ use zolana_keypair::{
 };
 use zolana_program_test::{
     fixture,
-    localnet::{FixtureLocalnet, LocalnetPaths, LocalnetPorts},
-    workspace_path,
+    localnet::{FixtureLocalnet, LocalnetPorts},
 };
 use zolana_test_utils::test_validator_asserts::wait_for_indexed_utxo;
 use zolana_test_utils::wallet::{Deposit, DepositParams, Wallet};
 use zolana_transaction::{utxo::SppProofInputUtxo, utxo::Utxo, AssetRegistry, Data, SOL_MINT};
+
+#[path = "../../../test-utils/localnet.rs"]
+mod release_localnet;
 
 // The whole per-transaction budget: the escrow forwards an SPP transact.
 const TRANSACT_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
@@ -68,9 +70,10 @@ pub fn setup(test: u16) -> Result<TestEnv> {
         LocalnetPorts::for_test(test)?,
         vec![(
             timelock_escrow_program::ID,
-            workspace_path("target/deploy/timelock_escrow_program.so"),
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../target/deploy/timelock_escrow_program.so"),
         )],
-        &LocalnetPaths::workspace(),
+        &release_localnet::paths(),
     )?;
     let payer = fixture::payer();
 

@@ -18,7 +18,9 @@ cp .env.example .env
 
 By default, the examples use your CLI wallet as `payer`. Make sure it's funded with [devnet SOL](https://faucet.solana.com/).
 
-To run on localnet, toggle `localnet` in [`src/lib.rs`](src/lib.rs).
+To run on localnet, toggle `localnet` in [`src/lib.rs`](src/lib.rs). For a local prover without an indexer, select `ProofDataSource::Client` in `SetupContext::client`; the localnet integration tests use this mode through `FixtureLocalnet.client`.
+
+Devnet proofs use the attested TEE prover, which fetches Merkle proofs from Photon and assembles the witness server-side. Photon also serves balance and history reads.
 
 ## Run
 
