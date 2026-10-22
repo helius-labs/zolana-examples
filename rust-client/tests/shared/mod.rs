@@ -3,7 +3,7 @@ use rust_client_example::SetupContext;
 use solana_address::Address;
 use solana_keypair::{write_keypair_file, Keypair};
 use std::{io::Write, path::Path, process::Command};
-use zolana_client::{SolanaRpc, ZolanaClient};
+use zolana_client::{ProofDataSource, SolanaRpc, ZolanaClient};
 
 const EXAMPLES: &[&str] = &[
     "register_private_wallet",
@@ -87,6 +87,7 @@ pub fn run_typescript_examples(
     context: &SetupContext,
     payer: &Keypair,
     payer_path: &Path,
+    proof_data_source: ProofDataSource,
 ) -> Result<()> {
     let language = "typescript-client";
     write_keypair_file(payer, payer_path)
@@ -105,6 +106,13 @@ pub fn run_typescript_examples(
             .env("ZOLANA_ENDPOINT", &context.rpc_url)
             .env("ZOLANA_INDEXER_URL", &context.indexer_url)
             .env("ZOLANA_PROVER_URL", &context.prover_url)
+            .env(
+                "ZOLANA_PROOF_DATA_SOURCE",
+                match proof_data_source {
+                    ProofDataSource::Client => "client",
+                    ProofDataSource::Prover => "prover",
+                },
+            )
             .env("ZOLANA_PAYER_KEYPAIR", payer_path)
             .output()?;
         std::io::stdout().write_all(&output.stdout)?;

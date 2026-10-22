@@ -1,5 +1,6 @@
 use anyhow::Result;
 use rust_client_example::SetupContext;
+use zolana_client::ProofDataSource;
 use zolana_program_test::{
     fixture,
     localnet::{FixtureLocalnet, LocalnetPorts},
@@ -46,5 +47,6 @@ fn typescript_client_examples_against_release() -> Result<()> {
         &release_localnet::paths()
             .working_dir
             .join("typescript-client-payer.json"),
+        ProofDataSource::Client,
     )
 }

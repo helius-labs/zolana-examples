@@ -5,7 +5,9 @@ use rust_client_example::{SetupContext, INDEXER_URL, PROVER_URL};
 use solana_keypair::{read_keypair_file, Keypair};
 use solana_signer::Signer;
 use solana_system_interface::instruction::transfer;
-use zolana_client::{ComputeBudgetConfig, ProverClient, Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::{
+    ComputeBudgetConfig, ProofDataSource, ProverClient, Rpc, SolanaRpc, ZolanaClient,
+};
 use zolana_interface::{pda, PROGRAM_ID_PUBKEY};
 use zolana_user_registry_interface::user_registry_program_id;
 
@@ -70,6 +72,7 @@ fn rust_and_typescript_clients_on_devnet() -> Result<()> {
     let prover = ProverClient::new(context.prover_url.clone());
     ensure!(prover.has_tee(), "devnet proving must use TEE attestation");
     prover.attest()?;
+    prover.check_indexed()?;
     println!("Devnet Photon: {INDEXER_URL}; attested TEE prover: {PROVER_URL}");
     let client = context.client()?;
     let keypair_path = env::var("DEVNET_PAYER_KEYPAIR_PATH")?;
@@ -85,7 +88,7 @@ fn rust_and_typescript_clients_on_devnet() -> Result<()> {
     let payer_path = PathBuf::from(env::var("DEVNET_PAYER_KEYPAIR_PATH")?)
         .with_file_name("typescript-devnet-payer.json");
     let result = with_funded_payer(&client, &sponsor, |payer| {
-        shared::run_typescript_examples(&context, payer, &payer_path)
+        shared::run_typescript_examples(&context, payer, &payer_path, ProofDataSource::Prover)
     });
     std::fs::remove_file(payer_path).ok();
     result

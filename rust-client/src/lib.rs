@@ -39,7 +39,7 @@ impl SetupContext {
             &self.indexer_url,
             self.prover_url.clone(),
         )?
-        .with_proof_data_source(ProofDataSource::Client))
+        .with_proof_data_source(ProofDataSource::Prover))
     }
 }
 

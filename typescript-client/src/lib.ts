@@ -106,9 +106,13 @@ function clientConfigFromEnv(): ZolanaClientConfig {
   if (!solanaRpcUrl) {
     throw new Error("set API_KEY or ZOLANA_ENDPOINT");
   }
+  const proofDataSource = process.env["ZOLANA_PROOF_DATA_SOURCE"] ?? "prover";
+  if (proofDataSource !== "client" && proofDataSource !== "prover") {
+    throw new Error("ZOLANA_PROOF_DATA_SOURCE must be client or prover");
+  }
   return Object.freeze({
     solanaRpcUrl,
-    proofDataSource: "client",
+    proofDataSource,
     indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || INDEXER_URL,
     proverUrl: process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL,
   });

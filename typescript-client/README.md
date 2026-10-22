@@ -21,6 +21,8 @@ pnpm install
 
 The example uses devnet by default.
 
+Devnet proofs use the attested TEE prover, which fetches Merkle proofs from Photon and assembles the witness server-side. Photon also serves balance and history reads.
+
 Get an API key from [Helius](https://helius.dev) and add to .env:
 
 ```bash
@@ -41,6 +43,8 @@ const RPC_URL = "http://127.0.0.1:8899";
 const INDEXER_URL = "http://127.0.0.1:8784";
 const PROVER_URL = "http://127.0.0.1:3001";
 ```
+
+For a local prover without an indexer, set `ZOLANA_PROOF_DATA_SOURCE=client`. The localnet integration tests use this mode because they share one prover across separate validator/indexer stacks.
 
 ## Run
 
