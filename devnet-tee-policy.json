@@ -1,0 +1,13 @@
+{
+  "platform": "aws-nitro",
+  "measurements": [
+    {
+      "pcr0": "c44eae0170e515259c1e46c30269154387e29c929c3a105606b1baff9fe71f4d503f37cf68c35fde6b082fd01413810b",
+      "pcr1": "4b4d5b3661b3efc12920900c80e126e4ce783c522de6c02a2a5bf7af3a2b9327b86776f188e4be1c1c404a129dbda493",
+      "pcr2": "b5c061abffb695cac4d3bffcff0299f47d72d732b1b1bdfab86cca72cd584ef3147ce71ebcd62505047dc4e9bcc442f6"
+    }
+  ],
+  "gpu": "optional",
+  "max_age_secs": 600,
+  "hpke_public_key": "f88ce265f3a519822d1fb7b1927d00e3d92c9dd3dc151cf9eebcb8fedd995f1a"
+}

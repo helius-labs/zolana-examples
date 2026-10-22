@@ -59,6 +59,13 @@ funded with at least 0.2 SOL. Each client uses a fresh funded payer, and unused
 public SOL is returned to the CI wallet. The test checks the devnet genesis hash,
 deployed programs, and TEE attestation before funding the test payers.
 
+Both clients pin this deployment in [`devnet-tee-policy.json`](devnet-tee-policy.json).
+Its measurements come from Zolana's successful
+[`publish-nitro` build for `devnet-d-tee-1`](https://github.com/helius-labs/zolana/actions/runs/39691894680),
+which built source commit `81d8f9cefed610247c9bd4cf69c3cf8553e0b731`.
+The HPKE public key was pinned after SDK verification of an attestation matching
+those build measurements. Localnet runs retain the SDK's loopback behavior.
+
 - [Demo](https://helius-privacy-demo.fly.dev/)
 - [Documentation](https://helius.dev/docs/privacy)
 - [Source Code](https://github.com/helius-labs/zolana)

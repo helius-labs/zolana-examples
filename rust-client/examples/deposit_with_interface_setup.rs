@@ -1,7 +1,5 @@
 use anyhow::{anyhow, Result};
-use rust_client_example::{
-    cli_keypair, landed_slot, setup, setup_test_token, SetupContext, TestToken,
-};
+use rust_client_example::{cli_keypair, landed_slot, setup, setup_test_token, TestToken};
 use solana_address::Address;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
@@ -16,14 +14,9 @@ use zolana_transaction::{decrypt_spendable, AssetRegistry};
 const DEPOSIT_AMOUNT: u64 = 1_000_000_000;
 
 fn main() -> Result<()> {
-    let SetupContext {
-        rpc_url,
-        indexer_url,
-        prover_url,
-        tree,
-    } = setup()?;
-    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
-    run(&client, tree, &cli_keypair()?).map(|_| ())
+    let context = setup()?;
+    let client = context.client()?;
+    run(&client, context.tree, &cli_keypair()?).map(|_| ())
 }
 
 pub fn run(client: &ZolanaClient<SolanaRpc>, tree: Address, payer: &Keypair) -> Result<Address> {

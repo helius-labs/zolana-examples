@@ -2,6 +2,8 @@ import "dotenv/config";
 
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import devnetTeePolicy from "../../devnet-tee-policy.json" with { type: "json" };
+import { teePolicyFromJson } from "@heliuslabs/zolana/client";
 
 import {
   AccountRole,
@@ -106,11 +108,15 @@ function clientConfigFromEnv(): ZolanaClientConfig {
   if (!solanaRpcUrl) {
     throw new Error("set API_KEY or ZOLANA_ENDPOINT");
   }
+  const proverUrl = process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL;
   return Object.freeze({
     solanaRpcUrl,
     proofDataSource: "client",
     indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || INDEXER_URL,
-    proverUrl: process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL,
+    proverUrl,
+    ...(proverUrl === PROVER_URL
+      ? { proverTee: teePolicyFromJson(devnetTeePolicy) }
+      : {}),
   });
 }
 

@@ -8,7 +8,10 @@ use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_system_interface::instruction::create_account;
 use spl_token_interface::instruction::{initialize_account3, initialize_mint2, mint_to};
-use zolana_client::{ProgramAccountsFilter, Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::{
+    check_service_url, prover::tee::TeePolicy, ProgramAccountsFilter, ProofDataSource,
+    ProverClient, Rpc, SolanaRpc, ZolanaClient, ZolanaIndexer,
+};
 use zolana_interface::{
     pda,
     state::{discriminator::SPL_ASSET_REGISTRY, SplAssetRegistry},
@@ -30,6 +33,29 @@ pub struct SetupContext {
     pub indexer_url: String,
     pub prover_url: String,
     pub tree: Address,
+}
+
+impl SetupContext {
+    pub fn prover(&self) -> Result<ProverClient> {
+        check_service_url(&self.prover_url, "prover_url")?;
+        let prover = ProverClient::new(self.prover_url.clone());
+        if prover.has_tee() {
+            let policy = TeePolicy::from_json(include_str!("../../devnet-tee-policy.json"))?;
+            Ok(prover.with_tee(policy))
+        } else {
+            Ok(prover)
+        }
+    }
+
+    pub fn client(&self) -> Result<ZolanaClient<SolanaRpc>> {
+        check_service_url(&self.indexer_url, "indexer_url")?;
+        Ok(ZolanaClient::new(
+            SolanaRpc::new(self.rpc_url.clone()),
+            ZolanaIndexer::new(self.indexer_url.clone()),
+            self.prover()?,
+        )
+        .with_proof_data_source(ProofDataSource::Client))
+    }
 }
 
 /// Read the environment settings and the `API_KEY` for the Helius devnet RPC.

@@ -6,11 +6,13 @@ on:
     paths:
       - "rust-client/**"
       - "typescript-client/**"
+      - "devnet-tee-policy.json"
       - ".github/workflows/devnet.yml"
   pull_request:
     paths:
       - "rust-client/**"
       - "typescript-client/**"
+      - "devnet-tee-policy.json"
       - ".github/workflows/devnet.yml"
   workflow_dispatch:
 

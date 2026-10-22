@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rust_client_example::{cli_keypair, setup, SetupContext};
+use rust_client_example::{cli_keypair, setup};
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 use solana_system_interface::instruction::transfer;
@@ -14,16 +14,8 @@ use zolana_user_registry_interface::{
 const FUND_LAMPORTS: u64 = 10_000_000;
 
 fn main() -> Result<()> {
-    let SetupContext {
-        rpc_url,
-        indexer_url,
-        prover_url,
-        ..
-    } = setup()?;
-
-    // Connect to the RPC, indexer, and prover.
-    let client = ZolanaClient::from_urls(SolanaRpc::new(rpc_url), &indexer_url, prover_url)?;
-
+    let context = setup()?;
+    let client = context.client()?;
     run(&client, &cli_keypair()?)
 }
 

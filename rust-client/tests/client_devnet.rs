@@ -5,9 +5,7 @@ use rust_client_example::{SetupContext, INDEXER_URL, PROVER_URL};
 use solana_keypair::{read_keypair_file, Keypair};
 use solana_signer::Signer;
 use solana_system_interface::instruction::transfer;
-use zolana_client::{
-    ComputeBudgetConfig, ProofDataSource, ProverClient, Rpc, SolanaRpc, ZolanaClient,
-};
+use zolana_client::{ComputeBudgetConfig, Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::{pda, PROGRAM_ID_PUBKEY};
 use zolana_user_registry_interface::user_registry_program_id;
 
@@ -37,7 +35,8 @@ fn with_funded_payer(
     )?;
     let result = run(&payer);
     let refund = (|| -> Result<()> {
-        let remaining = client.get_balance(payer.pubkey())?.saturating_sub(20_000);
+        let reserve = client.get_minimum_balance_for_rent_exemption(0)? + 20_000;
+        let remaining = client.get_balance(payer.pubkey())?.saturating_sub(reserve);
         if remaining > 0 {
             client.create_and_send_transaction(
                 &[transfer(&payer.pubkey(), &sponsor.pubkey(), remaining)],
@@ -68,12 +67,11 @@ fn rust_and_typescript_clients_on_devnet() -> Result<()> {
     );
     rpc.assert_executable(&PROGRAM_ID_PUBKEY)?;
     rpc.assert_executable(&user_registry_program_id())?;
-    let prover = ProverClient::new(context.prover_url.clone());
+    let prover = context.prover()?;
     ensure!(prover.has_tee(), "devnet proving must use TEE attestation");
     prover.attest()?;
     println!("Devnet Photon: {INDEXER_URL}; attested TEE prover: {PROVER_URL}");
-    let client = ZolanaClient::from_urls(rpc, &context.indexer_url, &context.prover_url)?
-        .with_proof_data_source(ProofDataSource::Client);
+    let client = context.client()?;
     let keypair_path = env::var("DEVNET_PAYER_KEYPAIR_PATH")?;
     let sponsor = read_keypair_file(keypair_path)
         .map_err(|error| anyhow!("load devnet test sponsor: {error}"))?;
