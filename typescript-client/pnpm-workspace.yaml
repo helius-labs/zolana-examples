@@ -1,5 +1,5 @@
 allowBuilds:
-  "@heliuslabs/zolana@https://codeload.github.com/helius-labs/zolana/tar.gz/884272c88b1bfc7bba46626e1071595c1394b062#path:/sdk-libs/ts": true
+  "@heliuslabs/zolana@https://codeload.github.com/helius-labs/zolana/tar.gz/801b44fb2d9018996a0d7150bcee2d2de9145e5e#path:/sdk-libs/ts": true
   esbuild: true
 minimumReleaseAgeExclude:
   - "@heliuslabs/zolana"

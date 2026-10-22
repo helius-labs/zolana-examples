@@ -5,7 +5,7 @@ use rust_client_example::{SetupContext, INDEXER_URL, PROVER_URL};
 use solana_keypair::{read_keypair_file, Keypair};
 use solana_signer::Signer;
 use solana_system_interface::instruction::transfer;
-use zolana_client::{ComputeBudgetConfig, Rpc, SolanaRpc, ZolanaClient};
+use zolana_client::{ComputeBudgetConfig, ProverClient, Rpc, SolanaRpc, ZolanaClient};
 use zolana_interface::{pda, PROGRAM_ID_PUBKEY};
 use zolana_user_registry_interface::user_registry_program_id;
 
@@ -67,7 +67,7 @@ fn rust_and_typescript_clients_on_devnet() -> Result<()> {
     );
     rpc.assert_executable(&PROGRAM_ID_PUBKEY)?;
     rpc.assert_executable(&user_registry_program_id())?;
-    let prover = context.prover()?;
+    let prover = ProverClient::new(context.prover_url.clone());
     ensure!(prover.has_tee(), "devnet proving must use TEE attestation");
     prover.attest()?;
     println!("Devnet Photon: {INDEXER_URL}; attested TEE prover: {PROVER_URL}");

@@ -9,7 +9,6 @@ on:
       - "swap-program/**"
       - "escrow-program/**"
       - "test-utils/**"
-      - "devnet-tee-policy.json"
       - ".github/workflows/examples.yml"
   pull_request:
     paths:
@@ -18,7 +17,6 @@ on:
       - "swap-program/**"
       - "escrow-program/**"
       - "test-utils/**"
-      - "devnet-tee-policy.json"
       - ".github/workflows/examples.yml"
   workflow_dispatch:
 
