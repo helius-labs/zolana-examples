@@ -1,7 +1,7 @@
 use crate::shared::*;
 use dvp_program::{circuits::AbortDvp, verifier::abort_dvp::VERIFYINGKEY};
 use dvp_sdk::proof::CircuitId;
-use zolana_program::ZkProgram;
+use zolana_program::ZkProgramCircuit;
 
 const CIRCUIT: CircuitId = CircuitId::AbortDvp;
 
@@ -127,7 +127,14 @@ fn abort_proof_rejects_wrong_refunds_and_spp_rejects_padding_before_a_deposit() 
         )
         .hash()
         .unwrap();
-        assert!(dvp_program::verifier::abort_dvp::verify(&proof, &public, &hash).is_err());
+        assert!(dvp_program::verifier::abort_dvp::Verifier {
+            proof: &proof,
+            public_inputs: dvp_program::verifier::abort_dvp::PublicInputs { ..public },
+            private_tx_hash: &hash,
+            transfers: &[]
+        }
+        .verify()
+        .is_err());
     }
     // 3. Check SPP rejects a real deposit after a dummy.
     let mut spp = finalized

@@ -79,7 +79,6 @@ impl SwapDvp {
         for destination in self.destinations() {
             match destination.signing_pubkey.curve().map_err(err)? {
                 Curve::Ed25519 | Curve::Pda => {}
-                Curve::P256 => bail!("destination has a P256 signing key"),
             }
         }
         Ok(())
@@ -362,7 +361,7 @@ mod tests {
         let terms = fixed_terms();
         assert_eq!(
             decimal(&terms.dvp_id().unwrap()),
-            "19284217639585534903980865803314903667065340572521528256377547822764170087020"
+            "10506488837131291769279363238439322047490778425491271257003999936566641911556"
         );
     }
 
@@ -448,12 +447,6 @@ mod tests {
     #[test]
     fn validate_rejects_bad_terms() {
         assert!(fixed_terms().validate().is_ok());
-        let p256 = ShieldedAddress {
-            signing_pubkey: PublicKey::from_p256(
-                &ViewingKey::from_bytes(&[3; 32]).unwrap().pubkey(),
-            ),
-            ..destination(11)
-        };
         let invalid: [(Mutation, &str); 8] = [
             (
                 |t| t.settlement_authority = t.seller,
@@ -485,23 +478,19 @@ mod tests {
             let error = terms.validate().expect_err(expected);
             assert_eq!(error.to_string(), expected);
         }
-        // A P256 signing key in any destination is rejected; a PDA is
-        // accepted.
+        // PDA destinations remain valid.
         let destinations: [fn(&mut SwapDvp) -> &mut ShieldedAddress; 4] = [
             |t| &mut t.seller_settlement_destination,
             |t| &mut t.buyer_settlement_destination,
             |t| &mut t.seller_refund_destination,
             |t| &mut t.buyer_refund_destination,
         ];
-        for (i, destination) in destinations.iter().enumerate() {
+        for (i, set_destination) in destinations.iter().enumerate() {
             let mut terms = fixed_terms();
-            *destination(&mut terms) = p256;
-            assert!(terms.validate().is_err(), "P256 destination {i}");
-            let mut terms = fixed_terms();
-            *destination(&mut terms) = ShieldedAddress::for_pda(
+            *set_destination(&mut terms) = ShieldedAddress::for_pda(
                 &Address::new_from_array([6; 32]),
                 [0; 32],
-                p256.viewing_pubkey,
+                destination(11).viewing_pubkey,
             );
             assert!(terms.validate().is_ok(), "PDA destination {i}");
         }
@@ -515,7 +504,7 @@ mod tests {
         ShieldedAddress {
             signing_pubkey: PublicKey::from_ed25519(&[seed; 32]),
             nullifier_pubkey: NullifierKey::from_secret([seed; 31]).pubkey().unwrap(),
-            viewing_pubkey: ViewingKey::from_bytes(&[seed; 32]).unwrap().pubkey(),
+            viewing_pubkey: ViewingKey::from_bytes(&[seed; 32]).pubkey(),
         }
     }
 

@@ -1,7 +1,7 @@
 use crate::shared::*;
 use dvp_program::{circuits::SettleDvp, verifier::settle_dvp::VERIFYINGKEY};
 use dvp_sdk::proof::CircuitId;
-use zolana_program::ZkProgram;
+use zolana_program::ZkProgramCircuit;
 
 const CIRCUIT: CircuitId = CircuitId::SettleDvp;
 
@@ -156,7 +156,14 @@ fn settle_program_proof_rejects_modified_outputs() {
         )
         .hash()
         .unwrap();
-        assert!(dvp_program::verifier::settle_dvp::verify(&proof, &public, &private_hash).is_err());
+        assert!(dvp_program::verifier::settle_dvp::Verifier {
+            proof: &proof,
+            public_inputs: dvp_program::verifier::settle_dvp::PublicInputs { ..public },
+            private_tx_hash: &private_hash,
+            transfers: &[]
+        }
+        .verify()
+        .is_err());
     }
 }
 
@@ -201,11 +208,13 @@ fn settlement_proof_rejects_a_different_state_commitment_or_first_nullifier() {
             .create_finalized_transaction(&destination(91), sample_terms().creator)
             .unwrap();
         // 3. Check the original proof cannot authorize it.
-        assert!(dvp_program::verifier::settle_dvp::verify(
-            &proof,
-            &public,
-            &transaction.padding_independent_private_tx_hash().unwrap()
-        )
+        assert!(dvp_program::verifier::settle_dvp::Verifier {
+            proof: &proof,
+            public_inputs: dvp_program::verifier::settle_dvp::PublicInputs { ..public },
+            private_tx_hash: &transaction.padding_independent_private_tx_hash().unwrap(),
+            transfers: &[]
+        }
+        .verify()
         .is_err());
     }
 }

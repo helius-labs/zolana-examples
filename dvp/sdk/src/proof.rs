@@ -73,7 +73,7 @@ pub fn key_checksum(circuit: CircuitId) -> Result<[u8; 32], ProveError> {
 }
 
 pub fn keys(id: CircuitId) -> Result<Groth16Keys, ProveError> {
-    Ok(Groth16Keys::load_image_checked(
+    Ok(Groth16Keys::load_checked(
         &keys_dir().join(format!("{}.pk", id.name())),
         &key_checksum(id)?,
     )?)

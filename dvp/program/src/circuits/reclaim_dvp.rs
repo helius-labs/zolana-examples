@@ -6,11 +6,11 @@ use zolana_program::{
         UtxoTrait,
     },
     conversion::ProofInput,
-    CircuitError, TxContext, ZkProgram,
+    CircuitError, TxContext, ZkProgramCircuit,
 };
 use zolana_transaction::WalletUtxo;
 
-#[derive(Clone, ZkProgram)]
+#[derive(Clone, ZkProgramCircuit)]
 pub struct ReclaimDvp {
     pub private: ReclaimDvpPrivateInputs,
     pub public: ReclaimDvpPublicInputs,
@@ -69,7 +69,7 @@ impl Circuit for <ReclaimDvp as ProofInput>::Circuit {
         let asset = private
             .payment_leg
             .select(&private.terms.payment_mint, &private.terms.delivery_mint);
-        let mut deposit = TokenUtxos::new_close(core::array::from_ref(&private.deposit))?;
+        let mut deposit = TokenUtxos::new_mut(core::array::from_ref(&private.deposit))?.close();
 
         // 4. Check DvP PDA ownership.
         deposit
@@ -90,9 +90,8 @@ impl Circuit for <ReclaimDvp as ProofInput>::Circuit {
 
         // 8. Check the transaction.
         ConfidentialTransaction::new(&private.tx_context, public)
-            .with_compact_padding()
-            .with_token_utxos(deposit)
-            .with_token_utxos(refund)
+            .with(deposit)
+            .with(refund)
             .check()
     }
 }

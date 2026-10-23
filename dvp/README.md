@@ -60,8 +60,9 @@ test release.
 `zolana zk compile` generates the four circuits' proving keys in
 `target/zk/dvp-program/` and their verifiers in `program/src/verifier/`.
 The committed [`dvp-keys.CHECKSUM`](dvp-keys.CHECKSUM) pins the proving keys
-used by both clients. These are deterministic test keys from an insecure
-test setup; use a trusted setup before deploying a production program.
+used by both clients. The Zolana 0.5 Devnet upgrade uses fresh single-party keys and program ID
+`7eGHQWQQMCuYBV3rGhMwasi2R1VmjLfYPA5jnUpjyGsb`. Use a trusted setup before
+deploying a production program.
 
 Check that the circuits reproduce the committed verifiers and key checksums:
 

@@ -3,7 +3,7 @@ use dvp_program::circuits::CreateDvp as CreateDvpInputs;
 use solana_address::Address;
 use zolana_client::{NonInclusionProof, ProverExt};
 use zolana_keypair::{ShieldedAddress, ViewingKey};
-use zolana_program::{ProgramOwner, ZkProgram};
+use zolana_program::{ProgramOwner, ZkProgramCircuit};
 use zolana_transaction::instructions::transact::SppProofInputs;
 
 use super::{proof::create_inputs, CreateDvp, CreateDvpDerivation};

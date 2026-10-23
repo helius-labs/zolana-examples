@@ -6,8 +6,8 @@ use solana_address::Address;
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::ViewingKey;
 use zolana_program::{
-    compression::{AddressSeed, NewAddress, PdaOwner},
-    ProgramOwner, TxContext, ZkProgram,
+    program::{AddressSeed, NewAddress, PdaOwner},
+    ProgramOwner, TxContext, ZkProgramCircuit,
 };
 use zolana_transaction::SppProofOutputUtxo;
 

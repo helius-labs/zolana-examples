@@ -1,6 +1,6 @@
 use anyhow::{ensure, Result};
 use solana_address::Address;
-use zolana_keypair::{P256Pubkey, ShieldedAddress, ViewingKey};
+use zolana_keypair::{ShieldedAddress, ViewingKey, X25519Pubkey};
 use zolana_program::ProgramOwner;
 use zolana_transaction::{Mint, SppProofOutputUtxo, WalletUtxo};
 
@@ -68,7 +68,7 @@ impl Deposit {
     /// every funder of the DvP sends to the same owner.
     pub fn address(
         terms: &SwapDvp,
-        authority_viewing_pubkey: P256Pubkey,
+        authority_viewing_pubkey: X25519Pubkey,
     ) -> Result<ShieldedAddress> {
         let (pda, _) = terms.dvp_authority()?;
         ProgramOwner::new(pda)
@@ -177,7 +177,7 @@ mod tests {
             (
                 sent.hash(1).unwrap(),
                 ProgramOwner::nullifier_pubkey().unwrap(),
-                *zolana_program::compression::PdaOwner::new(&pda)
+                *zolana_program::program::PdaOwner::new(&pda)
                     .unwrap()
                     .owner_hash(),
                 4,

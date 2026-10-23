@@ -9,9 +9,7 @@ name = "dvp_program"
 crate-type = ["cdylib", "lib"]
 
 [features]
-# Deterministic test keys are guarded by the insecure-test-setup feature.
-default = ["insecure-test-setup"]
-insecure-test-setup = []
+default = []
 bpf-entrypoint = []
 no-entrypoint = []
 cpi = ["no-entrypoint"]

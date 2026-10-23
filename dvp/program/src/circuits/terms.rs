@@ -1,6 +1,6 @@
 use zolana_keypair::ShieldedAddress;
 use zolana_program::{
-    circuit::{poseidon, zero, Assert, CircuitVar},
+    circuit::{poseidon, zero, Assert, CircuitVar, DataHash},
     conversion::ProofInput,
     CircuitError,
 };

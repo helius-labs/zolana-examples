@@ -3,10 +3,10 @@ use zolana_keypair::ShieldedAddress;
 use zolana_program::{
     circuit::{CheckedTransaction, Circuit, ConfidentialTransaction, DataUtxo, PublicInputs},
     conversion::ProofInput,
-    CircuitError, TxContext, ZkProgram,
+    CircuitError, TxContext, ZkProgramCircuit,
 };
 
-#[derive(Clone, ZkProgram)]
+#[derive(Clone, ZkProgramCircuit)]
 pub struct CreateDvp {
     pub private: CreateDvpPrivateInputs,
     pub public: CreateDvpPublicInputs,
@@ -57,9 +57,11 @@ impl Circuit for <CreateDvp as ProofInput>::Circuit {
 
         // 5. Reserve the DvP address and check the transaction.
         ConfidentialTransaction::new(&private.tx_context, public)
-            .with_compact_padding()
-            .with_new_address(&public.dvp_owner, &public.dvp_id)
-            .with_hashed_data_utxo(dvp_utxo)
+            .with(zolana_program::circuit::NewAddress::new(
+                &public.dvp_owner,
+                &public.dvp_id,
+            )?)
+            .with(dvp_utxo)
             .check()
     }
 }

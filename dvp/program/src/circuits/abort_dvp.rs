@@ -5,7 +5,7 @@ use zolana_program::{
         UtxoTrait,
     },
     conversion::ProofInput,
-    CircuitError, TxContext, ZkProgram,
+    CircuitError, TxContext, ZkProgramCircuit,
 };
 use zolana_transaction::WalletUtxo;
 
@@ -14,7 +14,7 @@ use super::{
     SwapDvpTerms,
 };
 
-#[derive(Clone, ZkProgram)]
+#[derive(Clone, ZkProgramCircuit)]
 pub struct AbortDvp {
     pub private: AbortDvpPrivateInputs,
     pub public: AbortDvpPublicInputs,
@@ -77,18 +77,16 @@ impl Circuit for <AbortDvp as ProofInput>::Circuit {
         let dvp_utxo = close_dvp_state(&private.dvp_utxo, &public.dvp_owner, &public.dvp_id)?;
 
         // 4. Spend any delivery deposit.
-        let mut delivery_deposit = TokenUtxos::new_optional_close(
-            &private.delivery_deposit,
-            &public.dvp_owner,
-            &terms.delivery_mint,
-        )?;
+        let mut delivery_deposit =
+            TokenUtxos::new_mut(core::array::from_ref(&private.delivery_deposit))?
+                .with_optional(&public.dvp_owner, &terms.delivery_mint)
+                .close();
 
         // 5. Spend any payment deposit.
-        let mut payment_deposit = TokenUtxos::new_optional_close(
-            &private.payment_deposit,
-            &public.dvp_owner,
-            &terms.payment_mint,
-        )?;
+        let mut payment_deposit =
+            TokenUtxos::new_mut(core::array::from_ref(&private.payment_deposit))?
+                .with_optional(&public.dvp_owner, &terms.payment_mint)
+                .close();
 
         // 6. Create the seller's refund, including zero.
         let mut seller_refund = TokenUtxos::new_init(
@@ -110,11 +108,12 @@ impl Circuit for <AbortDvp as ProofInput>::Circuit {
 
         // 10. Check the transaction with real deposits before padding.
         ConfidentialTransaction::new(&private.tx_context, public)
-            .with_input_padding()
-            .with_hashed_data_utxo(dvp_utxo)
-            .with_optional_token_utxos([delivery_deposit, payment_deposit])
-            .with_token_utxos(seller_refund)
-            .with_token_utxos(buyer_refund)
+            .with_dummy_padding()
+            .with(dvp_utxo)
+            .with(delivery_deposit)
+            .with(payment_deposit)
+            .with(seller_refund)
+            .with(buyer_refund)
             .check()
     }
 }

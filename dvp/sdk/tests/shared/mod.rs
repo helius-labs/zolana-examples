@@ -6,7 +6,7 @@ use dvp_sdk::{
 use solana_address::Address;
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::{NullifierKey, PublicKey, ShieldedAddress, ViewingKey};
-use zolana_program::{ProgramOwner, TxContext, ZkProgram};
+use zolana_program::{ProgramOwner, TxContext, ZkProgramCircuit};
 use zolana_transaction::{Mint, WalletUtxo, SOL_MINT};
 
 pub const OUTPUT_TREE_ID: u16 = 7;
@@ -117,7 +117,7 @@ pub fn abort_inputs(reject: bool, buyer: bool, delivery: bool, payment: bool) ->
     }
 }
 
-pub fn prove_and_verify<P: ZkProgram>(
+pub fn prove_and_verify<P: ZkProgramCircuit>(
     id: CircuitId,
     inputs: &P,
     vk: &groth16_solana::groth16::Groth16Verifyingkey,
@@ -144,7 +144,7 @@ pub fn prove_and_verify<P: ZkProgram>(
     );
 }
 
-pub fn assert_invalid<P: ZkProgram>(id: CircuitId, inputs: &P) {
+pub fn assert_invalid<P: ZkProgramCircuit>(id: CircuitId, inputs: &P) {
     assert!(inputs
         .create_finalized_transaction(&destination(91), Address::default())
         .is_err());
@@ -204,7 +204,7 @@ pub fn destination(seed: u8) -> ShieldedAddress {
     ShieldedAddress {
         signing_pubkey: PublicKey::from_ed25519(&[seed; 32]),
         nullifier_pubkey: NullifierKey::from_secret([seed; 31]).pubkey().unwrap(),
-        viewing_pubkey: ViewingKey::from_bytes(&[seed; 32]).unwrap().pubkey(),
+        viewing_pubkey: ViewingKey::from_bytes(&[seed; 32]).pubkey(),
     }
 }
 pub fn sample_terms() -> SwapDvp {

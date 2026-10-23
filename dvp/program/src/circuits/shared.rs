@@ -1,7 +1,7 @@
 use zolana_program::{
     circuit::{
-        constant, poseidon, zero, Assert, Asset, CircuitVar, DataUtxo, Owner, TxContext, Utxo,
-        UtxoTrait,
+        constant, poseidon, zero, Assert, CircuitVar, DataUtxo, SolanaAddress, TxContext, Utxo,
+        UtxoOwner, UtxoTrait,
     },
     CircuitError,
 };
@@ -18,16 +18,17 @@ pub(super) fn assert_blinding_seed(
 }
 pub(super) fn close_dvp_state(
     input: &Utxo,
-    owner: &Owner,
+    owner: &UtxoOwner,
     dvp_id: &CircuitVar,
 ) -> Result<DataUtxo<CircuitVar>, CircuitError> {
-    let state = DataUtxo::new_close_with_hash(input, dvp_id)?;
+    let state = DataUtxo::new_mut_with_hash(input, dvp_id)?.close();
     state
         .owner()
         .assert_equal(owner, "the DvP PDA owns its state")?;
-    state
-        .asset()
-        .assert_equal(&Asset::sol(), "the DvP state uses SOL")?;
+    state.asset().assert_equal(
+        &SolanaAddress::constant(&zolana_transaction::SOL_MINT),
+        "the DvP state uses SOL",
+    )?;
     state
         .amount()?
         .var()

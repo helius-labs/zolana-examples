@@ -1,7 +1,7 @@
 use crate::shared::*;
 use dvp_program::{circuits::CreateDvp, verifier::create_dvp::VERIFYINGKEY};
 use dvp_sdk::{instructions::create_dvp::CreateDvpDerivation, proof::CircuitId};
-use zolana_program::ZkProgram;
+use zolana_program::ZkProgramCircuit;
 
 const CIRCUIT: CircuitId = CircuitId::CreateDvp;
 
@@ -131,17 +131,26 @@ fn create_proof_rejects_changed_state_owner_tree_data_and_blinding() {
         }
         .hash()
         .unwrap();
-        assert!(dvp_program::verifier::create_dvp::verify(&proof, &public, &private_hash).is_err());
+        assert!(dvp_program::verifier::create_dvp::Verifier {
+            proof: &proof,
+            public_inputs: dvp_program::verifier::create_dvp::PublicInputs { ..public },
+            private_tx_hash: &private_hash,
+            transfers: &[]
+        }
+        .verify()
+        .is_err());
     }
     // 3. Check a different public owner cannot use the proof.
     let wrong_owner = dvp_program::verifier::create_dvp::PublicInputs {
         dvp_owner: destination(91).owner_hash().unwrap(),
         ..public
     };
-    assert!(dvp_program::verifier::create_dvp::verify(
-        &proof,
-        &wrong_owner,
-        &finalized.padding_independent_private_tx_hash().unwrap()
-    )
+    assert!(dvp_program::verifier::create_dvp::Verifier {
+        proof: &proof,
+        public_inputs: dvp_program::verifier::create_dvp::PublicInputs { ..wrong_owner },
+        private_tx_hash: &finalized.padding_independent_private_tx_hash().unwrap(),
+        transfers: &[]
+    }
+    .verify()
     .is_err());
 }

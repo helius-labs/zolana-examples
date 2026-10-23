@@ -2,7 +2,7 @@ use anyhow::{ensure, Result};
 use solana_address::Address;
 use solana_instruction::Instruction;
 use zolana_interface::instruction::instruction_data::transact::TransactIxData;
-use zolana_keypair::{P256Pubkey, ShieldedKeypair};
+use zolana_keypair::{ShieldedKeypair, X25519Pubkey};
 use zolana_program::instruction::Transact;
 use zolana_transaction::{
     instructions::transact::{ConfidentialTransaction, SppProofInputs},
@@ -28,7 +28,7 @@ pub struct FundDvpParams {
     /// The settlement authority's viewing pubkey, learned out of band (the
     /// terms name only its Solana address). The deposit ciphertext is
     /// encrypted to it.
-    pub authority_viewing_pubkey: P256Pubkey,
+    pub authority_viewing_pubkey: X25519Pubkey,
     /// The funder's spendable UTXOs, the first one real.
     pub inputs: Vec<WalletUtxo>,
     /// Fee payer and SPP payer; the funder's Solana key, since an Ed25519

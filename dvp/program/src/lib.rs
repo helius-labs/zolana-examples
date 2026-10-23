@@ -1,6 +1,3 @@
-#[cfg(all(not(feature = "r1cs-export"), not(feature = "insecure-test-setup")))]
-compile_error!("DvP verifying keys require the insecure-test-setup feature");
-
 #[cfg(feature = "circuits")]
 pub mod circuits;
 
@@ -59,7 +56,7 @@ mod entrypoint {
     pinocchio::entrypoint!(crate::process_instruction);
 }
 
-pinocchio::address::declare_id!("dvp1yeYrxQfXwwVam6Efm7HdHiHhWPij79FqtDhxcnj");
+pinocchio::address::declare_id!("7eGHQWQQMCuYBV3rGhMwasi2R1VmjLfYPA5jnUpjyGsb");
 
 #[cfg(not(feature = "r1cs-export"))]
 pub fn process_instruction(

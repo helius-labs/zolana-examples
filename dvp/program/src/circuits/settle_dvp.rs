@@ -9,11 +9,11 @@ use zolana_program::{
         UtxoTrait,
     },
     conversion::ProofInput,
-    CircuitError, TxContext, ZkProgram,
+    CircuitError, TxContext, ZkProgramCircuit,
 };
 use zolana_transaction::WalletUtxo;
 
-#[derive(Clone, ZkProgram)]
+#[derive(Clone, ZkProgramCircuit)]
 pub struct SettleDvp {
     pub private: SettleDvpPrivateInputs,
     pub public: SettleDvpPublicInputs,
@@ -88,7 +88,7 @@ impl Circuit for <SettleDvp as ProofInput>::Circuit {
 
         // 5. Spend the delivery deposit.
         let mut delivery_deposit =
-            TokenUtxos::new_close(core::array::from_ref(&private.delivery_deposit))?;
+            TokenUtxos::new_mut(core::array::from_ref(&private.delivery_deposit))?.close();
         delivery_deposit
             .owner()
             .assert_equal(&public.dvp_owner, "the PDA owns the delivery deposit")?;
@@ -98,7 +98,7 @@ impl Circuit for <SettleDvp as ProofInput>::Circuit {
 
         // 6. Spend the payment deposit.
         let mut payment_deposit =
-            TokenUtxos::new_close(core::array::from_ref(&private.payment_deposit))?;
+            TokenUtxos::new_mut(core::array::from_ref(&private.payment_deposit))?.close();
         payment_deposit
             .owner()
             .assert_equal(&public.dvp_owner, "the PDA owns the payment deposit")?;
@@ -144,13 +144,13 @@ impl Circuit for <SettleDvp as ProofInput>::Circuit {
 
         // 15. Check the transaction.
         ConfidentialTransaction::new(&private.tx_context, public)
-            .with_hashed_data_utxo(dvp_utxo)
-            .with_token_utxos(delivery_deposit)
-            .with_token_utxos(payment_deposit)
-            .with_token_utxos(delivery_settlement)
-            .with_token_utxos(payment_settlement)
-            .with_token_utxos(delivery_change)
-            .with_token_utxos(payment_change)
+            .with(dvp_utxo)
+            .with(delivery_deposit)
+            .with(payment_deposit)
+            .with(delivery_settlement)
+            .with(payment_settlement)
+            .with(delivery_change)
+            .with(payment_change)
             .check()
     }
 }

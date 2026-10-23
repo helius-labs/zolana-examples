@@ -7,7 +7,7 @@ use solana_instruction::Instruction;
 use zolana_client::ZolanaIndexer;
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::ShieldedKeypair;
-use zolana_program::{ProgramOwner, TxContext, ZkProgram};
+use zolana_program::{ProgramOwner, TxContext, ZkProgramCircuit};
 use zolana_transaction::{instructions::transact::SppProofInputs, Mint, WalletUtxo};
 
 use super::AbortMode;

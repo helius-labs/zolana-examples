@@ -1,12 +1,12 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use dvp_program::circuits::{
     ReclaimDvp as ReclaimDvpInputs, ReclaimDvpPrivateInputs, ReclaimDvpPublicInputs,
 };
 use solana_address::Address;
 use zolana_client::ZolanaIndexer;
 use zolana_hasher::primitives::solana_owner_identity;
-use zolana_keypair::{Curve, ShieldedAddress, ShieldedKeypair};
-use zolana_program::{ProgramOwner, TxContext, ZkProgram};
+use zolana_keypair::{ShieldedAddress, ShieldedKeypair};
+use zolana_program::{ProgramOwner, TxContext, ZkProgramCircuit};
 use zolana_transaction::instructions::transact::SppProofInputs;
 
 use super::ReclaimDvp;
@@ -42,9 +42,7 @@ impl ReclaimDvpTransactionParams {
         ensure_output_tree("the deposit", self.deposit.tree_id, self.tree_id)?;
         let sender = signer.shielded_address().map_err(err)?;
         let refund_destination = self.refund_destination.unwrap_or(sender);
-        if refund_destination.signing_pubkey.curve().map_err(err)? == Curve::P256 {
-            bail!("refund destination has a P256 signing key");
-        }
+        refund_destination.signing_pubkey.curve().map_err(err)?;
         let signer_address = sender.solana_address().map_err(err)?;
         let creator = terms.creator;
         let (pda, bump) = terms.dvp_authority()?;
@@ -152,10 +150,10 @@ mod tests {
     }
 
     #[test]
-    fn builder_rejects_the_other_party_and_p256_destination() {
+    fn builder_rejects_the_other_party() {
         // 1. Check the buyer cannot reclaim the seller's delivery deposit.
         let fixture = deposit_fixture();
-        let [seller, buyer] = &fixture.funders;
+        let [_, buyer] = &fixture.funders;
         let [delivery, _] = &fixture.deposits;
         let params = || ReclaimDvpTransactionParams {
             deposit: delivery.clone(),
@@ -164,18 +162,5 @@ mod tests {
             tree_id: delivery.tree_id,
         };
         assert!(params().build(buyer).is_err());
-        // 2. Check the refund destination uses a supported signing curve.
-        let destination = ShieldedAddress {
-            signing_pubkey: zolana_keypair::PublicKey::from_p256(
-                &zolana_keypair::ViewingKey::new().pubkey(),
-            ),
-            ..seller.shielded_address().unwrap()
-        };
-        assert!(ReclaimDvpTransactionParams {
-            refund_destination: Some(destination),
-            ..params()
-        }
-        .build(seller)
-        .is_err());
     }
 }

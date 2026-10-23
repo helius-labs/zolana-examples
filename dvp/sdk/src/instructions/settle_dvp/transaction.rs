@@ -6,7 +6,7 @@ use solana_address::Address;
 use zolana_client::ZolanaIndexer;
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::ShieldedKeypair;
-use zolana_program::{ProgramOwner, TxContext, ZkProgram};
+use zolana_program::{ProgramOwner, TxContext, ZkProgramCircuit};
 use zolana_transaction::instructions::transact::SppProofInputs;
 
 use super::SettleDvp;
