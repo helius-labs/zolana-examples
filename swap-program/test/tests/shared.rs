@@ -9,13 +9,15 @@ use zolana_keypair::{
 };
 use zolana_program_test::{
     fixture,
-    localnet::{FixtureLocalnet, LocalnetPaths, LocalnetPorts},
-    workspace_path,
+    localnet::{FixtureLocalnet, LocalnetPorts},
 };
 use zolana_test_utils::test_validator_asserts::wait_for_indexed_utxo;
 use zolana_test_utils::wallet::{sync_wallet, Deposit, DepositParams, Wallet};
 use zolana_transaction::{utxo::SppProofInputUtxo, utxo::Utxo, AssetRegistry, Data, SOL_MINT};
 use zolana_user_registry_interface::user_registry_program_id;
+
+#[path = "../../../test-utils/localnet.rs"]
+mod release_localnet;
 
 // The whole per-transaction budget: a swap verifies an SPP proof and its own.
 const TRANSACT_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
@@ -64,14 +66,17 @@ pub fn setup(test: u16) -> Result<TestEnv> {
         vec![
             (
                 swap_program::ID,
-                workspace_path("target/deploy/swap_program.so"),
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../program/target/deploy/swap_program.so"),
             ),
             (
                 user_registry_program_id(),
-                workspace_path("target/deploy/zolana_user_registry.so"),
+                release_localnet::paths()
+                    .working_dir
+                    .join("zolana_user_registry.so"),
             ),
         ],
-        &LocalnetPaths::workspace(),
+        &release_localnet::paths(),
     )?;
     let payer = fixture::payer();
 

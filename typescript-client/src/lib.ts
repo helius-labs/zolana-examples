@@ -56,8 +56,8 @@ export interface ConfirmedTransaction {
 
 // Will be exposed through a single devnet URL. Currently exposed as they are.
 const RPC_URL = "https://devnet.helius-rpc.com";
-const INDEXER_URL = "https://d2xah7tnhdhcom.cloudfront.net";
-const PROVER_URL = "https://d21ni15goiip6l.cloudfront.net";
+const INDEXER_URL = "https://d21d98xh5lgv3b.cloudfront.net";
+const PROVER_URL = "https://d1unet9hn0mci0.cloudfront.net";
 // localnet: const RPC_URL = "http://127.0.0.1:8899";
 // localnet: const INDEXER_URL = "http://127.0.0.1:8784";
 // localnet: const PROVER_URL = "http://127.0.0.1:3001";
@@ -106,8 +106,13 @@ function clientConfigFromEnv(): ZolanaClientConfig {
   if (!solanaRpcUrl) {
     throw new Error("set API_KEY or ZOLANA_ENDPOINT");
   }
+  const proofDataSource = process.env["ZOLANA_PROOF_DATA_SOURCE"] ?? "prover";
+  if (proofDataSource !== "client" && proofDataSource !== "prover") {
+    throw new Error("ZOLANA_PROOF_DATA_SOURCE must be client or prover");
+  }
   return Object.freeze({
     solanaRpcUrl,
+    proofDataSource,
     indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || INDEXER_URL,
     proverUrl: process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL,
   });

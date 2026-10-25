@@ -1,0 +1,85 @@
+name: devnet
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "rust-client/**"
+      - "typescript-client/**"
+      - ".github/workflows/devnet.yml"
+  pull_request:
+    paths:
+      - "rust-client/**"
+      - "typescript-client/**"
+      - ".github/workflows/devnet.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: devnet-clients
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  devnet-clients:
+    name: test / devnet clients
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEVNET_RPC_URL: ${{ secrets.DEVNET_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare devnet test wallet
+        env:
+          DEVNET_PAYER_KEYPAIR: ${{ secrets.DEVNET_PAYER_KEYPAIR }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          if not os.environ.get("DEVNET_RPC_URL") or not os.environ.get("DEVNET_PAYER_KEYPAIR"):
+              raise SystemExit("Configure DEVNET_RPC_URL and DEVNET_PAYER_KEYPAIR in repository secrets")
+          keypair = json.loads(os.environ["DEVNET_PAYER_KEYPAIR"])
+          if not isinstance(keypair, list) or len(keypair) != 64 or any(type(b) is not int or not 0 <= b <= 255 for b in keypair):
+              raise SystemExit("DEVNET_PAYER_KEYPAIR must contain a Solana JSON keypair")
+          directory = Path(os.environ["RUNNER_TEMP"]) / "devnet-wallet"
+          directory.mkdir(mode=0o700)
+          path = directory / "sponsor.json"
+          path.touch(mode=0o600)
+          path.write_text(json.dumps(keypair))
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              output.write(f"DEVNET_PAYER_KEYPAIR_PATH={path}\n")
+          PY
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-client
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: typescript-client/pnpm-lock.yaml
+
+      - name: Install TypeScript client dependencies
+        working-directory: typescript-client
+        run: pnpm install --frozen-lockfile
+
+      - name: Run both client suites on devnet
+        run: cargo test --manifest-path rust-client/Cargo.toml --test client_devnet --locked -- --nocapture
+
+      - name: Remove devnet wallet files
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/devnet-wallet"

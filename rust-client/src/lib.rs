@@ -8,13 +8,18 @@ use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_system_interface::instruction::create_account;
 use spl_token_interface::instruction::{initialize_account3, initialize_mint2, mint_to};
-use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
-use zolana_interface::{pda, SPL_TOKEN_ACCOUNT_LEN, SPL_TOKEN_MINT_ACCOUNT_LEN};
+use zolana_client::{ProgramAccountsFilter, ProofDataSource, Rpc, SolanaRpc, ZolanaClient};
+use zolana_interface::{
+    pda,
+    state::{discriminator::SPL_ASSET_REGISTRY, SplAssetRegistry},
+    PROGRAM_ID_PUBKEY, SPL_TOKEN_ACCOUNT_LEN, SPL_TOKEN_MINT_ACCOUNT_LEN,
+};
+use zolana_transaction::AssetRegistry;
 
 /// The RPC, Photon indexer, and prover the examples talk to.
 pub const RPC_URL: &str = "https://devnet.helius-rpc.com";
-pub const INDEXER_URL: &str = "https://d2xah7tnhdhcom.cloudfront.net";
-pub const PROVER_URL: &str = "https://d21ni15goiip6l.cloudfront.net";
+pub const INDEXER_URL: &str = "https://d21d98xh5lgv3b.cloudfront.net";
+pub const PROVER_URL: &str = "https://d1unet9hn0mci0.cloudfront.net";
 // localnet: pub const RPC_URL: &str = "http://127.0.0.1:8899";
 // localnet: pub const INDEXER_URL: &str = "http://127.0.0.1:8784";
 // localnet: pub const PROVER_URL: &str = "http://127.0.0.1:3001";
@@ -25,6 +30,17 @@ pub struct SetupContext {
     pub indexer_url: String,
     pub prover_url: String,
     pub tree: Address,
+}
+
+impl SetupContext {
+    pub fn client(&self) -> Result<ZolanaClient<SolanaRpc>> {
+        Ok(ZolanaClient::from_urls(
+            SolanaRpc::new(self.rpc_url.clone()),
+            &self.indexer_url,
+            self.prover_url.clone(),
+        )?
+        .with_proof_data_source(ProofDataSource::Prover))
+    }
 }
 
 /// Read the environment settings and the `API_KEY` for the Helius devnet RPC.
@@ -52,6 +68,27 @@ pub fn cli_keypair() -> Result<Keypair> {
         .unwrap_or_else(|_| "~/.config/solana/id.json".to_string());
     let path = shellexpand::tilde(&path).into_owned();
     read_keypair_file(&path).map_err(|e| anyhow!("load keypair {path}: {e}"))
+}
+
+/// Load the registered SPL mints before scanning notes that carry a mint address.
+pub fn asset_registry(client: &ZolanaClient<SolanaRpc>) -> Result<AssetRegistry> {
+    let mut assets = AssetRegistry::default();
+    let filter =
+        ProgramAccountsFilter::new(SplAssetRegistry::SIZE).with_memcmp(0, vec![SPL_ASSET_REGISTRY]);
+    for (address, account) in client
+        .rpc()
+        .get_program_accounts_filtered(PROGRAM_ID_PUBKEY, &filter)?
+    {
+        let registry = SplAssetRegistry::from_account_bytes(&account.data)
+            .map_err(|error| anyhow!("decode SPL asset registry: {error:?}"))?;
+        anyhow::ensure!(
+            account.owner == PROGRAM_ID_PUBKEY
+                && address == pda::spl_asset_registry(&registry.mint),
+            "invalid SPL asset registry account"
+        );
+        assets.insert(registry.asset_id, registry.mint)?;
+    }
+    Ok(assets)
 }
 
 /// Test mint and the payer's funded token account.

@@ -10,7 +10,8 @@ TypeScript client examples for `@heliuslabs/zolana`.
 
 ## Setup
 
-Install Node.js 24+ and pnpm.
+Install Node.js 24+ and pnpm. The SDK is pinned to the `v0.5.0-alpha` Git tag
+until the npm release is published. Installation builds the SDK from that tag.
 
 ```bash
 pnpm install
@@ -19,6 +20,8 @@ pnpm install
 **Devnet:**
 
 The example uses devnet by default.
+
+Devnet proofs use the attested TEE prover, which fetches Merkle proofs from Photon and assembles the witness server-side. Photon also serves balance and history reads.
 
 Get an API key from [Helius](https://helius.dev) and add to .env:
 
@@ -31,7 +34,7 @@ cp .env.example .env # ...and set API_KEY
 To run on localnet, configure in [`src/lib.ts`](src/lib.ts) and install:
 
 ```bash
-cargo install --git https://github.com/helius-labs/zolana --tag v0.4.0-alpha zolana-cli
+cargo install --git https://github.com/helius-labs/zolana --tag v0.5.0-alpha zolana-cli
 zolana dev start
 ```
 
@@ -40,6 +43,8 @@ const RPC_URL = "http://127.0.0.1:8899";
 const INDEXER_URL = "http://127.0.0.1:8784";
 const PROVER_URL = "http://127.0.0.1:3001";
 ```
+
+For a local prover without an indexer, set `ZOLANA_PROOF_DATA_SOURCE=client`. The localnet integration tests use this mode because they share one prover across separate validator/indexer stacks.
 
 ## Run
 
