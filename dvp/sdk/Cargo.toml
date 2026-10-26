@@ -23,6 +23,9 @@ zolana-transaction = { workspace = true }
 
 
 [dev-dependencies]
+mollusk-svm = { workspace = true }
+solana-account = { workspace = true }
+solana-program-error = { workspace = true }
 zolana-program = { workspace = true, features = ["test-support"] }
 groth16-solana = { workspace = true }
 solana-keypair = { workspace = true }

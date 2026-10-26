@@ -43,6 +43,7 @@ fn circuits_allocate_only_their_specified_utxo_inputs() {
 
 mod abort_dvp_circuit;
 mod create_dvp_circuit;
+mod program_boundary;
 mod reclaim_dvp_circuit;
 mod settle_dvp_circuit;
 mod shared;

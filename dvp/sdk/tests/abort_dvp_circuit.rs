@@ -99,10 +99,22 @@ fn abort_proof_rejects_wrong_refunds_and_spp_rejects_padding_before_a_deposit() 
     let public = dvp_program::verifier::abort_dvp::PublicInputs {
         creator_identity: inputs.public.creator_identity,
         dvp_id: inputs.public.dvp_id,
-        dvp_owner: inputs.public.dvp_owner.owner_hash().unwrap(),
+        dvp_owner: zolana_program::verifier::address_hash(
+            &inputs.public.dvp_owner.owner_hash().unwrap(),
+            inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
+        )
+        .unwrap(),
         signer_identity: inputs.public.signer_identity,
         reject: false,
     };
+    dvp_program::verifier::abort_dvp::Verifier {
+        proof: &proof,
+        public_inputs: dvp_program::verifier::abort_dvp::PublicInputs { ..public },
+        private_tx_hash: &finalized.padding_independent_private_tx_hash().unwrap(),
+        transfers: &[],
+    }
+    .verify()
+    .unwrap();
     // 2. Recompute the SPP hash after tampering each refund or input order.
     for mutation in 0..2 {
         let input_hashes = vec![

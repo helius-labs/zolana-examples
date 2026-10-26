@@ -105,6 +105,7 @@ impl CreateDvpTransaction {
             tree,
             dvp_id: self.derivation.dvp_id,
             bump: self.derivation.bump,
+            viewing_pubkey: *self.proof_inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
             create_proof,
             spp,
         })

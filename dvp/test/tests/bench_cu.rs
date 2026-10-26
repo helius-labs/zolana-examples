@@ -6,7 +6,7 @@
 //! root:
 //!
 //! ```sh
-//! cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.53 \
+//! cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.56 \
 //!     --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program
 //! SHIELDED_POOL_PROGRAM_PATH=/path/to/shielded_pool_program.so \
 //! ZOLANA_CLI_BIN=/path/to/zolana \
@@ -124,7 +124,7 @@ fn bench_cu_dvp() {
 
     let report = CuBenchmark::new(ReadmeConfig {
         title: "Private DvP -- CU Benchmark".into(),
-        description: "1. Measure the five DvP instructions under Mollusk using the test release shielded-pool program. Each DvP handler verifies its generated program proof and invokes SPP directly. Cancellation and rejection share process_abort_dvp.\n\n2. Record SPP and program proving times, consumed compute units, and serialized v1 transaction sizes. Create/reclaim use 1x2 with compact output padding; settle uses 3x4; cancel/reject use 3x2 with real optional deposits before random input padding.\n\n3. Report compiled program constraints, checksummed proving-key image sizes, and the total bytes of verifying-key curve points. Release-profile program proof timings include loading the checked key image. Build the profiling program first with cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.53 --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program.".into(),
+        description: "1. Measure the five DvP instructions under Mollusk using the test release shielded-pool program. Each DvP handler verifies its generated program proof and invokes SPP directly. Cancellation and rejection share process_abort_dvp.\n\n2. Record SPP and program proving times, consumed compute units, and serialized v1 transaction sizes. Create/reclaim use 1x2 with compact output padding; settle uses 3x4; cancel/reject use 3x2 with real optional deposits before random input padding.\n\n3. Report compiled program constraints, checksummed proving-key image sizes, and the total bytes of verifying-key curve points. Release-profile program proof timings include loading the checked key image. Build the profiling program first with cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.56 --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program.".into(),
         output_path: OUTPUT_PATH.into(),
         regenerate_command: Some(
             "cargo test --release --locked -p dvp-test --test bench_cu -- --ignored --nocapture".into(),
@@ -671,6 +671,7 @@ fn bench_reclaim_dvp(bench: &mut Bench) {
         creator: terms.creator,
         dvp_id: proof_inputs.public.dvp_id,
         bump,
+        viewing_pubkey: *proof_inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
         reclaim_proof,
         spp,
     }
@@ -726,6 +727,7 @@ fn bench_settle_dvp(bench: &mut Bench) {
         creator: terms.creator,
         dvp_id: proof_inputs.public.dvp_id,
         bump,
+        viewing_pubkey: *proof_inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
         current_timestamp,
         settle_proof,
         spp,
@@ -800,6 +802,7 @@ fn bench_abort_dvp(bench: &mut Bench, mode: AbortMode) {
             creator: terms.creator,
             dvp_id: proof_inputs.public.dvp_id,
             bump,
+            viewing_pubkey: *proof_inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
             cancel_proof: abort_proof,
             spp,
         }),
@@ -810,6 +813,7 @@ fn bench_abort_dvp(bench: &mut Bench, mode: AbortMode) {
             creator: terms.creator,
             dvp_id: proof_inputs.public.dvp_id,
             bump,
+            viewing_pubkey: *proof_inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
             reject_proof: abort_proof,
             spp,
         }),

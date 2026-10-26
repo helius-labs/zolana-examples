@@ -19,6 +19,7 @@ pub struct SettleDvp {
     pub dvp_id: [u8; 32],
     /// Bump of `dvp_authority` (`SwapDvp::dvp_authority`).
     pub bump: u8,
+    pub viewing_pubkey: [u8; 33],
     /// The time the settle proof checks the terms' window against; it must
     /// be within `TIME_WINDOW` behind the cluster clock when the transaction
     /// lands.
@@ -39,6 +40,7 @@ impl SettleDvp {
             creator,
             dvp_id,
             bump,
+            viewing_pubkey,
             current_timestamp,
             settle_proof,
             spp,
@@ -47,6 +49,7 @@ impl SettleDvp {
             creator,
             dvp_id,
             bump,
+            viewing_pubkey,
             current_timestamp,
             settle_proof,
             spp,

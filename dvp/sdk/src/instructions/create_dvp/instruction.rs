@@ -17,6 +17,7 @@ pub struct CreateDvp {
     pub dvp_id: [u8; 32],
     /// Bump of `dvp_authority` (`SwapDvp::dvp_authority`).
     pub bump: u8,
+    pub viewing_pubkey: [u8; 33],
     pub create_proof: CreateDvpProof,
     pub spp: TransactIxData,
 }
@@ -32,12 +33,14 @@ impl CreateDvp {
             tree,
             dvp_id,
             bump,
+            viewing_pubkey,
             create_proof,
             spp,
         } = self;
         let ix_data = CreateDvpIxData {
             dvp_id,
             bump,
+            viewing_pubkey,
             create_proof,
             spp,
         };

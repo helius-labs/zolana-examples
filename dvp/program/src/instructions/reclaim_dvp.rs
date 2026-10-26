@@ -35,6 +35,7 @@ pub fn process_reclaim_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> Prog
         creator,
         dvp_id,
         bump,
+        viewing_pubkey,
         reclaim_proof,
         spp,
     } = wincode::deserialize_exact(data).map_err(|_| DvpError::InvalidInstructionData)?;
@@ -49,7 +50,8 @@ pub fn process_reclaim_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> Prog
         return Err(DvpError::InvalidDvpAuthority.into());
     }
     let owner = PdaOwner::new(&dvp_authority).map_err(|_| DvpError::HashingFailed)?;
-    let dvp_owner = *owner.owner_hash();
+    let dvp_owner = zolana_program::verifier::address_hash(owner.owner_hash(), &viewing_pubkey)
+        .map_err(|_| DvpError::HashingFailed)?;
     let creator_identity = solana_owner_identity(creator.as_array()).map_err(DvpError::from)?;
     let signer_identity = solana_owner_identity(signer.as_array()).map_err(DvpError::from)?;
 
@@ -101,6 +103,7 @@ pub struct ReclaimDvpIxData {
     pub creator: Address,
     pub dvp_id: [u8; 32],
     pub bump: u8,
+    pub viewing_pubkey: [u8; 33],
     pub reclaim_proof: ReclaimDvpProof,
     pub spp: TransactIxData,
 }

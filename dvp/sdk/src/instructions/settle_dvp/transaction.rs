@@ -128,6 +128,7 @@ impl SettleDvpTransaction {
             creator: self.creator,
             dvp_id: self.proof_inputs.public.dvp_id,
             bump: self.bump,
+            viewing_pubkey: *self.proof_inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
             current_timestamp: self.current_timestamp,
             settle_proof,
             spp,

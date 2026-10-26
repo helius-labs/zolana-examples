@@ -21,6 +21,7 @@ pub struct CancelDvpIxData {
     pub creator: Address,
     pub dvp_id: [u8; 32],
     pub bump: u8,
+    pub viewing_pubkey: [u8; 33],
     pub cancel_proof: AbortDvpProof,
     pub spp: TransactIxData,
 }

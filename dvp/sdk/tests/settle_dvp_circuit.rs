@@ -126,10 +126,22 @@ fn settle_program_proof_rejects_modified_outputs() {
     let public = dvp_program::verifier::settle_dvp::PublicInputs {
         creator_identity: inputs.public.creator_identity,
         dvp_id: inputs.public.dvp_id,
-        dvp_owner: inputs.public.dvp_owner.owner_hash().unwrap(),
+        dvp_owner: zolana_program::verifier::address_hash(
+            &inputs.public.dvp_owner.owner_hash().unwrap(),
+            inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
+        )
+        .unwrap(),
         settlement_authority_identity: inputs.public.settlement_authority_identity,
         current_timestamp: inputs.public.current_timestamp,
     };
+    dvp_program::verifier::settle_dvp::Verifier {
+        proof: &proof,
+        public_inputs: dvp_program::verifier::settle_dvp::PublicInputs { ..public },
+        private_tx_hash: &finalized.padding_independent_private_tx_hash().unwrap(),
+        transfers: &[],
+    }
+    .verify()
+    .unwrap();
     // 2. Change a settlement amount, destination, mint, and derived blinding.
     for mutation in 0..4 {
         let mut outputs = finalized.output_utxos().to_vec();
@@ -171,14 +183,29 @@ fn settle_program_proof_rejects_modified_outputs() {
 fn settlement_proof_rejects_a_different_state_commitment_or_first_nullifier() {
     // 1. Prove settlement of the created state.
     let inputs = settle_inputs([0, 0]);
+    let finalized = inputs
+        .create_finalized_transaction(&destination(91), sample_terms().creator)
+        .unwrap();
     let proof = dvp_sdk::proof::prove(CIRCUIT, &inputs).unwrap();
     let public = dvp_program::verifier::settle_dvp::PublicInputs {
         creator_identity: inputs.public.creator_identity,
         dvp_id: inputs.public.dvp_id,
-        dvp_owner: inputs.public.dvp_owner.owner_hash().unwrap(),
+        dvp_owner: zolana_program::verifier::address_hash(
+            &inputs.public.dvp_owner.owner_hash().unwrap(),
+            inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
+        )
+        .unwrap(),
         settlement_authority_identity: inputs.public.settlement_authority_identity,
         current_timestamp: inputs.public.current_timestamp,
     };
+    dvp_program::verifier::settle_dvp::Verifier {
+        proof: &proof,
+        public_inputs: dvp_program::verifier::settle_dvp::PublicInputs { ..public },
+        private_tx_hash: &finalized.padding_independent_private_tx_hash().unwrap(),
+        transfers: &[],
+    }
+    .verify()
+    .unwrap();
     for change_blinding in [false, true] {
         // 2. Build a different transaction, preserving valid state fields.
         let mut altered = inputs.clone();

@@ -97,6 +97,7 @@ pub fn create_dvp_data(dvp_id: [u8; 32], bump: u8) -> Vec<u8> {
     let body = wincode::serialize(&CreateDvpIxData {
         dvp_id,
         bump,
+        viewing_pubkey: [4; 33],
         create_proof: CreateDvpProof {
             a: [10; 32],
             b: [11; 64],
@@ -153,6 +154,7 @@ pub fn reclaim_dvp_data(creator: Address, dvp_id: [u8; 32], bump: u8) -> Vec<u8>
         creator,
         dvp_id,
         bump,
+        viewing_pubkey: [4; 33],
         reclaim_proof: ReclaimDvpProof {
             a: [10; 32],
             b: [11; 64],
@@ -182,6 +184,7 @@ pub fn settle_dvp_data(
         creator,
         dvp_id,
         bump,
+        viewing_pubkey: [4; 33],
         current_timestamp,
         settle_proof: SettleDvpProof {
             a: [10; 32],
@@ -210,6 +213,7 @@ pub fn cancel_dvp_data(creator: Address, dvp_id: [u8; 32], bump: u8) -> Vec<u8> 
         creator,
         dvp_id,
         bump,
+        viewing_pubkey: [4; 33],
         cancel_proof: ABORT_PROOF,
         spp: spp(),
     })
@@ -225,6 +229,7 @@ pub fn reject_dvp_data(creator: Address, dvp_id: [u8; 32], bump: u8) -> Vec<u8> 
         creator,
         dvp_id,
         bump,
+        viewing_pubkey: [4; 33],
         reject_proof: ABORT_PROOF,
         spp: spp(),
     })

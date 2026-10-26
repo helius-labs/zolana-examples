@@ -23,7 +23,7 @@ env:
   AGAVE_VERSION: v4.0.2
   ZOLANA_TAG: test-dvp-pr-41-20261017-48dd150
   SURFPOOL_RELEASE_TAG: v1.6.0-light
-  SBF_TOOLS_VERSION: v1.53
+  SBF_TOOLS_VERSION: v1.56
 
 jobs:
   dvp-test:

@@ -109,8 +109,20 @@ fn create_proof_rejects_changed_state_owner_tree_data_and_blinding() {
     let public = dvp_program::verifier::create_dvp::PublicInputs {
         creator_identity: inputs.public.creator_identity,
         dvp_id: inputs.public.dvp_id,
-        dvp_owner: inputs.public.dvp_owner.owner_hash().unwrap(),
+        dvp_owner: zolana_program::verifier::address_hash(
+            &inputs.public.dvp_owner.owner_hash().unwrap(),
+            inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
+        )
+        .unwrap(),
     };
+    dvp_program::verifier::create_dvp::Verifier {
+        proof: &proof,
+        public_inputs: dvp_program::verifier::create_dvp::PublicInputs { ..public },
+        private_tx_hash: &finalized.padding_independent_private_tx_hash().unwrap(),
+        transfers: &[],
+    }
+    .verify()
+    .unwrap();
     let address = finalized.first_nullifier().unwrap();
     // 2. Recompute the SPP commitment after changing each state field.
     for mutation in 0..4 {
@@ -142,7 +154,7 @@ fn create_proof_rejects_changed_state_owner_tree_data_and_blinding() {
     }
     // 3. Check a different public owner cannot use the proof.
     let wrong_owner = dvp_program::verifier::create_dvp::PublicInputs {
-        dvp_owner: destination(91).owner_hash().unwrap(),
+        dvp_owner: destination(91).address_hash().unwrap(),
         ..public
     };
     assert!(dvp_program::verifier::create_dvp::Verifier {

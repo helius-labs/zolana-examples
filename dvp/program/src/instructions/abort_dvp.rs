@@ -39,6 +39,7 @@ pub(crate) fn process_abort_dvp(
         creator,
         dvp_id,
         bump,
+        viewing_pubkey,
         abort_proof,
         spp,
     } = wincode::deserialize_exact(data).map_err(|_| DvpError::InvalidInstructionData)?;
@@ -53,7 +54,8 @@ pub(crate) fn process_abort_dvp(
         return Err(DvpError::InvalidDvpAuthority.into());
     }
     let owner = PdaOwner::new(&dvp_authority).map_err(|_| DvpError::HashingFailed)?;
-    let dvp_owner = *owner.owner_hash();
+    let dvp_owner = zolana_program::verifier::address_hash(owner.owner_hash(), &viewing_pubkey)
+        .map_err(|_| DvpError::HashingFailed)?;
     let creator_identity = solana_owner_identity(creator.as_array()).map_err(DvpError::from)?;
     let signer_identity = solana_owner_identity(signer.as_array()).map_err(DvpError::from)?;
 
@@ -106,6 +108,7 @@ struct AbortDvpIxData {
     creator: Address,
     dvp_id: [u8; 32],
     bump: u8,
+    viewing_pubkey: [u8; 33],
     abort_proof: AbortDvpProof,
     spp: TransactIxData,
 }

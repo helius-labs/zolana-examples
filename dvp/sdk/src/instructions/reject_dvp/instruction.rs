@@ -19,6 +19,7 @@ pub struct RejectDvp {
     pub dvp_id: [u8; 32],
     /// Bump of `dvp_authority` (`SwapDvp::dvp_authority`).
     pub bump: u8,
+    pub viewing_pubkey: [u8; 33],
     pub reject_proof: AbortDvpProof,
     pub spp: TransactIxData,
 }
@@ -35,6 +36,7 @@ impl RejectDvp {
             creator,
             dvp_id,
             bump,
+            viewing_pubkey,
             reject_proof,
             spp,
         } = self;
@@ -42,6 +44,7 @@ impl RejectDvp {
             creator,
             dvp_id,
             bump,
+            viewing_pubkey,
             reject_proof,
             spp,
         };

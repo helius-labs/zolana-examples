@@ -31,8 +31,8 @@ settlement, reclaim, cancellation and rejection with each flow inlined.
 ## Build
 
 Use Rust stable, Node.js 24 or newer, `wasm-pack`, and Agave with SBF platform
-tools v1.53. The workspace pins its Zolana dependencies to
-[`7770e164e`](https://github.com/helius-labs/zolana/commit/7770e164ebc31a53c990cb3d1550591d3293f9e7).
+tools v1.56. The workspace pins its Zolana dependencies to
+[`ded44879`](https://github.com/helius-labs/zolana/commit/ded44879b3df35482d2871bc1d0f32f2d1be2879) (`v0.5.0-alpha`).
 Download the compatible CLI and localnet binaries from the
 [test release for PR #41](https://github.com/helius-labs/zolana/releases/tag/test-dvp-pr-41-20261017-48dd150).
 The native artifacts use protocol sources at `48dd150`; the attached
@@ -45,15 +45,20 @@ Run these commands from `dvp/`, with the downloaded CLI on `PATH`:
 ```bash
 zolana zk compile --manifest-path program/Cargo.toml --wasm-target nodejs --verifier
 scripts/check-keys.sh
-cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.53 -- --locked --features bpf-entrypoint
+cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.56 -- --locked --features bpf-entrypoint
 cargo build --release --workspace --locked
 npm --prefix typescript ci
 npm --prefix typescript run check
 npm --prefix typescript test
 ```
 
-Build with `bpf-entrypoint` and platform tools v1.53 to match CI and the
-test release.
+Build with `bpf-entrypoint` and platform tools v1.56 to match CI. Use a clean
+target directory when changing platform tools, then run the SDK program-boundary
+tests against the resulting binary.
+
+The Rust instruction builders send the tagged 33-byte X25519 viewing public key.
+The program combines it with the PDA owner hash to verify the same shielded
+address committed by the circuit. Upgrade the Rust SDK and program together.
 
 ## Circuit keys
 
@@ -133,6 +138,6 @@ starts one with `ZOLANA_CLI_BIN`. Keep its profiled program in `target/bench`,
 because a validator does not register the profiler syscall.
 
 ```bash
-cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.53 --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program
+cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.56 --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program
 cargo test --release --locked -p dvp-test --test bench_cu -- --ignored --nocapture
 ```

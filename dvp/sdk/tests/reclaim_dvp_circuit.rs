@@ -68,9 +68,21 @@ fn reclaim_proof_rejects_partial_or_wrong_asset_refunds() {
     let public = dvp_program::verifier::reclaim_dvp::PublicInputs {
         creator_identity: inputs.public.creator_identity,
         dvp_id: inputs.public.dvp_id,
-        dvp_owner: inputs.public.dvp_owner.owner_hash().unwrap(),
+        dvp_owner: zolana_program::verifier::address_hash(
+            &inputs.public.dvp_owner.owner_hash().unwrap(),
+            inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
+        )
+        .unwrap(),
         signer_identity: inputs.public.signer_identity,
     };
+    dvp_program::verifier::reclaim_dvp::Verifier {
+        proof: &proof,
+        public_inputs: dvp_program::verifier::reclaim_dvp::PublicInputs { ..public },
+        private_tx_hash: &finalized.padding_independent_private_tx_hash().unwrap(),
+        transfers: &[],
+    }
+    .verify()
+    .unwrap();
     // 2. Recompute the SPP hash for each unauthorized refund.
     for wrong_asset in [false, true] {
         let mut output = finalized.output_utxos().first().unwrap().clone();

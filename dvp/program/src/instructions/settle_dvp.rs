@@ -37,6 +37,7 @@ pub fn process_settle_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> Progr
         creator,
         dvp_id,
         bump,
+        viewing_pubkey,
         current_timestamp,
         settle_proof,
         spp,
@@ -62,7 +63,8 @@ pub fn process_settle_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> Progr
         return Err(DvpError::InvalidDvpAuthority.into());
     }
     let owner = PdaOwner::new(&dvp_authority).map_err(|_| DvpError::HashingFailed)?;
-    let dvp_owner = *owner.owner_hash();
+    let dvp_owner = zolana_program::verifier::address_hash(owner.owner_hash(), &viewing_pubkey)
+        .map_err(|_| DvpError::HashingFailed)?;
     let creator_identity = solana_owner_identity(creator.as_array()).map_err(DvpError::from)?;
     let signer_identity =
         solana_owner_identity(settlement_authority.as_array()).map_err(DvpError::from)?;
@@ -116,6 +118,7 @@ pub struct SettleDvpIxData {
     pub creator: Address,
     pub dvp_id: [u8; 32],
     pub bump: u8,
+    pub viewing_pubkey: [u8; 33],
     pub current_timestamp: i64,
     pub settle_proof: SettleDvpProof,
     pub spp: TransactIxData,
