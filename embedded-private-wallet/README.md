@@ -177,11 +177,41 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-To verify the live integration, create two fresh wallets and fund both with
-devnet SOL. Deposit into each, transfer privately between them, withdraw, and
-check balances and history immediately after each transaction. Restart the
-server with the same `DATA_DIR` and check both wallets again: it reuses the
-stored sealed seed and waits for the last confirmed slot before syncing.
+Run the full live devnet suite with:
+
+```bash
+cp .env.example .env  # set HELIUS_API_KEY and DEVNET_PAYER_KEYPAIR_PATH
+pnpm test:devnet
+```
+
+Use a Helius API key with Wallet-as-a-Service enabled and a **devnet-only**
+Solana JSON keypair with at least **0.2 SOL**. The payer path is resolved from
+this directory; `.data/devnet-payer.json` is a gitignored location for it.
+Never put keypair bytes or API keys in tracked files. `.env.example` contains
+placeholders; `.env` and `.env.*` are ignored. Environment variables override
+`.env`, so the same command can use secrets supplied by CI.
+
+The runner verifies the devnet genesis hash before funding. It starts its own
+server on a free port and creates two fresh embedded wallets per run. It checks
+registration, deposits, private transfer, withdrawal, exact balances and
+history, public SOL and standard SPL Token/Token-2022 sends, recipient token
+account creation/reuse, rejected requests, and recovery after a server restart.
+A test-only preload rejects plaintext proof traffic and records attestation
+and encrypted-proof metadata without request bodies or credential headers.
+Token-2022 mints in this test have no extensions.
+
+Each run prints its directory under `.data/devnet-e2e/run-*` and exits nonzero
+if any check fails. That gitignored directory contains `results.json` (check
+results, public addresses and transaction signatures), `prover-audit.jsonl`
+(metadata only), `server.log` (API keys redacted), and `data/wallets/` (secret
+wallet credentials). The server stops on success, failure, or Ctrl-C. Run data
+is retained so failed runs can be inspected and test wallets can be reopened;
+keep the whole directory private.
+
+The suite transfers **0.07 devnet SOL to each test wallet**, plus mint setup
+rent and transaction fees from the payer. It leaves the new wallets, balances
+and token accounts in place and does not automatically reclaim funds. This is
+an opt-in live check; ordinary `pnpm check` and PR CI do not run it.
 
 ## Links
 
