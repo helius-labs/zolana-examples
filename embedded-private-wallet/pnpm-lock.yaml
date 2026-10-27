@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@heliuslabs/zolana':
-        specifier: ^0.4.0-alpha
-        version: 0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2))
+        specifier: 0.5.0-alpha
+        version: 0.5.0-alpha(@solana/kit@8.4.0(typescript@7.0.2))(typescript@7.0.2)
       '@solana-program/system':
         specifier: 0.14.1
         version: 0.14.1(@solana/kit@8.4.0(typescript@7.0.2))
@@ -27,8 +27,8 @@ importers:
         specifier: ^8.6.0
         version: 8.6.0(typescript@7.0.2)
       '@zolana/tvc-wallet':
-        specifier: github:helius-labs/zolana-tvc#6e80f73cfe503231d0e2f3a827cc2887c64a2e84&path:/packages/tvc-wallet
-        version: https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/6e80f73cfe503231d0e2f3a827cc2887c64a2e84#path:/packages/tvc-wallet(@heliuslabs/zolana@0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2)))(@solana/kit@8.4.0(typescript@7.0.2))
+        specifier: github:helius-labs/zolana-tvc#cb717a8f750929e8307ffb788729ac29c369032c&path:/packages/tvc-wallet
+        version: https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/cb717a8f750929e8307ffb788729ac29c369032c#path:/packages/tvc-wallet(@heliuslabs/zolana@0.5.0-alpha(@solana/kit@8.4.0(typescript@7.0.2))(typescript@7.0.2))(@solana/kit@8.4.0(typescript@7.0.2))
       dotenv:
         specifier: ^17.2.2
         version: 17.4.2
@@ -213,8 +213,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@heliuslabs/zolana@0.4.0-alpha':
-    resolution: {integrity: sha512-KWNDOZLjs7KE4Q5tW05uAVDdUXbzZRAf+UwOcdYM6HmwlsKi+4UW5vMOI/2y0rSFBKg3VOn+N9ZKxAbLDBpRnQ==}
+  '@heliuslabs/zolana@0.5.0-alpha':
+    resolution: {integrity: sha512-WjPPZpCOhaef+sVXStkLSggjDuR4/BpwAfK20vCGkB1X5qcAQ8XAxEO8EstYyhaQX3wXsW1Fq3ZmMNjY+qCwYw==}
     engines: {node: '>=24'}
     peerDependencies:
       '@solana/kit': ^8.3.0
@@ -1046,8 +1046,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/6e80f73cfe503231d0e2f3a827cc2887c64a2e84#path:/packages/tvc-wallet':
-    resolution: {gitHosted: true, integrity: sha512-YCc8scCH5zcpP6fgiEyqLlRTJnlMRtyGPFnIojexPh7eP2NMAz3aBR69mg0oc4Kq54tgzCICemsFIcVPFwAo0w==, path: /packages/tvc-wallet, tarball: https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/6e80f73cfe503231d0e2f3a827cc2887c64a2e84}
+  '@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/cb717a8f750929e8307ffb788729ac29c369032c#path:/packages/tvc-wallet':
+    resolution: {gitHosted: true, integrity: sha512-nc/Jk04XjN/tJb8Ual7HDWSRrgfpa7HN+2YZ1xJgUhT8ivUj5DcCUdY0fp59R6FZCre2hGlLbJ9lMIwREBrB8w==, path: /packages/tvc-wallet, tarball: https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/cb717a8f750929e8307ffb788729ac29c369032c}
     version: 0.0.0
     engines: {node: '>=24'}
     peerDependencies:
@@ -1616,7 +1616,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@heliuslabs/zolana@0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2))':
+  '@heliuslabs/zolana@0.5.0-alpha(@solana/kit@8.4.0(typescript@7.0.2))(typescript@7.0.2)':
     dependencies:
       '@hpke/core': 1.9.0
       '@lightprotocol/hasher.rs': 0.2.1
@@ -1629,10 +1629,12 @@ snapshots:
       '@solana-program/system': 0.14.1(@solana/kit@8.4.0(typescript@7.0.2))
       '@solana-program/token': 0.16.1(@solana/kit@8.4.0(typescript@7.0.2))
       '@solana/kit': 8.4.0(typescript@7.0.2)
+      '@solana/rpc-spec-types': 8.4.0(typescript@7.0.2)
       bn.js: 5.2.5
       cborg: 6.1.3
     transitivePeerDependencies:
       - encoding
+      - typescript
 
   '@hpke/common@1.10.1': {}
 
@@ -2536,9 +2538,9 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/6e80f73cfe503231d0e2f3a827cc2887c64a2e84#path:/packages/tvc-wallet(@heliuslabs/zolana@0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2)))(@solana/kit@8.4.0(typescript@7.0.2))':
+  '@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/cb717a8f750929e8307ffb788729ac29c369032c#path:/packages/tvc-wallet(@heliuslabs/zolana@0.5.0-alpha(@solana/kit@8.4.0(typescript@7.0.2))(typescript@7.0.2))(@solana/kit@8.4.0(typescript@7.0.2))':
     dependencies:
-      '@heliuslabs/zolana': 0.4.0-alpha(@solana/kit@8.4.0(typescript@7.0.2))
+      '@heliuslabs/zolana': 0.5.0-alpha(@solana/kit@8.4.0(typescript@7.0.2))(typescript@7.0.2)
       '@noble/ciphers': 1.2.1
       '@noble/curves': 1.8.1
       '@noble/hashes': 1.7.1

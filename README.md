@@ -24,7 +24,7 @@
 
 |  |  |
 |---------|-------------|
-| [`private-wallet-node-starter/`](private-wallet-node-starter/README.md) | An Express server that creates private wallets whose keys the Helius enclave holds: create, deposit, private transfer, withdraw, and balances. |
+| [`embedded-private-wallet/`](embedded-private-wallet/README.md) | An Express server that creates private wallets whose keys the Helius enclave holds: create, deposit, private transfer, withdraw, and balances. |
 
 ### Program examples
 

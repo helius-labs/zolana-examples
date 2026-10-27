@@ -18,6 +18,7 @@ import {
 import { generateP256KeyPair } from "@turnkey/crypto";
 import {
   TvcKeys,
+  DEVNET_PROVER_POLICY,
   createTvcClient,
   createTvcOperationAuthorizer,
   identityOf,
@@ -54,7 +55,8 @@ import {
 
 /**
  * The enclave release this server trusts, from
- * helius-labs/zolana-tvc `apps/privacy-wallet/deploy/privacy-wallet.trust.json`.
+ * helius-labs/zolana-tvc at cb717a8f7509,
+ * `apps/privacy-wallet/deploy/privacy-wallet.trust.json`.
  * The client verifies every enclave answer against it.
  */
 const release = releaseJson as unknown as {
@@ -249,6 +251,7 @@ export async function openPrivateWallet(stored: StoredWallet) {
     connection,
     identity: stored.identity,
     sealedSeed: stored.sealedSeed,
+    prover: { url: ZOLANA_PROVER_URL, policy: DEVNET_PROVER_POLICY },
   });
   const shieldedAddress = shieldedAddressOf(stored.identity);
   const wallet = new Wallet({ identity: shieldedAddress });

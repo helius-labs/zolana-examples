@@ -1,6 +1,6 @@
-# Private wallet Node.js starter
+# Embedded private wallet
 
-An Express server that creates and runs Solana wallets with a private balance,
+A Node.js Express starter that creates and runs Solana wallets with a private balance,
 with only a Helius API key. Each wallet is an embedded wallet held by Turnkey
 in your Helius project, which sends SOL and SPL tokens as any Solana wallet
 does. Its private keys, which read and spend the private balance, are derived
@@ -36,6 +36,32 @@ pnpm dev
 ```
 
 The server listens on [http://localhost:3300](http://localhost:3300).
+
+### Deployment
+
+This starter uses Zolana `0.5.0-alpha` on **devnet-d**:
+
+| Service            | Endpoint                                                                 |
+| ------------------ | ------------------------------------------------------------------------ |
+| Solana RPC         | `https://devnet.helius-rpc.com` (your API key)                           |
+| Private-wallet API | `https://d2mwa6adbrijsr.cloudfront.net/v1/private-wallet` (your API key) |
+| Indexer            | `https://d21d98xh5lgv3b.cloudfront.net`                                  |
+| Attested prover    | `https://d1unet9hn0mci0.cloudfront.net`                                  |
+
+The private-wallet gateway verifies enrollment messages for the domain
+`beta-devnet.helius-rpc.com`, even when reached through CloudFront. The
+signed trust bundle in `src/lib/release.json` pins
+`private-wallet-devnet-e91c22e`; it is copied from zolana-tvc
+[`cb717a8f7509`](https://github.com/helius-labs/zolana-tvc/blob/cb717a8f750929e8307ffb788729ac29c369032c/apps/privacy-wallet/deploy/privacy-wallet.trust.json),
+the same commit pinned for `@zolana/tvc-wallet`.
+
+The SDK fetches Merkle proof data on the client. `TvcKeys` seals the resolved
+proof request inside the wallet enclave to the devnet-d prover under its
+signed `DEVNET_PROVER_POLICY`; the server relays the encrypted request.
+
+Use fresh wallets for this deployment. Data created by the older devnet-c
+starter uses a different viewing-key format and deployment; it cannot be
+reused here.
 
 ## Try it
 
@@ -112,7 +138,13 @@ Turnkey signs each Solana transaction. Public transfers
 ([`src/lib/solana.ts`](./src/lib/solana.ts)) use the Turnkey wallet alone.
 
 ```typescript
-const keys = new TvcKeys({ client, connection, identity, sealedSeed });
+const keys = new TvcKeys({
+  client,
+  connection,
+  identity,
+  sealedSeed,
+  prover: { url: ZOLANA_PROVER_URL, policy: DEVNET_PROVER_POLICY },
+});
 const wallet = new Wallet({ identity: shieldedAddressOf(identity) });
 await syncWallet({ client: zolana, wallet, keys, config: { requireSlot } });
 
@@ -137,6 +169,19 @@ the previous transaction already spent.
 `.data/wallets/`: the Turnkey owner key and the client key, which are secrets,
 and the descriptor, identity, sealed seed and last slot, which are not. A real
 deployment keeps the secrets in a KMS or secret store.
+
+## Check changes
+
+```bash
+pnpm install --frozen-lockfile
+pnpm check
+```
+
+To verify the live integration, create two fresh wallets and fund both with
+devnet SOL. Deposit into each, transfer privately between them, withdraw, and
+check balances and history immediately after each transaction. Restart the
+server with the same `DATA_DIR` and check both wallets again: it reuses the
+stored sealed seed and waits for the last confirmed slot before syncing.
 
 ## Links
 

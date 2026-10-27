@@ -11,7 +11,7 @@ export const PORT = Number(process.env.PORT ?? 3300);
 export const DATA_DIR = process.env.DATA_DIR ?? ".data";
 
 /** The Helius private-wallet API: the enclave that holds each wallet's private keys. */
-export const PRIVATE_WALLET_API_URL = `https://d19hyakngvko5w.cloudfront.net/v1/private-wallet?api-key=${HELIUS_API_KEY}`;
+export const PRIVATE_WALLET_API_URL = `https://d2mwa6adbrijsr.cloudfront.net/v1/private-wallet?api-key=${HELIUS_API_KEY}`;
 /** The domain the owner's enrollment message names. */
 export const ENROLLMENT_DOMAIN = "beta-devnet.helius-rpc.com";
 
@@ -19,6 +19,6 @@ export const HELIUS_API_URL = "https://dev-api.helius.xyz/v0";
 export const TURNKEY_API_URL = "https://api.turnkey.com";
 export const TURNKEY_AUTH_PROXY_URL = "https://authproxy.turnkey.com";
 
-export const SOLANA_RPC_URL = `https://beta-devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
-export const ZOLANA_INDEXER_URL = `https://beta-devnet.helius-rpc.com/v1/zolana?api-key=${HELIUS_API_KEY}`;
-export const ZOLANA_PROVER_URL = `https://beta-devnet.helius-rpc.com/v1/zolana?api-key=${HELIUS_API_KEY}`;
+export const SOLANA_RPC_URL = `https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+export const ZOLANA_INDEXER_URL = "https://d21d98xh5lgv3b.cloudfront.net";
+export const ZOLANA_PROVER_URL = "https://d1unet9hn0mci0.cloudfront.net";
