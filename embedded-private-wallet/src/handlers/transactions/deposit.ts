@@ -7,16 +7,7 @@ import { positiveAmount } from "../../lib/amount.js";
 import { openPrivateWallet, zolana } from "../../lib/private-wallet.js";
 import { loadWallet } from "../../lib/store.js";
 
-/**
- * Moves public SOL into the wallet's private balance. A deposit reveals the
- * sender, the recipient, the asset and the amount. The first deposit also
- * registers the wallet, so others can pay it privately by its Solana address.
- *
- * @example
- * curl -X POST http://localhost:3300/wallets/<address>/deposit \
- * -H "Content-Type: application/json" \
- * -d '{"lamports": "10000000"}'
- */
+/** Registers the wallet on its first deposit, then shields public SOL. */
 export const deposit: RequestHandler<{ address: string }> = async (
   req,
   res,

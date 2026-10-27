@@ -6,12 +6,9 @@ export type ProverAuditEntry = {
   method: string;
   path: string;
   status: number;
-  encrypted: boolean;
-  responseEncrypted: boolean;
 };
 
-// Test-only preload in the child server. Never record headers, query strings,
-// attestation documents or bodies: they may carry credentials or witness data.
+// Test-only preload. Log metadata; never headers, queries or bodies.
 const auditPath = process.env.E2E_AUDIT_PATH;
 assert.ok(auditPath, "prover-audit must be started by the devnet E2E runner");
 const proverOrigin = new URL(ZOLANA_PROVER_URL).origin;
@@ -30,14 +27,18 @@ globalThis.fetch = async (input, init) => {
     assert.equal(headers.get("content-type"), "application/octet-stream");
   }
   const response = await originalFetch(input, init);
+  if (proof) {
+    assert.equal(
+      response.headers.get("zolana-tee"),
+      "v1",
+      "unencrypted proof response",
+    );
+  }
   const entry: ProverAuditEntry = {
     method,
     path: url.pathname,
     status: response.status,
-    encrypted: proof,
-    responseEncrypted: response.headers.get("zolana-tee") === "v1",
   };
   appendFileSync(auditPath, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
-  if (proof) assert.ok(entry.responseEncrypted, "unencrypted proof response");
   return response;
 };

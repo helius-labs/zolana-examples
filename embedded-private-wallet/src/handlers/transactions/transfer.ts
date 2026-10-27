@@ -5,17 +5,7 @@ import { positiveAmount } from "../../lib/amount.js";
 import { openPrivateWallet, zolana } from "../../lib/private-wallet.js";
 import { loadWallet } from "../../lib/store.js";
 
-/**
- * Sends SOL from the wallet's private balance to another private wallet, by
- * its Solana address. A private transfer reveals the sender and the recipient,
- * not the asset or the amount. The recipient must have registered, as every
- * wallet does on its first deposit.
- *
- * @example
- * curl -X POST http://localhost:3300/wallets/<address>/transfer \
- * -H "Content-Type: application/json" \
- * -d '{"recipient": "<address>", "lamports": "3000000"}'
- */
+/** Sends private SOL to a registered wallet. */
 export const transfer: RequestHandler<{ address: string }> = async (
   req,
   res,

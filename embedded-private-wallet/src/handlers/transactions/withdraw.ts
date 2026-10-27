@@ -5,16 +5,7 @@ import { positiveAmount } from "../../lib/amount.js";
 import { openPrivateWallet, zolana } from "../../lib/private-wallet.js";
 import { loadWallet } from "../../lib/store.js";
 
-/**
- * Moves SOL from the wallet's private balance to any public Solana address,
- * the wallet's own by default. A withdrawal reveals the sender, the recipient,
- * the asset and the amount.
- *
- * @example
- * curl -X POST http://localhost:3300/wallets/<address>/withdraw \
- * -H "Content-Type: application/json" \
- * -d '{"lamports": "3000000"}'
- */
+/** Withdraws private SOL to a public address. */
 export const withdraw: RequestHandler<{ address: string }> = async (
   req,
   res,

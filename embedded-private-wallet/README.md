@@ -1,11 +1,8 @@
 # Embedded private wallet
 
-A Node.js Express starter that creates and runs Solana wallets with a private balance,
-with only a Helius API key. Each wallet is an embedded wallet held by Turnkey
-in your Helius project, which sends SOL and SPL tokens as any Solana wallet
-does. Its private keys, which read and spend the private balance, are derived
-and held by the Helius enclave (Turnkey Verifiable Compute), never by your
-server.
+An Express server for embedded Solana wallets with private balances. Turnkey
+holds the wallet's signing key; the Helius enclave derives and holds its private
+balance keys. Setup requires a Helius API key with Wallet-as-a-Service enabled.
 
 Devnet only. The server has no authentication: anyone who can reach it can
 spend every wallet it holds. Run it locally.
@@ -177,41 +174,28 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-Run the full live devnet suite with:
+For live tests, set `DEVNET_PAYER_KEYPAIR_PATH` in `.env` to a devnet-only
+Solana JSON keypair with at least **0.2 SOL**, then run:
 
 ```bash
-cp .env.example .env  # set HELIUS_API_KEY and DEVNET_PAYER_KEYPAIR_PATH
 pnpm test:devnet
 ```
 
-Use a Helius API key with Wallet-as-a-Service enabled and a **devnet-only**
-Solana JSON keypair with at least **0.2 SOL**. The payer path is resolved from
-this directory; `.data/devnet-payer.json` is a gitignored location for it.
-Never put keypair bytes or API keys in tracked files. `.env.example` contains
-placeholders; `.env` and `.env.*` are ignored. Environment variables override
-`.env`, so the same command can use secrets supplied by CI.
+The suite creates two wallets and checks deposits, private transfer, withdrawal,
+public SOL/SPL/Token-2022 sends, balances, history, rejected requests and reopening
+after restart. Token tests cover recipient account creation and reuse; Token-2022
+mints have no extensions. A preload checks encrypted prover requests/responses
+and records metadata without headers, queries or bodies.
 
-The runner verifies the devnet genesis hash before funding. It starts its own
-server on a free port and creates two fresh embedded wallets per run. It checks
-registration, deposits, private transfer, withdrawal, exact balances and
-history, public SOL and standard SPL Token/Token-2022 sends, recipient token
-account creation/reuse, rejected requests, and recovery after a server restart.
-A test-only preload rejects plaintext proof traffic and records attestation
-and encrypted-proof metadata without request bodies or credential headers.
-Token-2022 mints in this test have no extensions.
+The runner checks devnet before funding and stops its server on exit or Ctrl-C.
+Each run keeps `results.json`, `prover-audit.jsonl`, a redacted `server.log`, and
+wallet credentials under gitignored `.data/devnet-e2e/run-*`. Keep that directory
+private. The payer sends 0.07 SOL to each wallet and pays setup rent and fees;
+funds and accounts are retained after the test.
 
-Each run prints its directory under `.data/devnet-e2e/run-*` and exits nonzero
-if any check fails. That gitignored directory contains `results.json` (check
-results, public addresses and transaction signatures), `prover-audit.jsonl`
-(metadata only), `server.log` (API keys redacted), and `data/wallets/` (secret
-wallet credentials). The server stops on success, failure, or Ctrl-C. Run data
-is retained so failed runs can be inspected and test wallets can be reopened;
-keep the whole directory private.
-
-The suite transfers **0.07 devnet SOL to each test wallet**, plus mint setup
-rent and transaction fees from the payer. It leaves the new wallets, balances
-and token accounts in place and does not automatically reclaim funds. This is
-an opt-in live check; ordinary `pnpm check` and PR CI do not run it.
+`.env*` and `.data/` are gitignored; `.env.example` contains placeholders only.
+Environment variables override `.env`. Live tests run only when requested;
+`pnpm check` and PR CI check formatting and types.
 
 ## Links
 

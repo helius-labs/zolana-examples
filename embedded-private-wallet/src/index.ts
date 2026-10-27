@@ -29,6 +29,11 @@ const onError: ErrorRequestHandler = (error, _req, res, _next) => {
 app.use(onError);
 
 await zolana;
-app.listen(PORT, () => {
-  console.log(`Private wallet starter listening on http://localhost:${PORT}`);
+const server = app.listen(PORT, () => {
+  const bound = server.address();
+  if (bound && typeof bound !== "string") {
+    console.log(
+      `Private wallet starter listening on http://localhost:${bound.port}`,
+    );
+  }
 });

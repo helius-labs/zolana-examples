@@ -5,20 +5,7 @@ import { openPrivateWallet } from "../../lib/private-wallet.js";
 import { publicSolTransfer, publicSplTransfer } from "../../lib/solana.js";
 import { loadWallet } from "../../lib/store.js";
 
-/**
- * A public transfer from the wallet: SOL with `lamports`, or an SPL token
- * with `mint` and `amount` in the token's base units. Public transfers reveal
- * everything, as on any Solana wallet.
- *
- * @example
- * curl -X POST http://localhost:3300/wallets/<address>/send \
- * -H "Content-Type: application/json" \
- * -d '{"recipient": "<address>", "lamports": "1000000"}'
- *
- * curl -X POST http://localhost:3300/wallets/<address>/send \
- * -H "Content-Type: application/json" \
- * -d '{"recipient": "<address>", "mint": "<mint>", "amount": "250000"}'
- */
+/** Sends public SOL or SPL tokens using the Turnkey signer. */
 export const send: RequestHandler<{ address: string }> = async (req, res) => {
   const stored = await loadWallet(req.params.address);
   if (!stored) {

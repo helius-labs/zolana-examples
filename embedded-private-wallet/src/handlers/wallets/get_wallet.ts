@@ -3,13 +3,7 @@ import type { RequestHandler } from "express";
 import { openPrivateWallet, zolana } from "../../lib/private-wallet.js";
 import { loadWallet } from "../../lib/store.js";
 
-/**
- * The wallet's public and private SOL balances, in lamports. Reading the
- * private balance decrypts the wallet's notes in the enclave.
- *
- * @example
- * curl http://localhost:3300/wallets/<address>
- */
+/** Public and private SOL balances in lamports. */
 export const getWallet: RequestHandler<{ address: string }> = async (
   req,
   res,

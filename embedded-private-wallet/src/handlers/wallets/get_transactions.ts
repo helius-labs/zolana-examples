@@ -2,13 +2,7 @@ import type { RequestHandler } from "express";
 import { openPrivateWallet } from "../../lib/private-wallet.js";
 import { loadWallet } from "../../lib/store.js";
 
-/**
- * The wallet's private transactions, newest first: deposits, private
- * transfers in and out, and withdrawals, decrypted by the enclave.
- *
- * @example
- * curl http://localhost:3300/wallets/<address>/transactions
- */
+/** Decrypted private history, newest first. */
 export const getTransactions: RequestHandler<{ address: string }> = async (
   req,
   res,

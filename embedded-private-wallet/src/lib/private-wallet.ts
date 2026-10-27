@@ -3,7 +3,6 @@ import {
   SOL_MINT,
   Wallet,
   createZolanaClient,
-  initializePoseidon,
   syncWallet,
 } from "@heliuslabs/zolana";
 import {
@@ -25,7 +24,6 @@ import {
   sealedSeedOf,
   shieldedAddressOf,
   type QosIdentityPcrs,
-  type TvcClientConfig,
 } from "@zolana/tvc-wallet";
 import {
   clientKeyIdFor,
@@ -74,15 +72,13 @@ const ENCLAVE_PUBLIC_KEY = (() => {
 
 const P256 = { name: "ECDSA", namedCurve: "P-256" } as const;
 
-export const zolana = initializePoseidon().then(() =>
-  createZolanaClient({
-    solanaRpcUrl: SOLANA_RPC_URL,
-    indexerUrl: ZOLANA_INDEXER_URL,
-    proverUrl: ZOLANA_PROVER_URL,
-    // The enclave completes resolved proof inputs; it has no indexed proving.
-    proofDataSource: "client",
-  }),
-);
+export const zolana = createZolanaClient({
+  solanaRpcUrl: SOLANA_RPC_URL,
+  indexerUrl: ZOLANA_INDEXER_URL,
+  proverUrl: ZOLANA_PROVER_URL,
+  // The enclave completes resolved proof inputs; it has no indexed proving.
+  proofDataSource: "client",
+});
 
 function apiUrl(path: string): URL {
   const url = new URL(PRIVATE_WALLET_API_URL);
@@ -120,17 +116,16 @@ async function enclave(
   descriptor?: WalletDescriptor,
   clientKey?: webcrypto.JsonWebKey,
 ) {
-  const operations: TvcClientConfig["operations"] =
-    descriptor && clientKey
-      ? {
-          walletDescriptor: descriptor,
-          authorizer: await authorizer(clientKey),
-        }
-      : undefined;
   const client = createTvcClient({
     backend: { kind: "gateway", endpoint: new URL(PRIVATE_WALLET_API_URL) },
     ...release,
-    ...(operations ? { operations } : {}),
+    operations:
+      descriptor && clientKey
+        ? {
+            walletDescriptor: descriptor,
+            authorizer: await authorizer(clientKey),
+          }
+        : undefined,
   });
   return { client, connection: await client.connectAndVerify() };
 }
@@ -234,8 +229,6 @@ async function enablePrivateWallet(
   return wallet;
 }
 
-export type OpenWallet = Awaited<ReturnType<typeof openPrivateWallet>>;
-
 /**
  * A stored wallet with its enclave-held keys and Turnkey signer, synced to
  * the slot of its last transaction.
@@ -259,9 +252,9 @@ export async function openPrivateWallet(stored: StoredWallet) {
     client,
     wallet,
     keys,
-    ...(stored.lastSlot
-      ? { config: { requireSlot: BigInt(stored.lastSlot) } }
-      : {}),
+    config: stored.lastSlot
+      ? { requireSlot: BigInt(stored.lastSlot) }
+      : undefined,
   });
   const signer = transactionSigner(
     turnkey(stored.ownerKey, stored.organizationId),
