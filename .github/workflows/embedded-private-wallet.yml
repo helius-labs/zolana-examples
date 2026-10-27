@@ -34,7 +34,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: embedded-private-wallet/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
+      # TVC bundles declarations while pnpm packs its git dependency. Keep its
+      # source outside node_modules so the bundler follows relative type imports.
+      - run: pnpm install --frozen-lockfile --store-dir "$RUNNER_TEMP/pnpm-store"
       - run: pnpm check
