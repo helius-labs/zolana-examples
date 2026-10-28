@@ -38,10 +38,12 @@ generate the checked bytecode. The workspace uses Zolana
 [`226ddcb7e`](https://github.com/helius-labs/zolana/commit/226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb)
 and Xark
 [`38c0de6`](https://github.com/ananas-block/xark/commit/38c0de6fec56cff52f5a4e0cf2d86721ea29e583).
-The setup script checks out both revisions under `.tools/`, resolves the
-SDK revision's developer-specific Xark paths against the sibling checkout,
-and builds the matching CLI and compiler. Cargo and the TypeScript package
-use these sources; run setup before any Cargo or npm command.
+Cargo pins the SDK and prover to Git revisions, with Git patches overriding
+the SDK revision's developer-specific Xark paths. The setup script checks out
+the build tools under `.tools/`, applies the same Git pins to the CLI and its
+generated circuit crates, and builds the CLI and compiler. The TypeScript
+package uses the SDK checkout; run setup before building circuit artifacts or
+installing the TypeScript dependencies.
 
 Run these commands from `dvp/`:
 
@@ -125,15 +127,14 @@ before running it.
 
 ## Benchmark
 
-Run native Rust proving and benchmarks with `--release`. Before the Xark
-migration, debug builds were
-17–28× slower in the measured DvP flows. Release proof times were 87 ms for
-create, 158 ms for reclaim, 251 ms for settle, and 285 ms for cancel, including
-checked key loading and prover construction. See [`BENCHMARK.md`](BENCHMARK.md)
-for those historical results; regenerate the benchmark for the Xark backend.
+Run native Rust proving and benchmarks with `--release`.
+[`BENCHMARK.md`](BENCHMARK.md) records compute units, transaction sizes, circuit
+and key sizes, and native proof times. The [WASM benchmark](typescript/BENCHMARK.md)
+records Node.js proof timings.
 
-Input counts are fixed: reclaim has one deposit; settle has the DvP UTXO
-and two deposits; abort has those same three slots, with padding for absent
+Circuit input counts are fixed: reclaim has one deposit; settle has the DvP UTXO
+and two deposits; abort has those same three circuit slots, with dummy witnesses
+for absent deposits. Its SPP transaction includes only the state and funded
 deposits. Create reserves one address and has no token UTXO inputs.
 `TokenUtxos::new_init` allocates no input UTXOs. The circuit tests check these
 witness counts so a larger padding default cannot add unused inputs.

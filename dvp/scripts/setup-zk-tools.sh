@@ -24,8 +24,7 @@ checkout() {
 checkout https://github.com/helius-labs/zolana.git "$zolana_revision" "$dvp/.tools/zolana"
 checkout https://github.com/ananas-block/xark.git "$xark_revision" "$dvp/.tools/xark"
 
-# This SDK revision records a developer's Xark paths. Resolve them against
-# the pinned sibling checkout without changing the SDK implementation.
+# Use the same Git dependencies when building the CLI from its source checkout.
 python3 - "$dvp/.tools/zolana/Cargo.toml" <<'PY'
 import pathlib
 import re
@@ -33,16 +32,23 @@ import sys
 
 manifest = pathlib.Path(sys.argv[1])
 source = manifest.read_text()
-crates = {"xark": "lang", "xark-groth16": "groth16", "xark-wasm": "wasm"}
+crates = {"xark", "xark-groth16", "xark-wasm"}
 source, count = re.subn(
-    r'(?m)^(xark(?:-groth16|-wasm)?) = \{ path = "[^"]+" \}$',
-    lambda match: f'{match[1]} = {{ path = "../xark/crates/{crates[match[1]]}" }}',
+    r'(?m)^(xark(?:-groth16|-wasm)?) = \{ (?:path|git) = [^\n]+ \}$',
+    lambda match: f'{match[1]} = {{ git = "https://github.com/ananas-block/xark", rev = "38c0de6fec56cff52f5a4e0cf2d86721ea29e583" }}',
     source,
 )
 if count != len(crates):
     raise SystemExit("The pinned Zolana manifest has unexpected Xark dependencies")
 manifest.write_text(source)
 PY
+
+# Keep the generated circuit crates on those Git dependencies too.
+patch_file="$dvp/scripts/zk-build-git-deps.patch"
+if ! git -C "$dvp/.tools/zolana" apply --reverse --check "$patch_file" 2>/dev/null; then
+    git -C "$dvp/.tools/zolana" apply --check "$patch_file"
+    git -C "$dvp/.tools/zolana" apply "$patch_file"
+fi
 
 if [[ ${1:-} == --prepare-only ]]; then
     exit 0
@@ -55,6 +61,6 @@ for name in input-region-indices proof-randomness; do
 done
 
 "$dvp/.tools/zolana/tools/xark/build.sh" "$dvp/.tools/xark"
-cargo build --release --locked --manifest-path "$dvp/.tools/zolana/Cargo.toml" -p zolana-cli
+cargo build --release --manifest-path "$dvp/.tools/zolana/Cargo.toml" -p zolana-cli
 echo "Zolana CLI: $dvp/.tools/zolana/target/release/zolana"
 echo "Xark source: $dvp/.tools/xark (export XARK_SOURCE to this path)"

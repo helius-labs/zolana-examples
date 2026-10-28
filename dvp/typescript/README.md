@@ -75,5 +75,5 @@ The generated artifacts live under `../target/zk/dvp-program/`, with
 `<circuit>/circuit.xbc`, `<circuit>/pk.bin` and `<circuit>/vk.bin` for each
 circuit and the combined Node module in `wasm/dvp_program.js`.
 
-The [WASM benchmark](BENCHMARK.md) records historical measurements from the
-previous prover backend. Regenerate it to compare Xark proof times.
+The [WASM benchmark](BENCHMARK.md) records Xark proof timings. Regenerate it
+with `npx --no-install tsx bench/proofs.ts` from this directory.

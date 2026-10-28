@@ -1,0 +1,32 @@
+diff --git a/sdk-libs/program/src/build/mod.rs b/sdk-libs/program/src/build/mod.rs
+index e36596e..8c5a2b7 100644
+--- a/sdk-libs/program/src/build/mod.rs
++++ b/sdk-libs/program/src/build/mod.rs
+@@ -111,13 +111,11 @@ fn compiler_source(package: &Package, compiler: &Path) -> Result<Option<PathBuf>
+ 
+ fn source_overrides(source: Option<&Path>) -> Result<String> {
+     let Some(source) = source else { return Ok(String::new()); };
+-    let mut config = String::from("[patch.\"https://github.com/blueshift-gg/xark\"]\n");
+-    for (name, directory) in [("xark", "lang"), ("xark-macros", "macros"), ("xark-ir", "ir"),
+-        ("xark-prover", "prover"), ("xark-schema", "schema"), ("xark-groth16", "groth16"), ("xark-wasm", "wasm")] {
++    let mut config = String::from("[patch.\"https://github.com/helius-labs/zolana\"]\n");
++    for (name, directory) in [("xark", "lang"), ("xark-groth16", "groth16"), ("xark-wasm", "wasm")] {
+         let directory = source.join("crates").join(directory);
+         if !directory.join("Cargo.toml").is_file() { return Err(error(format!("missing {name} in {}", source.display()))); }
+-        let path = serde_json::to_string(directory.to_str().ok_or_else(|| error("non UTF-8 Xark source path"))?)?;
+-        config.push_str(&format!("{name} = {{ path = {path} }}\n"));
++        config.push_str(&format!("{name} = {{ git = \"https://github.com/ananas-block/xark\", rev = \"38c0de6fec56cff52f5a4e0cf2d86721ea29e583\" }}\n"));
+     }
+     Ok(config)
+ }
+@@ -193,8 +191,8 @@ fn entry(package: &Package, out: &Path, program: &ProgramMetadata, features: &st
+     let path = serde_json::to_string(package.manifest.parent().unwrap().to_str().ok_or_else(|| error("non UTF-8 crate path"))?)?;
+     let features = features.split(',').filter(|feature| !feature.is_empty())
+         .map(serde_json::to_string).collect::<std::result::Result<Vec<_>, _>>()?.join(", ");
+-    let xark_dependency = match source {
+-        Some(source) => format!("path = {}", serde_json::to_string(source.join("crates/lang").to_str().ok_or_else(|| error("non UTF-8 Xark source path"))?)?),
++    let xark_dependency: String = match source {
++        Some(_) => "git = \"https://github.com/ananas-block/xark\", rev = \"38c0de6fec56cff52f5a4e0cf2d86721ea29e583\"".into(),
+         None => "git = \"https://github.com/blueshift-gg/xark\", rev = \"b443d83ea8ec7f2253610887e9690623ad048aef\"".into(),
+     };
+     let manifest = format!("[package]\nname = \"zolana-generated-{}-{}\"\nversion = \"0.1.0\"\nedition = \"2024\"\npublish = false\n\n[workspace]\n\n[lib]\ncrate-type = [\"cdylib\", \"rlib\"]\n\n[dependencies]\nprogram = {{ package = \"{}\", path = {path}, features = [{features}] }}\nxark = {{ {xark_dependency} }}\n\n[lints.rust]\nunexpected_cfgs = {{ level = \"warn\", check-cfg = [\"cfg(xark)\", \"cfg(xark_client)\"] }}\n\n{source_config}", package.name, program.name, package.name);

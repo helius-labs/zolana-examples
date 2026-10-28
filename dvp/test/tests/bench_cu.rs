@@ -6,7 +6,7 @@
 //! root:
 //!
 //! ```sh
-//! cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.53 \
+//! cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.54 \
 //!     --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program
 //! SHIELDED_POOL_PROGRAM_PATH=/path/to/shielded_pool_program.so \
 //! ZOLANA_CLI_BIN=/path/to/zolana \
@@ -124,7 +124,7 @@ fn bench_cu_dvp() {
 
     let report = CuBenchmark::new(ReadmeConfig {
         title: "Private DvP -- CU Benchmark".into(),
-        description: "1. Measure the five DvP instructions under Mollusk using the test release shielded-pool program. Each DvP handler verifies its generated program proof and invokes SPP directly. Cancellation and rejection share process_abort_dvp.\n\n2. Record SPP and program proving times, consumed compute units, and serialized v1 transaction sizes. Create/reclaim use 1x2 with compact output padding; settle uses 3x4; cancel/reject use 3x2 with real optional deposits before random input padding.\n\n3. Report compiled program constraints, checksummed Xark proving-key and verifying-key sizes. Release-profile program proof timings include loading checked Xark artifacts. Build the profiling program first with cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.53 --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program.".into(),
+        description: "1. Measure the five DvP instructions under Mollusk using the v0.5.0-alpha shielded-pool program and the Xark-backed SDK. Each DvP handler verifies its generated program proof and invokes SPP directly. Cancellation and rejection share process_abort_dvp.\n\n2. Record SPP and program proving times, consumed compute units, and serialized v1 transaction sizes. Create/reclaim use 1x2 with compact output padding; settle uses 3x4; cancel uses 3x2 with both deposits funded; reject uses 2x2 with only the payment deposit. Absent deposits are omitted from the SPP transaction.\n\n3. Report compiled program constraints, checksummed Xark proving-key and verifying-key sizes. Native proof times are single samples in the release profile, including artifact checksum checks, circuit/key loading, proving and verification. Build the profiling program first with cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.54 --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program.".into(),
         output_path: OUTPUT_PATH.into(),
         regenerate_command: Some(
             "cargo test --release --locked -p dvp-test --test bench_cu -- --ignored --nocapture".into(),
@@ -734,7 +734,7 @@ fn bench_settle_dvp(bench: &mut Bench) {
 }
 
 /// Cancel by the settlement authority with both legs funded, or reject by
-/// the buyer with payment only, before input padding.
+/// the buyer with payment only, omitting the absent delivery deposit.
 fn bench_abort_dvp(bench: &mut Bench, mode: AbortMode) {
     let parties = Parties::new();
     let terms = &parties.terms;

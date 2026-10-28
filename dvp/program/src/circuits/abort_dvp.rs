@@ -48,7 +48,7 @@ impl AbortDvp {
     /// 7. Create the buyer's refund, including zero.
     /// 8. Refund the delivery deposit to the seller.
     /// 9. Refund the payment deposit to the buyer.
-    /// 10. Check the transaction with real deposits before padding.
+    /// 10. Check the transaction.
     pub fn execute(&self) -> Result<CheckedTransaction, CircuitError> {
         let private = &self.private;
         let public = &self.public;
@@ -104,9 +104,8 @@ impl AbortDvp {
         // 9. Refund the payment deposit to the buyer.
         payment_deposit.transfer_all(&mut buyer_refund)?;
 
-        // 10. Check the transaction with real deposits before padding.
+        // 10. Check the transaction.
         ConfidentialTransaction::new(&private.tx_context, public)
-            .with_dummy_padding()
             .with(dvp_utxo)
             .with(delivery_deposit)
             .with(payment_deposit)

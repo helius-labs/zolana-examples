@@ -225,7 +225,11 @@ test("Node proves each generated program circuit and every abort funding combina
               [delivery.utxo.amount, payment.utxo.amount],
             );
             assert.ok(aborted.outputs.every((output) => !output.isDummy()));
-            assert.equal(aborted.inputs.length, 3);
+            assert.equal(
+              aborted.inputs.length,
+              1 + Number(delivery !== absent) + Number(payment !== absent),
+            );
+            assert.ok(aborted.inputs.every((input) => !input.isDummy()));
             assert.deepEqual(
               aborted.encryptWithKeys(reject ? f.buyer : f.settlementAuthority).privateTxHash(),
               aborted.paddingIndependentPrivateTxHash,

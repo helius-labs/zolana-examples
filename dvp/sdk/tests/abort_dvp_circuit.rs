@@ -13,12 +13,8 @@ fn cancel_and_reject_refund_every_funding_combination() {
             let finalized = inputs
                 .create_finalized_transaction(&destination(91), sample_terms().creator)
                 .unwrap();
-            // 2. Check real deposits precede padding and both refunds remain real.
-            let expected_inputs = match (delivery, payment) {
-                (true, true) => vec![false, false, false],
-                (false, false) => vec![false, true, true],
-                _ => vec![false, false, true],
-            };
+            // 2. Check only funded deposits are included and both refunds remain real.
+            let expected_inputs = vec![false; 1 + usize::from(delivery) + usize::from(payment)];
             assert_eq!(
                 finalized
                     .input_utxos()
@@ -54,7 +50,7 @@ fn cancel_and_reject_refund_every_funding_combination() {
                     ),
                 ]
             );
-            // 3. Prove the abort, including a payment-only deposit before padding.
+            // 3. Prove the abort for this funding combination.
             prove_and_verify(CIRCUIT, &inputs, &VERIFYINGKEY);
         }
     }
@@ -104,12 +100,11 @@ fn abort_proof_rejects_wrong_refunds_and_spp_rejects_padding_before_a_deposit() 
         signer_identity: field_bytes(inputs.public.signer_identity),
         reject: false,
     };
-    // 2. Recompute the SPP hash after tampering each refund or input order.
+    // 2. Recompute the SPP hash after tampering each refund.
     for mutation in 0..2 {
         let input_hashes = vec![
             field_bytes(inputs.private.dvp_utxo.hash().unwrap()),
             field_bytes(inputs.private.payment_deposit.hash().unwrap()),
-            [0; 32],
         ];
         let mut outputs = finalized.output_utxos().to_vec();
         match mutation {
@@ -134,7 +129,10 @@ fn abort_proof_rejects_wrong_refunds_and_spp_rejects_padding_before_a_deposit() 
     let mut spp = finalized
         .encrypt_with_viewing_key(&zolana_keypair::ViewingKey::new())
         .unwrap();
-    spp.input_utxos.swap(1, 2);
+    spp.input_utxos.insert(
+        1,
+        zolana_transaction::utxo::SppProofInputUtxo::dummy(OUTPUT_TREE_ID).unwrap(),
+    );
     assert!(matches!(
         spp.check_shape(),
         Err(zolana_transaction::TransactionError::RealInputAfterDummy { index: 2 })

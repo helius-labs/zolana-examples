@@ -115,7 +115,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dvp/target/zk/dvp-program
-          key: dvp-xark-keys-${{ hashFiles('dvp/scripts/setup-zk-tools.sh', 'dvp/program/src/circuits/**', 'dvp/program/Cargo.toml', 'dvp/Cargo.lock', 'dvp/program/src/verifier/**', 'dvp/dvp-keys.CHECKSUM') }}
+          key: dvp-xark-keys-${{ hashFiles('dvp/scripts/**', 'dvp/program/src/circuits/**', 'dvp/program/Cargo.toml', 'dvp/Cargo.lock', 'dvp/program/src/verifier/**', 'dvp/dvp-keys.CHECKSUM') }}
 
       - name: Check Rust formatting
         run: cargo fmt -p dvp-program -p dvp-sdk -p dvp-test -- --check

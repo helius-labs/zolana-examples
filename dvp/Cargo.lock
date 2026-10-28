@@ -7246,6 +7246,7 @@ dependencies = [
 [[package]]
 name = "xark"
 version = "0.3.0"
+source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -7259,6 +7260,7 @@ dependencies = [
 [[package]]
 name = "xark-groth16"
 version = "0.3.0"
+source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
@@ -7275,6 +7277,7 @@ dependencies = [
 [[package]]
 name = "xark-ir"
 version = "0.3.0"
+source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -7288,6 +7291,7 @@ dependencies = [
 [[package]]
 name = "xark-macros"
 version = "0.3.0"
+source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7297,6 +7301,7 @@ dependencies = [
 [[package]]
 name = "xark-prover"
 version = "0.3.0"
+source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -7312,6 +7317,7 @@ dependencies = [
 [[package]]
 name = "xark-schema"
 version = "0.3.0"
+source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -7451,6 +7457,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 [[package]]
 name = "zolana-account-checks"
 version = "0.8.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "solana-account-view 2.0.0",
  "solana-address 2.6.1",
@@ -7461,6 +7468,7 @@ dependencies = [
 [[package]]
 name = "zolana-api"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "http",
  "reqwest",
@@ -7475,6 +7483,7 @@ dependencies = [
 [[package]]
 name = "zolana-circuit"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "ark-bn254 0.5.0",
  "ark-ff 0.5.0",
@@ -7493,6 +7502,7 @@ dependencies = [
 [[package]]
 name = "zolana-client"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7544,6 +7554,7 @@ dependencies = [
 [[package]]
 name = "zolana-event"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "borsh",
  "wincode",
@@ -7552,6 +7563,7 @@ dependencies = [
 [[package]]
 name = "zolana-event-parser"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "borsh",
  "solana-pubkey 4.2.1",
@@ -7562,6 +7574,7 @@ dependencies = [
 [[package]]
 name = "zolana-hasher"
 version = "5.0.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "ark-bn254 0.5.0",
  "ark-ff 0.5.0",
@@ -7576,6 +7589,7 @@ dependencies = [
 [[package]]
 name = "zolana-indexed-array"
 version = "0.3.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "num-bigint 0.4.8",
  "num-traits",
@@ -7586,6 +7600,7 @@ dependencies = [
 [[package]]
 name = "zolana-indexer-api"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "base64 0.22.1",
  "bs58",
@@ -7598,6 +7613,7 @@ dependencies = [
 [[package]]
 name = "zolana-instruction"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "pinocchio 0.11.2",
  "solana-address 2.6.1",
@@ -7613,6 +7629,7 @@ dependencies = [
 [[package]]
 name = "zolana-interface"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "arrayvec",
  "borsh",
@@ -7631,6 +7648,7 @@ dependencies = [
 [[package]]
 name = "zolana-keypair"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "aes",
  "bs58",
@@ -7657,6 +7675,7 @@ dependencies = [
 [[package]]
 name = "zolana-macros"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7667,6 +7686,7 @@ dependencies = [
 [[package]]
 name = "zolana-merkle-tree"
 version = "4.0.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "num-bigint 0.4.8",
  "num-traits",
@@ -7678,6 +7698,7 @@ dependencies = [
 [[package]]
 name = "zolana-program"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-serialize 0.6.0",
@@ -7710,6 +7731,7 @@ dependencies = [
 [[package]]
 name = "zolana-program-test"
 version = "0.23.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "base64 0.22.1",
  "litesvm",
@@ -7743,6 +7765,7 @@ dependencies = [
 [[package]]
 name = "zolana-prover-tee"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "aes-gcm",
  "ciborium",
@@ -7765,6 +7788,7 @@ dependencies = [
 [[package]]
 name = "zolana-smart-account-client"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "borsh",
  "solana-instruction",
@@ -7774,6 +7798,7 @@ dependencies = [
 [[package]]
 name = "zolana-test-utils"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7816,6 +7841,7 @@ dependencies = [
 [[package]]
 name = "zolana-transaction"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "borsh",
  "num-bigint 0.4.8",
@@ -7836,6 +7862,7 @@ dependencies = [
 [[package]]
 name = "zolana-tree"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "borsh",
  "bytemuck",
@@ -7850,6 +7877,7 @@ dependencies = [
 [[package]]
 name = "zolana-user-registry-interface"
 version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
 dependencies = [
  "borsh",
  "solana-instruction",
@@ -7883,3 +7911,8 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "xark-wasm"
+version = "0.3.0"
+source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
