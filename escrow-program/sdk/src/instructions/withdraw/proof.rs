@@ -1,8 +1,8 @@
 use anyhow::{bail, Result};
+use spr_client::ProofInputUtxo;
+use spr_transaction::instructions::transact::{PrivateTxHash, SppProofOutputUtxo};
 use timelock_escrow_program::instructions::withdraw::WithdrawPublicInput;
 use timelock_escrow_prover::{EscrowTermsProofInput, WithdrawProofInputs};
-use zolana_client::ProofInputUtxo;
-use zolana_transaction::instructions::transact::{PrivateTxHash, SppProofOutputUtxo};
 
 use crate::{err, shared::check_output_utxo, state::EscrowUtxo};
 

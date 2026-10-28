@@ -2,8 +2,8 @@ use anyhow::{ensure, Result};
 use rust_client_example::SetupContext;
 use solana_address::Address;
 use solana_keypair::{write_keypair_file, Keypair};
+use spr_client::{ProofDataSource, SolanaRpc, ZolanaClient};
 use std::{io::Write, path::Path, process::Command};
-use zolana_client::{ProofDataSource, SolanaRpc, ZolanaClient};
 
 const EXAMPLES: &[&str] = &[
     "register_private_wallet",
@@ -39,10 +39,10 @@ pub fn run_rust_examples(
     tree: Address,
     payer: &Keypair,
 ) -> Result<()> {
-    use zolana_test_utils::wallet::{
+    use spr_test_utils::wallet::{
         PrivateTransactionDirection as Direction, PrivateTransactionKind as Kind,
     };
-    use zolana_transaction::SOL_MINT;
+    use spr_transaction::SOL_MINT;
 
     register_private_wallet::run(client, payer)?;
     deposit_transfer_withdraw::run(client, tree, payer)?;

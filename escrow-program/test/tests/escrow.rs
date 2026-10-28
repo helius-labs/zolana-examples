@@ -1,12 +1,19 @@
-use zolana_test_utils::utxo::{
+use spr_test_utils::utxo::{
     encrypt_transaction_data, get_transaction_viewing_key, prepare_output_blindings,
 };
-use zolana_transaction::utxo::SppProofInputUtxo;
+use spr_transaction::utxo::SppProofInputUtxo;
 mod shared;
 
 use anyhow::{anyhow, Result};
 use shared::{
     send, setup, TestEnv, LOCK_AMOUNT, SHIELD_AMOUNT, SPP_RELAYER_DEADLINE, UNLOCK_TIMESTAMP,
+};
+use spr_client::Rpc;
+use spr_keypair::random_blinding;
+use spr_test_utils::wallet::sync_wallet;
+use spr_transaction::{
+    instructions::transact::{ExternalData, SppProofInputs, SppProofOutputUtxo},
+    Data, Utxo, SOL_ASSET_ID, SOL_MINT,
 };
 use timelock_escrow_sdk::{
     instructions::{
@@ -16,13 +23,6 @@ use timelock_escrow_sdk::{
     prover::EscrowProverClient,
     shared::input_sum,
     state::{EscrowTerms, EscrowUtxo},
-};
-use zolana_client::Rpc;
-use zolana_keypair::random_blinding;
-use zolana_test_utils::wallet::sync_wallet;
-use zolana_transaction::{
-    instructions::transact::{ExternalData, SppProofInputs, SppProofOutputUtxo},
-    Data, Utxo, SOL_ASSET_ID, SOL_MINT,
 };
 
 // Timelock escrow lock-then-withdraw on the shielded pool, driven against a
@@ -56,7 +56,7 @@ fn escrow_then_withdraw() -> Result<()> {
     let mut escrow_utxo = EscrowUtxo {
         terms,
         blinding: random_blinding(),
-        asset: zolana_transaction::Mint::SOL,
+        asset: spr_transaction::Mint::SOL,
         amount: LOCK_AMOUNT,
     };
 
@@ -114,7 +114,7 @@ fn escrow_then_withdraw() -> Result<()> {
         .indexer()
         .prove_transact(
             spp_proof_inputs,
-            &zolana_keypair::NullifierKey::from_secret([0; 31]),
+            &spr_keypair::NullifierKey::from_secret([0; 31]),
         )
         .map_err(|e| anyhow!("escrow transact proof: {e:?}"))?;
 
@@ -157,7 +157,7 @@ fn escrow_then_withdraw() -> Result<()> {
         .map_err(|e| anyhow!("creator balance after escrow: {e:?}"))?;
     let expected_change_utxo = Utxo {
         owner: creator_address.signing_pubkey,
-        asset: zolana_transaction::Mint::SOL,
+        asset: spr_transaction::Mint::SOL,
         amount: change_amount,
         blinding: change_blinding,
         ring_program_id: None,
@@ -187,7 +187,7 @@ fn escrow_then_withdraw() -> Result<()> {
     let source_output = escrow_utxo.source_output(creator_address, random_blinding());
 
     let escrow_hash = escrow_utxo.output_utxo()?.hash(localnet.tree_id)?;
-    let escrow_state = zolana_test_utils::test_validator_asserts::wait_for_merkle_proof(
+    let escrow_state = spr_test_utils::test_validator_asserts::wait_for_merkle_proof(
         localnet.client.indexer(),
         localnet.tree,
         escrow_hash,
@@ -256,7 +256,7 @@ fn escrow_then_withdraw() -> Result<()> {
         .indexer()
         .prove_transact(
             withdraw_spp_proof_inputs,
-            &zolana_keypair::NullifierKey::from_secret([0; 31]),
+            &spr_keypair::NullifierKey::from_secret([0; 31]),
         )
         .map_err(|e| anyhow!("withdraw transact proof: {e:?}"))?;
     let withdraw_proof = EscrowProverClient::new()
@@ -295,7 +295,7 @@ fn escrow_then_withdraw() -> Result<()> {
         .map_err(|e| anyhow!("creator balance after withdraw: {e:?}"))?;
     let expected_source_output_utxo = Utxo {
         owner: creator_address.signing_pubkey,
-        asset: zolana_transaction::Mint::SOL,
+        asset: spr_transaction::Mint::SOL,
         amount: LOCK_AMOUNT,
         blinding: source_output_blinding,
         ring_program_id: None,

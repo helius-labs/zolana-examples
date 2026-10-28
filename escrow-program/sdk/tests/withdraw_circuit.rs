@@ -4,6 +4,9 @@ use groth16_solana::{
     vk::gnark::{parse_gnark_vk_bytes, Groth16VerifyingkeyOwned},
 };
 use solana_address::Address;
+use spr_client::ProofInputUtxo;
+use spr_keypair::hash::poseidon;
+use spr_transaction::{instructions::transact::PrivateTxHash, utxo::Blinding};
 use timelock_escrow_program::{
     instructions::{
         verifier::{verify_groth16, CompressedGroth16Proof},
@@ -13,9 +16,6 @@ use timelock_escrow_program::{
 };
 use timelock_escrow_prover::{CircuitId, EscrowTermsProofInput, WithdrawProofInputs, PROVER};
 use timelock_escrow_sdk::state::DataHash;
-use zolana_client::ProofInputUtxo;
-use zolana_keypair::hash::poseidon;
-use zolana_transaction::{instructions::transact::PrivateTxHash, utxo::Blinding};
 
 mod shared;
 use shared::escrow_utxo_owner_hash;

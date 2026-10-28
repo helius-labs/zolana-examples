@@ -1,8 +1,8 @@
-use std::time::{Duration, Instant};
-use zolana_test_utils::utxo::{
+use spr_test_utils::utxo::{
     encrypt_transaction_data, get_transaction_viewing_key, prepare_output_blindings,
 };
-use zolana_transaction::utxo::SppProofInputUtxo;
+use spr_transaction::utxo::SppProofInputUtxo;
+use std::time::{Duration, Instant};
 
 use light_program_profiler::{
     mollusk::{register_profiling_syscalls, take_profiling_entries},
@@ -16,6 +16,26 @@ use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
+use spr_client::{
+    transaction_size, ComputeBudgetConfig, MerkleContext, MerkleProof, NonInclusionProof,
+    ProverClient, ProverExt, SpendProof, NULLIFIER_TREE_HEIGHT, STATE_TREE_HEIGHT,
+};
+use spr_hasher::Poseidon;
+use spr_interface::{
+    instruction::instruction_data::transact::TransactIxData,
+    state::{
+        default_tree_fees, discriminator::TREE_ACCOUNT_DISCRIMINATOR, nullifier_tree_params,
+        tree_account_size, STATE_HEIGHT,
+    },
+    SHIELDED_POOL_PROGRAM_ID,
+};
+use spr_keypair::{random_blinding, ShieldedKeypair, SigningKey};
+use spr_merkle_tree::{indexed::IndexedMerkleTree, MerkleTree};
+use spr_transaction::{
+    instructions::transact::{ExternalData, SppProofInputs, SppProofOutputUtxo, BN254_MODULUS_DEC},
+    Data, Utxo,
+};
+use spr_tree::TreeAccount;
 use timelock_escrow_prover::{CircuitId, PROVER};
 use timelock_escrow_sdk::{
     instructions::{
@@ -26,26 +46,6 @@ use timelock_escrow_sdk::{
     shared::input_sum,
     state::{EscrowTerms, EscrowUtxo},
 };
-use zolana_client::{
-    transaction_size, ComputeBudgetConfig, MerkleContext, MerkleProof, NonInclusionProof,
-    ProverClient, ProverExt, SpendProof, NULLIFIER_TREE_HEIGHT, STATE_TREE_HEIGHT,
-};
-use zolana_hasher::Poseidon;
-use zolana_interface::{
-    instruction::instruction_data::transact::TransactIxData,
-    state::{
-        default_tree_fees, discriminator::TREE_ACCOUNT_DISCRIMINATOR, nullifier_tree_params,
-        tree_account_size, STATE_HEIGHT,
-    },
-    SHIELDED_POOL_PROGRAM_ID,
-};
-use zolana_keypair::{random_blinding, ShieldedKeypair, SigningKey};
-use zolana_merkle_tree::{indexed::IndexedMerkleTree, MerkleTree};
-use zolana_transaction::{
-    instructions::transact::{ExternalData, SppProofInputs, SppProofOutputUtxo, BN254_MODULUS_DEC},
-    Data, Utxo,
-};
-use zolana_tree::TreeAccount;
 
 const PROFILING_SBF_DIR: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../../target/escrow-bench");
@@ -238,15 +238,15 @@ fn prove_transact_timed(
     proof_inputs: SppProofInputs,
     spend_proofs: &[SpendProof],
     prover: &ProverClient,
-    keys: &[&zolana_keypair::NullifierKey],
+    keys: &[&spr_keypair::NullifierKey],
 ) -> (TransactIxData, Duration) {
-    let dummy_proofs = zolana_test_utils::utxo::dummy_proofs(&proof_inputs);
+    let dummy_proofs = spr_test_utils::utxo::dummy_proofs(&proof_inputs);
     prover
         .prove_transact(
             proof_inputs.clone(),
             spend_proofs,
             &dummy_proofs,
-            &zolana_test_utils::utxo::ProofKeys(keys),
+            &spr_test_utils::utxo::ProofKeys(keys),
         )
         .expect("warm prove transact");
     let start = Instant::now();
@@ -255,7 +255,7 @@ fn prove_transact_timed(
             proof_inputs,
             spend_proofs,
             &dummy_proofs,
-            &zolana_test_utils::utxo::ProofKeys(keys),
+            &spr_test_utils::utxo::ProofKeys(keys),
         )
         .expect("prove transact");
     (transact, start.elapsed())
@@ -266,7 +266,7 @@ fn start_prover() {
     INIT.call_once(|| {
         std::env::set_var("ZOLANA_PROVER_KEYS_DIR", PROVER_KEYS_DIR);
     });
-    zolana_client::spawn_prover().expect("spawn prover");
+    spr_client::spawn_prover().expect("spawn prover");
 }
 
 fn proving_time_table(spp: Duration, circuit: Duration) -> SectionTable {
@@ -358,7 +358,7 @@ fn bench_escrow(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark)
     const LOCK_AMOUNT: u64 = 400_000;
     const UNLOCK_TIMESTAMP: u64 = 1_000_000;
 
-    let tree = zolana_interface::pda::tree(BENCH_TREE_ID);
+    let tree = spr_interface::pda::tree(BENCH_TREE_ID);
     let payer = Keypair::new();
     let creator = keypair_from_payer(&payer);
     let creator_address = creator.shielded_address().expect("creator address");
@@ -366,13 +366,13 @@ fn bench_escrow(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark)
     let input_blinding = random_blinding();
     let input_utxo = Utxo {
         owner: creator.signing_pubkey(),
-        asset: zolana_transaction::Mint::SOL,
+        asset: spr_transaction::Mint::SOL,
         amount: INPUT_AMOUNT,
         blinding: input_blinding,
         ring_program_id: None,
         data: Data::default(),
     };
-    let input_utxo: SppProofInputUtxo = zolana_test_utils::utxo::wallet(
+    let input_utxo: SppProofInputUtxo = spr_test_utils::utxo::wallet(
         input_utxo,
         &creator.nullifier_key,
         BENCH_TREE_ID,
@@ -393,7 +393,7 @@ fn bench_escrow(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark)
             unlock_timestamp: UNLOCK_TIMESTAMP,
         },
         blinding: random_blinding(),
-        asset: zolana_transaction::Mint::SOL,
+        asset: spr_transaction::Mint::SOL,
         amount: LOCK_AMOUNT,
     };
     let escrow_output_utxo = escrow_utxo.output_utxo().expect("escrow output");
@@ -513,7 +513,7 @@ fn bench_withdraw(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmar
     const UNLOCK_TIMESTAMP: u64 = 1_000_000;
     const SPP_RELAYER_DEADLINE: u64 = 2_000_000_000;
 
-    let tree = zolana_interface::pda::tree(BENCH_TREE_ID);
+    let tree = spr_interface::pda::tree(BENCH_TREE_ID);
     let payer = Keypair::new();
     let creator = keypair_from_payer(&payer);
     let creator_address = creator.shielded_address().expect("creator address");
@@ -524,7 +524,7 @@ fn bench_withdraw(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmar
             unlock_timestamp: UNLOCK_TIMESTAMP,
         },
         blinding: random_blinding(),
-        asset: zolana_transaction::Mint::SOL,
+        asset: spr_transaction::Mint::SOL,
         amount: LOCK_AMOUNT,
     };
     let source_output = escrow_utxo.source_output(creator_address, random_blinding());
@@ -609,7 +609,7 @@ fn bench_withdraw(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmar
         spp_proof_inputs,
         &spend_proofs,
         &prover,
-        &[&zolana_keypair::NullifierKey::from_secret([0; 31])],
+        &[&spr_keypair::NullifierKey::from_secret([0; 31])],
     );
     let withdraw_prove_start = Instant::now();
     let withdraw_proof = escrow_prover

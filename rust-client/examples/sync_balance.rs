@@ -2,9 +2,9 @@ use anyhow::Result;
 use rust_client_example::{asset_registry, cli_keypair, setup};
 use solana_keypair::Keypair;
 use solana_signer::Signer;
-use zolana_client::{SolanaRpc, UtxoScan, ZolanaClient};
-use zolana_keypair::ShieldedKeypair;
-use zolana_transaction::Balances;
+use spr_client::{SolanaRpc, UtxoScan, ZolanaClient};
+use spr_keypair::ShieldedKeypair;
+use spr_transaction::Balances;
 
 fn main() -> Result<()> {
     let context = setup()?;

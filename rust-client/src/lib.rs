@@ -8,13 +8,13 @@ use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_system_interface::instruction::create_account;
 use spl_token_interface::instruction::{initialize_account3, initialize_mint2, mint_to};
-use zolana_client::{ProgramAccountsFilter, ProofDataSource, Rpc, SolanaRpc, ZolanaClient};
-use zolana_interface::{
+use spr_client::{ProgramAccountsFilter, ProofDataSource, Rpc, SolanaRpc, ZolanaClient};
+use spr_interface::{
     pda,
     state::{discriminator::SPL_ASSET_REGISTRY, SplAssetRegistry},
     PROGRAM_ID_PUBKEY, SPL_TOKEN_ACCOUNT_LEN, SPL_TOKEN_MINT_ACCOUNT_LEN,
 };
-use zolana_transaction::AssetRegistry;
+use spr_transaction::AssetRegistry;
 
 /// The RPC, Photon indexer, and prover the examples talk to.
 pub const RPC_URL: &str = "https://devnet.helius-rpc.com";
