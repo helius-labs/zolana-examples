@@ -16,16 +16,16 @@ solana-signer = "3.0"
 solana-system-interface = { version = "3.2", features = ["bincode"] }
 shellexpand = "3"
 spl-token-interface = "3.0.0"
-zolana-client = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha", features = ["solana-rpc"] }
-zolana-interface = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha" }
-zolana-keypair = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha" }
-zolana-program = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha" }
-zolana-test-utils = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha" }
-zolana-transaction = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha" }
-zolana-user-registry-interface = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha", features = ["solana"] }
+spr-client = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha", features = ["solana-rpc"] }
+spr-interface = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha" }
+spr-keypair = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha" }
+spr-program = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha" }
+spr-test-utils = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha" }
+spr-transaction = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha" }
+spr-user-registry-interface = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha", features = ["solana"] }
 
 [dev-dependencies]
-zolana-program-test = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha", features = ["localnet"] }
+spr-program-test = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha", features = ["localnet"] }
 
 [[example]]
 name = "register_private_wallet"

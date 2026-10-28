@@ -1,7 +1,7 @@
 use anyhow::Result;
 use solana_address::Address;
-use zolana_keypair::ShieldedAddress;
-use zolana_transaction::{instructions::transact::SppProofOutputUtxo, utxo::SppProofInputUtxo};
+use spr_keypair::ShieldedAddress;
+use spr_transaction::{instructions::transact::SppProofOutputUtxo, utxo::SppProofInputUtxo};
 
 use crate::err;
 

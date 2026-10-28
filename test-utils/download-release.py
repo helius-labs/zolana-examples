@@ -26,7 +26,7 @@ def main():
         "prover": "prover-server",
         "photon": "photon",
         "shielded_pool": "shielded_pool_program.so",
-        "user_registry": "zolana_user_registry.so",
+        "user_registry": "spr_user_registry.so",
         "surfpool": "surfpool",
     }
     for asset in manifest["programs"] + binaries:

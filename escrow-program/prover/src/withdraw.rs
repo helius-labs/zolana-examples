@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use zolana_client::ProofInputUtxo;
-use zolana_gnark_ffi_prover::{decimal, utxo_proof_inputs, ProofInputMap};
+use spr_client::ProofInputUtxo;
+use spr_gnark_ffi_prover::{decimal, utxo_proof_inputs, ProofInputMap};
 
 use crate::{CircuitId, EscrowTermsProofInput, TimelockProof, PROVER};
 
@@ -42,7 +42,7 @@ impl WithdrawProofInputs {
         map
     }
 
-    pub fn prove(&self) -> zolana_gnark_ffi_prover::Result<TimelockProof> {
+    pub fn prove(&self) -> spr_gnark_ffi_prover::Result<TimelockProof> {
         Ok(PROVER
             .prove(CircuitId::Withdraw, &self.witness())?
             .compress()?
@@ -54,7 +54,7 @@ impl WithdrawProofInputs {
 mod tests {
     use std::collections::HashSet;
 
-    use zolana_gnark_ffi_prover::utxo_proof_input_keys;
+    use spr_gnark_ffi_prover::utxo_proof_input_keys;
 
     use super::*;
     use crate::escrow_terms::expected_escrow_terms_witness_keys;

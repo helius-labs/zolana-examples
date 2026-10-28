@@ -3,13 +3,13 @@ use rust_client_example::{cli_keypair, landed_slot, setup};
 use solana_address::Address;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
-use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
-use zolana_keypair::ShieldedKeypair;
-use zolana_program::instruction::{
+use spr_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
+use spr_keypair::ShieldedKeypair;
+use spr_program::instruction::{
     AssetDeposit, Deposit, DepositAsset, Transact, TransactInterfaceTransferAccounts,
     TransactSolTransferAccounts,
 };
-use zolana_transaction::{
+use spr_transaction::{
     decrypt_spendable, instructions::transact::ConfidentialTransaction, AssetRegistry, SOL_MINT,
 };
 

@@ -2,17 +2,17 @@ use anyhow::{anyhow, Result};
 use solana_instruction::Instruction;
 use solana_signature::Signature;
 use solana_signer::Signer;
-use zolana_client::{ComputeBudgetConfig, Rpc, SolanaRpc};
-use zolana_keypair::{
+use spr_client::{ComputeBudgetConfig, Rpc, SolanaRpc};
+use spr_keypair::{
     constants::BLINDING_LEN, NullifierKey, PublicKey, ShieldedAddress, ShieldedKeypair, SigningKey,
 };
-use zolana_program_test::{
+use spr_program_test::{
     fixture,
     localnet::{FixtureLocalnet, LocalnetPorts},
 };
-use zolana_test_utils::test_validator_asserts::wait_for_indexed_utxo;
-use zolana_test_utils::wallet::{Deposit, DepositParams, Wallet};
-use zolana_transaction::{utxo::SppProofInputUtxo, utxo::Utxo, AssetRegistry, Data, SOL_MINT};
+use spr_test_utils::test_validator_asserts::wait_for_indexed_utxo;
+use spr_test_utils::wallet::{Deposit, DepositParams, Wallet};
+use spr_transaction::{utxo::SppProofInputUtxo, utxo::Utxo, AssetRegistry, Data, SOL_MINT};
 
 #[path = "../../../test-utils/localnet.rs"]
 mod release_localnet;
@@ -101,7 +101,7 @@ pub fn setup(test: u16) -> Result<TestEnv> {
         asset: SOL_MINT,
         amount: SHIELD_AMOUNT,
         spl_token_account: None,
-        spl_token_program: Some(zolana_interface::pda::spl_token_program_id()),
+        spl_token_program: Some(spr_interface::pda::spl_token_program_id()),
         memo: None,
     })?;
     let creator_view_tag = creator_deposit.view_tag();
@@ -116,10 +116,10 @@ pub fn setup(test: u16) -> Result<TestEnv> {
         .output_slot
         .proofless_output()
         .ok_or_else(|| anyhow!("indexed creator deposit is not a proofless UTXO"))?;
-    let creator_input: SppProofInputUtxo = zolana_test_utils::utxo::wallet(
+    let creator_input: SppProofInputUtxo = spr_test_utils::utxo::wallet(
         Utxo {
             owner: escrow_authority_address.signing_pubkey,
-            asset: zolana_transaction::Mint::SOL,
+            asset: spr_transaction::Mint::SOL,
             amount: creator_deposited.amount,
             blinding: creator_deposited.blinding,
             ring_program_id: None,
