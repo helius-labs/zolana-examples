@@ -131,6 +131,8 @@ Run native Rust proving and benchmarks with `--release`.
 [`BENCHMARK.md`](BENCHMARK.md) records compute units, transaction sizes, circuit
 and key sizes, and native proof times. The [WASM benchmark](typescript/BENCHMARK.md)
 records Node.js proof timings.
+[`CONSTRAINTS.md`](CONSTRAINTS.md) breaks down the circuits' constraint costs
+and shows how to generate Xark's source and call-chain profiles.
 
 Circuit input counts are fixed: reclaim has one deposit; settle has the DvP UTXO
 and two deposits; abort has those same three circuit slots, with dummy witnesses

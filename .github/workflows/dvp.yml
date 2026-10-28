@@ -100,7 +100,8 @@ jobs:
           test -x "$bin/surfpool"
           {
             echo "PROVER_BIN=$bin/prover"
-            echo "ZOLANA_PHOTON_BIN=$bin/photon"
+            echo "DVP_PHOTON_BIN=$bin/photon"
+            echo "ZOLANA_PHOTON_BIN=$GITHUB_WORKSPACE/dvp/scripts/photon-localnet.sh"
             echo "SURFPOOL_BIN=$bin/surfpool"
             echo "SHIELDED_POOL_PROGRAM_PATH=$bin/$asset"
           } >> "$GITHUB_ENV"

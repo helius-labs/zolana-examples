@@ -77,3 +77,6 @@ circuit and the combined Node module in `wasm/dvp_program.js`.
 
 The [WASM benchmark](BENCHMARK.md) records Xark proof timings. Regenerate it
 with `npx --no-install tsx bench/proofs.ts` from this directory.
+Run `npx --no-install tsx bench/threads.ts` for the
+[worker-pool comparison](THREAD_BENCHMARK.md), which measures a single session
+and pools of 4, 8 and all available workers in separate processes.
