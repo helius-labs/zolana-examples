@@ -6,6 +6,12 @@ use zolana_transaction::instructions::transact::SppProofInputs;
 
 use crate::err;
 
+pub(crate) fn field_decimal(bytes: [u8; 32]) -> Result<String> {
+    Ok(zolana_program::from_bytes(&bytes)
+        .map_err(err)?
+        .to_decimal())
+}
+
 /// Proves a transaction whose real inputs are all owned by the DvP PDA under
 /// the zero nullifier secret (padding inputs carry their own) through
 /// `indexer`, which serves their Merkle proofs, and checks that the SPP

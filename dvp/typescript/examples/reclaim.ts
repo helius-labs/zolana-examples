@@ -11,8 +11,7 @@ import {
   ShieldedKeypair,
   SigningKey,
   ViewingKey,
-  P256_PUBLIC_KEY_LENGTH,
-  P256PublicKey,
+  X25519PublicKey,
 } from "@heliuslabs/zolana/keypair";
 import {
   AssetRegistry,
@@ -51,16 +50,17 @@ import {
   dvpId,
   encodeTerms,
   encoder,
+  integer,
   PROGRAM_ID,
+  VIEWING_PUBLIC_KEY_LENGTH,
   type SwapDvp,
 } from "../src/terms.js";
 import { createDvpInstruction, reclaimDvpInstruction } from "../src/instructions.js";
-import { provingKey, initWasm, type WalletUtxo } from "../src/wasm.js";
+import { ProgramProver, wasm, type WalletUtxo } from "../src/wasm.js";
 
 async function main(): Promise<void> {
   // 1. Connect the seller, buyer, and settlement authority.
   await initializePoseidon();
-  const wasm = await initWasm();
   const seller = keypair("DVP_SELLER_SEED");
   const buyer = keypair("DVP_BUYER_SEED");
   const settlementAuthority = keypair("DVP_AUTHORITY_SEED");
@@ -118,18 +118,17 @@ async function main(): Promise<void> {
         },
         public: {
           creatorIdentity: checkedTerms.creatorIdentity,
-          dvpId: id,
+          dvpId: integer(id).toString(),
           dvpOwner: dvpAddress.toBytes(),
         },
       },
       seller.shieldedAddress().toBytes(),
       payer.address,
     );
-    const createKey = provingKey("create_dvp");
-    const createProver = wasm.CreateDvpProver.fromKey(createKey.key, createKey.checksum);
+    const createProver = new ProgramProver("create_dvp");
     let createProof;
     try {
-      createProof = createProver.prove(create.proofInputs);
+      createProof = createProver.prove(create);
       assert.deepEqual(createProof.publicInputs, [create.publicHash]);
     } finally {
       createProver.free();
@@ -276,6 +275,7 @@ async function main(): Promise<void> {
     const deliveryTx = await sendAndConfirm(
       await transactInstruction({
         payer: seller.toSolanaSigner(),
+        ownerSigners: [seller.toSolanaSigner()],
         inputTree: client.tree,
         outputTree: client.tree,
         data: deliverySpp,
@@ -301,13 +301,13 @@ async function main(): Promise<void> {
     try {
       assert.ok(deliveryTxViewingKey.publicKey().equals(deliveryRecord.txViewingPublicKey));
       const encryptedDeposit = decodeOutputData(deliverySlot.payload).body;
-      const recipientViewingPublicKey = P256PublicKey.fromBytes(
-        bytes33(encryptedDeposit.subarray(0, P256_PUBLIC_KEY_LENGTH)),
+      const recipientViewingPublicKey = X25519PublicKey.fromBytes(
+        bytes33(encryptedDeposit.subarray(0, VIEWING_PUBLIC_KEY_LENGTH)),
       );
       deliveryPlaintext = decodeConfidential(
         deliveryTxViewingKey.decryptSlotEphemeral(
           recipientViewingPublicKey,
-          encryptedDeposit.subarray(P256_PUBLIC_KEY_LENGTH),
+          encryptedDeposit.subarray(VIEWING_PUBLIC_KEY_LENGTH),
           deliveryRecord.salt,
           deliveryIndex,
         ),
@@ -344,7 +344,7 @@ async function main(): Promise<void> {
         },
         public: {
           creatorIdentity: checkedTerms.creatorIdentity,
-          dvpId: id,
+          dvpId: integer(id).toString(),
           dvpOwner: dvpAddress.toBytes(),
           signerIdentity: checkedTerms.sellerIdentity,
         },
@@ -352,11 +352,10 @@ async function main(): Promise<void> {
       seller.shieldedAddress().toBytes(),
       payer.address,
     );
-    const reclaimKey = provingKey("reclaim_dvp");
-    const reclaimProver = wasm.ReclaimDvpProver.fromKey(reclaimKey.key, reclaimKey.checksum);
+    const reclaimProver = new ProgramProver("reclaim_dvp");
     let reclaimProof;
     try {
-      reclaimProof = reclaimProver.prove(reclaim.proofInputs);
+      reclaimProof = reclaimProver.prove(reclaim);
       assert.deepEqual(reclaimProof.publicInputs, [reclaim.publicHash]);
     } finally {
       reclaimProver.free();
@@ -364,7 +363,7 @@ async function main(): Promise<void> {
 
     // 10. Encrypt, prove, and submit the refund transaction.
     const reclaimed = await decodeProgramTransaction(reclaim.finalizedTx, assets);
-    const reclaimInputs = reclaimed.toProofInputs(seller);
+    const reclaimInputs = reclaimed.encryptWithKeys(seller);
     const reclaimSpp = await client.proveTransact(reclaimInputs, pdaKeys);
     assert.deepEqual(reclaimSpp.privateTxHash, reclaimed.paddingIndependentPrivateTxHash);
     const reclaimTx = await sendAndConfirm(

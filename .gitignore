@@ -7,3 +7,4 @@ rust-client/BUGS.md
 rust-client/test-ledger/
 rust-client/.surfpool/
 build/
+dvp/.tools/

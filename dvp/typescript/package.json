@@ -10,7 +10,7 @@
     "format": "oxfmt --write ."
   },
   "dependencies": {
-    "@heliuslabs/zolana": "https://github.com/helius-labs/zolana/releases/download/test-dvp-pr-41-20261017-48dd150/heliuslabs-zolana-0.0.0-test.dvp-pr-41.d4ec52316.tgz",
+    "@heliuslabs/zolana": "file:../.tools/zolana/sdk-libs/ts",
     "@solana/kit": "^8.3.0"
   },
   "devDependencies": {

@@ -8,6 +8,7 @@ pub mod error;
 #[cfg(not(feature = "r1cs-export"))]
 pub mod instructions;
 #[cfg(not(feature = "r1cs-export"))]
+#[rustfmt::skip] // Keep the generator's exact output for `zk compile --check`.
 pub mod verifier;
 
 #[cfg(not(feature = "r1cs-export"))]

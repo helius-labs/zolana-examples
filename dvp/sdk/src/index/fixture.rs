@@ -5,7 +5,7 @@ use zolana_client::{
     rpc::GetShieldedTransactionsByNullifiersResponse, ClientError, Context,
     GetShieldedTransactionsByTagsResponse, IndexerRpcConfig, MerkleContext, NonInclusionProof, Rpc,
 };
-use zolana_keypair::{P256Pubkey, ShieldedKeypair};
+use zolana_keypair::{ShieldedKeypair, X25519Pubkey};
 use zolana_transaction::{
     instructions::transact::{OutputContext, OutputSlot, SppProofInputs},
     AssetRegistry, Data, Mint, ShieldedTransaction, Utxo, WalletUtxo, SOL_MINT,
@@ -134,7 +134,7 @@ pub(crate) fn terms_fixture() -> TermsFixture {
         slot: 0,
         tx_signature: Signature::default(),
         event_index: Some(0),
-        tx_viewing_pk: P256Pubkey::from_bytes(spp.tx_viewing_pk).ok(),
+        tx_viewing_pk: X25519Pubkey::from_bytes(spp.tx_viewing_pk).ok(),
         salt: Some(spp.salt),
         output_slots,
         messages: spp.messages,
@@ -229,7 +229,7 @@ pub(crate) fn shielded_transaction(
         slot: 0,
         tx_signature: Signature::default(),
         event_index: Some(0),
-        tx_viewing_pk: P256Pubkey::from_bytes(external.tx_viewing_pk).ok(),
+        tx_viewing_pk: X25519Pubkey::from_bytes(external.tx_viewing_pk).ok(),
         salt: Some(external.salt),
         output_slots,
         messages: external.messages.clone(),

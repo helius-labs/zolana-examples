@@ -1,15 +1,17 @@
-use anyhow::{bail, Result};
+use anyhow::{ensure, Result};
 use dvp_program::circuits::{
-    ReclaimDvp as ReclaimDvpInputs, ReclaimDvpPrivateInputs, ReclaimDvpPublicInputs,
+    ReclaimDvpClient as ReclaimDvpInputs, ReclaimDvpPrivateInputsClient,
+    ReclaimDvpPublicInputsClient,
 };
 use solana_address::Address;
 use zolana_client::ZolanaIndexer;
 use zolana_hasher::primitives::solana_owner_identity;
-use zolana_keypair::{Curve, ShieldedAddress, ShieldedKeypair};
-use zolana_program::{ProgramOwner, TxContext, ZkProgram};
+use zolana_keypair::{ShieldedAddress, ShieldedKeypair};
+use zolana_program::{ProgramOwner, TransactionOptions};
 use zolana_transaction::instructions::transact::SppProofInputs;
 
 use super::ReclaimDvp;
+use crate::shared::field_decimal;
 use crate::{
     err,
     shared::{ensure_output_tree, prove_pda_transact},
@@ -28,7 +30,8 @@ pub struct ReclaimDvpTransaction {
     creator: Address,
     bump: u8,
     pub spp_proof_inputs: SppProofInputs,
-    pub proof_inputs: ReclaimDvpInputs,
+    pub proof_inputs: zolana_program::ProgramProofInputs,
+    dvp_id: [u8; 32],
 }
 
 impl ReclaimDvpTransactionParams {
@@ -42,38 +45,51 @@ impl ReclaimDvpTransactionParams {
         ensure_output_tree("the deposit", self.deposit.tree_id, self.tree_id)?;
         let sender = signer.shielded_address().map_err(err)?;
         let refund_destination = self.refund_destination.unwrap_or(sender);
-        if refund_destination.signing_pubkey.curve().map_err(err)? == Curve::P256 {
-            bail!("refund destination has a P256 signing key");
-        }
         let signer_address = sender.solana_address().map_err(err)?;
+        let party = if self.deposit.leg == Leg::Payment {
+            terms.buyer
+        } else {
+            terms.seller
+        };
+        ensure!(
+            signer_address == party,
+            "only the leg's party can reclaim it"
+        );
         let creator = terms.creator;
         let (pda, bump) = terms.dvp_authority()?;
-        let mut circuit_terms = dvp_program::circuits::SwapDvpTerms::try_from(terms)?;
+        let mut circuit_terms = dvp_program::circuits::SwapDvpTermsClient::try_from(terms)?;
         match self.deposit.leg {
             Leg::Delivery => circuit_terms.delivery_mint = self.deposit.mint,
             Leg::Payment => circuit_terms.payment_mint = self.deposit.mint,
         }
         // 2. Build the program transaction.
         let proof_inputs = ReclaimDvpInputs {
-            private: ReclaimDvpPrivateInputs {
-                tx_context: TxContext::new().with_output_tree_id(Some(self.tree_id)),
+            private: ReclaimDvpPrivateInputsClient {
+                tx_context: TransactionOptions {
+                    blinding_seed: None,
+                    output_tree_id: Some(self.tree_id),
+                },
                 terms: circuit_terms,
                 deposit: self.deposit.to_input_utxo()?,
                 payment_leg: self.deposit.leg == Leg::Payment,
                 refund_destination,
             },
-            public: ReclaimDvpPublicInputs {
-                creator_identity: solana_owner_identity(creator.as_array()).map_err(err)?,
-                dvp_id: terms.dvp_id()?,
+            public: ReclaimDvpPublicInputsClient {
+                creator_identity: field_decimal(
+                    solana_owner_identity(creator.as_array()).map_err(err)?,
+                )?,
+                dvp_id: field_decimal(terms.dvp_id()?)?,
                 dvp_owner: ProgramOwner::new(pda)
                     .address(signer.viewing_pubkey())
                     .map_err(err)?,
-                signer_identity: solana_owner_identity(signer_address.as_array()).map_err(err)?,
+                signer_identity: field_decimal(
+                    solana_owner_identity(signer_address.as_array()).map_err(err)?,
+                )?,
             },
         };
-        let finalized = proof_inputs
-            .create_finalized_transaction(&sender, self.payer)
-            .map_err(err)?;
+        let transaction = proof_inputs.prepare(&sender, self.payer).map_err(err)?;
+        let finalized = transaction.finalized;
+        let proof_inputs = transaction.proof_inputs;
         // 3. Encrypt the refund UTXO.
         let key = signer
             .get_transaction_viewing_key(&finalized.first_nullifier().map_err(err)?)
@@ -85,6 +101,7 @@ impl ReclaimDvpTransactionParams {
             bump,
             spp_proof_inputs,
             proof_inputs,
+            dvp_id: terms.dvp_id()?,
         })
     }
 }
@@ -108,7 +125,7 @@ impl ReclaimDvpTransaction {
             signer: self.signer,
             tree,
             creator: self.creator,
-            dvp_id: self.proof_inputs.public.dvp_id,
+            dvp_id: self.dvp_id,
             bump: self.bump,
             reclaim_proof,
             spp,
@@ -152,10 +169,10 @@ mod tests {
     }
 
     #[test]
-    fn builder_rejects_the_other_party_and_p256_destination() {
+    fn builder_rejects_the_other_party() {
         // 1. Check the buyer cannot reclaim the seller's delivery deposit.
         let fixture = deposit_fixture();
-        let [seller, buyer] = &fixture.funders;
+        let [_, buyer] = &fixture.funders;
         let [delivery, _] = &fixture.deposits;
         let params = || ReclaimDvpTransactionParams {
             deposit: delivery.clone(),
@@ -164,18 +181,5 @@ mod tests {
             tree_id: delivery.tree_id,
         };
         assert!(params().build(buyer).is_err());
-        // 2. Check the refund destination uses a supported signing curve.
-        let destination = ShieldedAddress {
-            signing_pubkey: zolana_keypair::PublicKey::from_p256(
-                &zolana_keypair::ViewingKey::new().pubkey(),
-            ),
-            ..seller.shielded_address().unwrap()
-        };
-        assert!(ReclaimDvpTransactionParams {
-            refund_destination: Some(destination),
-            ..params()
-        }
-        .build(seller)
-        .is_err());
     }
 }

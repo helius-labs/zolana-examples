@@ -1,7 +1,6 @@
 use crate::shared::*;
-use dvp_program::{circuits::ReclaimDvp, verifier::reclaim_dvp::VERIFYINGKEY};
+use dvp_program::verifier::reclaim_dvp::VERIFYINGKEY;
 use dvp_sdk::proof::CircuitId;
-use zolana_program::ZkProgram;
 
 const CIRCUIT: CircuitId = CircuitId::ReclaimDvp;
 
@@ -10,7 +9,7 @@ fn each_party_reclaims_its_leg_to_a_chosen_destination() {
     for payment in [false, true] {
         // 1. Choose a refund destination outside the committed terms.
         let mut inputs = reclaim_inputs(payment);
-        inputs.private.refund_destination = destination(91);
+        inputs.private.refund_destination = inputs.address(destination(91));
         let finalized = inputs
             .create_finalized_transaction(&destination(91), sample_terms().creator)
             .unwrap();
@@ -25,8 +24,12 @@ fn each_party_reclaims_its_leg_to_a_chosen_destination() {
             ),
             (
                 Some(destination(91)),
-                inputs.private.deposit.utxo.asset,
-                inputs.private.deposit.utxo.amount,
+                if payment {
+                    zolana_transaction::Mint::SOL
+                } else {
+                    delivery_mint()
+                },
+                inputs.private.deposit.amount,
                 false
             )
         );
@@ -40,14 +43,14 @@ fn each_party_reclaims_its_leg_to_a_chosen_destination() {
 fn reclaim_rejects_wrong_party_leg_owner_mint_and_data() {
     // 1. Tamper one signer, owner, mint, or data constraint.
     let mutations: [fn(&mut ReclaimDvp); 8] = [
-        |inputs| inputs.public.signer_identity = fe(99),
+        |inputs| inputs.public.signer_identity = field(99),
         |inputs| inputs.private.payment_leg = true,
-        |inputs| inputs.public.creator_identity = fe(99),
-        |inputs| inputs.public.dvp_id = fe(99),
-        |inputs| inputs.private.deposit.data_hash = Some(fe(99)),
-        |inputs| inputs.private.deposit.utxo.owner = destination(91).signing_pubkey,
-        |inputs| inputs.private.deposit.utxo.asset = zolana_transaction::Mint::SOL,
-        |inputs| inputs.private.terms.blinding = fe(99),
+        |inputs| inputs.public.creator_identity = field(99),
+        |inputs| inputs.public.dvp_id = field(99),
+        |inputs| inputs.private.deposit.data_hash = field(99),
+        |inputs| inputs.private.deposit.owner = *inputs.address(destination(91)).owner(),
+        |inputs| inputs.private.deposit.asset = [0; 32],
+        |inputs| inputs.private.terms.blinding = field(99),
     ];
     // 2. Check each mutation is unprovable.
     for mutate in mutations {
@@ -64,12 +67,12 @@ fn reclaim_proof_rejects_partial_or_wrong_asset_refunds() {
     let finalized = inputs
         .create_finalized_transaction(&destination(91), sample_terms().creator)
         .unwrap();
-    let proof = dvp_sdk::proof::prove(CIRCUIT, &inputs).unwrap();
+    let proof = dvp_sdk::proof::prove(CIRCUIT, &inputs.proof_inputs()).unwrap();
     let public = dvp_program::verifier::reclaim_dvp::PublicInputs {
-        creator_identity: inputs.public.creator_identity,
-        dvp_id: inputs.public.dvp_id,
-        dvp_owner: inputs.public.dvp_owner.owner_hash().unwrap(),
-        signer_identity: inputs.public.signer_identity,
+        creator_identity: field_bytes(inputs.public.creator_identity),
+        dvp_id: field_bytes(inputs.public.dvp_id),
+        dvp_owner: field_bytes(inputs.public.dvp_owner.owner().hash().unwrap()),
+        signer_identity: field_bytes(inputs.public.signer_identity),
     };
     // 2. Recompute the SPP hash for each unauthorized refund.
     for wrong_asset in [false, true] {
@@ -80,12 +83,31 @@ fn reclaim_proof_rejects_partial_or_wrong_asset_refunds() {
             output.amount -= 1;
         }
         let hash = zolana_program::PrivateTxHash::new(
-            &[inputs.private.deposit.utxo_hash],
+            &[field_bytes(inputs.private.deposit.hash().unwrap())],
             &[output.hash(OUTPUT_TREE_ID).unwrap(), [0; 32]],
             &finalized.private_tx_blinding().unwrap(),
         )
         .hash()
         .unwrap();
-        assert!(dvp_program::verifier::reclaim_dvp::verify(&proof, &public, &hash).is_err());
+        assert!(verify(&proof, &public, &hash).is_err());
     }
+}
+
+fn verify(
+    proof: &zolana_program::CompressedProof,
+    public: &dvp_program::verifier::reclaim_dvp::PublicInputs,
+    private_tx_hash: &[u8; 32],
+) -> Result<(), zolana_program::verifier::VerifyError> {
+    dvp_program::verifier::reclaim_dvp::Verifier {
+        proof,
+        public_inputs: dvp_program::verifier::reclaim_dvp::PublicInputs {
+            creator_identity: public.creator_identity,
+            dvp_id: public.dvp_id,
+            dvp_owner: public.dvp_owner,
+            signer_identity: public.signer_identity,
+        },
+        private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
 }

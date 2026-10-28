@@ -1,23 +1,30 @@
 [workspace]
 resolver = "2"
 members = ["program", "sdk", "test"]
+exclude = [".tools/zolana", ".tools/xark"]
 
 [workspace.package]
 edition = "2021"
 
-# Zolana crates use one pinned revision; Solana dependencies match its SDK.
+# Prepared by scripts/setup-zk-tools.sh at Zolana 226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb.
+# Its Xark path dependencies are resolved against the pinned sibling checkout.
 [workspace.dependencies]
-zolana-account-checks = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e", default-features = false }
-zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-hasher = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e", default-features = false }
-zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-merkle-tree = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-program = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-program-test = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-tree = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
+xark = { path = ".tools/xark/crates/lang" }
+xark-groth16 = { path = ".tools/xark/crates/groth16" }
+serde = { version = "1", features = ["derive"] }
+tsify = { version = "0.5.6", features = ["js"] }
+wasm-bindgen = "0.2"
+zolana-account-checks = { path = ".tools/zolana/program-libs/account-checks", default-features = false }
+zolana-client = { path = ".tools/zolana/sdk-libs/client" }
+zolana-hasher = { path = ".tools/zolana/program-libs/hasher", default-features = false }
+zolana-interface = { path = ".tools/zolana/program-libs/interface" }
+zolana-keypair = { path = ".tools/zolana/sdk-libs/keypair" }
+zolana-merkle-tree = { path = ".tools/zolana/sdk-libs/merkle-tree" }
+zolana-program = { path = ".tools/zolana/sdk-libs/program" }
+zolana-program-test = { path = ".tools/zolana/sdk-libs/program-test" }
+zolana-test-utils = { path = ".tools/zolana/program-tests/test-utils" }
+zolana-transaction = { path = ".tools/zolana/sdk-libs/transaction" }
+zolana-tree = { path = ".tools/zolana/program-libs/tree" }
 
 groth16-solana = { git = "https://github.com/Lightprotocol/groth16-solana", rev = "70a93803e5f55b8425301d506c625169ef557c9d", features = ["bsb22"] }
 light-program-profiler = { git = "https://github.com/Lightprotocol/light-program-profiler", rev = "db49f3c801996a80e1cb7e4e92b13a694e962b65" }

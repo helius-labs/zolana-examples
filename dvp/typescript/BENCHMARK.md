@@ -1,5 +1,9 @@
 # TypeScript WASM proof timings
 
+These measurements cover the pre-Xark SDK and its Rayon WASM prover. The
+benchmark script now uses an Xark proving session; fresh measurements require
+running it with the newly generated circuits and keys.
+
 Measured 2026-10-17T03:00:12.070Z from source baseline `d72655851065bddec8283ac0d349abc422d77af0` with the Node threading changes applied.
 
 darwin arm64; Apple M5 Pro; 18 logical CPUs; Node.js v26.0.0. Optimized WASM with a shared-memory Rayon pool.

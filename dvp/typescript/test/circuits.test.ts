@@ -34,12 +34,11 @@ import {
   PROGRAM_ID,
   type SwapDvp,
 } from "../src/terms.js";
-import { provingKey, initWasm, type WalletUtxo } from "../src/wasm.js";
+import { ProgramProver, wasm, type WalletUtxo } from "../src/wasm.js";
 
 await initializePoseidon();
-const wasm = await initWasm();
 
-test("terms keep the existing golden Rust commitment and exact wire encoding", () => {
+test("terms match the X25519 Rust commitment and exact wire encoding", () => {
   const destination = (seed: number) => {
     const nullifier = NullifierKey.fromSecret(bytes31(new Uint8Array(31).fill(seed))),
       viewing = ViewingKey.fromBytes(bytes32(new Uint8Array(32).fill(seed)));
@@ -78,7 +77,7 @@ test("terms keep the existing golden Rust commitment and exact wire encoding", (
   };
   assert.equal(
     integer(dvpId(t)).toString(),
-    "19284217639585534903980865803314903667065340572521528256377547822764170087020",
+    "13601006363444597634864084490330890110481277484464045593977180451704799918864",
   );
   const encoded = encodeTerms(t);
   assert.equal(encoded.length, 725);
@@ -98,24 +97,35 @@ test("Node proves each generated program circuit and every abort funding combina
         },
         public: {
           creatorIdentity: f.checkedTerms.creatorIdentity,
-          dvpId: f.id,
+          dvpId: integer(f.id).toString(),
           dvpOwner: f.dvpAddress.toBytes(),
         },
       },
       f.seller.shieldedAddress().toBytes(),
       f.terms.creator,
     );
-    const createKey = provingKey("create_dvp");
-    const createProver = wasm.CreateDvpProver.fromKey(createKey.key, createKey.checksum);
+    const createProver = new ProgramProver("create_dvp");
     try {
-      assert.deepEqual(createProver.prove(create.proofInputs).publicInputs, [create.publicHash]);
+      const firstProof = createProver.prove(create);
+      const secondProof = createProver.prove(create);
+      assert.deepEqual(firstProof.publicInputs, [create.publicHash]);
+      assert.deepEqual(secondProof.publicInputs, firstProof.publicInputs);
+      assert.notDeepEqual(secondProof.compressedProof, firstProof.compressedProof);
+      assert.throws(
+        () =>
+          createProver.prove({
+            proofInputs: create.proofInputs,
+            publicHash: create.publicHash.map((byte) => byte ^ 1),
+          }),
+        /proof public hash differs from its transaction/,
+      );
     } finally {
       createProver.free();
     }
     const created = await decodeProgramTransaction(create.finalizedTx, f.assets);
     assert.equal(created.inputs.at(0)?.isAddress(), true);
     assert.equal(created.outputs.at(1)?.isCompact(), true);
-    const createInputs = created.toProofInputs(f.seller);
+    const createInputs = created.encryptWithKeys(f.seller);
     assert.deepEqual(createInputs.privateTxHash(), created.paddingIndependentPrivateTxHash);
     assert.equal(createInputs.inputUtxoHashes().length, 0);
     assert.equal(createInputs.externalData.outputs.length, 1);
@@ -149,7 +159,7 @@ test("Node proves each generated program circuit and every abort funding combina
         },
         public: {
           creatorIdentity: f.checkedTerms.creatorIdentity,
-          dvpId: f.id,
+          dvpId: integer(f.id).toString(),
           dvpOwner: f.dvpAddress.toBytes(),
           settlementAuthorityIdentity: f.checkedTerms.settlementAuthorityIdentity,
           currentTimestamp: 1750000000n,
@@ -158,15 +168,9 @@ test("Node proves each generated program circuit and every abort funding combina
       f.settlementAuthority.shieldedAddress().toBytes(),
       f.terms.creator,
     );
-    const settlementKey = provingKey("settle_dvp");
-    const settlementProver = wasm.SettleDvpProver.fromKey(
-      settlementKey.key,
-      settlementKey.checksum,
-    );
+    const settlementProver = new ProgramProver("settle_dvp");
     try {
-      assert.deepEqual(settlementProver.prove(settlement.proofInputs).publicInputs, [
-        settlement.publicHash,
-      ]);
+      assert.deepEqual(settlementProver.prove(settlement).publicInputs, [settlement.publicHash]);
     } finally {
       settlementProver.free();
     }
@@ -177,14 +181,13 @@ test("Node proves each generated program circuit and every abort funding combina
     );
     assert.ok(settled.outputs.every((output) => !output.isDummy()));
     assert.deepEqual(
-      settled.toProofInputs(f.settlementAuthority).privateTxHash(),
+      settled.encryptWithKeys(f.settlementAuthority).privateTxHash(),
       settled.paddingIndependentPrivateTxHash,
     );
 
     // 3. Cancel and reject with every combination of included deposits.
     const absent = nativeInput(ProofInputUtxo.dummy(randomBlinding(), 0), f.assets, 0n);
-    const abortKey = provingKey("abort_dvp");
-    const abortProver = wasm.AbortDvpProver.fromKey(abortKey.key, abortKey.checksum);
+    const abortProver = new ProgramProver("abort_dvp");
     try {
       for (const reject of [false, true]) {
         for (const delivery of [absent, f.delivery]) {
@@ -204,7 +207,7 @@ test("Node proves each generated program circuit and every abort funding combina
                 },
                 public: {
                   creatorIdentity: f.checkedTerms.creatorIdentity,
-                  dvpId: f.id,
+                  dvpId: integer(f.id).toString(),
                   dvpOwner: f.dvpAddress.toBytes(),
                   signerIdentity: reject
                     ? f.checkedTerms.buyerIdentity
@@ -215,7 +218,7 @@ test("Node proves each generated program circuit and every abort funding combina
               (reject ? f.buyer : f.settlementAuthority).shieldedAddress().toBytes(),
               f.terms.creator,
             );
-            assert.deepEqual(abortProver.prove(abort.proofInputs).publicInputs, [abort.publicHash]);
+            assert.deepEqual(abortProver.prove(abort).publicInputs, [abort.publicHash]);
             const aborted = await decodeProgramTransaction(abort.finalizedTx, f.assets);
             assert.deepEqual(
               aborted.outputs.map((output) => output.amount),
@@ -224,7 +227,7 @@ test("Node proves each generated program circuit and every abort funding combina
             assert.ok(aborted.outputs.every((output) => !output.isDummy()));
             assert.equal(aborted.inputs.length, 3);
             assert.deepEqual(
-              aborted.toProofInputs(reject ? f.buyer : f.settlementAuthority).privateTxHash(),
+              aborted.encryptWithKeys(reject ? f.buyer : f.settlementAuthority).privateTxHash(),
               aborted.paddingIndependentPrivateTxHash,
             );
           }
@@ -246,7 +249,7 @@ test("Node proves each generated program circuit and every abort funding combina
         },
         public: {
           creatorIdentity: f.checkedTerms.creatorIdentity,
-          dvpId: f.id,
+          dvpId: integer(f.id).toString(),
           dvpOwner: f.dvpAddress.toBytes(),
           signerIdentity: f.checkedTerms.sellerIdentity,
         },
@@ -254,10 +257,9 @@ test("Node proves each generated program circuit and every abort funding combina
       f.seller.shieldedAddress().toBytes(),
       f.terms.creator,
     );
-    const reclaimKey = provingKey("reclaim_dvp");
-    const reclaimProver = wasm.ReclaimDvpProver.fromKey(reclaimKey.key, reclaimKey.checksum);
+    const reclaimProver = new ProgramProver("reclaim_dvp");
     try {
-      assert.deepEqual(reclaimProver.prove(reclaim.proofInputs).publicInputs, [reclaim.publicHash]);
+      assert.deepEqual(reclaimProver.prove(reclaim).publicInputs, [reclaim.publicHash]);
     } finally {
       reclaimProver.free();
     }
@@ -265,7 +267,7 @@ test("Node proves each generated program circuit and every abort funding combina
     assert.equal(reclaimed.outputs.at(0)?.amount, 1100n);
     assert.equal(reclaimed.outputs.at(1)?.isCompact(), true);
     assert.deepEqual(
-      reclaimed.toProofInputs(f.seller).privateTxHash(),
+      reclaimed.encryptWithKeys(f.seller).privateTxHash(),
       reclaimed.paddingIndependentPrivateTxHash,
     );
 
@@ -279,7 +281,7 @@ test("Node proves each generated program circuit and every abort funding combina
           },
           public: {
             creatorIdentity: f.checkedTerms.creatorIdentity,
-            dvpId: f.id,
+            dvpId: integer(f.id).toString(),
             dvpOwner: f.dvpAddress.toBytes(),
           },
         },
@@ -299,7 +301,7 @@ test("Node proves each generated program circuit and every abort funding combina
           },
           public: {
             creatorIdentity: f.checkedTerms.creatorIdentity,
-            dvpId: f.id,
+            dvpId: integer(f.id).toString(),
             dvpOwner: f.dvpAddress.toBytes(),
             settlementAuthorityIdentity: f.checkedTerms.sellerIdentity,
             currentTimestamp: 1750000000n,

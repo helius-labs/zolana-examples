@@ -1,9 +1,8 @@
 use anyhow::{ensure, Result};
-use dvp_program::circuits::CreateDvp as CreateDvpInputs;
 use solana_address::Address;
 use zolana_client::{NonInclusionProof, ProverExt};
 use zolana_keypair::{ShieldedAddress, ViewingKey};
-use zolana_program::{ProgramOwner, ZkProgram};
+use zolana_program::ProgramOwner;
 use zolana_transaction::instructions::transact::SppProofInputs;
 
 use super::{proof::create_inputs, CreateDvp, CreateDvpDerivation};
@@ -27,7 +26,7 @@ pub struct CreateDvpTransaction {
     non_inclusion: NonInclusionProof,
     pub derivation: CreateDvpDerivation,
     pub spp_proof_inputs: SppProofInputs,
-    pub proof_inputs: CreateDvpInputs,
+    pub proof_inputs: zolana_program::ProgramProofInputs,
 }
 
 impl CreateDvpTransactionParams {
@@ -52,9 +51,9 @@ impl CreateDvpTransactionParams {
             .address(viewing_key.pubkey())
             .map_err(err)?;
         let proof_inputs = create_inputs(&self.terms, owner, self.tree_id)?;
-        let finalized = proof_inputs
-            .create_finalized_transaction(&owner, self.payer)
-            .map_err(err)?;
+        let transaction = proof_inputs.prepare(&owner, self.payer).map_err(err)?;
+        let finalized = transaction.finalized;
+        let proof_inputs = transaction.proof_inputs;
         let mut spp_proof_inputs = finalized
             .encrypt_with_viewing_key(&viewing_key)
             .map_err(err)?;

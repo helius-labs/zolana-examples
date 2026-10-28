@@ -6,8 +6,10 @@ publish = false
 autotests = false
 
 [dependencies]
+xark = { workspace = true }
+xark-groth16 = { workspace = true }
+sha2 = "0.10"
 anyhow = { workspace = true }
-thiserror = { workspace = true }
 dvp-program = { path = "../program", features = ["circuits", "parallel"] }
 num-bigint = { workspace = true }
 solana-address = { workspace = true, features = ["curve25519"] }

@@ -192,7 +192,11 @@ fn node_client_lifecycles() -> anyhow::Result<()> {
             .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../typescript"))
             .env("ZOLANA_LOCALNET_URL", ports.rpc_url())
             .env("ZOLANA_INDEXER_URL", ports.photon_url())
-            .env("ZOLANA_PROVER_URL", "http://127.0.0.1:3001")
+            .env(
+                "ZOLANA_PROVER_URL",
+                std::env::var("ZOLANA_PROVER_URL")
+                    .unwrap_or_else(|_| "http://127.0.0.1:3001".into()),
+            )
             .env("DVP_SELLER_SEED", seed(&env.seller.solana))
             .env("DVP_BUYER_SEED", seed(&env.buyer.solana))
             .env("DVP_AUTHORITY_SEED", seed(&env.settlement_authority.solana))

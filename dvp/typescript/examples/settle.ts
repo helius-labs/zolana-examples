@@ -10,7 +10,6 @@ import {
   ShieldedKeypair,
   SigningKey,
   ViewingKey,
-  P256_PUBLIC_KEY_LENGTH,
 } from "@heliuslabs/zolana/keypair";
 import {
   AssetRegistry,
@@ -49,16 +48,17 @@ import {
   dvpId,
   encodeTerms,
   encoder,
+  integer,
   PROGRAM_ID,
+  VIEWING_PUBLIC_KEY_LENGTH,
   type SwapDvp,
 } from "../src/terms.js";
 import { createDvpInstruction, settleDvpInstruction } from "../src/instructions.js";
-import { provingKey, initWasm, type WalletUtxo } from "../src/wasm.js";
+import { ProgramProver, wasm, type WalletUtxo } from "../src/wasm.js";
 
 async function main(): Promise<void> {
   // 1. Connect the seller, buyer, and settlement authority.
   await initializePoseidon();
-  const wasm = await initWasm();
   const seller = keypair("DVP_SELLER_SEED");
   const buyer = keypair("DVP_BUYER_SEED");
   const settlementAuthority = keypair("DVP_AUTHORITY_SEED");
@@ -117,18 +117,17 @@ async function main(): Promise<void> {
         },
         public: {
           creatorIdentity: checkedTerms.creatorIdentity,
-          dvpId: id,
+          dvpId: integer(id).toString(),
           dvpOwner: dvpAddress.toBytes(),
         },
       },
       seller.shieldedAddress().toBytes(),
       payer.address,
     );
-    const createKey = provingKey("create_dvp");
-    const createProver = wasm.CreateDvpProver.fromKey(createKey.key, createKey.checksum);
+    const createProver = new ProgramProver("create_dvp");
     let createProof;
     try {
-      createProof = createProver.prove(create.proofInputs);
+      createProof = createProver.prove(create);
       assert.deepEqual(createProof.publicInputs, [create.publicHash]);
     } finally {
       createProver.free();
@@ -275,6 +274,7 @@ async function main(): Promise<void> {
     const deliveryTx = await sendAndConfirm(
       await transactInstruction({
         payer: seller.toSolanaSigner(),
+        ownerSigners: [seller.toSolanaSigner()],
         inputTree: client.tree,
         outputTree: client.tree,
         data: deliverySpp,
@@ -295,7 +295,7 @@ async function main(): Promise<void> {
     assert.ok(deliveryIndex >= 0 && deliverySlot);
     const deliveryPlaintext = decodeConfidential(
       authorityViewingKey.decryptUtxo(
-        decodeOutputData(deliverySlot.payload).body.subarray(P256_PUBLIC_KEY_LENGTH),
+        decodeOutputData(deliverySlot.payload).body.subarray(VIEWING_PUBLIC_KEY_LENGTH),
         deliveryRecord.txViewingPublicKey,
         deliveryRecord.salt,
         deliveryIndex,
@@ -362,6 +362,7 @@ async function main(): Promise<void> {
     const paymentTx = await sendAndConfirm(
       await transactInstruction({
         payer: buyer.toSolanaSigner(),
+        ownerSigners: [buyer.toSolanaSigner()],
         inputTree: client.tree,
         outputTree: client.tree,
         data: paymentSpp,
@@ -382,7 +383,7 @@ async function main(): Promise<void> {
     assert.ok(paymentIndex >= 0 && paymentSlot);
     const paymentPlaintext = decodeConfidential(
       authorityViewingKey.decryptUtxo(
-        decodeOutputData(paymentSlot.payload).body.subarray(P256_PUBLIC_KEY_LENGTH),
+        decodeOutputData(paymentSlot.payload).body.subarray(VIEWING_PUBLIC_KEY_LENGTH),
         paymentRecord.txViewingPublicKey,
         paymentRecord.salt,
         paymentIndex,
@@ -424,7 +425,7 @@ async function main(): Promise<void> {
         },
         public: {
           creatorIdentity: checkedTerms.creatorIdentity,
-          dvpId: id,
+          dvpId: integer(id).toString(),
           dvpOwner: dvpAddress.toBytes(),
           settlementAuthorityIdentity: checkedTerms.settlementAuthorityIdentity,
           currentTimestamp,
@@ -433,14 +434,10 @@ async function main(): Promise<void> {
       settlementAuthority.shieldedAddress().toBytes(),
       payer.address,
     );
-    const settlementKey = provingKey("settle_dvp");
-    const settlementProver = wasm.SettleDvpProver.fromKey(
-      settlementKey.key,
-      settlementKey.checksum,
-    );
+    const settlementProver = new ProgramProver("settle_dvp");
     let settlementProof;
     try {
-      settlementProof = settlementProver.prove(settlement.proofInputs);
+      settlementProof = settlementProver.prove(settlement);
       assert.deepEqual(settlementProof.publicInputs, [settlement.publicHash]);
     } finally {
       settlementProver.free();
@@ -448,7 +445,7 @@ async function main(): Promise<void> {
 
     // 13. Encrypt, prove, and submit the atomic SPP settlement.
     const settled = await decodeProgramTransaction(settlement.finalizedTx, assets);
-    const settlementInputs = settled.toProofInputs(settlementAuthority);
+    const settlementInputs = settled.encryptWithKeys(settlementAuthority);
     const settlementSpp = await client.proveTransact(settlementInputs, pdaKeys);
     assert.deepEqual(settlementSpp.privateTxHash, settled.paddingIndependentPrivateTxHash);
     const settlementTx = await sendAndConfirm(

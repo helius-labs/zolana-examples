@@ -1,7 +1,6 @@
 use crate::shared::*;
-use dvp_program::{circuits::AbortDvp, verifier::abort_dvp::VERIFYINGKEY};
+use dvp_program::verifier::abort_dvp::VERIFYINGKEY;
 use dvp_sdk::proof::CircuitId;
-use zolana_program::ZkProgram;
 
 const CIRCUIT: CircuitId = CircuitId::AbortDvp;
 
@@ -65,16 +64,18 @@ fn cancel_and_reject_refund_every_funding_combination() {
 fn abort_rejects_unauthorized_signers_and_wrong_deposit_state() {
     // 1. Tamper authorization, state, seed, owner, or mint.
     let mutations: [fn(&mut AbortDvp); 10] = [
-        |inputs| inputs.public.signer_identity = fe(99),
-        |inputs| inputs.public.signer_identity = identity(sample_terms().seller),
-        |inputs| inputs.public.creator_identity = fe(99),
-        |inputs| inputs.public.dvp_id = fe(99),
-        |inputs| inputs.private.tx_context.blinding_seed = fe(99),
-        |inputs| inputs.private.dvp_utxo.data_hash = Some(fe(99)),
-        |inputs| inputs.private.delivery_deposit.utxo.asset = zolana_transaction::Mint::SOL,
-        |inputs| inputs.private.payment_deposit.utxo.owner = destination(91).signing_pubkey,
-        |inputs| inputs.private.delivery_deposit.data_hash = Some(fe(99)),
-        |inputs| inputs.private.terms.seller_refund_destination.address = destination(91),
+        |inputs| inputs.public.signer_identity = field(99),
+        |inputs| inputs.public.signer_identity = field_identity(sample_terms().seller),
+        |inputs| inputs.public.creator_identity = field(99),
+        |inputs| inputs.public.dvp_id = field(99),
+        |inputs| inputs.private.tx_context.blinding_seed = field(99),
+        |inputs| inputs.private.dvp_utxo.data_hash = field(99),
+        |inputs| inputs.private.delivery_deposit.asset = [0; 32],
+        |inputs| inputs.private.payment_deposit.owner = *inputs.address(destination(91)).owner(),
+        |inputs| inputs.private.delivery_deposit.data_hash = field(99),
+        |inputs| {
+            inputs.private.terms.seller_refund_destination.address = inputs.address(destination(91))
+        },
     ];
     // 2. Check every mutation is rejected.
     for mutate in mutations {
@@ -84,7 +85,7 @@ fn abort_rejects_unauthorized_signers_and_wrong_deposit_state() {
     }
     // 3. Check reject accepts only the selected party.
     let mut inputs = abort_inputs(true, false, true, true);
-    inputs.public.signer_identity = identity(sample_terms().settlement_authority);
+    inputs.public.signer_identity = field_identity(sample_terms().settlement_authority);
     assert_invalid(CIRCUIT, &inputs);
 }
 
@@ -95,19 +96,19 @@ fn abort_proof_rejects_wrong_refunds_and_spp_rejects_padding_before_a_deposit() 
     let finalized = inputs
         .create_finalized_transaction(&destination(91), sample_terms().creator)
         .unwrap();
-    let proof = dvp_sdk::proof::prove(CIRCUIT, &inputs).unwrap();
+    let proof = dvp_sdk::proof::prove(CIRCUIT, &inputs.proof_inputs()).unwrap();
     let public = dvp_program::verifier::abort_dvp::PublicInputs {
-        creator_identity: inputs.public.creator_identity,
-        dvp_id: inputs.public.dvp_id,
-        dvp_owner: inputs.public.dvp_owner.owner_hash().unwrap(),
-        signer_identity: inputs.public.signer_identity,
+        creator_identity: field_bytes(inputs.public.creator_identity),
+        dvp_id: field_bytes(inputs.public.dvp_id),
+        dvp_owner: field_bytes(inputs.public.dvp_owner.owner().hash().unwrap()),
+        signer_identity: field_bytes(inputs.public.signer_identity),
         reject: false,
     };
     // 2. Recompute the SPP hash after tampering each refund or input order.
     for mutation in 0..2 {
         let input_hashes = vec![
-            inputs.private.dvp_utxo.utxo_hash,
-            inputs.private.payment_deposit.utxo_hash,
+            field_bytes(inputs.private.dvp_utxo.hash().unwrap()),
+            field_bytes(inputs.private.payment_deposit.hash().unwrap()),
             [0; 32],
         ];
         let mut outputs = finalized.output_utxos().to_vec();
@@ -127,7 +128,7 @@ fn abort_proof_rejects_wrong_refunds_and_spp_rejects_padding_before_a_deposit() 
         )
         .hash()
         .unwrap();
-        assert!(dvp_program::verifier::abort_dvp::verify(&proof, &public, &hash).is_err());
+        assert!(verify(&proof, &public, &hash).is_err());
     }
     // 3. Check SPP rejects a real deposit after a dummy.
     let mut spp = finalized
@@ -138,4 +139,24 @@ fn abort_proof_rejects_wrong_refunds_and_spp_rejects_padding_before_a_deposit() 
         spp.check_shape(),
         Err(zolana_transaction::TransactionError::RealInputAfterDummy { index: 2 })
     ));
+}
+
+fn verify(
+    proof: &zolana_program::CompressedProof,
+    public: &dvp_program::verifier::abort_dvp::PublicInputs,
+    private_tx_hash: &[u8; 32],
+) -> Result<(), zolana_program::verifier::VerifyError> {
+    dvp_program::verifier::abort_dvp::Verifier {
+        proof,
+        public_inputs: dvp_program::verifier::abort_dvp::PublicInputs {
+            creator_identity: public.creator_identity,
+            dvp_id: public.dvp_id,
+            dvp_owner: public.dvp_owner,
+            signer_identity: public.signer_identity,
+            reject: public.reject,
+        },
+        private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
 }

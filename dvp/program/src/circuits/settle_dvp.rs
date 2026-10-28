@@ -2,44 +2,42 @@ use super::{
     shared::{assert_blinding_seed, close_dvp_state},
     SwapDvpTerms,
 };
-use zolana_keypair::ShieldedAddress;
+use zolana_program::circuit::Utxo;
 use zolana_program::{
-    circuit::{
-        Assert, CheckedTransaction, Circuit, ConfidentialTransaction, PublicInputs, TokenUtxos,
-        UtxoTrait,
-    },
-    conversion::ProofInput,
-    CircuitError, TxContext, ZkProgram,
+    circuit::{CheckedTransaction, ConfidentialTransaction, TokenUtxos, UtxoTrait},
+    input, require, require_eq, CircuitError, ClientInputs, Field, ShieldedAddress, TxContext,
+    ZkProgram,
 };
-use zolana_transaction::WalletUtxo;
 
-#[derive(Clone, ZkProgram)]
+#[input]
+#[derive(ZkProgram)]
 pub struct SettleDvp {
     pub private: SettleDvpPrivateInputs,
     pub public: SettleDvpPublicInputs,
 }
 
-#[derive(Clone, ProofInput)]
+#[input]
+#[derive(ClientInputs)]
 pub struct SettleDvpPrivateInputs {
     pub tx_context: TxContext,
+    #[client(nested)]
     pub terms: SwapDvpTerms,
-    pub dvp_utxo: WalletUtxo,
-    pub delivery_deposit: WalletUtxo,
-    pub payment_deposit: WalletUtxo,
+    pub dvp_utxo: Utxo,
+    pub delivery_deposit: Utxo,
+    pub payment_deposit: Utxo,
 }
 
-#[derive(Clone, PublicInputs)]
+#[input]
+#[derive(ClientInputs)]
 pub struct SettleDvpPublicInputs {
-    pub creator_identity: [u8; 32],
-    pub dvp_id: [u8; 32],
+    pub creator_identity: Field,
+    pub dvp_id: Field,
     pub dvp_owner: ShieldedAddress,
-    pub settlement_authority_identity: [u8; 32],
+    pub settlement_authority_identity: Field,
     pub current_timestamp: u64,
 }
 
-impl Circuit for <SettleDvp as ProofInput>::Circuit {
-    type Output = CheckedTransaction;
-
+impl SettleDvp {
     /// 1. Check terms and creator.
     /// 2. Check the settlement authority is the signer.
     /// 3. Check the settlement time bounds.
@@ -55,7 +53,7 @@ impl Circuit for <SettleDvp as ProofInput>::Circuit {
     /// 13. Refund the delivery surplus.
     /// 14. Refund the payment surplus.
     /// 15. Check the transaction.
-    fn circuit(&self) -> Result<Self::Output, CircuitError> {
+    pub fn execute(&self) -> Result<CheckedTransaction, CircuitError> {
         let private = &self.private;
         let public = &self.public;
         let terms = &private.terms;
@@ -64,23 +62,18 @@ impl Circuit for <SettleDvp as ProofInput>::Circuit {
         terms.assert_dvp(&public.dvp_id, &public.creator_identity)?;
 
         // 2. Check the settlement authority is the signer.
-        terms.settlement_authority_identity.assert_equal(
-            &public.settlement_authority_identity,
-            "only the settlement authority settles",
-        )?;
+        require_eq(
+            terms.settlement_authority_identity,
+            public.settlement_authority_identity,
+        );
 
         // 3. Check the settlement time bounds.
-        public.current_timestamp.var().check_bits(63)?;
-        public
-            .current_timestamp
-            .assert_less_or_equal(&terms.expiry_timestamp, "settlement precedes expiry")?;
-        terms
-            .earliest_settlement_timestamp
-            .is_less_or_equal(&public.current_timestamp)?
-            .assert_true_if(
-                &terms.has_earliest_settlement,
-                "settlement follows the earliest settlement time",
-            )?;
+        require(public.current_timestamp <= i64::MAX as u64);
+        require(public.current_timestamp <= terms.expiry_timestamp);
+        require(
+            !terms.has_earliest_settlement
+                || terms.earliest_settlement_timestamp <= public.current_timestamp,
+        );
 
         // 4. Check the settlement seed and spend the DvP UTXO.
         assert_blinding_seed(&private.tx_context, crate::SETTLEMENT_TAG, &terms.blinding)?;
@@ -88,23 +81,15 @@ impl Circuit for <SettleDvp as ProofInput>::Circuit {
 
         // 5. Spend the delivery deposit.
         let mut delivery_deposit =
-            TokenUtxos::new_close(core::array::from_ref(&private.delivery_deposit))?;
-        delivery_deposit
-            .owner()
-            .assert_equal(&public.dvp_owner, "the PDA owns the delivery deposit")?;
-        delivery_deposit
-            .asset()
-            .assert_equal(&terms.delivery_mint, "the delivery mint matches the terms")?;
+            TokenUtxos::new_mut(core::array::from_ref(&private.delivery_deposit))?.close();
+        require_eq(delivery_deposit.owner(), *public.dvp_owner.owner());
+        require_eq(delivery_deposit.asset(), terms.delivery_mint);
 
         // 6. Spend the payment deposit.
         let mut payment_deposit =
-            TokenUtxos::new_close(core::array::from_ref(&private.payment_deposit))?;
-        payment_deposit
-            .owner()
-            .assert_equal(&public.dvp_owner, "the PDA owns the payment deposit")?;
-        payment_deposit
-            .asset()
-            .assert_equal(&terms.payment_mint, "the payment mint matches the terms")?;
+            TokenUtxos::new_mut(core::array::from_ref(&private.payment_deposit))?.close();
+        require_eq(payment_deposit.owner(), *public.dvp_owner.owner());
+        require_eq(payment_deposit.asset(), terms.payment_mint);
 
         // 7. Create the buyer's delivery settlement.
         let mut delivery_settlement = TokenUtxos::new_init(
@@ -144,13 +129,40 @@ impl Circuit for <SettleDvp as ProofInput>::Circuit {
 
         // 15. Check the transaction.
         ConfidentialTransaction::new(&private.tx_context, public)
-            .with_hashed_data_utxo(dvp_utxo)
-            .with_token_utxos(delivery_deposit)
-            .with_token_utxos(payment_deposit)
-            .with_token_utxos(delivery_settlement)
-            .with_token_utxos(payment_settlement)
-            .with_token_utxos(delivery_change)
-            .with_token_utxos(payment_change)
+            .with(dvp_utxo)
+            .with(delivery_deposit)
+            .with(payment_deposit)
+            .with(delivery_settlement)
+            .with(payment_settlement)
+            .with(delivery_change)
+            .with(payment_change)
             .check()
+    }
+}
+
+impl zolana_program::circuit::PublicInputs for SettleDvpPublicInputs {
+    fn hash(&self, transaction_hash: &Field) -> Result<Field, CircuitError> {
+        zolana_program::poseidon(&[
+            self.creator_identity,
+            self.dvp_id,
+            self.dvp_owner.owner().hash()?,
+            self.settlement_authority_identity,
+            Field::from(self.current_timestamp),
+            *transaction_hash,
+        ])
+    }
+}
+
+#[cfg(all(feature = "r1cs-export", not(xark), not(xark_client)))]
+impl zolana_program::build::PublicInputLayout for SettleDvpPublicInputs {
+    fn layout() -> Vec<(&'static str, zolana_program::build::PublicFieldKind)> {
+        use zolana_program::build::PublicFieldKind;
+        vec![
+            ("creator_identity", PublicFieldKind::Hash),
+            ("dvp_id", PublicFieldKind::Hash),
+            ("dvp_owner", PublicFieldKind::Hash),
+            ("settlement_authority_identity", PublicFieldKind::Hash),
+            ("current_timestamp", PublicFieldKind::Integer { bits: 64 }),
+        ]
     }
 }

@@ -1,14 +1,20 @@
 # DvP Node.js client
 
-The examples use the program's generated WASM transactions and provers, the
+The examples use the program's generated WASM transactions and Xark prover, the
 Zolana SDK for encryption and SPP proofs, and DvP instruction builders from
 `src/instructions.ts`. Each example contains its full flow; utility functions
 appear below `main`.
 
-From `dvp/`, generate the circuit artifacts with the pinned test CLI:
+From `dvp/`, prepare the pinned source checkouts and generate the circuit
+artifacts with their matching CLI:
 
 ```sh
-zolana zk compile --manifest-path program/Cargo.toml --wasm-target nodejs
+scripts/setup-zk-tools.sh
+export ZOLANA_CLI_BIN="$PWD/.tools/zolana/target/release/zolana"
+export XARK_SOURCE="$PWD/.tools/xark"
+"$ZOLANA_CLI_BIN" zk compile --test --manifest-path program/Cargo.toml --wasm-target nodejs --verifier
+npm --prefix .tools/zolana ci
+npm --prefix .tools/zolana run build:ts
 cd typescript
 npm ci
 npm run check
@@ -46,25 +52,28 @@ seller reclaims it. `cancel.ts` cancels an unfunded DvP with two real zero
 refunds. `reject.ts` funds the payment leg, then the buyer rejects and receives
 the payment refund.
 
-The package pins a test SDK artifact attached to the Zolana test release for
-this PR. The circuit keys are checked against `../dvp-keys.CHECKSUM` before
-loading. These deterministic keys are for local tests.
+The package uses the TypeScript SDK built from the same pinned Zolana
+checkout as the Rust client. The circuit bytecode and Xark proving and verifying keys are checked
+against `../dvp-keys.CHECKSUM` before loading. These deterministic keys are
+for local tests.
 
-## WASM threads
+## WASM proving
 
-Initialize the generated Node module before creating a prover:
+The generated Node module initializes when imported. Construct a prover for
+one of the four compiled circuits:
 
 ```ts
-const wasm = await initWasm({ threads: 4 });
+import { ProgramProver } from "./src/wasm.js";
+
+const prover = new ProgramProver("settle_dvp");
 ```
 
-Omit `threads` to use all cores available to Node. The limit is set when the
-module's pool initializes and cannot be changed afterward. Node builds use a
-shared-memory Rayon pool; `--single-threaded` builds a package without it.
+The wrapper uses Xark's synchronous proving session and verifies each proof
+against the trusted key before converting it into the Solana proof layout.
+Call `prover.free()` when finished to release the WASM session.
+The generated artifacts live under `../target/zk/dvp-program/`, with
+`<circuit>/circuit.xbc`, `<circuit>/pk.bin` and `<circuit>/vk.bin` for each
+circuit and the combined Node module in `wasm/dvp_program.js`.
 
-Use a CLI built from the Zolana source containing Node thread support. It emits
-`node.mjs`, whose default initializer accepts `{ threads }`. The earlier PR test
-release CLI predates that entry point.
-
-The [WASM benchmark](BENCHMARK.md) records separate measurements for 1, 4, 8,
-and all available threads.
+The [WASM benchmark](BENCHMARK.md) records historical measurements from the
+previous prover backend. Regenerate it to compare Xark proof times.

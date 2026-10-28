@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Check the generated proving keys against the committed checksums.
+# Check generated Xark bytecode and keys against trusted checksums.
 set -euo pipefail
 
 dvp="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

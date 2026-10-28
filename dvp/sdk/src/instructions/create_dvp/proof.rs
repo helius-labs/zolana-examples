@@ -1,16 +1,18 @@
 use anyhow::{ensure, Result};
 use dvp_program::circuits::{
-    CreateDvp, CreateDvpPrivateInputs, CreateDvpPublicInputs, SwapDvpTerms,
+    CreateDvpClient as CreateDvp, CreateDvpPrivateInputsClient, CreateDvpPublicInputsClient,
+    SwapDvpTermsClient as SwapDvpTerms,
 };
 use solana_address::Address;
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::ViewingKey;
 use zolana_program::{
-    compression::{AddressSeed, NewAddress, PdaOwner},
-    ProgramOwner, TxContext, ZkProgram,
+    program::{AddressSeed, NewAddress, PdaOwner},
+    ProgramOwner, TransactionOptions,
 };
 use zolana_transaction::SppProofOutputUtxo;
 
+use crate::shared::field_decimal;
 use crate::{err, state::SwapDvp};
 
 #[derive(Clone, Debug)]
@@ -44,9 +46,8 @@ impl CreateDvpDerivation {
             .address(ViewingKey::new().pubkey())
             .map_err(err)?;
         let inputs = create_inputs(terms, owner, tree_id)?;
-        let finalized = inputs
-            .create_finalized_transaction(&owner, terms.creator)
-            .map_err(err)?;
+        let finalized = inputs.prepare(&owner, terms.creator).map_err(err)?;
+        let finalized = finalized.finalized;
         let output = finalized
             .output_utxos()
             .first()
@@ -77,15 +78,18 @@ pub(crate) fn create_inputs(
     tree_id: u16,
 ) -> Result<CreateDvp> {
     Ok(CreateDvp {
-        private: CreateDvpPrivateInputs {
-            tx_context: TxContext::new()
-                .with_blinding_seed(terms.create_blinding_seed()?)
-                .with_output_tree_id(Some(tree_id)),
+        private: CreateDvpPrivateInputsClient {
+            tx_context: TransactionOptions {
+                blinding_seed: Some(terms.create_blinding_seed()?),
+                output_tree_id: Some(tree_id),
+            },
             terms: SwapDvpTerms::try_from(terms)?,
         },
-        public: CreateDvpPublicInputs {
-            creator_identity: solana_owner_identity(terms.creator.as_array()).map_err(err)?,
-            dvp_id: terms.dvp_id()?,
+        public: CreateDvpPublicInputsClient {
+            creator_identity: field_decimal(
+                solana_owner_identity(terms.creator.as_array()).map_err(err)?,
+            )?,
+            dvp_id: field_decimal(terms.dvp_id()?)?,
             dvp_owner: owner,
         },
     })

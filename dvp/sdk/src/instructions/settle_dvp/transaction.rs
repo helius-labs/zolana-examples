@@ -1,15 +1,16 @@
 use anyhow::{ensure, Result};
 use dvp_program::circuits::{
-    SettleDvp as SettleDvpInputs, SettleDvpPrivateInputs, SettleDvpPublicInputs,
+    SettleDvpClient as SettleDvpInputs, SettleDvpPrivateInputsClient, SettleDvpPublicInputsClient,
 };
 use solana_address::Address;
 use zolana_client::ZolanaIndexer;
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::ShieldedKeypair;
-use zolana_program::{ProgramOwner, TxContext, ZkProgram};
+use zolana_program::{ProgramOwner, TransactionOptions};
 use zolana_transaction::instructions::transact::SppProofInputs;
 
 use super::SettleDvp;
+use crate::shared::field_decimal;
 use crate::{
     err,
     shared::{ensure_output_tree, prove_pda_transact},
@@ -33,7 +34,8 @@ pub struct SettleDvpTransaction {
     bump: u8,
     current_timestamp: i64,
     pub spp_proof_inputs: SppProofInputs,
-    pub proof_inputs: SettleDvpInputs,
+    pub proof_inputs: zolana_program::ProgramProofInputs,
+    dvp_id: [u8; 32],
 }
 
 impl SettleDvpTransactionParams {
@@ -60,14 +62,34 @@ impl SettleDvpTransactionParams {
         )?;
         let signer = authority.shielded_address().map_err(err)?;
         let settlement_authority = signer.solana_address().map_err(err)?;
+        ensure!(
+            settlement_authority == self.terms.settlement_authority,
+            "only the settlement authority settles"
+        );
+        ensure!(
+            self.current_timestamp >= 0 && self.current_timestamp <= self.terms.expiry_timestamp,
+            "settlement must precede expiry"
+        );
+        ensure!(
+            self.terms
+                .earliest_settlement_timestamp
+                .is_none_or(|earliest| earliest <= self.current_timestamp),
+            "settlement must follow the earliest settlement time"
+        );
+        ensure!(
+            self.delivery_deposit.amount >= self.terms.delivery_amount
+                && self.payment_deposit.amount >= self.terms.payment_amount,
+            "the DvP is underfunded"
+        );
         let creator = self.terms.creator;
         let (pda, bump) = self.terms.dvp_authority()?;
         // 2. Build the program transaction.
         let proof_inputs = SettleDvpInputs {
-            private: SettleDvpPrivateInputs {
-                tx_context: TxContext::new()
-                    .with_blinding_seed(self.terms.settle_blinding_seed()?)
-                    .with_output_tree_id(Some(self.tree_id)),
+            private: SettleDvpPrivateInputsClient {
+                tx_context: TransactionOptions {
+                    blinding_seed: Some(self.terms.settle_blinding_seed()?),
+                    output_tree_id: Some(self.tree_id),
+                },
                 terms: self
                     .terms
                     .circuit_terms(self.delivery_deposit.mint, self.payment_deposit.mint)?,
@@ -75,22 +97,23 @@ impl SettleDvpTransactionParams {
                 delivery_deposit: self.delivery_deposit.to_input_utxo()?,
                 payment_deposit: self.payment_deposit.to_input_utxo()?,
             },
-            public: SettleDvpPublicInputs {
-                creator_identity: solana_owner_identity(creator.as_array()).map_err(err)?,
-                dvp_id: self.terms.dvp_id()?,
+            public: SettleDvpPublicInputsClient {
+                creator_identity: field_decimal(
+                    solana_owner_identity(creator.as_array()).map_err(err)?,
+                )?,
+                dvp_id: field_decimal(self.terms.dvp_id()?)?,
                 dvp_owner: ProgramOwner::new(pda)
                     .address(authority.viewing_pubkey())
                     .map_err(err)?,
-                settlement_authority_identity: solana_owner_identity(
-                    settlement_authority.as_array(),
-                )
-                .map_err(err)?,
+                settlement_authority_identity: field_decimal(
+                    solana_owner_identity(settlement_authority.as_array()).map_err(err)?,
+                )?,
                 current_timestamp: u64::try_from(self.current_timestamp)?,
             },
         };
-        let finalized = proof_inputs
-            .create_finalized_transaction(&signer, self.payer)
-            .map_err(err)?;
+        let transaction = proof_inputs.prepare(&signer, self.payer).map_err(err)?;
+        let finalized = transaction.finalized;
+        let proof_inputs = transaction.proof_inputs;
         // 3. Encrypt the settlement and change UTXOs.
         let key = authority
             .get_transaction_viewing_key(&finalized.first_nullifier().map_err(err)?)
@@ -103,6 +126,7 @@ impl SettleDvpTransactionParams {
             current_timestamp: self.current_timestamp,
             spp_proof_inputs,
             proof_inputs,
+            dvp_id: self.terms.dvp_id()?,
         })
     }
 }
@@ -126,7 +150,7 @@ impl SettleDvpTransaction {
             settlement_authority: self.settlement_authority,
             tree,
             creator: self.creator,
-            dvp_id: self.proof_inputs.public.dvp_id,
+            dvp_id: self.dvp_id,
             bump: self.bump,
             current_timestamp: self.current_timestamp,
             settle_proof,

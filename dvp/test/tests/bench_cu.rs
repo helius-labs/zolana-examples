@@ -124,7 +124,7 @@ fn bench_cu_dvp() {
 
     let report = CuBenchmark::new(ReadmeConfig {
         title: "Private DvP -- CU Benchmark".into(),
-        description: "1. Measure the five DvP instructions under Mollusk using the test release shielded-pool program. Each DvP handler verifies its generated program proof and invokes SPP directly. Cancellation and rejection share process_abort_dvp.\n\n2. Record SPP and program proving times, consumed compute units, and serialized v1 transaction sizes. Create/reclaim use 1x2 with compact output padding; settle uses 3x4; cancel/reject use 3x2 with real optional deposits before random input padding.\n\n3. Report compiled program constraints, checksummed proving-key image sizes, and the total bytes of verifying-key curve points. Release-profile program proof timings include loading the checked key image. Build the profiling program first with cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.53 --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program.".into(),
+        description: "1. Measure the five DvP instructions under Mollusk using the test release shielded-pool program. Each DvP handler verifies its generated program proof and invokes SPP directly. Cancellation and rejection share process_abort_dvp.\n\n2. Record SPP and program proving times, consumed compute units, and serialized v1 transaction sizes. Create/reclaim use 1x2 with compact output padding; settle uses 3x4; cancel/reject use 3x2 with real optional deposits before random input padding.\n\n3. Report compiled program constraints, checksummed Xark proving-key and verifying-key sizes. Release-profile program proof timings include loading checked Xark artifacts. Build the profiling program first with cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.53 --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program.".into(),
         output_path: OUTPUT_PATH.into(),
         regenerate_command: Some(
             "cargo test --release --locked -p dvp-test --test bench_cu -- --ignored --nocapture".into(),
@@ -410,18 +410,8 @@ fn circuits_table(proof_times: &[(CircuitId, Duration)]) -> SectionTable {
             vec![
                 name.into(),
                 count,
-                format_size(file_size(&keys_dir.join(format!("{name}.pk")))),
-                format_size({
-                    let key = dvp_sdk::proof::verifying_key(circuit).expect("verifying key");
-                    u64::try_from(
-                        key.alpha_g1.len()
-                            + key.beta_g2.len()
-                            + key.gamma_g2.len()
-                            + key.delta_g2.len()
-                            + key.ic.iter().map(|point| point.len()).sum::<usize>(),
-                    )
-                    .expect("verifying-key size")
-                }),
+                format_size(file_size(&keys_dir.join(name).join("pk.bin"))),
+                format_size(file_size(&keys_dir.join(name).join("vk.bin"))),
                 format!("{} ms", proof_time.as_millis()),
             ]
         })
@@ -432,7 +422,7 @@ fn circuits_table(proof_times: &[(CircuitId, Duration)]) -> SectionTable {
             "Circuit".into(),
             "Constraints".into(),
             "Proving key".into(),
-            "VK points".into(),
+            "Verifying key".into(),
             "Proof time".into(),
         ],
         rows,
@@ -669,7 +659,7 @@ fn bench_reclaim_dvp(bench: &mut Bench) {
         signer: pubkey(&parties.seller),
         tree: bench.tree,
         creator: terms.creator,
-        dvp_id: proof_inputs.public.dvp_id,
+        dvp_id: terms.dvp_id().expect("DvP id"),
         bump,
         reclaim_proof,
         spp,
@@ -724,7 +714,7 @@ fn bench_settle_dvp(bench: &mut Bench) {
         settlement_authority: pubkey(&parties.settlement_authority),
         tree: bench.tree,
         creator: terms.creator,
-        dvp_id: proof_inputs.public.dvp_id,
+        dvp_id: terms.dvp_id().expect("DvP id"),
         bump,
         current_timestamp,
         settle_proof,
@@ -798,7 +788,7 @@ fn bench_abort_dvp(bench: &mut Bench, mode: AbortMode) {
             settlement_authority: pubkey(signer),
             tree: bench.tree,
             creator: terms.creator,
-            dvp_id: proof_inputs.public.dvp_id,
+            dvp_id: terms.dvp_id().expect("DvP id"),
             bump,
             cancel_proof: abort_proof,
             spp,
@@ -808,7 +798,7 @@ fn bench_abort_dvp(bench: &mut Bench, mode: AbortMode) {
             signer: pubkey(signer),
             tree: bench.tree,
             creator: terms.creator,
-            dvp_id: proof_inputs.public.dvp_id,
+            dvp_id: terms.dvp_id().expect("DvP id"),
             bump,
             reject_proof: abort_proof,
             spp,
