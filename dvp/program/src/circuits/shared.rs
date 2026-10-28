@@ -1,36 +1,28 @@
 use zolana_program::{
-    circuit::{
-        constant, poseidon, zero, Assert, Asset, CircuitVar, DataUtxo, Owner, TxContext, Utxo,
-        UtxoTrait,
-    },
-    CircuitError,
+    circuit::{DataUtxo, Utxo, UtxoTrait},
+    poseidon, require_eq, CircuitError, Field, TxContext, UtxoOwner,
 };
 
 pub(super) fn assert_blinding_seed(
     context: &TxContext,
     tag: u32,
-    terms_blinding: &CircuitVar,
+    terms_blinding: &Field,
 ) -> Result<(), CircuitError> {
-    context.blinding_seed.assert_equal(
-        &poseidon(&[constant(u64::from(tag)), terms_blinding.clone()])?,
-        "the transaction seed derives from the DvP terms and instruction",
-    )
+    require_eq(
+        context.blinding_seed,
+        poseidon(&[Field::from(tag), *terms_blinding])?,
+    );
+    Ok(())
 }
+
 pub(super) fn close_dvp_state(
     input: &Utxo,
-    owner: &Owner,
-    dvp_id: &CircuitVar,
-) -> Result<DataUtxo<CircuitVar>, CircuitError> {
-    let state = DataUtxo::new_close_with_hash(input, dvp_id)?;
-    state
-        .owner()
-        .assert_equal(owner, "the DvP PDA owns its state")?;
-    state
-        .asset()
-        .assert_equal(&Asset::sol(), "the DvP state uses SOL")?;
-    state
-        .amount()?
-        .var()
-        .assert_equal(&zero(), "the DvP state holds no funds")?;
+    owner: &UtxoOwner,
+    dvp_id: &Field,
+) -> Result<DataUtxo<Field>, CircuitError> {
+    let state = DataUtxo::new_mut_with_hash(input, dvp_id)?.close();
+    require_eq(state.owner(), *owner);
+    require_eq(state.asset(), [0u8; 32]);
+    require_eq(state.amount()?, 0u64);
     Ok(state)
 }

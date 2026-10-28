@@ -12,7 +12,7 @@ import {
 } from "@heliuslabs/zolana/interface";
 import type { ProgramOwner } from "@heliuslabs/zolana/transaction";
 import { PROGRAM_ID, concat, encoder, u64 } from "./terms.js";
-import type { CompressedGroth16Proof } from "./wasm.js";
+import type { CompressedProof } from "./wasm.js";
 
 interface DvpInstructionAccounts {
   readonly payer: TransactionSigner;
@@ -21,7 +21,7 @@ interface DvpInstructionAccounts {
   readonly authority: ProgramOwner;
   readonly bump: number;
   readonly dvpId: Uint8Array;
-  readonly proof: CompressedGroth16Proof;
+  readonly proof: CompressedProof;
   readonly transact: TransactInstructionData;
 }
 
@@ -95,6 +95,7 @@ async function dvpInstruction(
     inputTree: input.tree,
     outputTree: input.tree,
     data: input.transact,
+    ownerSigners: [],
     signerPdas: [input.authority.pda],
   });
   const payer: AccountSignerMeta = {

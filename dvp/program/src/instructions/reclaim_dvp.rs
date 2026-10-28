@@ -9,8 +9,8 @@ use zolana_account_checks::AccountIterator;
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_interface::instruction::instruction_data::transact::TransactIxData;
 use zolana_program::{
-    compression::PdaOwner,
     cpi::{SppTransactAccounts, TransactAccountsError},
+    program::PdaOwner,
     verifier::VerifyError,
 };
 
@@ -54,16 +54,18 @@ pub fn process_reclaim_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> Prog
     let signer_identity = solana_owner_identity(signer.as_array()).map_err(DvpError::from)?;
 
     // 4. Verify the DvP proof.
-    reclaim_dvp::verify(
-        &reclaim_proof,
-        &reclaim_dvp::PublicInputs {
+    reclaim_dvp::Verifier {
+        proof: &reclaim_proof,
+        public_inputs: reclaim_dvp::PublicInputs {
             creator_identity,
             dvp_id,
             dvp_owner,
             signer_identity,
         },
-        &spp.private_tx_hash,
-    )
+        private_tx_hash: &spp.private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
     .map_err(|error| match error {
         VerifyError::PublicInputs => DvpError::HashingFailed,
         VerifyError::Proof => DvpError::ProofVerificationFailed,

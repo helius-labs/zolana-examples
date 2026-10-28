@@ -1,41 +1,38 @@
 use super::SwapDvpTerms;
-use zolana_keypair::ShieldedAddress;
+use zolana_program::circuit::Utxo;
 use zolana_program::{
-    circuit::{
-        Assert, CheckedTransaction, Circuit, ConfidentialTransaction, PublicInputs, TokenUtxos,
-        UtxoTrait,
-    },
-    conversion::ProofInput,
-    CircuitError, TxContext, ZkProgram,
+    circuit::{CheckedTransaction, ConfidentialTransaction, TokenUtxos, UtxoTrait},
+    input, require_eq, CircuitError, ClientInputs, Field, ShieldedAddress, TxContext, ZkProgram,
 };
-use zolana_transaction::WalletUtxo;
 
-#[derive(Clone, ZkProgram)]
+#[input]
+#[derive(ZkProgram)]
 pub struct ReclaimDvp {
     pub private: ReclaimDvpPrivateInputs,
     pub public: ReclaimDvpPublicInputs,
 }
 
-#[derive(Clone, ProofInput)]
+#[input]
+#[derive(ClientInputs)]
 pub struct ReclaimDvpPrivateInputs {
     pub tx_context: TxContext,
+    #[client(nested)]
     pub terms: SwapDvpTerms,
-    pub deposit: WalletUtxo,
+    pub deposit: Utxo,
     pub payment_leg: bool,
     pub refund_destination: ShieldedAddress,
 }
 
-#[derive(Clone, PublicInputs)]
+#[input]
+#[derive(ClientInputs)]
 pub struct ReclaimDvpPublicInputs {
-    pub creator_identity: [u8; 32],
-    pub dvp_id: [u8; 32],
+    pub creator_identity: Field,
+    pub dvp_id: Field,
     pub dvp_owner: ShieldedAddress,
-    pub signer_identity: [u8; 32],
+    pub signer_identity: Field,
 }
 
-impl Circuit for <ReclaimDvp as ProofInput>::Circuit {
-    type Output = CheckedTransaction;
-
+impl ReclaimDvp {
     /// 1. Check terms and creator.
     /// 2. Check the signer is the leg's party.
     /// 3. Spend the deposit.
@@ -44,7 +41,7 @@ impl Circuit for <ReclaimDvp as ProofInput>::Circuit {
     /// 6. Create the chosen refund.
     /// 7. Refund the full deposit.
     /// 8. Check the transaction.
-    fn circuit(&self) -> Result<Self::Output, CircuitError> {
+    pub fn execute(&self) -> Result<CheckedTransaction, CircuitError> {
         let private = &self.private;
         let public = &self.public;
 
@@ -54,32 +51,26 @@ impl Circuit for <ReclaimDvp as ProofInput>::Circuit {
             .assert_dvp(&public.dvp_id, &public.creator_identity)?;
 
         // 2. Check the signer is the leg's party.
-        private
-            .payment_leg
-            .select(
-                &private.terms.buyer_identity,
-                &private.terms.seller_identity,
-            )
-            .assert_equal(
-                &public.signer_identity,
-                "only the leg's party can reclaim it",
-            )?;
+        let signer = if private.payment_leg {
+            private.terms.buyer_identity
+        } else {
+            private.terms.seller_identity
+        };
+        require_eq(signer, public.signer_identity);
 
         // 3. Spend the deposit.
-        let asset = private
-            .payment_leg
-            .select(&private.terms.payment_mint, &private.terms.delivery_mint);
-        let mut deposit = TokenUtxos::new_close(core::array::from_ref(&private.deposit))?;
+        let asset = if private.payment_leg {
+            private.terms.payment_mint
+        } else {
+            private.terms.delivery_mint
+        };
+        let mut deposit = TokenUtxos::new_mut(core::array::from_ref(&private.deposit))?.close();
 
         // 4. Check DvP PDA ownership.
-        deposit
-            .owner()
-            .assert_equal(&public.dvp_owner, "the DvP PDA owns the deposit")?;
+        require_eq(deposit.owner(), *public.dvp_owner.owner());
 
         // 5. Check the leg mint.
-        deposit
-            .asset()
-            .assert_equal(&asset, "the deposit belongs to the selected leg")?;
+        require_eq(deposit.asset(), asset);
 
         // 6. Create the chosen refund.
         let mut refund =
@@ -90,9 +81,33 @@ impl Circuit for <ReclaimDvp as ProofInput>::Circuit {
 
         // 8. Check the transaction.
         ConfidentialTransaction::new(&private.tx_context, public)
-            .with_compact_padding()
-            .with_token_utxos(deposit)
-            .with_token_utxos(refund)
+            .with(deposit)
+            .with(refund)
             .check()
+    }
+}
+
+impl zolana_program::circuit::PublicInputs for ReclaimDvpPublicInputs {
+    fn hash(&self, transaction_hash: &Field) -> Result<Field, CircuitError> {
+        zolana_program::poseidon(&[
+            self.creator_identity,
+            self.dvp_id,
+            self.dvp_owner.owner().hash()?,
+            self.signer_identity,
+            *transaction_hash,
+        ])
+    }
+}
+
+#[cfg(all(feature = "r1cs-export", not(xark), not(xark_client)))]
+impl zolana_program::build::PublicInputLayout for ReclaimDvpPublicInputs {
+    fn layout() -> Vec<(&'static str, zolana_program::build::PublicFieldKind)> {
+        use zolana_program::build::PublicFieldKind;
+        vec![
+            ("creator_identity", PublicFieldKind::Hash),
+            ("dvp_id", PublicFieldKind::Hash),
+            ("dvp_owner", PublicFieldKind::Hash),
+            ("signer_identity", PublicFieldKind::Hash),
+        ]
     }
 }

@@ -1,23 +1,29 @@
 [workspace]
 resolver = "2"
 members = ["program", "sdk", "test"]
+exclude = [".tools/zolana", ".tools/xark"]
 
 [workspace.package]
 edition = "2021"
 
-# Zolana crates use one pinned revision; Solana dependencies match its SDK.
+# SDK and prover sources use pinned Git revisions.
 [workspace.dependencies]
-zolana-account-checks = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e", default-features = false }
-zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-hasher = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e", default-features = false }
-zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-merkle-tree = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-program = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-program-test = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
-zolana-tree = { git = "https://github.com/helius-labs/zolana", rev = "7770e164e" }
+xark = { git = "https://github.com/ananas-block/xark", rev = "38c0de6fec56cff52f5a4e0cf2d86721ea29e583" }
+xark-groth16 = { git = "https://github.com/ananas-block/xark", rev = "38c0de6fec56cff52f5a4e0cf2d86721ea29e583" }
+serde = { version = "1", features = ["derive"] }
+tsify = { version = "0.5.6", features = ["js"] }
+wasm-bindgen = "0.2"
+zolana-account-checks = { git = "https://github.com/helius-labs/zolana", rev = "226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb", default-features = false }
+zolana-client = { git = "https://github.com/helius-labs/zolana", rev = "226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb" }
+zolana-hasher = { git = "https://github.com/helius-labs/zolana", rev = "226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb", default-features = false }
+zolana-interface = { git = "https://github.com/helius-labs/zolana", rev = "226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb" }
+zolana-keypair = { git = "https://github.com/helius-labs/zolana", rev = "226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb" }
+zolana-merkle-tree = { git = "https://github.com/helius-labs/zolana", rev = "226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb" }
+zolana-program = { git = "https://github.com/helius-labs/zolana", rev = "226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb" }
+zolana-program-test = { git = "https://github.com/helius-labs/zolana", rev = "226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb" }
+zolana-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb" }
+zolana-transaction = { git = "https://github.com/helius-labs/zolana", rev = "226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb" }
+zolana-tree = { git = "https://github.com/helius-labs/zolana", rev = "226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb" }
 
 groth16-solana = { git = "https://github.com/Lightprotocol/groth16-solana", rev = "70a93803e5f55b8425301d506c625169ef557c9d", features = ["bsb22"] }
 light-program-profiler = { git = "https://github.com/Lightprotocol/light-program-profiler", rev = "db49f3c801996a80e1cb7e4e92b13a694e962b65" }
@@ -39,3 +45,9 @@ solana-signer = "3.0"
 
 [profile.release]
 overflow-checks = true
+
+# Override the SDK revision's absolute Xark paths with the same Git source.
+[patch."https://github.com/helius-labs/zolana"]
+xark = { git = "https://github.com/ananas-block/xark", rev = "38c0de6fec56cff52f5a4e0cf2d86721ea29e583" }
+xark-groth16 = { git = "https://github.com/ananas-block/xark", rev = "38c0de6fec56cff52f5a4e0cf2d86721ea29e583" }
+xark-wasm = { git = "https://github.com/ananas-block/xark", rev = "38c0de6fec56cff52f5a4e0cf2d86721ea29e583" }

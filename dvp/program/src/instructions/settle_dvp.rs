@@ -9,8 +9,8 @@ use zolana_account_checks::AccountIterator;
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_interface::instruction::instruction_data::transact::TransactIxData;
 use zolana_program::{
-    compression::PdaOwner,
     cpi::{SppTransactAccounts, TransactAccountsError},
+    program::PdaOwner,
     verifier::VerifyError,
 };
 
@@ -68,17 +68,19 @@ pub fn process_settle_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> Progr
         solana_owner_identity(settlement_authority.as_array()).map_err(DvpError::from)?;
 
     // 5. Verify the DvP proof.
-    settle_dvp::verify(
-        &settle_proof,
-        &settle_dvp::PublicInputs {
+    settle_dvp::Verifier {
+        proof: &settle_proof,
+        public_inputs: settle_dvp::PublicInputs {
             creator_identity,
             dvp_id,
             dvp_owner,
             settlement_authority_identity: signer_identity,
             current_timestamp: timestamp,
         },
-        &spp.private_tx_hash,
-    )
+        private_tx_hash: &spp.private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
     .map_err(|error| match error {
         VerifyError::PublicInputs => DvpError::HashingFailed,
         VerifyError::Proof => DvpError::ProofVerificationFailed,

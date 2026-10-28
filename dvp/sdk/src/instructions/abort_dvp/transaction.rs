@@ -1,16 +1,17 @@
 use anyhow::{ensure, Result};
 use dvp_program::circuits::{
-    AbortDvp as AbortDvpInputs, AbortDvpPrivateInputs, AbortDvpPublicInputs,
+    AbortDvpClient as AbortDvpInputs, AbortDvpPrivateInputsClient, AbortDvpPublicInputsClient,
 };
 use solana_address::Address;
 use solana_instruction::Instruction;
 use zolana_client::ZolanaIndexer;
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::ShieldedKeypair;
-use zolana_program::{ProgramOwner, TxContext, ZkProgram};
+use zolana_program::{ProgramOwner, TransactionOptions};
 use zolana_transaction::{instructions::transact::SppProofInputs, Mint, WalletUtxo};
 
 use super::AbortMode;
+use crate::shared::field_decimal;
 use crate::{
     err,
     instructions::{cancel_dvp::CancelDvp, reject_dvp::RejectDvp},
@@ -37,7 +38,8 @@ pub struct AbortDvpTransaction {
     creator: Address,
     bump: u8,
     pub spp_proof_inputs: SppProofInputs,
-    pub proof_inputs: AbortDvpInputs,
+    pub proof_inputs: zolana_program::ProgramProofInputs,
+    dvp_id: [u8; 32],
 }
 
 pub enum AbortDvp {
@@ -77,6 +79,16 @@ impl AbortDvpTransactionParams {
         }
         let sender = signer.shielded_address().map_err(err)?;
         let signer_address = sender.solana_address().map_err(err)?;
+        match self.mode {
+            AbortMode::Cancel => ensure!(
+                signer_address == self.terms.settlement_authority,
+                "only the settlement authority cancels"
+            ),
+            AbortMode::Reject => ensure!(
+                signer_address == self.terms.seller || signer_address == self.terms.buyer,
+                "only a party rejects"
+            ),
+        }
         let creator = self.terms.creator;
         let (pda, bump) = self.terms.dvp_authority()?;
         let deposit_input = |deposit: Option<Deposit>| -> Result<WalletUtxo> {
@@ -87,10 +99,11 @@ impl AbortDvpTransactionParams {
         };
         // 2. Build the program transaction with optional deposits.
         let proof_inputs = AbortDvpInputs {
-            private: AbortDvpPrivateInputs {
-                tx_context: TxContext::new()
-                    .with_blinding_seed(self.terms.abort_blinding_seed()?)
-                    .with_output_tree_id(Some(self.tree_id)),
+            private: AbortDvpPrivateInputsClient {
+                tx_context: TransactionOptions {
+                    blinding_seed: Some(self.terms.abort_blinding_seed()?),
+                    output_tree_id: Some(self.tree_id),
+                },
                 terms: self
                     .terms
                     .circuit_terms(self.delivery_mint, self.payment_mint)?,
@@ -99,19 +112,23 @@ impl AbortDvpTransactionParams {
                 payment_deposit: deposit_input(self.payment_deposit)?,
                 buyer_rejects: signer_address == self.terms.buyer,
             },
-            public: AbortDvpPublicInputs {
-                creator_identity: solana_owner_identity(creator.as_array()).map_err(err)?,
-                dvp_id: self.terms.dvp_id()?,
+            public: AbortDvpPublicInputsClient {
+                creator_identity: field_decimal(
+                    solana_owner_identity(creator.as_array()).map_err(err)?,
+                )?,
+                dvp_id: field_decimal(self.terms.dvp_id()?)?,
                 dvp_owner: ProgramOwner::new(pda)
                     .address(signer.viewing_pubkey())
                     .map_err(err)?,
-                signer_identity: solana_owner_identity(signer_address.as_array()).map_err(err)?,
+                signer_identity: field_decimal(
+                    solana_owner_identity(signer_address.as_array()).map_err(err)?,
+                )?,
                 reject: self.mode == AbortMode::Reject,
             },
         };
-        let finalized = proof_inputs
-            .create_finalized_transaction(&sender, self.payer)
-            .map_err(err)?;
+        let transaction = proof_inputs.prepare(&sender, self.payer).map_err(err)?;
+        let finalized = transaction.finalized;
+        let proof_inputs = transaction.proof_inputs;
         // 3. Encrypt both refund UTXOs, including zero amounts.
         let key = signer
             .get_transaction_viewing_key(&finalized.first_nullifier().map_err(err)?)
@@ -124,6 +141,7 @@ impl AbortDvpTransactionParams {
             bump,
             spp_proof_inputs,
             proof_inputs,
+            dvp_id: self.terms.dvp_id()?,
         })
     }
 }
@@ -141,7 +159,7 @@ impl AbortDvpTransaction {
         let spp = prove_pda_transact(indexer, self.spp_proof_inputs, &private_tx_hash)?;
         // 2. Prove abort_dvp and build cancel_dvp or reject_dvp.
         let proof = crate::proof::prove(crate::proof::CircuitId::AbortDvp, &self.proof_inputs)?;
-        let dvp_id = self.proof_inputs.public.dvp_id;
+        let dvp_id = self.dvp_id;
         Ok(match self.mode {
             AbortMode::Cancel => AbortDvp::Cancel(CancelDvp {
                 payer,

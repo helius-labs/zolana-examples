@@ -7,8 +7,9 @@ import {
   type Bytes32,
 } from "@heliuslabs/zolana/keypair";
 import { assetField, type AssetRegistry } from "@heliuslabs/zolana/transaction";
-import type { SwapDvpTerms } from "./wasm.js";
+import type { SwapDvpTermsClient } from "./wasm.js";
 export const PROGRAM_ID = address("8ErdEhvg1NgRzzZRSw3Lx4z4rDEruc6Bjwzn7WVooUMx");
+export const VIEWING_PUBLIC_KEY_LENGTH = 33;
 export const ZERO = new Uint8Array(32) as Bytes32;
 const addressEncoder = getAddressEncoder();
 export const encoder = {
@@ -66,26 +67,28 @@ export interface SwapDvp {
   creator: Address;
   blinding: Bytes32;
 }
-export function circuitTerms(t: SwapDvp, assets: AssetRegistry): SwapDvpTerms {
+export function circuitTerms(t: SwapDvp, assets: AssetRegistry): SwapDvpTermsClient {
   const destination = (value: ShieldedAddress) => ({
     address: value.toBytes(),
-    viewingKeyHash: hashBytes(value.viewingPublicKey.toBytes()),
+    viewingKeyHash: integer(hashBytes(value.viewingPublicKey.toBytes())).toString(),
   });
   return {
-    sellerIdentity: solanaOwnerIdentity(encoder.encode(t.seller)),
-    buyerIdentity: solanaOwnerIdentity(encoder.encode(t.buyer)),
-    settlementAuthorityIdentity: solanaOwnerIdentity(encoder.encode(t.settlementAuthority)),
-    creatorIdentity: solanaOwnerIdentity(encoder.encode(t.creator)),
+    sellerIdentity: integer(solanaOwnerIdentity(encoder.encode(t.seller))).toString(),
+    buyerIdentity: integer(solanaOwnerIdentity(encoder.encode(t.buyer))).toString(),
+    settlementAuthorityIdentity: integer(
+      solanaOwnerIdentity(encoder.encode(t.settlementAuthority)),
+    ).toString(),
+    creatorIdentity: integer(solanaOwnerIdentity(encoder.encode(t.creator))).toString(),
     deliveryMint: { asset: t.deliveryMint, assetId: assets.assetId(t.deliveryMint) },
     paymentMint: { asset: t.paymentMint, assetId: assets.assetId(t.paymentMint) },
     deliveryAmount: t.deliveryAmount,
     paymentAmount: t.paymentAmount,
     expiryTimestamp: t.expiryTimestamp,
     nonce: t.nonce,
-    referenceHash: hashBytes(t.refString),
+    referenceHash: integer(hashBytes(t.refString)).toString(),
     hasEarliestSettlement: t.earliestSettlementTimestamp !== undefined,
     earliestSettlementTimestamp: t.earliestSettlementTimestamp ?? 0n,
-    blinding: t.blinding,
+    blinding: integer(t.blinding).toString(),
     sellerSettlementDestination: destination(t.sellerSettlementDestination),
     buyerSettlementDestination: destination(t.buyerSettlementDestination),
     sellerRefundDestination: destination(t.sellerRefundDestination),

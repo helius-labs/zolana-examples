@@ -1,7 +1,6 @@
 use crate::shared::*;
-use dvp_program::{circuits::SettleDvp, verifier::settle_dvp::VERIFYINGKEY};
+use dvp_program::verifier::settle_dvp::VERIFYINGKEY;
 use dvp_sdk::proof::CircuitId;
-use zolana_program::ZkProgram;
 
 const CIRCUIT: CircuitId = CircuitId::SettleDvp;
 
@@ -63,22 +62,24 @@ fn settle_accepts_both_time_bounds_and_optional_lower_bound() {
     let mut terms = sample_terms();
     terms.earliest_settlement_timestamp = None;
     let mut inputs = settle_inputs([0, 0]);
-    inputs.private.terms = terms
-        .circuit_terms(delivery_mint(), zolana_transaction::Mint::SOL)
-        .unwrap();
-    inputs.public.dvp_id = terms.dvp_id().unwrap();
-    inputs.public.dvp_owner = owner(&terms);
-    inputs.private.dvp_utxo = dvp_sdk::state::DvpUtxo::new(terms.clone(), 3)
-        .to_input_utxo(2)
-        .unwrap();
-    inputs.private.delivery_deposit =
-        deposit(&terms, dvp_sdk::state::Leg::Delivery, terms.delivery_amount)
+    inputs.private.terms = inputs.terms_input(&terms);
+    inputs.public.dvp_id = zolana_program::from_bytes(&terms.dvp_id().unwrap()).unwrap();
+    inputs.public.dvp_owner = inputs.address(owner(&terms));
+    inputs.private.dvp_utxo = inputs.wallet(
+        &dvp_sdk::state::DvpUtxo::new(terms.clone(), 3)
+            .to_input_utxo(2)
+            .unwrap(),
+    );
+    inputs.private.delivery_deposit = inputs.wallet(
+        &deposit(&terms, dvp_sdk::state::Leg::Delivery, terms.delivery_amount)
             .to_input_utxo()
-            .unwrap();
-    inputs.private.payment_deposit =
-        deposit(&terms, dvp_sdk::state::Leg::Payment, terms.payment_amount)
+            .unwrap(),
+    );
+    inputs.private.payment_deposit = inputs.wallet(
+        &deposit(&terms, dvp_sdk::state::Leg::Payment, terms.payment_amount)
             .to_input_utxo()
-            .unwrap();
+            .unwrap(),
+    );
     prove_and_verify(CIRCUIT, &inputs, &VERIFYINGKEY);
 }
 
@@ -86,26 +87,32 @@ fn settle_accepts_both_time_bounds_and_optional_lower_bound() {
 fn settle_rejects_wrong_authority_time_commitments_and_deposits() {
     // 1. Tamper one authorization, time, state, or deposit constraint.
     let mutations: [fn(&mut SettleDvp); 15] = [
-        |inputs| inputs.public.settlement_authority_identity = fe(99),
+        |inputs| inputs.public.settlement_authority_identity = field(99),
         |inputs| inputs.public.current_timestamp = 1_800_000_001,
         |inputs| inputs.public.current_timestamp = 1_699_999_999,
         |inputs| inputs.public.current_timestamp = u64::MAX,
-        |inputs| inputs.public.creator_identity = fe(99),
-        |inputs| inputs.public.dvp_id = fe(99),
-        |inputs| inputs.private.tx_context.blinding_seed = fe(99),
-        |inputs| inputs.private.delivery_deposit.utxo.amount -= 1,
-        |inputs| inputs.private.payment_deposit.utxo.amount -= 1,
+        |inputs| inputs.public.creator_identity = field(99),
+        |inputs| inputs.public.dvp_id = field(99),
+        |inputs| inputs.private.tx_context.blinding_seed = field(99),
+        |inputs| inputs.private.delivery_deposit.amount -= 1,
+        |inputs| inputs.private.payment_deposit.amount -= 1,
         |inputs| {
+            let inputs = &mut **inputs;
             std::mem::swap(
                 &mut inputs.private.delivery_deposit,
                 &mut inputs.private.payment_deposit,
             )
         },
-        |inputs| inputs.private.delivery_deposit.utxo.owner = destination(91).signing_pubkey,
-        |inputs| inputs.private.payment_deposit.data_hash = Some(fe(99)),
-        |inputs| inputs.private.dvp_utxo.utxo.amount = 1,
-        |inputs| inputs.private.terms.buyer_settlement_destination.address = destination(91),
-        |inputs| inputs.private.terms.seller_refund_destination.address = destination(91),
+        |inputs| inputs.private.delivery_deposit.owner = *inputs.address(destination(91)).owner(),
+        |inputs| inputs.private.payment_deposit.data_hash = field(99),
+        |inputs| inputs.private.dvp_utxo.amount = 1,
+        |inputs| {
+            inputs.private.terms.buyer_settlement_destination.address =
+                inputs.address(destination(91))
+        },
+        |inputs| {
+            inputs.private.terms.seller_refund_destination.address = inputs.address(destination(91))
+        },
     ];
     // 2. Check every tampered transaction fails before publication.
     for mutate in mutations {
@@ -122,12 +129,12 @@ fn settle_program_proof_rejects_modified_outputs() {
     let finalized = inputs
         .create_finalized_transaction(&destination(91), sample_terms().creator)
         .unwrap();
-    let proof = dvp_sdk::proof::prove(CIRCUIT, &inputs).unwrap();
+    let proof = dvp_sdk::proof::prove(CIRCUIT, &inputs.proof_inputs()).unwrap();
     let public = dvp_program::verifier::settle_dvp::PublicInputs {
-        creator_identity: inputs.public.creator_identity,
-        dvp_id: inputs.public.dvp_id,
-        dvp_owner: inputs.public.dvp_owner.owner_hash().unwrap(),
-        settlement_authority_identity: inputs.public.settlement_authority_identity,
+        creator_identity: field_bytes(inputs.public.creator_identity),
+        dvp_id: field_bytes(inputs.public.dvp_id),
+        dvp_owner: field_bytes(inputs.public.dvp_owner.owner().hash().unwrap()),
+        settlement_authority_identity: field_bytes(inputs.public.settlement_authority_identity),
         current_timestamp: inputs.public.current_timestamp,
     };
     // 2. Change a settlement amount, destination, mint, and derived blinding.
@@ -156,7 +163,7 @@ fn settle_program_proof_rejects_modified_outputs() {
         )
         .hash()
         .unwrap();
-        assert!(dvp_program::verifier::settle_dvp::verify(&proof, &public, &private_hash).is_err());
+        assert!(verify(&proof, &public, &private_hash).is_err());
     }
 }
 
@@ -164,19 +171,20 @@ fn settle_program_proof_rejects_modified_outputs() {
 fn settlement_proof_rejects_a_different_state_commitment_or_first_nullifier() {
     // 1. Prove settlement of the created state.
     let inputs = settle_inputs([0, 0]);
-    let proof = dvp_sdk::proof::prove(CIRCUIT, &inputs).unwrap();
+    let proof = dvp_sdk::proof::prove(CIRCUIT, &inputs.proof_inputs()).unwrap();
     let public = dvp_program::verifier::settle_dvp::PublicInputs {
-        creator_identity: inputs.public.creator_identity,
-        dvp_id: inputs.public.dvp_id,
-        dvp_owner: inputs.public.dvp_owner.owner_hash().unwrap(),
-        settlement_authority_identity: inputs.public.settlement_authority_identity,
+        creator_identity: field_bytes(inputs.public.creator_identity),
+        dvp_id: field_bytes(inputs.public.dvp_id),
+        dvp_owner: field_bytes(inputs.public.dvp_owner.owner().hash().unwrap()),
+        settlement_authority_identity: field_bytes(inputs.public.settlement_authority_identity),
         current_timestamp: inputs.public.current_timestamp,
     };
     for change_blinding in [false, true] {
         // 2. Build a different transaction, preserving valid state fields.
-        let mut altered = inputs.clone();
+        let mut state = dvp_sdk::state::DvpUtxo::new(sample_terms(), 3)
+            .to_input_utxo(2)
+            .unwrap();
         if change_blinding {
-            let state = &mut altered.private.dvp_utxo;
             state.utxo.blinding = fe(99);
             state.utxo_hash = state
                 .utxo
@@ -195,17 +203,38 @@ fn settlement_proof_rejects_a_different_state_commitment_or_first_nullifier() {
                 )
                 .unwrap();
         } else {
-            altered.private.dvp_utxo.nullifier = fe(99);
+            state.nullifier = fe(99);
         }
+        let altered = settle_inputs_with_state([0, 0], Some(state));
         let transaction = altered
             .create_finalized_transaction(&destination(91), sample_terms().creator)
             .unwrap();
         // 3. Check the original proof cannot authorize it.
-        assert!(dvp_program::verifier::settle_dvp::verify(
+        assert!(verify(
             &proof,
             &public,
             &transaction.padding_independent_private_tx_hash().unwrap()
         )
         .is_err());
     }
+}
+
+fn verify(
+    proof: &zolana_program::CompressedProof,
+    public: &dvp_program::verifier::settle_dvp::PublicInputs,
+    private_tx_hash: &[u8; 32],
+) -> Result<(), zolana_program::verifier::VerifyError> {
+    dvp_program::verifier::settle_dvp::Verifier {
+        proof,
+        public_inputs: dvp_program::verifier::settle_dvp::PublicInputs {
+            creator_identity: public.creator_identity,
+            dvp_id: public.dvp_id,
+            dvp_owner: public.dvp_owner,
+            settlement_authority_identity: public.settlement_authority_identity,
+            current_timestamp: public.current_timestamp,
+        },
+        private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
 }

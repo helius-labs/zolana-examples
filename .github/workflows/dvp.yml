@@ -21,9 +21,9 @@ permissions:
 
 env:
   AGAVE_VERSION: v4.0.2
-  ZOLANA_TAG: test-dvp-pr-41-20261017-48dd150
+  ZOLANA_TAG: v0.5.0-alpha
   SURFPOOL_RELEASE_TAG: v1.6.0-light
-  SBF_TOOLS_VERSION: v1.53
+  SBF_TOOLS_VERSION: v1.54
 
 jobs:
   dvp-test:
@@ -37,15 +37,21 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
 
+      - name: Prepare pinned SDK and Xark sources
+        run: scripts/setup-zk-tools.sh --prepare-only
+
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: dvp
+          workspaces: |
+            dvp
+            dvp/.tools/zolana
+            dvp/.tools/xark
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -68,13 +74,19 @@ jobs:
         working-directory: dvp/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
 
-      - name: Download test release binaries
+      - name: Build pinned Zolana CLI and Xark
+        run: |
+          scripts/setup-zk-tools.sh
+          echo "ZOLANA_CLI_BIN=$PWD/.tools/zolana/target/release/zolana" >> "$GITHUB_ENV"
+          echo "XARK_SOURCE=$PWD/.tools/xark" >> "$GITHUB_ENV"
+
+      - name: Download protocol release binaries
         run: |
           bin="$RUNNER_TEMP/zolana-bin"
           mkdir -p "$bin"
           base="https://github.com/helius-labs/zolana/releases/download/${ZOLANA_TAG}"
           curl -sSfL --retry 5 "${base}/SHA256SUMS" -o "$bin/SHA256SUMS"
-          for name in zolana prover photon; do
+          for name in prover photon; do
             asset="${name}-linux-x64-${ZOLANA_TAG}"
             curl -sSfL --retry 5 "${base}/${asset}" -o "$bin/$asset"
             (cd "$bin" && grep "  ${asset}$" SHA256SUMS | sha256sum --check --strict)
@@ -87,9 +99,9 @@ jobs:
           curl -sSfL --retry 5 "https://github.com/Lightprotocol/surfpool/releases/download/${SURFPOOL_RELEASE_TAG}/surfpool-linux-x64.tar.gz" | tar -xz -C "$bin"
           test -x "$bin/surfpool"
           {
-            echo "ZOLANA_CLI_BIN=$bin/zolana"
             echo "PROVER_BIN=$bin/prover"
-            echo "ZOLANA_PHOTON_BIN=$bin/photon"
+            echo "DVP_PHOTON_BIN=$bin/photon"
+            echo "ZOLANA_PHOTON_BIN=$GITHUB_WORKSPACE/dvp/scripts/photon-localnet.sh"
             echo "SURFPOOL_BIN=$bin/surfpool"
             echo "SHIELDED_POOL_PROGRAM_PATH=$bin/$asset"
           } >> "$GITHUB_ENV"
@@ -104,14 +116,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dvp/target/zk/dvp-program
-          key: dvp-zk-keys-${{ env.ZOLANA_TAG }}-${{ hashFiles('dvp/program/src/circuits/**', 'dvp/program/Cargo.toml', 'dvp/Cargo.lock', 'dvp/program/src/verifier/**', 'dvp/dvp-keys.CHECKSUM') }}
+          key: dvp-xark-keys-${{ hashFiles('dvp/scripts/**', 'dvp/program/src/circuits/**', 'dvp/program/Cargo.toml', 'dvp/Cargo.lock', 'dvp/program/src/verifier/**', 'dvp/dvp-keys.CHECKSUM') }}
 
       - name: Check Rust formatting
-        run: cargo fmt --all -- --check
+        run: cargo fmt -p dvp-program -p dvp-sdk -p dvp-test -- --check
 
       - name: Check generated verifiers and circuit keys
         run: |
-          "$ZOLANA_CLI_BIN" zk compile --manifest-path program/Cargo.toml --check
+          "$ZOLANA_CLI_BIN" zk compile --test --manifest-path program/Cargo.toml --check
           scripts/check-keys.sh
 
       - name: Build Node.js circuits
@@ -119,6 +131,11 @@ jobs:
 
       - name: Run clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Build pinned TypeScript SDK
+        run: |
+          npm --prefix .tools/zolana ci
+          npm --prefix .tools/zolana run build:ts
 
       - name: Check and test TypeScript
         working-directory: dvp/typescript

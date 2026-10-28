@@ -1,10 +1,14 @@
+use crate::shared::field_decimal;
 use anyhow::{bail, ensure, Result};
-use dvp_program::circuits::{DvpDestination, SwapDvpTerms};
+use dvp_program::circuits::{
+    DvpDestinationClient as DvpDestination, SwapDvpTerms as RawTerms,
+    SwapDvpTermsClient as SwapDvpTerms,
+};
 use dvp_program::{ABORT_TAG, CREATE_TAG, DVP_AUTHORITY_PDA_SEED, SETTLEMENT_TAG};
 use solana_address::Address;
 use zolana_hasher::primitives::{hash_bytes, right_align, solana_owner_identity};
-use zolana_keypair::{hash::poseidon, shielded::SHIELDED_ADDRESS_LEN, Curve, ShieldedAddress};
-use zolana_program::conversion::{to_bytes, Allocator, ProofInput};
+use zolana_keypair::{hash::poseidon, shielded::SHIELDED_ADDRESS_LEN, ShieldedAddress};
+use zolana_program::{to_bytes, ClientInputs, InputRecords};
 use zolana_transaction::Mint;
 
 use crate::err;
@@ -50,9 +54,7 @@ pub struct SwapDvp {
 // `dvp_id` from them.
 impl SwapDvp {
     /// Rejects terms no create, settle or abort proof can accept, before any
-    /// proving work: the create checks, non-negative timestamps and
-    /// settlement and refund destinations with Ed25519 or PDA signing keys
-    /// (the Eddsa rail checks a Solana identity for every output owner).
+    /// proving work: the create checks and non-negative timestamps.
     ///
     /// It also requires the settlement authority to be a third party, as the
     /// reference DvP program does. The circuits do not check this; it keeps a
@@ -76,23 +78,7 @@ impl SwapDvp {
                 "earliest settlement timestamp is after expiry"
             );
         }
-        for destination in self.destinations() {
-            match destination.signing_pubkey.curve().map_err(err)? {
-                Curve::Ed25519 | Curve::Pda => {}
-                Curve::P256 => bail!("destination has a P256 signing key"),
-            }
-        }
         Ok(())
-    }
-
-    /// The four destinations in `dvp_id` order.
-    fn destinations(&self) -> [&ShieldedAddress; 4] {
-        [
-            &self.seller_settlement_destination,
-            &self.buyer_settlement_destination,
-            &self.seller_refund_destination,
-            &self.buyer_refund_destination,
-        ]
     }
 
     /// The DvP id, nested because Poseidon takes at most 12 inputs:
@@ -104,7 +90,7 @@ impl SwapDvp {
     ///
     /// See [`swap_dvp_id`] for the inner hashes.
     pub fn dvp_id(&self) -> Result<[u8; 32]> {
-        swap_dvp_id(&SwapDvpTerms::try_from(self)?)
+        swap_dvp_id(SwapDvpTerms::try_from(self)?)
     }
 
     /// The per-DvP authority PDA `[b"dvp", creator, dvp_id]` and its bump.
@@ -149,13 +135,18 @@ impl SwapDvp {
             "payment mint differs from the terms"
         );
         Ok(SwapDvpTerms {
-            seller_identity: solana_owner_identity(self.seller.as_array()).map_err(err)?,
-            buyer_identity: solana_owner_identity(self.buyer.as_array()).map_err(err)?,
-            settlement_authority_identity: solana_owner_identity(
-                self.settlement_authority.as_array(),
-            )
-            .map_err(err)?,
-            creator_identity: solana_owner_identity(self.creator.as_array()).map_err(err)?,
+            seller_identity: field_decimal(
+                solana_owner_identity(self.seller.as_array()).map_err(err)?,
+            )?,
+            buyer_identity: field_decimal(
+                solana_owner_identity(self.buyer.as_array()).map_err(err)?,
+            )?,
+            settlement_authority_identity: field_decimal(
+                solana_owner_identity(self.settlement_authority.as_array()).map_err(err)?,
+            )?,
+            creator_identity: field_decimal(
+                solana_owner_identity(self.creator.as_array()).map_err(err)?,
+            )?,
             delivery_mint,
             payment_mint,
             delivery_amount: self.delivery_amount,
@@ -166,7 +157,7 @@ impl SwapDvp {
                 .earliest_settlement_timestamp
                 .map_or(Ok(0), timestamp)?,
             nonce: self.nonce,
-            reference_hash: hash_bytes(&self.ref_string).map_err(err)?,
+            reference_hash: field_decimal(hash_bytes(&self.ref_string).map_err(err)?)?,
             seller_settlement_destination: destination_proof_input(
                 &self.seller_settlement_destination,
             )?,
@@ -175,7 +166,7 @@ impl SwapDvp {
             )?,
             seller_refund_destination: destination_proof_input(&self.seller_refund_destination)?,
             buyer_refund_destination: destination_proof_input(&self.buyer_refund_destination)?,
-            blinding: self.blinding,
+            blinding: field_decimal(self.blinding)?,
         })
     }
 }
@@ -287,15 +278,17 @@ impl SwapDvp {
 /// schedule_hash     = Poseidon(expiry_timestamp, has_earliest, earliest_settlement_timestamp, nonce)
 /// destinations_hash = Poseidon(dest(seller_settlement), dest(buyer_settlement), dest(seller_refund), dest(buyer_refund))
 /// ```
-fn swap_dvp_id(input: &SwapDvpTerms) -> Result<[u8; 32]> {
-    let terms = input.instantiate(&Allocator::native()).map_err(err)?;
-    to_bytes(&terms.hash().map_err(err)?).map_err(err)
+fn swap_dvp_id(input: SwapDvpTerms) -> Result<[u8; 32]> {
+    let terms = RawTerms::from_client(input, &mut InputRecords::new()).map_err(err)?;
+    Ok(to_bytes(&terms.hash().map_err(err)?))
 }
 
 fn destination_proof_input(address: &ShieldedAddress) -> Result<DvpDestination> {
     Ok(DvpDestination {
         address: *address,
-        viewing_key_hash: hash_bytes(address.viewing_pubkey.as_bytes()).map_err(err)?,
+        viewing_key_hash: field_decimal(
+            hash_bytes(address.viewing_pubkey.as_bytes()).map_err(err)?,
+        )?,
     })
 }
 
@@ -362,7 +355,7 @@ mod tests {
         let terms = fixed_terms();
         assert_eq!(
             decimal(&terms.dvp_id().unwrap()),
-            "19284217639585534903980865803314903667065340572521528256377547822764170087020"
+            "13601006363444597634864084490330890110481277484464045593977180451704799918864"
         );
     }
 
@@ -448,12 +441,6 @@ mod tests {
     #[test]
     fn validate_rejects_bad_terms() {
         assert!(fixed_terms().validate().is_ok());
-        let p256 = ShieldedAddress {
-            signing_pubkey: PublicKey::from_p256(
-                &ViewingKey::from_bytes(&[3; 32]).unwrap().pubkey(),
-            ),
-            ..destination(11)
-        };
         let invalid: [(Mutation, &str); 8] = [
             (
                 |t| t.settlement_authority = t.seller,
@@ -485,25 +472,21 @@ mod tests {
             let error = terms.validate().expect_err(expected);
             assert_eq!(error.to_string(), expected);
         }
-        // A P256 signing key in any destination is rejected; a PDA is
-        // accepted.
         let destinations: [fn(&mut SwapDvp) -> &mut ShieldedAddress; 4] = [
             |t| &mut t.seller_settlement_destination,
             |t| &mut t.buyer_settlement_destination,
             |t| &mut t.seller_refund_destination,
             |t| &mut t.buyer_refund_destination,
         ];
-        for (i, destination) in destinations.iter().enumerate() {
+        for destination in destinations {
             let mut terms = fixed_terms();
-            *destination(&mut terms) = p256;
-            assert!(terms.validate().is_err(), "P256 destination {i}");
-            let mut terms = fixed_terms();
-            *destination(&mut terms) = ShieldedAddress::for_pda(
+            let address = destination(&mut terms);
+            *address = ShieldedAddress::for_pda(
                 &Address::new_from_array([6; 32]),
                 [0; 32],
-                p256.viewing_pubkey,
+                address.viewing_pubkey,
             );
-            assert!(terms.validate().is_ok(), "PDA destination {i}");
+            assert!(terms.validate().is_ok());
         }
     }
 
@@ -515,7 +498,7 @@ mod tests {
         ShieldedAddress {
             signing_pubkey: PublicKey::from_ed25519(&[seed; 32]),
             nullifier_pubkey: NullifierKey::from_secret([seed; 31]).pubkey().unwrap(),
-            viewing_pubkey: ViewingKey::from_bytes(&[seed; 32]).unwrap().pubkey(),
+            viewing_pubkey: ViewingKey::from_bytes(&[seed; 32]).pubkey(),
         }
     }
 
