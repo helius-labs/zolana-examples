@@ -4,11 +4,13 @@ on:
   push:
     branches: [main]
     paths:
+      - "devnet-e-tee-policy.json"
       - "rust-client/**"
       - "typescript-client/**"
       - ".github/workflows/devnet.yml"
   pull_request:
     paths:
+      - "devnet-e-tee-policy.json"
       - "rust-client/**"
       - "typescript-client/**"
       - ".github/workflows/devnet.yml"

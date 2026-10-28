@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 
@@ -33,6 +34,7 @@ import {
   type Bytes32,
   type ZolanaClientConfig,
 } from "@heliuslabs/zolana";
+import { teePolicyFromJson } from "@heliuslabs/zolana/client";
 import { getCreateAccountInstruction } from "@solana-program/system";
 import {
   getInitializeAccount3Instruction,
@@ -110,11 +112,24 @@ function clientConfigFromEnv(): ZolanaClientConfig {
   if (proofDataSource !== "client" && proofDataSource !== "prover") {
     throw new Error("ZOLANA_PROOF_DATA_SOURCE must be client or prover");
   }
+  const proverUrl = process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL;
   return Object.freeze({
     solanaRpcUrl,
     proofDataSource,
     indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || INDEXER_URL,
-    proverUrl: process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL,
+    proverUrl,
+    ...(proverUrl.replace(/\/$/, "") === PROVER_URL
+      ? {
+          proverTee: teePolicyFromJson(
+            JSON.parse(
+              readFileSync(
+                new URL("../../devnet-e-tee-policy.json", import.meta.url),
+                "utf8",
+              ),
+            ),
+          ),
+        }
+      : {}),
   });
 }
 

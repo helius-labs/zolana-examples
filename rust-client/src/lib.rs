@@ -8,7 +8,10 @@ use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_system_interface::instruction::create_account;
 use spl_token_interface::instruction::{initialize_account3, initialize_mint2, mint_to};
-use spr_client::{ProgramAccountsFilter, ProofDataSource, Rpc, SolanaRpc, ZolanaClient};
+use spr_client::{
+    check_service_url, prover::tee::TeePolicy, ProgramAccountsFilter, ProofDataSource,
+    ProverClient, Rpc, SolanaRpc, ZolanaClient, ZolanaIndexer,
+};
 use spr_interface::{
     pda,
     state::{discriminator::SPL_ASSET_REGISTRY, SplAssetRegistry},
@@ -33,12 +36,25 @@ pub struct SetupContext {
 }
 
 impl SetupContext {
+    pub fn prover_client(&self) -> Result<ProverClient> {
+        check_service_url(&self.prover_url, "prover_url")?;
+        let prover = ProverClient::new(self.prover_url.clone());
+        if self.prover_url.trim_end_matches('/') == PROVER_URL {
+            Ok(prover.with_tee(TeePolicy::from_json(include_str!(
+                "../../devnet-e-tee-policy.json"
+            ))?))
+        } else {
+            Ok(prover)
+        }
+    }
+
     pub fn client(&self) -> Result<ZolanaClient<SolanaRpc>> {
-        Ok(ZolanaClient::from_urls(
+        check_service_url(&self.indexer_url, "indexer_url")?;
+        Ok(ZolanaClient::new(
             SolanaRpc::new(self.rpc_url.clone()),
-            &self.indexer_url,
-            self.prover_url.clone(),
-        )?
+            ZolanaIndexer::new(&self.indexer_url),
+            self.prover_client()?,
+        )
         .with_proof_data_source(ProofDataSource::Prover))
     }
 }
