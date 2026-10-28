@@ -5,7 +5,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-zolana-client = { workspace = true }
+spr-client = { workspace = true }
 anyhow = { workspace = true }
 timelock-escrow-program = { path = "../program" }
 timelock-escrow-prover = { path = "../prover" }
@@ -13,11 +13,11 @@ solana-address = { workspace = true }
 solana-instruction = { workspace = true }
 solana-pubkey = { workspace = true }
 wincode = { workspace = true }
-zolana-interface = { workspace = true }
-zolana-program = { workspace = true }
-zolana-hasher = { workspace = true }
-zolana-keypair = { workspace = true }
-zolana-transaction = { workspace = true }
+spr-interface = { workspace = true }
+spr-program = { workspace = true }
+spr-hasher = { workspace = true }
+spr-keypair = { workspace = true }
+spr-transaction = { workspace = true }
 
 [dev-dependencies]
 groth16-solana = { workspace = true, features = ["bsb22"] }

@@ -26,20 +26,20 @@ profile-program = ["light-program-profiler/profile-program"]
 
 [dependencies]
 borsh = { version = "1.5", default-features = false, features = ["derive"] }
-groth16-solana = { git = "https://github.com/Lightprotocol/groth16-solana", rev = "70a93803e5f55b8425301d506c625169ef557c9d", features = ["bsb22"] }
+groth16-solana = { version = "0.3.1", features = ["bsb22"] }
 light-program-profiler = { git = "https://github.com/Lightprotocol/light-program-profiler", rev = "db49f3c801996a80e1cb7e4e92b13a694e962b65" }
 pinocchio = { version = "0.11", features = ["cpi"] }
 solana-program-error = "3.0"
 thiserror = "2.0"
 wincode = { version = "0.5", features = ["derive"] }
-zolana-account-checks = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha", default-features = false }
-zolana-hasher = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha", default-features = false }
-zolana-interface = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha" }
-zolana-program = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha", features = ["cpi"] }
+spr-account-checks = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha", default-features = false }
+spr-hasher = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha", default-features = false }
+spr-interface = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha" }
+spr-program = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha", features = ["cpi"] }
 
 [dev-dependencies]
 mollusk-svm = "0.15.0"
-zolana-test-utils = { git = "https://github.com/helius-labs/zolana", tag = "v0.5.0-alpha", features = ["mollusk"] }
+spr-test-utils = { git = "https://github.com/helius-labs/zolana", tag = "v0.6.0-alpha", features = ["mollusk"] }
 solana-account = "4.3"
 solana-instruction = "3.4"
 solana-pubkey = { version = "4.2", features = ["curve25519"] }

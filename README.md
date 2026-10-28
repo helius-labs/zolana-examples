@@ -31,12 +31,15 @@
 
 CI runs all five Rust and TypeScript client examples, the swap (take, cancel,
 and verifiable encryption), and timelock escrow flows against the
-`v0.5.0-alpha` GitHub release binaries, including the shielded
+`v0.6.0-alpha` GitHub release binaries, including the shielded
 pool, user registry, prover, and Photon indexer. Artifact sizes and SHA-256 hashes
 are pinned in [`test-utils/release-artifacts.json`](test-utils/release-artifacts.json).
+This release uses the shielded-pool program ID
+`ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW`; accounts and notes from
+earlier program IDs are not migrated.
 
 To run the same tests locally, install Rust, Go 1.27.1+, and the Solana CLI
-with `cargo build-sbf`, and check out Zolana's `v0.5.0-alpha` tag in a sibling
+with `cargo build-sbf`, and check out Zolana's `v0.6.0-alpha` tag in a sibling
 directory named `zolana`. Install the TypeScript dependencies with
 `cd typescript-client && pnpm install --frozen-lockfile`, then run from the
 repository root:
@@ -51,15 +54,19 @@ validators and indexers. The protocol prover downloads its pinned keys as needed
 Logs are retained under `target/release-tests/processes/logs` and uploaded by CI.
 
 The separate `devnet` workflow runs both client suites on Solana devnet, using
-Photon at `https://d21d98xh5lgv3b.cloudfront.net` and the attested prover at
-`https://d1unet9hn0mci0.cloudfront.net`. It runs on pushes to main, pull requests
+Devnet-e Photon at `https://d34xe1hqb2ibg2.cloudfront.net` and the attested prover at
+`https://dd73hh473h6ha.cloudfront.net`. It runs on pushes to main, pull requests
 from this repository, and manual dispatch. Configure `DEVNET_RPC_URL` and
 `DEVNET_PAYER_KEYPAIR` as repository secrets, with a devnet-only JSON keypair
 funded with at least 0.2 SOL. Each client uses a fresh funded payer, and unused
 public SOL is returned to the CI wallet. The test checks the devnet genesis hash,
 deployed programs, and TEE attestation before funding the test payers.
 
-Both clients use the default TEE policy shipped in the `v0.5.0-alpha` SDK.
+Both clients pin the Devnet-e enclave in
+[`devnet-e-tee-policy.json`](devnet-e-tee-policy.json). Its PCR measurements come
+from the [v0.6.0-alpha Nitro build](https://github.com/helius-labs/zolana/actions/runs/40784786893),
+and its HPKE public key was verified against a fresh attestation using those
+measurements. The SDK's default policy still pins the previous Devnet-d enclave.
 
 - [Demo](https://helius-privacy-demo.fly.dev/)
 - [Documentation](https://helius.dev/docs/privacy)

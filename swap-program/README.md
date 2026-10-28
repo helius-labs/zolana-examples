@@ -18,7 +18,7 @@ model, order terms, instructions, and circuits.
 - [`program/`](program/) — the Pinocchio program. Verifies a Groth16 proof
   against the public-input hash, then CPIs SPP `transact`.
 - [`prover/`](prover/) — in-process proving engine on the shared
-  `zolana-gnark-ffi-prover`. Go gnark circuits, their registration, and the
+  `spr-gnark-ffi-prover`. Go gnark circuits, their registration, and the
   key-generation binary.
 - [`sdk/`](sdk/) — client library. State, instruction and proof-input
   builders, UTXO hashing, discovery, encryption codecs, and the prover client.
@@ -28,7 +28,7 @@ model, order terms, instructions, and circuits.
 ## Build
 
 Each crate is its own package with no shared workspace, so build them one at a
-time. The Zolana crates come from the `v0.5.0-alpha` tag of
+time. The Zolana crates come from the `v0.6.0-alpha` tag of
 [helius-labs/zolana](https://github.com/helius-labs/zolana). Run the commands
 below from `swap-program/`.
 
@@ -44,10 +44,10 @@ and `zolana/gnarksdk` Go modules, which
 named `zolana` next to the `zolana-examples` checkout:
 
 ```bash
-git clone --branch v0.5.0-alpha https://github.com/helius-labs/zolana ../../zolana
+git clone --branch v0.6.0-alpha https://github.com/helius-labs/zolana ../../zolana
 ```
 
-The Go bridge to Rust ships inside the `zolana-gnark-ffi-prover-build` crate
+The Go bridge to Rust ships inside the `spr-gnark-ffi-prover-build` crate
 and needs no checkout.
 
 The circuit tests need the pinned proving and verifying keys, whose hashes are

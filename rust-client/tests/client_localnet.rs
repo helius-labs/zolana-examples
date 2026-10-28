@@ -1,11 +1,11 @@
 use anyhow::Result;
 use rust_client_example::SetupContext;
-use zolana_client::ProofDataSource;
-use zolana_program_test::{
+use spr_client::ProofDataSource;
+use spr_program_test::{
     fixture,
     localnet::{FixtureLocalnet, LocalnetPorts},
 };
-use zolana_user_registry_interface::user_registry_program_id;
+use spr_user_registry_interface::user_registry_program_id;
 
 #[path = "../../test-utils/localnet.rs"]
 mod release_localnet;
@@ -18,7 +18,7 @@ fn start_localnet(language: &str, test_number: u16) -> Result<FixtureLocalnet> {
         LocalnetPorts::for_test(test_number)?,
         vec![(
             user_registry_program_id(),
-            paths.working_dir.join("zolana_user_registry.so"),
+            paths.working_dir.join("spr_user_registry.so"),
         )],
         &paths,
     )

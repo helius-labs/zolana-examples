@@ -1,10 +1,10 @@
 use anyhow::{anyhow, Result};
 use rust_client_example::{asset_registry, cli_keypair, setup};
 use solana_keypair::Keypair;
-use zolana_client::{SolanaRpc, ZolanaClient};
-use zolana_keypair::ShieldedKeypair;
-// The stateful wallet, with its transaction history, lives in zolana-test-utils.
-use zolana_test_utils::wallet::{
+use spr_client::{SolanaRpc, ZolanaClient};
+use spr_keypair::ShieldedKeypair;
+// The stateful wallet, with its transaction history, lives in spr-test-utils.
+use spr_test_utils::wallet::{
     sync_wallet_with_config, PrivateTransaction, SyncWalletConfig, Wallet,
 };
 

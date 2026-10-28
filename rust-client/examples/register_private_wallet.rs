@@ -3,10 +3,10 @@ use rust_client_example::{cli_keypair, setup};
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 use solana_system_interface::instruction::transfer;
-use zolana_client::user_registry::is_wallet_registered_sync;
-use zolana_client::{Rpc, SolanaRpc, ZolanaClient};
-use zolana_keypair::ShieldedKeypair;
-use zolana_user_registry_interface::{
+use spr_client::user_registry::is_wallet_registered_sync;
+use spr_client::{Rpc, SolanaRpc, ZolanaClient};
+use spr_keypair::ShieldedKeypair;
+use spr_user_registry_interface::{
     instruction::{register, set_merge_encryption, RegisterData},
     user_record_pda, MergeEncryptionScheme,
 };

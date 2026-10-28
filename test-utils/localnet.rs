@@ -1,5 +1,5 @@
+use spr_program_test::localnet::LocalnetPaths;
 use std::{env, path::PathBuf};
-use zolana_program_test::localnet::LocalnetPaths;
 
 /// Use the verified release artifacts supplied by the integration test runner.
 pub fn paths() -> LocalnetPaths {

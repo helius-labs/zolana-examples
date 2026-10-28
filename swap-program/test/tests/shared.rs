@@ -3,18 +3,18 @@ use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_signature::Signature;
 use solana_signer::Signer;
-use zolana_client::{ComputeBudgetConfig, Rpc, SolanaRpc};
-use zolana_keypair::{
+use spr_client::{ComputeBudgetConfig, Rpc, SolanaRpc};
+use spr_keypair::{
     constants::BLINDING_LEN, NullifierKey, PublicKey, ShieldedAddress, ShieldedKeypair, SigningKey,
 };
-use zolana_program_test::{
+use spr_program_test::{
     fixture,
     localnet::{FixtureLocalnet, LocalnetPorts},
 };
-use zolana_test_utils::test_validator_asserts::wait_for_indexed_utxo;
-use zolana_test_utils::wallet::{sync_wallet, Deposit, DepositParams, Wallet};
-use zolana_transaction::{utxo::SppProofInputUtxo, utxo::Utxo, AssetRegistry, Data, SOL_MINT};
-use zolana_user_registry_interface::user_registry_program_id;
+use spr_test_utils::test_validator_asserts::wait_for_indexed_utxo;
+use spr_test_utils::wallet::{sync_wallet, Deposit, DepositParams, Wallet};
+use spr_transaction::{utxo::SppProofInputUtxo, utxo::Utxo, AssetRegistry, Data, SOL_MINT};
+use spr_user_registry_interface::user_registry_program_id;
 
 #[path = "../../../test-utils/localnet.rs"]
 mod release_localnet;
@@ -73,7 +73,7 @@ pub fn setup(test: u16) -> Result<TestEnv> {
                 user_registry_program_id(),
                 release_localnet::paths()
                     .working_dir
-                    .join("zolana_user_registry.so"),
+                    .join("spr_user_registry.so"),
             ),
         ],
         &release_localnet::paths(),
@@ -113,7 +113,7 @@ pub fn setup(test: u16) -> Result<TestEnv> {
         asset: spl_mint,
         amount: MAKER_SHIELD_SPL,
         spl_token_account: Some(spl_funding),
-        spl_token_program: Some(zolana_interface::pda::spl_token_program_id()),
+        spl_token_program: Some(spr_interface::pda::spl_token_program_id()),
         memo: None,
     })?;
     let maker_view_tag = maker_deposit.view_tag();
@@ -126,7 +126,7 @@ pub fn setup(test: u16) -> Result<TestEnv> {
         .output_slot
         .proofless_output()
         .ok_or_else(|| anyhow!("indexed maker deposit is not a proofless UTXO"))?;
-    let maker_input: SppProofInputUtxo = zolana_test_utils::utxo::wallet(
+    let maker_input: SppProofInputUtxo = spr_test_utils::utxo::wallet(
         Utxo {
             owner: order_authority_address.signing_pubkey,
             asset: assets.mint(&spl_mint)?,
@@ -151,7 +151,7 @@ pub fn setup(test: u16) -> Result<TestEnv> {
         asset: SOL_MINT,
         amount: DESTINATION_AMOUNT,
         spl_token_account: None,
-        spl_token_program: Some(zolana_interface::pda::spl_token_program_id()),
+        spl_token_program: Some(spr_interface::pda::spl_token_program_id()),
         memo: None,
     })?;
     let taker_view_tag = taker_deposit.view_tag();

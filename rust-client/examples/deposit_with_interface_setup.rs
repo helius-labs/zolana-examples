@@ -3,13 +3,13 @@ use rust_client_example::{cli_keypair, landed_slot, setup, setup_test_token, Tes
 use solana_address::Address;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
-use zolana_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
-use zolana_interface::{pda, state::SplAssetRegistry};
-use zolana_keypair::ShieldedKeypair;
-use zolana_program::instruction::{
+use spr_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
+use spr_interface::{pda, state::SplAssetRegistry};
+use spr_keypair::ShieldedKeypair;
+use spr_program::instruction::{
     AssetDeposit, CreateSplInterface, Deposit, DepositAsset, DepositSplAccounts,
 };
-use zolana_transaction::{decrypt_spendable, AssetRegistry};
+use spr_transaction::{decrypt_spendable, AssetRegistry};
 
 const DEPOSIT_AMOUNT: u64 = 1_000_000_000;
 

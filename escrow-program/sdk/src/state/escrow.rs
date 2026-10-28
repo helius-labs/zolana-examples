@@ -1,14 +1,14 @@
 use anyhow::Result;
-use timelock_escrow_program::instructions::shared::u64_right_align;
-use timelock_escrow_prover::EscrowTermsProofInput;
-use zolana_keypair::{
+use spr_keypair::{
     constants::BLINDING_LEN, hash::poseidon, NullifierKey, PublicKey, ShieldedAddress,
 };
-use zolana_transaction::{
+use spr_transaction::{
     instructions::transact::SppProofOutputUtxo,
     utxo::{Blinding, SppProofInputUtxo, Utxo},
     Data, Mint,
 };
+use timelock_escrow_program::instructions::shared::u64_right_align;
+use timelock_escrow_prover::EscrowTermsProofInput;
 
 use crate::err;
 

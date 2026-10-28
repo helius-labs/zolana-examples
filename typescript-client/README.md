@@ -10,7 +10,7 @@ TypeScript client examples for `@heliuslabs/zolana`.
 
 ## Setup
 
-Install Node.js 24+ and pnpm. The SDK is pinned to the `v0.5.0-alpha` Git tag
+Install Node.js 24+ and pnpm. The SDK is pinned to the `v0.6.0-alpha` Git tag
 until the npm release is published. Installation builds the SDK from that tag.
 
 ```bash
@@ -34,7 +34,7 @@ cp .env.example .env # ...and set API_KEY
 To run on localnet, configure in [`src/lib.ts`](src/lib.ts) and install:
 
 ```bash
-cargo install --git https://github.com/helius-labs/zolana --tag v0.5.0-alpha zolana-cli
+cargo install --git https://github.com/helius-labs/zolana --tag v0.6.0-alpha spr-cli
 zolana dev start
 ```
 

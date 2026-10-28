@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - "devnet-e-tee-policy.json"
       - "rust-client/**"
       - "typescript-client/**"
       - "swap-program/**"
@@ -12,6 +13,7 @@ on:
       - ".github/workflows/examples.yml"
   pull_request:
     paths:
+      - "devnet-e-tee-policy.json"
       - "rust-client/**"
       - "typescript-client/**"
       - "swap-program/**"
@@ -154,7 +156,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: helius-labs/zolana
-          ref: v0.5.0-alpha
+          ref: v0.6.0-alpha
           path: zolana
 
       - name: Install Rust
@@ -180,7 +182,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            examples/target/release-tests/*v0.5.0-alpha*
+            examples/target/release-tests/*v0.6.0-alpha*
             examples/target/release-tests/surfpool-*.tar.gz
             examples/target/release-tests/proving-keys
           key: release-integration-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('examples/test-utils/release-artifacts.json') }}

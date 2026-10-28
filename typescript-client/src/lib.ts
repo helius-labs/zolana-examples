@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 
@@ -33,6 +34,7 @@ import {
   type Bytes32,
   type ZolanaClientConfig,
 } from "@heliuslabs/zolana";
+import { teePolicyFromJson } from "@heliuslabs/zolana/client";
 import { getCreateAccountInstruction } from "@solana-program/system";
 import {
   getInitializeAccount3Instruction,
@@ -56,8 +58,8 @@ export interface ConfirmedTransaction {
 
 // Will be exposed through a single devnet URL. Currently exposed as they are.
 const RPC_URL = "https://devnet.helius-rpc.com";
-const INDEXER_URL = "https://d21d98xh5lgv3b.cloudfront.net";
-const PROVER_URL = "https://d1unet9hn0mci0.cloudfront.net";
+const INDEXER_URL = "https://d34xe1hqb2ibg2.cloudfront.net";
+const PROVER_URL = "https://dd73hh473h6ha.cloudfront.net";
 // localnet: const RPC_URL = "http://127.0.0.1:8899";
 // localnet: const INDEXER_URL = "http://127.0.0.1:8784";
 // localnet: const PROVER_URL = "http://127.0.0.1:3001";
@@ -110,11 +112,24 @@ function clientConfigFromEnv(): ZolanaClientConfig {
   if (proofDataSource !== "client" && proofDataSource !== "prover") {
     throw new Error("ZOLANA_PROOF_DATA_SOURCE must be client or prover");
   }
+  const proverUrl = process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL;
   return Object.freeze({
     solanaRpcUrl,
     proofDataSource,
     indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || INDEXER_URL,
-    proverUrl: process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL,
+    proverUrl,
+    ...(proverUrl.replace(/\/$/, "") === PROVER_URL
+      ? {
+          proverTee: teePolicyFromJson(
+            JSON.parse(
+              readFileSync(
+                new URL("../../devnet-e-tee-policy.json", import.meta.url),
+                "utf8",
+              ),
+            ),
+          ),
+        }
+      : {}),
   });
 }
 
