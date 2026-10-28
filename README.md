@@ -54,8 +54,8 @@ validators and indexers. The protocol prover downloads its pinned keys as needed
 Logs are retained under `target/release-tests/processes/logs` and uploaded by CI.
 
 The separate `devnet` workflow runs both client suites on Solana devnet, using
-Photon at `https://d21d98xh5lgv3b.cloudfront.net` and the attested prover at
-`https://d1unet9hn0mci0.cloudfront.net`. It runs on pushes to main, pull requests
+Devnet-e Photon at `https://d34xe1hqb2ibg2.cloudfront.net` and the attested prover at
+`https://dd73hh473h6ha.cloudfront.net`. It runs on pushes to main, pull requests
 from this repository, and manual dispatch. Configure `DEVNET_RPC_URL` and
 `DEVNET_PAYER_KEYPAIR` as repository secrets, with a devnet-only JSON keypair
 funded with at least 0.2 SOL. Each client uses a fresh funded payer, and unused

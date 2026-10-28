@@ -18,8 +18,8 @@ use spr_transaction::AssetRegistry;
 
 /// The RPC, Photon indexer, and prover the examples talk to.
 pub const RPC_URL: &str = "https://devnet.helius-rpc.com";
-pub const INDEXER_URL: &str = "https://d21d98xh5lgv3b.cloudfront.net";
-pub const PROVER_URL: &str = "https://d1unet9hn0mci0.cloudfront.net";
+pub const INDEXER_URL: &str = "https://d34xe1hqb2ibg2.cloudfront.net";
+pub const PROVER_URL: &str = "https://dd73hh473h6ha.cloudfront.net";
 // localnet: pub const RPC_URL: &str = "http://127.0.0.1:8899";
 // localnet: pub const INDEXER_URL: &str = "http://127.0.0.1:8784";
 // localnet: pub const PROVER_URL: &str = "http://127.0.0.1:3001";
