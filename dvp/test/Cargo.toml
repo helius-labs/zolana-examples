@@ -1,0 +1,53 @@
+[package]
+name = "dvp-test"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+autotests = false
+
+[dependencies]
+anyhow = { workspace = true }
+dvp-program = { path = "../program", features = ["circuits", "parallel"] }
+dvp-sdk = { path = "../sdk" }
+solana-clock = { workspace = true }
+solana-signature = { workspace = true }
+wincode = { workspace = true }
+zolana-client = { workspace = true, features = ["reqwest", "solana-rpc"] }
+
+[dev-dependencies]
+light-program-profiler = { workspace = true, features = ["mollusk"] }
+mollusk-svm = { workspace = true }
+num-bigint = { workspace = true }
+solana-account = { workspace = true }
+solana-address = { workspace = true }
+solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
+solana-signer = { workspace = true }
+zolana-hasher = { workspace = true }
+zolana-interface = { workspace = true }
+zolana-keypair = { workspace = true }
+zolana-merkle-tree = { workspace = true }
+zolana-program-test = { workspace = true, features = ["localnet"] }
+zolana-test-utils = { workspace = true }
+zolana-transaction = { workspace = true }
+zolana-tree = { workspace = true }
+
+[[test]]
+name = "abort_dvp"
+path = "tests/abort_dvp.rs"
+
+[[test]]
+name = "bench_cu"
+path = "tests/bench_cu.rs"
+
+[[test]]
+name = "create_dvp"
+path = "tests/create_dvp.rs"
+
+[[test]]
+name = "reclaim_dvp"
+path = "tests/reclaim_dvp.rs"
+
+[[test]]
+name = "settle_dvp"
+path = "tests/settle_dvp.rs"

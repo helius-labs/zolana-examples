@@ -1,0 +1,25 @@
+{
+  "name": "dvp-node-examples",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "oxfmt --check . && tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "example": "tsx",
+    "format": "oxfmt --write ."
+  },
+  "dependencies": {
+    "@heliuslabs/zolana": "https://github.com/helius-labs/zolana/releases/download/test-dvp-pr-41-20261017-48dd150/heliuslabs-zolana-0.0.0-test.dvp-pr-41.d4ec52316.tgz",
+    "@solana/kit": "^8.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxfmt": "^0.67.0",
+    "tsx": "latest",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
