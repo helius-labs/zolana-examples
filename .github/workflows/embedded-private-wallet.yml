@@ -1,0 +1,40 @@
+name: embedded private wallet
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "embedded-private-wallet/**"
+      - ".github/workflows/embedded-private-wallet.yml"
+  pull_request:
+    paths:
+      - "embedded-private-wallet/**"
+      - ".github/workflows/embedded-private-wallet.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: embedded-private-wallet-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check / embedded-private-wallet
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: embedded-private-wallet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # TVC bundles declarations while pnpm packs its git dependency. Keep its
+      # source outside node_modules so the bundler follows relative type imports.
+      - run: pnpm install --frozen-lockfile --store-dir "$RUNNER_TEMP/pnpm-store"
+      - run: pnpm check

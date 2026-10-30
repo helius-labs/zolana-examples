@@ -1,0 +1,5 @@
+allowBuilds:
+  "@zolana/tvc-wallet@https://codeload.github.com/helius-labs/zolana-tvc/tar.gz/cb717a8f750929e8307ffb788729ac29c369032c#path:/packages/tvc-wallet": true
+  esbuild: true
+minimumReleaseAgeExclude:
+  - "@heliuslabs/zolana@0.5.0-alpha"
