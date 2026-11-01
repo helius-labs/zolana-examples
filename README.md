@@ -66,7 +66,8 @@ Both clients pin the Devnet-e enclave in
 [`devnet-e-tee-policy.json`](devnet-e-tee-policy.json). Its PCR measurements come
 from the [v0.6.0-alpha Nitro build](https://github.com/helius-labs/zolana/actions/runs/40784786893),
 and its HPKE public key was verified against a fresh attestation using those
-measurements. The SDK's default policy still pins the previous Devnet-d enclave.
+measurements. The Rust SDK's default policy still pins the previous Devnet-d
+enclave. TypeScript 0.7.0-alpha has no default policy; these examples pass this file.
 
 - [Demo](https://helius-privacy-demo.fly.dev/)
 - [Documentation](https://helius.dev/docs/privacy)

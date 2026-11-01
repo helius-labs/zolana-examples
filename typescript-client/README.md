@@ -10,8 +10,8 @@ TypeScript client examples for `@heliuslabs/zolana`.
 
 ## Setup
 
-Install Node.js 24+ and pnpm. The SDK is pinned to the `v0.6.0-alpha` Git tag
-until the npm release is published. Installation builds the SDK from that tag.
+Install Node.js 24+ and pnpm. The SDK is pinned to the published npm release
+`@heliuslabs/zolana@^0.7.0-alpha`.
 
 ```bash
 pnpm install
