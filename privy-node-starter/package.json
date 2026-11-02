@@ -1,37 +1,33 @@
 {
-  "name": "privy-node-starter",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
+  "name": "starter",
+  "version": "1.0.0",
+  "main": "index.js",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
-    "check": "oxfmt --check . && tsc --noEmit",
-    "test": "tsx --test src/*.test.ts",
-    "validate:devnet": "tsx validation/validate-devnet.ts",
-    "validate:protocol": "tsx validation/validate-protocol.ts"
+    "dev": "tsx --watch src/index.ts",
+    "format": "prettier --write .",
+    "type-check": "tsc --noEmit",
+    "confidential": "tsx src/confidential.mts"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
   "dependencies": {
     "@heliuslabs/zolana": "0.7.0-alpha",
-    "@privy-io/react-auth": "3.51.0",
+    "@privy-io/node": "^0.1.0-alpha.2",
     "@solana-program/compute-budget": "0.20.0",
-    "@solana-program/memo": "0.16.0",
-    "@solana-program/system": "0.14.1",
-    "@solana/kit": "^8.3.0",
+    "@solana/kit": "8.6.0",
     "dotenv": "^17.2.2",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "express": "^5.1.0",
+    "viem": "^2.37.4"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "oxfmt": "^0.75.0",
+    "@tsconfig/node22": "^22.0.2",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.1",
+    "nodemon": "^3.1.10",
+    "prettier": "^3.6.2",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.2",
-    "vite": "^7.1.7"
-  },
-  "engines": {
-    "node": ">=24"
+    "typescript": "^5.9.2"
   }
 }

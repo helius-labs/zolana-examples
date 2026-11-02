@@ -1,14 +1,9 @@
 {
+  "extends": "@tsconfig/node22/tsconfig.json",
   "compilerOptions": {
-    "target": "ES2024",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "jsx": "react-jsx",
-    "strict": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "types": ["node", "vite/client"]
+    "outDir": "./dist",
+    "rootDir": "./"
   },
-  "include": ["src", "validation", "vite.config.ts"]
+  "include": ["**/*.ts", "**/*.mts"],
+  "exclude": ["dist"]
 }

@@ -1,9 +1,0 @@
-{
-  "name": "privy-devnet-validation",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "@privy-io/node": "0.37.0",
-    "@solana/kit": "^5.1.0"
-  }
-}

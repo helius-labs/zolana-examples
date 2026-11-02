@@ -1,82 +1,137 @@
-# Privy Node starter
+# Privy + Node.js Server Starter
 
-React starter with Privy Solana embedded wallets and `@heliuslabs/zolana`.
-The same SDK flow also runs with Privy server wallets for automated validation.
+This example showcases how to get started using Privy's Node.js SDK in a server-side Express.js application.
 
-The example registers two wallets, deposits 0.01 SOL, transfers 0.003 SOL confidentially,
-decrypts the recipient's balance, and withdraws both private balances to their public wallets.
-A confidential transfer reveals sender and recipient; it encrypts the asset and amount.
-Deposits and withdrawals reveal the asset and amount.
+## Getting Started
 
-## Setup
+### 1. Clone the Project
 
-Use Node.js 24 or later.
+```bash
+mkdir -p privy-node-starter && curl -L https://github.com/privy-io/privy-examples/archive/main.tar.gz | tar -xz --strip=2 -C privy-node-starter examples-main/privy-node-starter && cd privy-node-starter
+```
+
+### 2. Install Dependencies
 
 ```bash
 npm install
-npm install --prefix validation
+```
+
+### 3. Configure Environment
+
+Copy the example environment file and configure your Privy app credentials:
+
+```bash
 cp .env.example .env
 ```
 
-Set `API_KEY` to a Helius Devnet RPC key.
-Set `VITE_PRIVY_APP_ID` to your Privy App ID.
-In the Privy dashboard, enable Solana embedded wallets and allow `http://localhost:5173`.
+Update `.env` with your Privy app credentials and treasury configuration:
+
+```env
+# Privy App Credentials
+PRIVY_APP_ID=your_app_id_here
+PRIVY_APP_SECRET=your_app_secret_here
+
+# Treasury Configuration
+TREASURY_WALLET_ID=your_treasury_wallet_id
+TREASURY_WALLET_ADDRESS=your_treasury_wallet_address
+TREASURY_AUTHORIZATION_KEY=your_base64_encoded_private_key
+TREASURY_OWNER_ID=your_treasury_owner_id
+
+# Key Quorum Configuration
+TREASURY_QUORUM_PRIVATE_KEY=your_base64_encoded_private_key
+TREASURY_QUORUM_PUBLIC_KEY=your_base64_encoded_public_key
+
+# Policy Configuration
+ALLOWLIST_USDC_POLICY_ID=your_allowlist_policy_id
+```
+
+**Important:** Get your credentials from the [Privy Dashboard](https://dashboard.privy.io). Never expose `PRIVY_APP_SECRET` in client-side code.
+
+### 4. Start Development Server
 
 ```bash
 npm run dev
 ```
 
-Open the local URL, log in, and create a second Solana embedded wallet.
-Fund both displayed addresses with at least 0.05 Devnet SOL each, then select **Validate on Devnet**.
-The app asks Privy to sign the SDK's canonical derivation message and each Solana transaction.
-It never exports the Privy signing key.
-Privacy keys derived from the message signature stay in the browser; the SDK uses the attested prover policy from `../devnet-e-tee-policy.json`.
+The server will start on [http://localhost:3300](http://localhost:3300).
 
-The local Vite proxy reads `API_KEY` on the server. It is not a `VITE_` variable.
-The browser starter uses this proxy; configure an RPC proxy for another hosting environment.
+## Core Functionality
 
-## Automated Privy validation
+### 1. Initialize Privy Server Client
 
-Set `PRIVY_APP_ID` and `PRIVY_APP_SECRET` in `.env`.
-Use a dedicated test app whose wallet API can create and sign with app-owned Solana wallets.
-The secret belongs only in the Node process.
+Server-side initialization with app credentials.
 
-```bash
-npm run validate:devnet
+[`src/lib/privy.ts`](./src/lib/privy.ts)
+```typescript
+import { PrivyClient } from "@privy-io/node";
+
+export const privy = new PrivyClient({
+  appId: PRIVY_APP_ID,
+  appSecret: PRIVY_APP_SECRET,
+});
 ```
 
-The script creates two Privy server wallets, saves their IDs and public addresses in `wallets.local.json`,
-and funds each with 0.05 Devnet SOL from `ZOLANA_PAYER_KEYPAIR` (default `~/.config/solana/id.json`).
-The payer needs at least 0.101 Devnet SOL.
-Successful validation saves confirmed transaction signatures and slots to `validation.local.json`.
-The funded public balances remain in the two test wallets.
+### 2. Create Wallets with Key Quorums
 
-Server-wallet validation proves the Privy wallet API signing path.
-The browser login and embedded-wallet path needs its own live run.
+Create wallets owned by multi-signature key quorums for enhanced security.
 
-## Checks
+[`src/handlers/key_quorums/create_wallet.ts`](./src/handlers/key_quorums/create_wallet.ts)
+```typescript
+import { privy } from "../../lib/privy";
 
-```bash
-npm run check
-npm test
-npm run build
+// Create 2-of-2 key quorum
+const keyQuorum = await privy.keyQuorums().create({
+  public_keys: [public_key, TREASURY_QUORUM_PUBLIC_KEY],
+  authorization_threshold: 2,
+  display_name: `Treasury 2-of-2 Key Quorum with ${alias}`,
+});
+
+// Create wallet owned by key quorum
+const wallet = await privy.wallets().create({
+  chain_type: "ethereum",
+  owner_id: keyQuorum.id,
+});
 ```
 
-The signer tests use local Ed25519 keys. They do not call Privy.
-`npm run validate:protocol` runs the same live Devnet flow with local test signers.
-It saves recovery seeds to the ignored, owner-readable `protocol-seeds.local.json` before funding the test wallets.
-It refuses to overwrite that file. Its results do not validate Privy signing.
+### 3. Send USDC Transactions
 
-See [VALIDATION.md](VALIDATION.md) for the latest recorded result.
+Execute server-side USDC transactions with policy enforcement.
 
-## References
+[`src/handlers/transactions/send_usdc.ts`](./src/handlers/transactions/send_usdc.ts)
+```typescript
+import { privy } from "../../lib/privy";
 
-- [Privy Solana starter](https://github.com/privy-io/examples/tree/main/examples/privy-next-solana): provider configuration, message signing, and transaction signing.
-- [Privy Node starter](https://github.com/privy-io/examples/tree/main/privy-node-starter): server client configuration.
-- [`typescript-client/examples/deposit_transfer_withdraw.ts`](../typescript-client/examples/deposit_transfer_withdraw.ts): deposit, proof, transfer, indexer freshness, and withdrawal sequence.
-- [Zolana wallet adapter example](https://github.com/helius-labs/zolana-examples/tree/feat/sign-with-wallet-adapter/embedded-private-wallet/src/lib): Kit wire-transaction adapter and version 0 transaction composition.
-- [Zolana SDK `LocalKeys`](https://github.com/helius-labs/zolana/blob/v0.7.0-alpha/sdk-libs/ts/src/client/keys.ts): signature-based privacy-key derivation.
+// Send USDC with treasury approval
+const transactionRequest = await privy.transactions().create({
+  wallet_id: TREASURY_WALLET_ID,
+  chain_type: "ethereum",
+  // Transaction details configured server-side
+});
+```
 
-Privy's Node SDK currently declares a Solana Kit 5 peer dependency.
-Its validation dependencies are installed separately from the browser and Zolana SDK, which use Kit 8.
-The integration exchanges transaction bytes between them.
+## Relevant Links
+
+- [Privy Dashboard](https://dashboard.privy.io)
+- [Privy Documentation](https://docs.privy.io)
+- [Node.js SDK](https://www.npmjs.com/package/@privy-io/node)
+- [Express.js Documentation](https://expressjs.com/)
+
+## Confidential SOL on Devnet
+
+This directory starts from the [official Privy Node starter](https://github.com/privy-io/examples/tree/cf8a9d34570e8bece4ed7f5bc58b92042c398b18/privy-node-starter).
+The added `src/confidential.mts` uses `@heliuslabs/zolana@0.7.0-alpha` to deposit 0.01 SOL,
+transfer 0.003 SOL confidentially, and withdraw both private balances. Privy signs the
+privacy-key derivation messages and Solana transactions.
+
+Use Node.js 24 or later. Set `HELIUS_RPC_URL`, `SENDER_WALLET_ID`, and `RECIPIENT_WALLET_ID`
+in `.env`. Both wallets must be Solana wallets that the configured Privy app can sign for.
+Fund the sender with at least 0.02 Devnet SOL and the recipient with at least 0.01 Devnet SOL.
+Only `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, and these three variables are needed for this example.
+It uses the repository's `../devnet-e-tee-policy.json` for prover attestation.
+
+```bash
+npm run confidential
+```
+
+The script checks the deposited and transferred private balances, then checks that both
+private balances are zero after withdrawal. It prints the confirmed transaction signatures.
