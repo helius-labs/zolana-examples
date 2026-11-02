@@ -28,7 +28,7 @@ model, order terms, instructions, and circuits.
 ## Build
 
 Each crate is its own package with no shared workspace, so build them one at a
-time. The Zolana crates come from the `v0.6.0-alpha` tag of
+time. The Zolana crates come from the `v0.7.0-alpha` tag of
 [helius-labs/zolana](https://github.com/helius-labs/zolana). Run the commands
 below from `swap-program/`.
 
@@ -38,13 +38,13 @@ cargo build --manifest-path sdk/Cargo.toml
 ```
 
 The prover compiles Go gnark circuits, so building `prover`, `sdk` or `test`
-needs Go 1.27.1 or newer alongside Rust. The circuits import the `github.com/helius-labs/zolana/prover/server`
+needs Go 1.27.3 or newer alongside Rust. The circuits import the `github.com/helius-labs/zolana/prover/server`
 and `zolana/gnarksdk` Go modules, which
 [`prover/circuits/go.mod`](prover/circuits/go.mod) takes from a Zolana checkout
 named `zolana` next to the `zolana-examples` checkout:
 
 ```bash
-git clone --branch v0.6.0-alpha https://github.com/helius-labs/zolana ../../zolana
+git clone --branch v0.7.0-alpha https://github.com/helius-labs/zolana ../../zolana
 ```
 
 The Go bridge to Rust ships inside the `spr-gnark-ffi-prover-build` crate

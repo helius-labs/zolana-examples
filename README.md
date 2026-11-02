@@ -38,8 +38,8 @@ This release uses the shielded-pool program ID
 `ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW`; accounts and notes from
 earlier program IDs are not migrated.
 
-To run the same tests locally, install Rust, Go 1.27.1+, and the Solana CLI
-with `cargo build-sbf`, and check out Zolana's `v0.6.0-alpha` tag in a sibling
+To run the same tests locally, install Rust, Go 1.27.3+, and the Solana CLI
+with `cargo build-sbf`, and check out Zolana's `v0.7.0-alpha` tag in a sibling
 directory named `zolana`. Install the TypeScript dependencies with
 `cd typescript-client && pnpm install --frozen-lockfile`, then run from the
 repository root:
