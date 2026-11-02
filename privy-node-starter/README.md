@@ -7,7 +7,8 @@ This example showcases how to get started using Privy's Node.js SDK in a server-
 ### 1. Clone the Project
 
 ```bash
-mkdir -p privy-node-starter && curl -L https://github.com/privy-io/privy-examples/archive/main.tar.gz | tar -xz --strip=2 -C privy-node-starter examples-main/privy-node-starter && cd privy-node-starter
+git clone https://github.com/helius-labs/zolana-examples.git
+cd zolana-examples/privy-node-starter
 ```
 
 ### 2. Install Dependencies
@@ -109,17 +110,10 @@ const transactionRequest = await privy.transactions().create({
 });
 ```
 
-## Relevant Links
-
-- [Privy Dashboard](https://dashboard.privy.io)
-- [Privy Documentation](https://docs.privy.io)
-- [Node.js SDK](https://www.npmjs.com/package/@privy-io/node)
-- [Express.js Documentation](https://expressjs.com/)
-
-## Confidential SOL on Devnet
+### 4. Confidential SOL on Devnet
 
 This directory starts from the [official Privy Node starter](https://github.com/privy-io/examples/tree/cf8a9d34570e8bece4ed7f5bc58b92042c398b18/privy-node-starter).
-The added `src/confidential.mts` uses `@heliuslabs/zolana@0.7.0-alpha` to deposit 0.01 SOL,
+The added [`src/confidential.mts`](./src/confidential.mts) uses `@heliuslabs/zolana@0.7.0-alpha` to deposit 0.01 SOL,
 transfer 0.003 SOL confidentially, and withdraw both private balances. Privy signs the
 privacy-key derivation messages and Solana transactions.
 
@@ -133,5 +127,19 @@ It uses the repository's `../devnet-e-tee-policy.json` for prover attestation.
 npm run confidential
 ```
 
+Run this script separately from the Express development server.
+
 The script checks the deposited and transferred private balances, then checks that both
 private balances are zero after withdrawal. It prints the confirmed transaction signatures.
+
+## Relevant Links
+
+- [Privy Dashboard](https://dashboard.privy.io)
+- [Privy Documentation](https://docs.privy.io)
+- [Node.js SDK](https://www.npmjs.com/package/@privy-io/node)
+- [Express.js Documentation](https://expressjs.com/)
+- [Helius Privacy Documentation](https://www.helius.dev/docs/privacy)
+- [Deposit into a Private Balance](https://www.helius.dev/docs/privacy/guides/deposit)
+- [Private Transfers](https://www.helius.dev/docs/privacy/guides/transfer)
+- [Withdraw from a Private Balance](https://www.helius.dev/docs/privacy/guides/withdraw)
+- [Helius Privacy Demo](https://helius.dev/privacy/demo)
