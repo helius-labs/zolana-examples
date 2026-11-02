@@ -20,6 +20,10 @@
 | [`sync_balance`](typescript-client/examples/sync_balance.ts) | Read the private SOL and SPL balances. |
 | [`read_history`](typescript-client/examples/read_history.ts) | Read the private transaction history. |
 
+### [Privy confidential transfers](privy-confidential-transfers/README.md)
+
+Privy Solana embedded wallets and server wallets: register, deposit, confidential transfer, and withdraw on Devnet.
+
 ### Program examples
 
 |  |  |

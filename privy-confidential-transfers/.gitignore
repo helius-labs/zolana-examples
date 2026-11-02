@@ -1,0 +1,7 @@
+.env
+.env.local
+dist/
+validation.local.json
+wallets.local.json
+protocol-seeds.local.json
+protocol-validation.local.json
