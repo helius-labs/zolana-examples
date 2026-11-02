@@ -1,4 +1,4 @@
-# Privy confidential transfers on Devnet
+# Privy Node starter
 
 React starter with Privy Solana embedded wallets and `@heliuslabs/zolana`.
 The same SDK flow also runs with Privy server wallets for automated validation.

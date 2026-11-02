@@ -1,0 +1,38 @@
+{
+  "provider": "Privy server wallets",
+  "checkedAt": "2026-11-02T18:09:48.703Z",
+  "network": "devnet",
+  "sender": "FGKrLcQHgrPBrgM1KMRLhHrpNcACLi8TFbindTifU8DM",
+  "recipient": "HnEThJAqJnvbX5i5viMmTXJhHbQ4XiwdWfcYVgsefeuD",
+  "activationRecovery": true,
+  "depositLamports": "10000000",
+  "transferLamports": "3000000",
+  "senderPrivateBalance": "0",
+  "recipientPrivateBalance": "0",
+  "transactions": {
+    "senderRegistration": {
+      "signature": "3Stu4mZH2hsJAmbA6VSXGCUoB4iP1isBAoiko9DJ7pRJ7LywgKHRtVBxovz8oK8fEkXgmjj9zpzFaAcDUWwZ2gSs",
+      "slot": "517940407"
+    },
+    "recipientRegistration": {
+      "signature": "64wBAAHLEUxWFxWn6HJLS3jaciuFVKYc82YhxtMy1px6LVWQkwz2qw4Exrg8GXkRMap4RSkaDU3UTqSP28kXJCbc",
+      "slot": "517940415"
+    },
+    "deposit": {
+      "signature": "52GwJ9fwBgdB875g6iHpmiKk5LwqBC6r9i1GyGLZqf6eP8tj9jMHfDULfnWCNTNWzRBNkv2NqzZ5WEPEMKnPsKMi",
+      "slot": "517940423"
+    },
+    "transfer": {
+      "signature": "5KGFPrm3BzunAwUgcXUhKMg9NxFmsWFpEFavVFjoiea9zKK8iXpNzKcDxFX2BRLfkRm4qnaEEqGAXTzDo5meuCoe",
+      "slot": "517940432"
+    },
+    "recipientWithdrawal": {
+      "signature": "2QUj2XLPT6RZq9xpHSkz9ccAcCZg58hDM3BTYsyJrBDrHQZcd5f2bYkV8fJFQsyiTwtFvC5tNq9FYWhTqNStbNju",
+      "slot": "517940443"
+    },
+    "senderWithdrawal": {
+      "signature": "5yDu6TBEEEjkpDWjBaRmQiFgwTTikKUckMEYxog95rLJW641ucw6bRt5w7UrEdPaSBjXdAjZheXBNHkCuDuHEW2z",
+      "slot": "517940452"
+    }
+  }
+}
