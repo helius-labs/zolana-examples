@@ -1,8 +1,7 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { createZolanaClient, initializePoseidon } from "@heliuslabs/zolana";
-import { LocalKeys, teePolicyFromJson } from "@heliuslabs/zolana/client";
+import { LocalKeys, SignedTeePolicy } from "@heliuslabs/zolana/client";
 import {
   ed25519DerivationMessage,
   type Bytes32,
@@ -39,9 +38,7 @@ export function getClient(): Promise<Client> {
       indexerUrl: "https://d34xe1hqb2ibg2.cloudfront.net",
       proverUrl: "https://dd73hh473h6ha.cloudfront.net",
       proofDataSource: "prover",
-      proverTee: teePolicyFromJson(
-        JSON.parse(readFileSync("../devnet-e-tee-policy.json", "utf8")),
-      ),
+      proverTee: SignedTeePolicy.forNetwork("devnet"),
     });
     assert.equal(
       await client.solanaRpc.getGenesisHash().send(),

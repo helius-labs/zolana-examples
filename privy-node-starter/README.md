@@ -34,8 +34,11 @@ cd zolana-examples/privy-node-starter
 
 Use Node.js 24 or later.
 
+Use pnpm to install the Privacy SDK from its pinned Git subdirectory.
+The SDK is pinned to [upstream commit c4062d3](https://github.com/helius-labs/zolana/tree/c4062d3860965855e47268f61b01a27e774096eb/sdk-libs/ts) (0.8.0-alpha).
+
 ```bash
-npm install
+pnpm install
 ```
 
 ### 3. Configure Environment
@@ -83,7 +86,7 @@ The confidential endpoints require `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `HELIUS_R
 ### 4. Start Development Server
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 The server will start on [http://localhost:3300](http://localhost:3300).
@@ -191,10 +194,10 @@ Validate deposit, confidential transfer, and withdrawal for SOL and SPL tokens w
 [`scripts/confidential.e2e.mts`](./scripts/confidential.e2e.mts)
 
 ```bash
-npm run confidential:e2e
+pnpm confidential:e2e
 ```
 
-Configure two distinct funded Solana wallets with the same authorized owner key. `RECIPIENT_WALLET_ID` is needed only for this script. The script registers their public shielded keys, creates a test SPL mint, starts the Express server, checks private and public balances, tests restart recovery, and withdraws both private balances. It prints confirmed transaction hashes. Port 3300 must be available.
+Configure two distinct funded Solana wallets with the same authorized owner key. `RECIPIENT_WALLET_ID` is needed only for this script. The script registers their public shielded keys, creates a test SPL mint, starts the Express server, checks private and public balances, tests restart recovery, and withdraws both private balances. It prints confirmed transaction hashes. Stop the development server before running the script; port 3300 must be available.
 
 ## Relevant Links
 

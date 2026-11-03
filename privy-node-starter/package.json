@@ -13,7 +13,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@heliuslabs/zolana": "0.7.0-alpha",
+    "@heliuslabs/zolana": "git+https://github.com/helius-labs/zolana.git#c4062d3860965855e47268f61b01a27e774096eb&path:/sdk-libs/ts",
     "@privy-io/node": "^0.1.0-alpha.2",
     "@solana-program/compute-budget": "0.20.0",
     "@solana-program/system": "0.14.1",
@@ -31,5 +31,6 @@
     "prettier": "^3.6.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
-  }
+  },
+  "packageManager": "pnpm@11.18.0"
 }
