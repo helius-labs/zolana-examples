@@ -62,12 +62,12 @@ funded with at least 0.2 SOL. Each client uses a fresh funded payer, and unused
 public SOL is returned to the CI wallet. The test checks the devnet genesis hash,
 deployed programs, and TEE attestation before funding the test payers.
 
-Both clients pin the Devnet-e enclave in
+The Rust client pins the Devnet-e enclave in
 [`devnet-e-tee-policy.json`](devnet-e-tee-policy.json). Its PCR measurements come
 from the [v0.6.0-alpha Nitro build](https://github.com/helius-labs/zolana/actions/runs/40784786893),
 and its HPKE public key was verified against a fresh attestation using those
 measurements. The Rust SDK's default policy still pins the previous Devnet-d
-enclave. TypeScript 0.8.0-alpha has no default policy; these examples pass this file.
+enclave. TypeScript 0.8.0-alpha follows this prover with `SignedTeePolicy.forNetwork("devnet")`.
 
 - [Demo](https://helius-privacy-demo.fly.dev/)
 - [Documentation](https://helius.dev/docs/privacy)
