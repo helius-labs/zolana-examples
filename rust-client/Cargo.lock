@@ -5823,7 +5823,7 @@ dependencies = [
 [[package]]
 name = "spr-api"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "http",
  "reqwest",
@@ -5838,7 +5838,7 @@ dependencies = [
 [[package]]
 name = "spr-client"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5890,7 +5890,7 @@ dependencies = [
 [[package]]
 name = "spr-event"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "borsh",
  "wincode",
@@ -5899,7 +5899,7 @@ dependencies = [
 [[package]]
 name = "spr-event-parser"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "borsh",
  "solana-pubkey 4.2.0",
@@ -5910,7 +5910,7 @@ dependencies = [
 [[package]]
 name = "spr-hasher"
 version = "0.1.1"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -5925,7 +5925,7 @@ dependencies = [
 [[package]]
 name = "spr-indexer-api"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "base64 0.22.1",
  "bs58",
@@ -5938,7 +5938,7 @@ dependencies = [
 [[package]]
 name = "spr-instruction"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "solana-address 2.6.1",
  "solana-instruction",
@@ -5952,7 +5952,7 @@ dependencies = [
 [[package]]
 name = "spr-interface"
 version = "0.1.1"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "arrayvec",
  "borsh",
@@ -5971,7 +5971,7 @@ dependencies = [
 [[package]]
 name = "spr-keypair"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "aes",
  "bs58",
@@ -5994,7 +5994,7 @@ dependencies = [
 [[package]]
 name = "spr-merkle-tree"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "num-bigint 0.4.8",
  "num-traits",
@@ -6005,7 +6005,7 @@ dependencies = [
 [[package]]
 name = "spr-program"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "solana-address 2.6.1",
  "spr-hasher",
@@ -6018,7 +6018,7 @@ dependencies = [
 [[package]]
 name = "spr-program-test"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "base64 0.22.1",
  "litesvm",
@@ -6053,7 +6053,7 @@ dependencies = [
 [[package]]
 name = "spr-protocol-instructions"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "solana-address 2.6.1",
  "solana-instruction",
@@ -6065,13 +6065,14 @@ dependencies = [
 [[package]]
 name = "spr-prover-tee"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "aes-gcm",
  "ciborium",
  "ciborium-ll",
  "coset",
  "dcap-qvl",
+ "ed25519-dalek",
  "form_urlencoded",
  "hex",
  "hpke",
@@ -6088,7 +6089,7 @@ dependencies = [
 [[package]]
 name = "spr-smart-account-client"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "borsh",
  "solana-instruction",
@@ -6098,7 +6099,7 @@ dependencies = [
 [[package]]
 name = "spr-test-utils"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6140,7 +6141,7 @@ dependencies = [
 [[package]]
 name = "spr-transaction"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "borsh",
  "num-bigint 0.4.8",
@@ -6158,7 +6159,7 @@ dependencies = [
 [[package]]
 name = "spr-tree"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "borsh",
  "bytemuck",
@@ -6173,7 +6174,7 @@ dependencies = [
 [[package]]
 name = "spr-user-registry-interface"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?tag=v0.7.0-alpha#c4263ad1e5c5a78285c44cf98335e09db64b762d"
+source = "git+https://github.com/helius-labs/zolana?rev=6bb4f7008294695ebe614f08affb215d4321a538#6bb4f7008294695ebe614f08affb215d4321a538"
 dependencies = [
  "borsh",
  "solana-instruction",
