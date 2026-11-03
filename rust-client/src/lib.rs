@@ -9,8 +9,10 @@ use solana_signer::Signer;
 use solana_system_interface::instruction::create_account;
 use spl_token_interface::instruction::{initialize_account3, initialize_mint2, mint_to};
 use spr_client::{
-    check_service_url, prover::tee::TeePolicy, ProgramAccountsFilter, ProofDataSource,
-    ProverClient, Rpc, SolanaRpc, ZolanaClient, ZolanaIndexer,
+    check_service_url,
+    prover::tee::{SignedTeePolicy, TeeNetwork},
+    ProgramAccountsFilter, ProofDataSource, ProverClient, Rpc, SolanaRpc, ZolanaClient,
+    ZolanaIndexer,
 };
 use spr_interface::{
     pda,
@@ -40,9 +42,7 @@ impl SetupContext {
         check_service_url(&self.prover_url, "prover_url")?;
         let prover = ProverClient::new(self.prover_url.clone());
         if self.prover_url.trim_end_matches('/') == PROVER_URL {
-            Ok(prover.with_tee(TeePolicy::from_json(include_str!(
-                "../../devnet-e-tee-policy.json"
-            ))?))
+            Ok(prover.with_signed_tee(SignedTeePolicy::for_network(TeeNetwork::Devnet)))
         } else {
             Ok(prover)
         }
