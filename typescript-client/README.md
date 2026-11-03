@@ -11,7 +11,7 @@ TypeScript client examples for `@heliuslabs/zolana`.
 ## Setup
 
 Install Node.js 24+ and pnpm. The SDK is pinned to the published npm release
-`@heliuslabs/zolana@^0.7.0-alpha`.
+`@heliuslabs/zolana@^0.8.0-alpha`.
 
 ```bash
 pnpm install
