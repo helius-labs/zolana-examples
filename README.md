@@ -31,11 +31,11 @@
 
 CI runs all five Rust and TypeScript client examples, the swap (take, cancel,
 and verifiable encryption), and timelock escrow flows. Rust dependencies, the
-prover, and the shielded-pool program use Zolana commit
+CLI, prover, and the shielded-pool program use Zolana commit
 `6bb4f7008294695ebe614f08affb215d4321a538`, the TypeScript `0.8.0-alpha` release
-commit. The prover and shielded-pool program are built from source because the
-published binaries predate the SDK's attestation protocol and finalized ceremony
-keys. The CLI, user registry, and Photon use the `v0.6.0-alpha` release binaries;
+commit. The CLI, prover and shielded-pool program are built from source because
+the published binaries predate the SDK's attestation protocol, key catalog and
+finalized ceremony keys. The user registry and Photon use the `v0.6.0-alpha` release binaries;
 their sizes and SHA-256 hashes are pinned in
 [`test-utils/release-artifacts.json`](test-utils/release-artifacts.json).
 The shielded-pool program ID is
@@ -53,7 +53,7 @@ repository root:
 bash test-utils/run-release-tests.sh
 ```
 
-The runner downloads and verifies release binaries, builds the prover,
+The runner downloads and verifies release binaries, builds the CLI, prover,
 shielded-pool program and two example programs, generates the examples'
 insecure test proving keys, and starts isolated
 validators and indexers. The protocol prover downloads its pinned keys as needed.

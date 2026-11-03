@@ -9,15 +9,16 @@ ZOLANA_TEST_ARTIFACTS_DIR=$(cd "$ZOLANA_TEST_ARTIFACTS_DIR" && pwd)
 export ZOLANA_TEST_ARTIFACTS_DIR
 python3 test-utils/download-release.py "$ZOLANA_TEST_ARTIFACTS_DIR"
 
-# The SDK's attestation protocol and finalized ceremony keys postdate the
-# published prover and shielded-pool binaries. Build both from the SDK revision.
+# The SDK's attestation protocol, key catalog and finalized ceremony keys
+# postdate the published binaries. Build these services from the SDK revision.
 sdk_dir=$(cd "$repo_dir/../zolana" && pwd)
 sdk_revision=6bb4f7008294695ebe614f08affb215d4321a538
 if [ "$(git -C "$sdk_dir" rev-parse HEAD)" != "$sdk_revision" ]; then
     echo "Check out Zolana $sdk_revision at $sdk_dir" >&2
     exit 1
 fi
-rm "$ZOLANA_TEST_ARTIFACTS_DIR/prover-server" "$ZOLANA_TEST_ARTIFACTS_DIR/shielded_pool_program.so"
+rm "$ZOLANA_TEST_ARTIFACTS_DIR/prover-server" "$ZOLANA_TEST_ARTIFACTS_DIR/shielded_pool_program.so" \
+    "$ZOLANA_TEST_ARTIFACTS_DIR/zolana"
 (
     cd "$sdk_dir/prover/server"
     go build -mod=readonly -o "$ZOLANA_TEST_ARTIFACTS_DIR/prover-server" .
@@ -25,6 +26,9 @@ rm "$ZOLANA_TEST_ARTIFACTS_DIR/prover-server" "$ZOLANA_TEST_ARTIFACTS_DIR/shield
 cargo build-sbf --manifest-path "$sdk_dir/programs/shielded-pool/Cargo.toml" \
     --tools-version v1.54 --sbf-out-dir "$ZOLANA_TEST_ARTIFACTS_DIR" \
     -- --features bpf-entrypoint
+cargo build --manifest-path "$sdk_dir/Cargo.toml" --locked -p spr-cli --bin zolana \
+    --target-dir "$sdk_dir/target"
+ln -s "$sdk_dir/target/debug/zolana" "$ZOLANA_TEST_ARTIFACTS_DIR/zolana"
 
 export SURFPOOL_BIN="$ZOLANA_TEST_ARTIFACTS_DIR/surfpool"
 export ZOLANA_PHOTON_BIN="$ZOLANA_TEST_ARTIFACTS_DIR/photon"
