@@ -14,3 +14,6 @@ export const TREASURY_QUORUM_PUBLIC_KEY =
   process.env.TREASURY_QUORUM_PUBLIC_KEY!;
 
 export const ALLOWLIST_USDC_POLICY_ID = process.env.ALLOWLIST_USDC_POLICY_ID!;
+
+export const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL!;
+export const SENDER_WALLET_ID = process.env.SENDER_WALLET_ID!;

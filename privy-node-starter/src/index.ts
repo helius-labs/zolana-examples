@@ -19,6 +19,18 @@ app.post("/key_quorums/create_wallet", createWallet);
 
 app.post("/internal/policies/create_allowlist_usdc", createAllowlistUsdc);
 
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
-});
+async function start() {
+  const [{ deposit }, { transfer }, { withdraw }] = await Promise.all([
+    import("./handlers/transactions/deposit.mjs"),
+    import("./handlers/transactions/transfer.mjs"),
+    import("./handlers/transactions/withdraw.mjs"),
+  ]);
+  app.post("/transactions/deposit", deposit);
+  app.post("/transactions/transfer", transfer);
+  app.post("/transactions/withdraw", withdraw);
+  app.listen(port, (error) => {
+    if (error) throw error;
+    console.log(`Example app listening on port ${port}`);
+  });
+}
+void start();
