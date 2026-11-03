@@ -156,7 +156,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: helius-labs/zolana
-          ref: 6bb4f7008294695ebe614f08affb215d4321a538
+          ref: 6aba4a70177caaef602baf972ce4958691ec1e65
           path: zolana
 
       - name: Install Rust
