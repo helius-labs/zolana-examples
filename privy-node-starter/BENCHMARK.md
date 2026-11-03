@@ -24,14 +24,18 @@ Regenerate with `npm run confidential:e2e`.
 | Asset | Total CU | HTTP Duration | Fee            |
 | ----- | -------- | ------------- | -------------- |
 | SOL   | 38,080   | 2,645.9 ms    | 5,000 lamports |
+| SPL   | 45,746   | 2,707.0 ms    | 5,000 lamports |
 
 **Transaction Size**
 
-| Instruction Data | Accounts | v0 Tx     |
-| ---------------- | -------- | --------- |
-| 83 bytes         | 6        | 390 bytes |
+| Asset | Instruction Data | Accounts | v0 Tx     |
+| ----- | ---------------- | -------- | --------- |
+| SOL   | 83 bytes         | 6        | 390 bytes |
+| SPL   | 85 bytes         | 12       | 597 bytes |
 
 Transaction: [Devnet SOL deposit](https://explorer.solana.com/tx/3f3rTf2HfPzQwYUFf9L7hgYjrGe7SJ6WzoigsjfGuainmLWLXG9LRwZgh5oLVaTsoRmcX3bioHgQDg38oKrbjX5R?cluster=devnet).
+
+Transaction: [Devnet SPL deposit](https://explorer.solana.com/tx/12A2fsPed5Qw1gYR92SDhVfg1sybh1rZEuCDTRDyZX32ZifZtYecAPiCVMFBLzRvpBZUYqwSYpuCe8PhmmjvZN3L?cluster=devnet).
 
 ## 2. Transfer
 
@@ -51,4 +55,5 @@ No withdrawal measurement from this run. The transfer stage did not complete.
 - Two Privy Solana wallets with a shared owner authorization key.
 - Wallet registrations and SPL mint setup confirmed before the SOL deposit.
 - The attempted transfer returned CLIENT_PROVER_TEE_ATTESTATION. The SDK requests /tee/v1/attestation with the Zolana-Tee wire contract; the deployed prover serves /attestation with the Spr-Tee wire contract.
-- Attestation verification remains enabled. This report contains only the successful deposit measurement.
+- The E2E run stopped at the first transfer. The SPL deposit was measured separately through the same Express endpoint; its public and private token balances were verified.
+- Attestation verification remains enabled. This report contains only successful deposit measurements.
