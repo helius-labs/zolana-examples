@@ -20,14 +20,10 @@ use spr_interface::{
     PROGRAM_ID_PUBKEY, SPL_TOKEN_ACCOUNT_LEN, SPL_TOKEN_MINT_ACCOUNT_LEN,
 };
 use spr_transaction::AssetRegistry;
+use url::Url;
 
-/// The RPC, Photon indexer, and prover the examples talk to.
+/// Helius serves Solana RPC, the indexer, and the prover on the same host.
 pub const RPC_URL: &str = "https://devnet.helius-rpc.com";
-pub const INDEXER_URL: &str = "https://d34xe1hqb2ibg2.cloudfront.net";
-pub const PROVER_URL: &str = "https://dd73hh473h6ha.cloudfront.net";
-// localnet: pub const RPC_URL: &str = "http://127.0.0.1:8899";
-// localnet: pub const INDEXER_URL: &str = "http://127.0.0.1:8784";
-// localnet: pub const PROVER_URL: &str = "http://127.0.0.1:3001";
 
 /// Service URLs and the default tree.
 pub struct SetupContext {
@@ -38,14 +34,32 @@ pub struct SetupContext {
 }
 
 impl SetupContext {
+    pub fn from_rpc_url(rpc_url: String) -> Result<Self> {
+        let mut service_url = Url::parse(&rpc_url)?;
+        if service_url
+            .host_str()
+            .is_some_and(|host| host == "helius-rpc.com" || host.ends_with(".helius-rpc.com"))
+            && service_url.path().trim_end_matches('/').is_empty()
+        {
+            service_url.set_path("/v1/spr");
+        }
+        Ok(Self {
+            rpc_url,
+            indexer_url: service_url.to_string(),
+            prover_url: service_url.to_string(),
+            tree: pda::tree(0),
+        })
+    }
+
     pub fn prover_client(&self) -> Result<ProverClient> {
         check_service_url(&self.prover_url, "prover_url")?;
         let prover = ProverClient::new(self.prover_url.clone());
-        if self.prover_url.trim_end_matches('/') == PROVER_URL {
-            Ok(prover.with_signed_tee(SignedTeePolicy::for_network(TeeNetwork::Devnet)))
-        } else {
-            Ok(prover)
-        }
+        let network = match Url::parse(&self.prover_url)?.host_str() {
+            Some("devnet.helius-rpc.com") => TeeNetwork::Devnet,
+            Some("mainnet.helius-rpc.com") => TeeNetwork::Mainnet,
+            _ => return Ok(prover),
+        };
+        Ok(prover.with_signed_tee(SignedTeePolicy::for_network(network)))
     }
 
     pub fn client(&self) -> Result<ZolanaClient<SolanaRpc>> {
@@ -59,22 +73,35 @@ impl SetupContext {
     }
 }
 
-/// Read the environment settings and the `API_KEY` for the Helius devnet RPC.
-/// Defaults are Helius plus the Photon/prover HTTPS endpoints. Toggle the `localnet:`
-/// lines to run against a local stack instead.
+/// Use `ZOLANA_ENDPOINT`, or the Helius devnet endpoint with `API_KEY`.
+/// Local stacks can override `ZOLANA_INDEXER_URL` and `ZOLANA_PROVER_URL`.
 pub fn setup() -> Result<SetupContext> {
     dotenvy::dotenv().ok();
-    let tree = pda::tree(0);
-    let api_key = std::env::var("API_KEY").map_err(|_| anyhow!("set API_KEY"))?;
-    let rpc_url = format!("{RPC_URL}/?api-key={api_key}");
-    // localnet: let rpc_url = RPC_URL.to_string();
+    let rpc_url = match env_setting("ZOLANA_ENDPOINT") {
+        Some(endpoint) => endpoint,
+        None => {
+            let api_key =
+                env_setting("API_KEY").ok_or_else(|| anyhow!("set API_KEY or ZOLANA_ENDPOINT"))?;
+            let mut url = Url::parse(RPC_URL)?;
+            url.query_pairs_mut().append_pair("api-key", &api_key);
+            url.to_string()
+        }
+    };
+    let mut context = SetupContext::from_rpc_url(rpc_url)?;
+    if let Some(url) = env_setting("ZOLANA_INDEXER_URL") {
+        context.indexer_url = url;
+    }
+    if let Some(url) = env_setting("ZOLANA_PROVER_URL") {
+        context.prover_url = url;
+    }
+    Ok(context)
+}
 
-    Ok(SetupContext {
-        rpc_url,
-        indexer_url: INDEXER_URL.to_string(),
-        prover_url: PROVER_URL.to_string(),
-        tree,
-    })
+fn env_setting(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 /// The Solana CLI wallet (`ZOLANA_PAYER_KEYPAIR`, defaults to

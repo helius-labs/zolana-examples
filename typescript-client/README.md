@@ -21,7 +21,7 @@ pnpm install
 
 The example uses devnet by default.
 
-Devnet proofs use the attested TEE prover, which fetches Merkle proofs from Photon and assembles the witness server-side. Photon also serves balance and history reads.
+One Helius RPC endpoint serves Solana RPC, the Photon indexer, and the attested TEE prover. The SDK routes indexer and prover requests through `/v1/spr`, preserving the API key. The prover fetches Merkle proofs from Photon and assembles the witness server-side. Photon also serves balance and history reads.
 
 Get an API key from [Helius](https://helius.dev) and add to .env:
 
@@ -29,19 +29,23 @@ Get an API key from [Helius](https://helius.dev) and add to .env:
 cp .env.example .env # ...and set API_KEY
 ```
 
+For mainnet, set `ZOLANA_ENDPOINT=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY`. The examples select the signed TEE policy for the endpoint's network.
+
 **Localnet**:
 
-To run on localnet, configure in [`src/lib.ts`](src/lib.ts) and install:
+To run on localnet, install:
 
 ```bash
 cargo install --git https://github.com/helius-labs/zolana --rev 6bb4f7008294695ebe614f08affb215d4321a538 spr-cli
 zolana dev start
 ```
 
-```typescript
-const RPC_URL = "http://127.0.0.1:8899";
-const INDEXER_URL = "http://127.0.0.1:8784";
-const PROVER_URL = "http://127.0.0.1:3001";
+Set these overrides in `.env`:
+
+```bash
+ZOLANA_ENDPOINT=http://127.0.0.1:8899
+ZOLANA_INDEXER_URL=http://127.0.0.1:8784
+ZOLANA_PROVER_URL=http://127.0.0.1:3001
 ```
 
 For a local prover without an indexer, set `ZOLANA_PROOF_DATA_SOURCE=client`. The localnet integration tests use this mode because they share one prover across separate validator/indexer stacks.
