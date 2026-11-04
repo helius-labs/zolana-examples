@@ -70,6 +70,9 @@ const prover = new ProgramProver("settle_dvp");
 
 The wrapper uses Xark's synchronous proving session and verifies each proof
 against the trusted key before converting it into the Solana proof layout.
+To prove with a worker pool, create one from the generated
+`wasm/xark/pool.mjs` and pass it to `useWorkerPool(pool)` before constructing
+provers; terminate the pool when finished.
 Call `prover.free()` when finished to release the WASM session.
 The generated artifacts live under `../target/zk/dvp-program/`, with
 `<circuit>/circuit.xbc`, `<circuit>/pk.bin` and `<circuit>/vk.bin` for each

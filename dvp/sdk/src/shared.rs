@@ -4,12 +4,19 @@ use zolana_interface::instruction::instruction_data::transact::TransactIxData;
 use zolana_program::ProgramOwner;
 use zolana_transaction::instructions::transact::SppProofInputs;
 
+use zolana_hasher::primitives::solana_owner_identity;
+
 use crate::err;
 
 pub(crate) fn field_decimal(bytes: [u8; 32]) -> Result<String> {
     Ok(zolana_program::from_bytes(&bytes)
         .map_err(err)?
         .to_decimal())
+}
+
+/// A Solana address's owner identity, as a decimal proof input.
+pub(crate) fn identity_decimal(address: &solana_address::Address) -> Result<String> {
+    field_decimal(solana_owner_identity(address.as_array()).map_err(err)?)
 }
 
 /// Runs a program transaction's `prepare`, whose native circuit `execute`

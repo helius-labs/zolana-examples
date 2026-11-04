@@ -1,10 +1,10 @@
-import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import * as runtime from "../../target/zk/dvp-program/wasm/dvp_program.js";
 import type {
   ProgramTransaction,
   ProgramProof,
+  ProofBundle,
 } from "../../target/zk/dvp-program/wasm/dvp_program.js";
 import type { WorkerPool } from "../../target/zk/dvp-program/wasm/xark/pool.d.ts";
 
@@ -50,25 +50,36 @@ export function useWorkerPool(pool: WorkerPool | undefined): void {
 /** Keeps a decoded Xark circuit, proving key and verifier for repeated proofs. */
 export class ProgramProver {
   readonly #session: InstanceType<typeof runtime.ProvingSession> | undefined;
-  readonly #pooled:
-    | { pool: WorkerPool; artifacts: ReturnType<typeof circuitArtifacts> }
-    | undefined;
   readonly #verifier: InstanceType<typeof runtime.VerifyingKey>;
+  readonly #prove: (inputs: ProgramTransaction["proofInputs"]) => ProofBundle;
   #disposed = false;
 
   constructor(readonly name: CircuitName) {
     const artifacts = circuitArtifacts(name);
     this.#verifier = new runtime.VerifyingKey(artifacts.verifyingKey);
     try {
-      if (workerPool) {
-        this.#pooled = { pool: workerPool, artifacts };
-        this.#preload();
+      const pool = workerPool;
+      if (pool) {
+        const preload = () => {
+          if (preloadedBy === this) return;
+          runtime.preloadStreaming(artifacts.circuit, artifacts.provingKey, {
+            sources: artifacts.sources,
+          });
+          preloadedBy = this;
+        };
+        preload();
+        this.#prove = (inputs) => {
+          preload();
+          return runtime.proveStreamingPreloaded(inputs, { pool });
+        };
       } else {
-        this.#session = new runtime.ProvingSession(
+        const session = new runtime.ProvingSession(
           artifacts.circuit,
           artifacts.provingKey,
           artifacts.sources,
         );
+        this.#session = session;
+        this.#prove = (inputs) => session.prove(inputs);
       }
     } catch (error) {
       this.#verifier.free();
@@ -76,27 +87,9 @@ export class ProgramProver {
     }
   }
 
-  #preload(): void {
-    if (!this.#pooled || preloadedBy === this) return;
-    const { artifacts } = this.#pooled;
-    runtime.preloadStreaming(artifacts.circuit, artifacts.provingKey, {
-      sources: artifacts.sources,
-    });
-    preloadedBy = this;
-  }
-
   prove(transaction: Pick<ProgramTransaction, "proofInputs" | "publicHash">): ProgramProof {
     if (this.#disposed) throw new Error("DvP prover is disposed");
-    let bundle;
-    if (this.#pooled) {
-      this.#preload();
-      bundle = runtime.proveStreamingPreloaded(transaction.proofInputs, {
-        pool: this.#pooled.pool,
-      });
-    } else {
-      assert.ok(this.#session);
-      bundle = this.#session.prove(transaction.proofInputs);
-    }
+    const bundle = this.#prove(transaction.proofInputs);
     try {
       if (!this.#verifier.verify(bundle.proof, bundle.publicInputs))
         throw new Error("DvP proof verification failed");

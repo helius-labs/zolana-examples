@@ -285,14 +285,11 @@ pub fn assert_invalid<P: Execute>(id: CircuitId, inputs: &Fixture<P>) {
 pub fn context(seed: [u8; 32]) -> TxContext {
     InputRecords::context(&seed, Some(OUTPUT_TREE_ID)).unwrap()
 }
-pub fn identity(address: Address) -> [u8; 32] {
-    solana_owner_identity(address.as_array()).unwrap()
-}
 pub fn owner_hash(address: &ShieldedAddress) -> Field {
     from_bytes(&address.owner_hash().unwrap()).unwrap()
 }
 pub fn field_identity(address: Address) -> Field {
-    from_bytes(&identity(address)).unwrap()
+    from_bytes(&solana_owner_identity(address.as_array()).unwrap()).unwrap()
 }
 pub fn field(value: u8) -> Field {
     Field::from(value)

@@ -1,15 +1,15 @@
 # TypeScript WASM — 18 workers
 
-Measured 2026-11-04T03:45:08.837Z at commit `3597be32b77bc480a0eaa8289ae3dc126e7f982f`.
+Measured 2026-11-04T03:54:40.707Z at commit `51c4a9a6072e662167e9f74e8ebee42eea8237b6`.
 
 darwin arm64; Apple M5 Pro; 18 logical CPUs; Node.js v26.0.0. The generated Node.js WASM build uses the release profile and Xark's streaming prover with a pool of 18 workers.
 
 | Circuit     | Artifact read + SHA-256 (ms) | Prover load (ms) | First prove (ms) | Warm prove median (ms) | Warm prove range (ms) |
 | ----------- | ---------------------------: | ---------------: | ---------------: | ---------------------: | --------------------: |
-| create_dvp  |                          1.3 |             74.4 |            366.0 |                  262.7 |           259.1–266.7 |
-| reclaim_dvp |                          1.4 |             69.7 |            328.9 |                  289.7 |           280.4–293.0 |
-| settle_dvp  |                          2.1 |            112.7 |            505.4 |                  430.9 |           425.6–451.2 |
-| abort_dvp   |                          1.9 |             87.6 |            464.6 |                  398.7 |           388.1–419.4 |
+| create_dvp  |                          1.3 |             76.4 |            358.6 |                  261.6 |           256.4–263.6 |
+| reclaim_dvp |                          1.3 |             68.5 |            321.2 |                  287.8 |           282.3–302.0 |
+| settle_dvp  |                          2.2 |            111.6 |            505.2 |                  432.4 |           427.3–438.7 |
+| abort_dvp   |                          2.1 |             85.1 |            456.6 |                  398.9 |           395.7–424.6 |
 
 Each warm figure uses five samples after one additional warm-up, with the same loaded prover and proof inputs. The fixtures cover create, a full delivery reclaim, a settlement with surplus, and cancellation with both deposits. Abort's first call uses an unfunded cancellation; its warm samples use both deposits.
 

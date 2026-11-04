@@ -1,5 +1,5 @@
 //! Loads checksum-pinned Xark artifacts and converts proofs to the Solana ABI.
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{ensure, Context, Result};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use xark_groth16::PkSource;
@@ -40,7 +40,7 @@ pub fn keys_dir() -> PathBuf {
 }
 
 /// The manifest is committed source metadata, never downloaded with the artifacts.
-pub fn artifact_checksum(id: CircuitId, artifact: &str) -> Result<[u8; 32]> {
+fn artifact_checksum(id: CircuitId, artifact: &str) -> Result<[u8; 32]> {
     let filename = format!("{}/{artifact}", id.name());
     let digest = include_str!("../../dvp-keys.CHECKSUM")
         .lines()
@@ -58,7 +58,7 @@ pub fn artifact_checksum(id: CircuitId, artifact: &str) -> Result<[u8; 32]> {
     Ok(bytes)
 }
 
-pub fn checked_artifact(id: CircuitId, artifact: &str) -> Result<Vec<u8>> {
+fn checked_artifact(id: CircuitId, artifact: &str) -> Result<Vec<u8>> {
     let path = keys_dir().join(id.name()).join(artifact);
     let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
     ensure!(
@@ -120,8 +120,6 @@ pub fn constraint_count(id: CircuitId) -> Result<usize> {
     )
     .map_err(anyhow::Error::msg)?;
     let count = rows.num_constraints();
-    if count == 0 {
-        bail!("empty DvP circuit");
-    }
+    ensure!(count != 0, "empty DvP circuit");
     Ok(count)
 }

@@ -1,4 +1,4 @@
-use crate::shared::field_decimal;
+use crate::shared::{field_decimal, identity_decimal};
 use anyhow::{bail, ensure, Result};
 use dvp_program::circuits::{
     DvpDestinationClient as DvpDestination, SwapDvpTerms as RawTerms,
@@ -6,7 +6,7 @@ use dvp_program::circuits::{
 };
 use dvp_program::{ABORT_TAG, CREATE_TAG, DVP_AUTHORITY_PDA_SEED, SETTLEMENT_TAG};
 use solana_address::Address;
-use zolana_hasher::primitives::{hash_bytes, right_align, solana_owner_identity};
+use zolana_hasher::primitives::{hash_bytes, right_align};
 use zolana_keypair::{hash::poseidon, shielded::SHIELDED_ADDRESS_LEN, ShieldedAddress};
 use zolana_program::{to_bytes, ClientInputs, InputRecords};
 use zolana_transaction::Mint;
@@ -135,18 +135,10 @@ impl SwapDvp {
             "payment mint differs from the terms"
         );
         Ok(SwapDvpTerms {
-            seller_identity: field_decimal(
-                solana_owner_identity(self.seller.as_array()).map_err(err)?,
-            )?,
-            buyer_identity: field_decimal(
-                solana_owner_identity(self.buyer.as_array()).map_err(err)?,
-            )?,
-            settlement_authority_identity: field_decimal(
-                solana_owner_identity(self.settlement_authority.as_array()).map_err(err)?,
-            )?,
-            creator_identity: field_decimal(
-                solana_owner_identity(self.creator.as_array()).map_err(err)?,
-            )?,
+            seller_identity: identity_decimal(&self.seller)?,
+            buyer_identity: identity_decimal(&self.buyer)?,
+            settlement_authority_identity: identity_decimal(&self.settlement_authority)?,
+            creator_identity: identity_decimal(&self.creator)?,
             delivery_mint,
             payment_mint,
             delivery_amount: self.delivery_amount,

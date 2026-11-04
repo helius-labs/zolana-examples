@@ -4,13 +4,12 @@ use dvp_program::circuits::{
 };
 use solana_address::Address;
 use zolana_client::ZolanaIndexer;
-use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::ShieldedKeypair;
 use zolana_program::{ProgramOwner, TransactionOptions};
 use zolana_transaction::instructions::transact::SppProofInputs;
 
 use super::SettleDvp;
-use crate::shared::{catch_requirement, field_decimal};
+use crate::shared::{catch_requirement, field_decimal, identity_decimal};
 use crate::{
     err,
     shared::{ensure_output_tree, prove_pda_transact},
@@ -102,14 +101,10 @@ impl SettleDvpTransactionParams {
                 dvp_address,
             },
             public: SettleDvpPublicInputsClient {
-                creator_identity: field_decimal(
-                    solana_owner_identity(creator.as_array()).map_err(err)?,
-                )?,
+                creator_identity: identity_decimal(&creator)?,
                 dvp_id: field_decimal(self.terms.dvp_id()?)?,
                 dvp_owner: field_decimal(dvp_address.owner_hash().map_err(err)?)?,
-                settlement_authority_identity: field_decimal(
-                    solana_owner_identity(settlement_authority.as_array()).map_err(err)?,
-                )?,
+                settlement_authority_identity: identity_decimal(&settlement_authority)?,
                 current_timestamp: u64::try_from(self.current_timestamp)?,
             },
         };

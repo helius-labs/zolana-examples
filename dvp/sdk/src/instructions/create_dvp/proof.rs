@@ -4,7 +4,6 @@ use dvp_program::circuits::{
     SwapDvpTermsClient as SwapDvpTerms,
 };
 use solana_address::Address;
-use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::ViewingKey;
 use zolana_program::{
     program::{AddressSeed, NewAddress, PdaOwner},
@@ -12,7 +11,7 @@ use zolana_program::{
 };
 use zolana_transaction::SppProofOutputUtxo;
 
-use crate::shared::{catch_requirement, field_decimal};
+use crate::shared::{catch_requirement, field_decimal, identity_decimal};
 use crate::{err, state::SwapDvp};
 
 #[derive(Clone, Debug)]
@@ -87,9 +86,7 @@ pub(crate) fn create_inputs(
             dvp_address: owner,
         },
         public: CreateDvpPublicInputsClient {
-            creator_identity: field_decimal(
-                solana_owner_identity(terms.creator.as_array()).map_err(err)?,
-            )?,
+            creator_identity: identity_decimal(&terms.creator)?,
             dvp_id: field_decimal(terms.dvp_id()?)?,
             dvp_owner: field_decimal(owner.owner_hash().map_err(err)?)?,
         },
