@@ -1,0 +1,36 @@
+use zolana_program::{
+    circuit::{
+        constant, poseidon, zero, Assert, Asset, CircuitVar, DataUtxo, Owner, TxContext, Utxo,
+        UtxoTrait,
+    },
+    CircuitError,
+};
+
+pub(super) fn assert_blinding_seed(
+    context: &TxContext,
+    tag: u32,
+    terms_blinding: &CircuitVar,
+) -> Result<(), CircuitError> {
+    context.blinding_seed.assert_equal(
+        &poseidon(&[constant(u64::from(tag)), terms_blinding.clone()])?,
+        "the transaction seed derives from the DvP terms and instruction",
+    )
+}
+pub(super) fn close_dvp_state(
+    input: &Utxo,
+    owner: &Owner,
+    dvp_id: &CircuitVar,
+) -> Result<DataUtxo<CircuitVar>, CircuitError> {
+    let state = DataUtxo::new_close_with_hash(input, dvp_id)?;
+    state
+        .owner()
+        .assert_equal(owner, "the DvP PDA owns its state")?;
+    state
+        .asset()
+        .assert_equal(&Asset::sol(), "the DvP state uses SOL")?;
+    state
+        .amount()?
+        .var()
+        .assert_equal(&zero(), "the DvP state holds no funds")?;
+    Ok(state)
+}
