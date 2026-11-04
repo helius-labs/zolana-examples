@@ -91,21 +91,21 @@ fn create_rejects_wrong_commitments_and_seed() {
 fn create_rejects_non_pda_address_owners() {
     // 1. Replace the program owner with an ordinary private wallet.
     let mut inputs = create_inputs(&sample_terms());
-    inputs.public.dvp_owner = inputs.address(destination(91));
+    inputs.private.dvp_address = inputs.address(destination(91));
+    inputs.public.dvp_owner = owner_hash(&destination(91));
     // 2. Check the address reservation rejects it.
     assert_invalid(CIRCUIT, &inputs);
 }
 
 #[test]
-fn create_rejects_a_destination_viewing_key_outside_its_commitment() {
+fn create_rejects_a_dvp_address_outside_the_public_owner() {
+    // 1. Supply another PDA's address under the original public owner hash.
     let mut inputs = create_inputs(&sample_terms());
-    let target = &mut inputs.private.terms.seller_settlement_destination;
-    target.address = zolana_program::ShieldedAddress::new(
-        *target.address.owner(),
-        *destination(91).viewing_pubkey.as_bytes(),
-    );
-    // The owner and committed viewing-key hash remain unchanged; the address
-    // must still supply the exact viewing key that its commitment names.
+    let other = zolana_program::ProgramOwner::new(solana_address::Address::new_from_array([9; 32]))
+        .address(destination(91).viewing_pubkey)
+        .unwrap();
+    inputs.private.dvp_address = inputs.address(other);
+    // 2. Check the private address must match the owner the program binds.
     assert_invalid(CIRCUIT, &inputs);
 }
 
@@ -121,7 +121,7 @@ fn create_proof_rejects_changed_state_owner_tree_data_and_blinding() {
     let public = dvp_program::verifier::create_dvp::PublicInputs {
         creator_identity: field_bytes(inputs.public.creator_identity),
         dvp_id: field_bytes(inputs.public.dvp_id),
-        dvp_owner: field_bytes(inputs.public.dvp_owner.owner().hash().unwrap()),
+        dvp_owner: field_bytes(inputs.public.dvp_owner),
     };
     let address = finalized.first_nullifier().unwrap();
     // 2. Recompute the SPP commitment after changing each state field.

@@ -71,7 +71,7 @@ fn reclaim_proof_rejects_partial_or_wrong_asset_refunds() {
     let public = dvp_program::verifier::reclaim_dvp::PublicInputs {
         creator_identity: field_bytes(inputs.public.creator_identity),
         dvp_id: field_bytes(inputs.public.dvp_id),
-        dvp_owner: field_bytes(inputs.public.dvp_owner.owner().hash().unwrap()),
+        dvp_owner: field_bytes(inputs.public.dvp_owner),
         signer_identity: field_bytes(inputs.public.signer_identity),
     };
     // 2. Recompute the SPP hash for each unauthorized refund.

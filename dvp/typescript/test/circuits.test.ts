@@ -94,11 +94,12 @@ test("Node proves each generated program circuit and every abort funding combina
         private: {
           txContext: { blindingSeed: h(field(0x44565043n), f.terms.blinding), outputTreeId: 0 },
           terms: f.checkedTerms,
+          dvpAddress: f.dvpAddress.toBytes(),
         },
         public: {
           creatorIdentity: f.checkedTerms.creatorIdentity,
           dvpId: integer(f.id).toString(),
-          dvpOwner: f.dvpAddress.toBytes(),
+          dvpOwner: integer(f.dvpAddress.ownerHash()).toString(),
         },
       },
       f.seller.shieldedAddress().toBytes(),
@@ -156,11 +157,12 @@ test("Node proves each generated program circuit and every abort funding combina
           dvpUtxo,
           deliveryDeposit: f.delivery,
           paymentDeposit: f.payment,
+          dvpAddress: f.dvpAddress.toBytes(),
         },
         public: {
           creatorIdentity: f.checkedTerms.creatorIdentity,
           dvpId: integer(f.id).toString(),
-          dvpOwner: f.dvpAddress.toBytes(),
+          dvpOwner: integer(f.dvpAddress.ownerHash()).toString(),
           settlementAuthorityIdentity: f.checkedTerms.settlementAuthorityIdentity,
           currentTimestamp: 1750000000n,
         },
@@ -204,11 +206,12 @@ test("Node proves each generated program circuit and every abort funding combina
                   deliveryDeposit: delivery,
                   paymentDeposit: payment,
                   buyerRejects: reject,
+                  dvpAddress: f.dvpAddress.toBytes(),
                 },
                 public: {
                   creatorIdentity: f.checkedTerms.creatorIdentity,
                   dvpId: integer(f.id).toString(),
-                  dvpOwner: f.dvpAddress.toBytes(),
+                  dvpOwner: integer(f.dvpAddress.ownerHash()).toString(),
                   signerIdentity: reject
                     ? f.checkedTerms.buyerIdentity
                     : f.checkedTerms.settlementAuthorityIdentity,
@@ -225,11 +228,7 @@ test("Node proves each generated program circuit and every abort funding combina
               [delivery.utxo.amount, payment.utxo.amount],
             );
             assert.ok(aborted.outputs.every((output) => !output.isDummy()));
-            assert.equal(
-              aborted.inputs.length,
-              1 + Number(delivery !== absent) + Number(payment !== absent),
-            );
-            assert.ok(aborted.inputs.every((input) => !input.isDummy()));
+            assert.equal(aborted.inputs.length, 3);
             assert.deepEqual(
               aborted.encryptWithKeys(reject ? f.buyer : f.settlementAuthority).privateTxHash(),
               aborted.paddingIndependentPrivateTxHash,
@@ -250,11 +249,12 @@ test("Node proves each generated program circuit and every abort funding combina
           deposit: f.delivery,
           paymentLeg: false,
           refundDestination: f.seller.shieldedAddress().toBytes(),
+          dvpAddress: f.dvpAddress.toBytes(),
         },
         public: {
           creatorIdentity: f.checkedTerms.creatorIdentity,
           dvpId: integer(f.id).toString(),
-          dvpOwner: f.dvpAddress.toBytes(),
+          dvpOwner: integer(f.dvpAddress.ownerHash()).toString(),
           signerIdentity: f.checkedTerms.sellerIdentity,
         },
       },
@@ -282,11 +282,12 @@ test("Node proves each generated program circuit and every abort funding combina
           private: {
             txContext: { blindingSeed: randomBlinding(), outputTreeId: 0 },
             terms: f.checkedTerms,
+            dvpAddress: f.dvpAddress.toBytes(),
           },
           public: {
             creatorIdentity: f.checkedTerms.creatorIdentity,
             dvpId: integer(f.id).toString(),
-            dvpOwner: f.dvpAddress.toBytes(),
+            dvpOwner: integer(f.dvpAddress.ownerHash()).toString(),
           },
         },
         f.seller.shieldedAddress().toBytes(),
@@ -302,11 +303,12 @@ test("Node proves each generated program circuit and every abort funding combina
             dvpUtxo,
             deliveryDeposit: f.delivery,
             paymentDeposit: f.payment,
+            dvpAddress: f.dvpAddress.toBytes(),
           },
           public: {
             creatorIdentity: f.checkedTerms.creatorIdentity,
             dvpId: integer(f.id).toString(),
-            dvpOwner: f.dvpAddress.toBytes(),
+            dvpOwner: integer(f.dvpAddress.ownerHash()).toString(),
             settlementAuthorityIdentity: f.checkedTerms.sellerIdentity,
             currentTimestamp: 1750000000n,
           },

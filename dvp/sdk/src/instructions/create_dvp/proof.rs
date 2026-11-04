@@ -12,7 +12,7 @@ use zolana_program::{
 };
 use zolana_transaction::SppProofOutputUtxo;
 
-use crate::shared::field_decimal;
+use crate::shared::{catch_requirement, field_decimal};
 use crate::{err, state::SwapDvp};
 
 #[derive(Clone, Debug)]
@@ -46,7 +46,7 @@ impl CreateDvpDerivation {
             .address(ViewingKey::new().pubkey())
             .map_err(err)?;
         let inputs = create_inputs(terms, owner, tree_id)?;
-        let finalized = inputs.prepare(&owner, terms.creator).map_err(err)?;
+        let finalized = catch_requirement(|| inputs.prepare(&owner, terms.creator).map_err(err))?;
         let finalized = finalized.finalized;
         let output = finalized
             .output_utxos()
@@ -84,13 +84,14 @@ pub(crate) fn create_inputs(
                 output_tree_id: Some(tree_id),
             },
             terms: SwapDvpTerms::try_from(terms)?,
+            dvp_address: owner,
         },
         public: CreateDvpPublicInputsClient {
             creator_identity: field_decimal(
                 solana_owner_identity(terms.creator.as_array()).map_err(err)?,
             )?,
             dvp_id: field_decimal(terms.dvp_id()?)?,
-            dvp_owner: owner,
+            dvp_owner: field_decimal(owner.owner_hash().map_err(err)?)?,
         },
     })
 }

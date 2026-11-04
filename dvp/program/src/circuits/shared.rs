@@ -1,7 +1,18 @@
 use zolana_program::{
     circuit::{DataUtxo, Utxo, UtxoTrait},
-    poseidon, require_eq, CircuitError, Field, TxContext, UtxoOwner,
+    poseidon, require_eq, CircuitError, Field, ShieldedAddress, TxContext, UtxoOwner,
 };
+
+/// Binds the private DvP address to the public PDA owner hash the program
+/// derives, and returns the owner the circuit checks UTXOs against.
+pub(super) fn dvp_owner<'a>(
+    address: &'a ShieldedAddress,
+    owner_hash: &Field,
+) -> Result<&'a UtxoOwner, CircuitError> {
+    let owner = address.owner();
+    require_eq(owner.hash()?, *owner_hash);
+    Ok(owner)
+}
 
 pub(super) fn assert_blinding_seed(
     context: &TxContext,

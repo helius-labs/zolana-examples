@@ -21,21 +21,38 @@ checkout() {
     fi
 }
 
+# Cargo manifests and the build patch cannot read these variables; fail when
+# any of their Git pins drifts from the revisions above.
+check_pins() {
+    local repository=$1 revision=$2 file
+    shift 2
+    for file in "$@"; do
+        if grep -F "$repository" "$file" | grep -F 'rev = ' | grep -vqF "$revision"; then
+            echo "$file pins $repository to a revision other than $revision" >&2
+            exit 1
+        fi
+    done
+}
+check_pins https://github.com/helius-labs/zolana "$zolana_revision" "$dvp/Cargo.toml"
+check_pins https://github.com/ananas-block/xark "$xark_revision" \
+    "$dvp/Cargo.toml" "$dvp/scripts/zk-build-git-deps.patch"
+
 checkout https://github.com/helius-labs/zolana.git "$zolana_revision" "$dvp/.tools/zolana"
 checkout https://github.com/ananas-block/xark.git "$xark_revision" "$dvp/.tools/xark"
 
 # Use the same Git dependencies when building the CLI from its source checkout.
-python3 - "$dvp/.tools/zolana/Cargo.toml" <<'PY'
+python3 - "$dvp/.tools/zolana/Cargo.toml" "$xark_revision" <<'PY'
 import pathlib
 import re
 import sys
 
 manifest = pathlib.Path(sys.argv[1])
+revision = sys.argv[2]
 source = manifest.read_text()
 crates = {"xark", "xark-groth16", "xark-wasm"}
 source, count = re.subn(
     r'(?m)^(xark(?:-groth16|-wasm)?) = \{ (?:path|git) = [^\n]+ \}$',
-    lambda match: f'{match[1]} = {{ git = "https://github.com/ananas-block/xark", rev = "38c0de6fec56cff52f5a4e0cf2d86721ea29e583" }}',
+    lambda match: f'{match[1]} = {{ git = "https://github.com/ananas-block/xark", rev = "{revision}" }}',
     source,
 )
 if count != len(crates):

@@ -1,11 +1,11 @@
 use zolana_program::circuit::Utxo;
 use zolana_program::{
-    circuit::{CheckedTransaction, ConfidentialTransaction, TokenUtxos, UtxoTrait},
+    circuit::{CheckedTransaction, ConfidentialTransaction, PublicInputs, TokenUtxos, UtxoTrait},
     input, require_eq, CircuitError, ClientInputs, Field, ShieldedAddress, TxContext, ZkProgram,
 };
 
 use super::{
-    shared::{assert_blinding_seed, close_dvp_state},
+    shared::{assert_blinding_seed, close_dvp_state, dvp_owner},
     SwapDvpTerms,
 };
 
@@ -25,15 +25,17 @@ pub struct AbortDvpPrivateInputs {
     pub dvp_utxo: Utxo,
     pub delivery_deposit: Utxo,
     pub payment_deposit: Utxo,
+    pub dvp_address: ShieldedAddress,
     pub buyer_rejects: bool,
 }
 
 #[input]
-#[derive(ClientInputs)]
+#[derive(PublicInputs)]
 pub struct AbortDvpPublicInputs {
     pub creator_identity: Field,
     pub dvp_id: Field,
-    pub dvp_owner: ShieldedAddress,
+    /// Owner hash of the DvP PDA.
+    pub dvp_owner: Field,
     pub signer_identity: Field,
     pub reject: bool,
 }
@@ -48,7 +50,7 @@ impl AbortDvp {
     /// 7. Create the buyer's refund, including zero.
     /// 8. Refund the delivery deposit to the seller.
     /// 9. Refund the payment deposit to the buyer.
-    /// 10. Check the transaction.
+    /// 10. Check the transaction with real deposits before padding.
     pub fn execute(&self) -> Result<CheckedTransaction, CircuitError> {
         let private = &self.private;
         let public = &self.public;
@@ -72,18 +74,19 @@ impl AbortDvp {
 
         // 3. Check the abort seed and spend the DvP UTXO.
         assert_blinding_seed(&private.tx_context, crate::ABORT_TAG, &terms.blinding)?;
-        let dvp_utxo = close_dvp_state(&private.dvp_utxo, &public.dvp_owner, &public.dvp_id)?;
+        let owner = dvp_owner(&private.dvp_address, &public.dvp_owner)?;
+        let dvp_utxo = close_dvp_state(&private.dvp_utxo, owner, &public.dvp_id)?;
 
         // 4. Spend any delivery deposit.
         let mut delivery_deposit =
             TokenUtxos::new_mut(core::array::from_ref(&private.delivery_deposit))?
-                .with_optional(&public.dvp_owner, &terms.delivery_mint)
+                .with_optional(owner, &terms.delivery_mint)
                 .close();
 
         // 5. Spend any payment deposit.
         let mut payment_deposit =
             TokenUtxos::new_mut(core::array::from_ref(&private.payment_deposit))?
-                .with_optional(&public.dvp_owner, &terms.payment_mint)
+                .with_optional(owner, &terms.payment_mint)
                 .close();
 
         // 6. Create the seller's refund, including zero.
@@ -104,40 +107,14 @@ impl AbortDvp {
         // 9. Refund the payment deposit to the buyer.
         payment_deposit.transfer_all(&mut buyer_refund)?;
 
-        // 10. Check the transaction.
+        // 10. Check the transaction with real deposits before padding.
         ConfidentialTransaction::new(&private.tx_context, public)
+            .with_dummy_padding()
             .with(dvp_utxo)
             .with(delivery_deposit)
             .with(payment_deposit)
             .with(seller_refund)
             .with(buyer_refund)
             .check()
-    }
-}
-
-impl zolana_program::circuit::PublicInputs for AbortDvpPublicInputs {
-    fn hash(&self, transaction_hash: &Field) -> Result<Field, CircuitError> {
-        zolana_program::poseidon(&[
-            self.creator_identity,
-            self.dvp_id,
-            self.dvp_owner.owner().hash()?,
-            self.signer_identity,
-            Field::from(self.reject),
-            *transaction_hash,
-        ])
-    }
-}
-
-#[cfg(all(feature = "r1cs-export", not(xark), not(xark_client)))]
-impl zolana_program::build::PublicInputLayout for AbortDvpPublicInputs {
-    fn layout() -> Vec<(&'static str, zolana_program::build::PublicFieldKind)> {
-        use zolana_program::build::PublicFieldKind;
-        vec![
-            ("creator_identity", PublicFieldKind::Hash),
-            ("dvp_id", PublicFieldKind::Hash),
-            ("dvp_owner", PublicFieldKind::Hash),
-            ("signer_identity", PublicFieldKind::Hash),
-            ("reject", PublicFieldKind::Bool),
-        ]
     }
 }

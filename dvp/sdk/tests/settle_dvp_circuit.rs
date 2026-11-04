@@ -64,7 +64,8 @@ fn settle_accepts_both_time_bounds_and_optional_lower_bound() {
     let mut inputs = settle_inputs([0, 0]);
     inputs.private.terms = inputs.terms_input(&terms);
     inputs.public.dvp_id = zolana_program::from_bytes(&terms.dvp_id().unwrap()).unwrap();
-    inputs.public.dvp_owner = inputs.address(owner(&terms));
+    inputs.private.dvp_address = inputs.address(owner(&terms));
+    inputs.public.dvp_owner = owner_hash(&owner(&terms));
     inputs.private.dvp_utxo = inputs.wallet(
         &dvp_sdk::state::DvpUtxo::new(terms.clone(), 3)
             .to_input_utxo(2)
@@ -133,7 +134,7 @@ fn settle_program_proof_rejects_modified_outputs() {
     let public = dvp_program::verifier::settle_dvp::PublicInputs {
         creator_identity: field_bytes(inputs.public.creator_identity),
         dvp_id: field_bytes(inputs.public.dvp_id),
-        dvp_owner: field_bytes(inputs.public.dvp_owner.owner().hash().unwrap()),
+        dvp_owner: field_bytes(inputs.public.dvp_owner),
         settlement_authority_identity: field_bytes(inputs.public.settlement_authority_identity),
         current_timestamp: inputs.public.current_timestamp,
     };
@@ -175,7 +176,7 @@ fn settlement_proof_rejects_a_different_state_commitment_or_first_nullifier() {
     let public = dvp_program::verifier::settle_dvp::PublicInputs {
         creator_identity: field_bytes(inputs.public.creator_identity),
         dvp_id: field_bytes(inputs.public.dvp_id),
-        dvp_owner: field_bytes(inputs.public.dvp_owner.owner().hash().unwrap()),
+        dvp_owner: field_bytes(inputs.public.dvp_owner),
         settlement_authority_identity: field_bytes(inputs.public.settlement_authority_identity),
         current_timestamp: inputs.public.current_timestamp,
     };

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism, cpus } from "node:os";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
@@ -77,11 +77,8 @@ async function measure(workers: number): Promise<void> {
       let session: InstanceType<typeof wasm.ProvingSession> | undefined;
       const started = performance.now();
       if (pool) {
-        const rows = new URL(`${name}/r1cs.stream`, artifacts);
-        wasm.preloadStreaming(checked.circuit, checked.provingKey, {
-          sources: checked.sources,
-          ...(existsSync(rows) ? { r1cs: readFileSync(rows) } : {}),
-        });
+        // Only checksummed artifacts: no unchecked `r1cs.stream` row cache.
+        wasm.preloadStreaming(checked.circuit, checked.provingKey, { sources: checked.sources });
       } else {
         session = new wasm.ProvingSession(checked.circuit, checked.provingKey, checked.sources);
       }

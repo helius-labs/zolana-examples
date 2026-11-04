@@ -1,6 +1,9 @@
-use super::{shared::assert_blinding_seed, SwapDvpTerms};
+use super::{
+    shared::{assert_blinding_seed, dvp_owner},
+    SwapDvpTerms,
+};
 use zolana_program::{
-    circuit::{CheckedTransaction, ConfidentialTransaction, DataUtxo},
+    circuit::{CheckedTransaction, ConfidentialTransaction, DataUtxo, PublicInputs},
     input, CircuitError, ClientInputs, Field, ShieldedAddress, TxContext, ZkProgram,
 };
 
@@ -17,14 +20,16 @@ pub struct CreateDvpPrivateInputs {
     pub tx_context: TxContext,
     #[client(nested)]
     pub terms: SwapDvpTerms,
+    pub dvp_address: ShieldedAddress,
 }
 
 #[input]
-#[derive(ClientInputs)]
+#[derive(PublicInputs)]
 pub struct CreateDvpPublicInputs {
     pub creator_identity: Field,
     pub dvp_id: Field,
-    pub dvp_owner: ShieldedAddress,
+    /// Owner hash of the DvP PDA.
+    pub dvp_owner: Field,
 }
 
 impl CreateDvp {
@@ -53,38 +58,16 @@ impl CreateDvp {
         )?;
 
         // 4. Create the zero-SOL DvP UTXO.
-        let dvp_utxo = DataUtxo::new_init_with_hash(&public.dvp_owner, &public.dvp_id);
+        let owner = dvp_owner(&private.dvp_address, &public.dvp_owner)?;
+        let dvp_utxo = DataUtxo::new_init_with_hash(owner, &public.dvp_id);
 
         // 5. Reserve the DvP address and check the transaction.
         ConfidentialTransaction::new(&private.tx_context, public)
             .with(zolana_program::circuit::NewAddress::new(
-                &public.dvp_owner,
+                owner,
                 &public.dvp_id,
             )?)
             .with(dvp_utxo)
             .check()
-    }
-}
-
-impl zolana_program::circuit::PublicInputs for CreateDvpPublicInputs {
-    fn hash(&self, transaction_hash: &Field) -> Result<Field, CircuitError> {
-        zolana_program::poseidon(&[
-            self.creator_identity,
-            self.dvp_id,
-            self.dvp_owner.owner().hash()?,
-            *transaction_hash,
-        ])
-    }
-}
-
-#[cfg(all(feature = "r1cs-export", not(xark), not(xark_client)))]
-impl zolana_program::build::PublicInputLayout for CreateDvpPublicInputs {
-    fn layout() -> Vec<(&'static str, zolana_program::build::PublicFieldKind)> {
-        use zolana_program::build::PublicFieldKind;
-        vec![
-            ("creator_identity", PublicFieldKind::Hash),
-            ("dvp_id", PublicFieldKind::Hash),
-            ("dvp_owner", PublicFieldKind::Hash),
-        ]
     }
 }

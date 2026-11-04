@@ -8,7 +8,12 @@ autotests = false
 [dependencies]
 xark = { workspace = true }
 xark-groth16 = { workspace = true }
+# xark-groth16 leaves its MSM and FFT crates sequential (only its dev
+# dependencies enable `parallel`); unify the features so native proofs use Rayon.
+ark-ec = { version = "0.6", default-features = false, features = ["std", "parallel"] }
+ark-poly = { version = "0.6", default-features = false, features = ["std", "parallel"] }
 sha2 = "0.10"
+tempfile = "3"
 anyhow = { workspace = true }
 dvp-program = { path = "../program", features = ["circuits", "parallel"] }
 num-bigint = { workspace = true }

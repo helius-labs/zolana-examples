@@ -1,10 +1,10 @@
 use super::{
-    shared::{assert_blinding_seed, close_dvp_state},
+    shared::{assert_blinding_seed, close_dvp_state, dvp_owner},
     SwapDvpTerms,
 };
 use zolana_program::circuit::Utxo;
 use zolana_program::{
-    circuit::{CheckedTransaction, ConfidentialTransaction, TokenUtxos, UtxoTrait},
+    circuit::{CheckedTransaction, ConfidentialTransaction, PublicInputs, TokenUtxos, UtxoTrait},
     input, require, require_eq, CircuitError, ClientInputs, Field, ShieldedAddress, TxContext,
     ZkProgram,
 };
@@ -25,14 +25,16 @@ pub struct SettleDvpPrivateInputs {
     pub dvp_utxo: Utxo,
     pub delivery_deposit: Utxo,
     pub payment_deposit: Utxo,
+    pub dvp_address: ShieldedAddress,
 }
 
 #[input]
-#[derive(ClientInputs)]
+#[derive(PublicInputs)]
 pub struct SettleDvpPublicInputs {
     pub creator_identity: Field,
     pub dvp_id: Field,
-    pub dvp_owner: ShieldedAddress,
+    /// Owner hash of the DvP PDA.
+    pub dvp_owner: Field,
     pub settlement_authority_identity: Field,
     pub current_timestamp: u64,
 }
@@ -77,18 +79,19 @@ impl SettleDvp {
 
         // 4. Check the settlement seed and spend the DvP UTXO.
         assert_blinding_seed(&private.tx_context, crate::SETTLEMENT_TAG, &terms.blinding)?;
-        let dvp_utxo = close_dvp_state(&private.dvp_utxo, &public.dvp_owner, &public.dvp_id)?;
+        let owner = dvp_owner(&private.dvp_address, &public.dvp_owner)?;
+        let dvp_utxo = close_dvp_state(&private.dvp_utxo, owner, &public.dvp_id)?;
 
         // 5. Spend the delivery deposit.
         let mut delivery_deposit =
             TokenUtxos::new_mut(core::array::from_ref(&private.delivery_deposit))?.close();
-        require_eq(delivery_deposit.owner(), *public.dvp_owner.owner());
+        require_eq(delivery_deposit.owner(), *owner);
         require_eq(delivery_deposit.asset(), terms.delivery_mint);
 
         // 6. Spend the payment deposit.
         let mut payment_deposit =
             TokenUtxos::new_mut(core::array::from_ref(&private.payment_deposit))?.close();
-        require_eq(payment_deposit.owner(), *public.dvp_owner.owner());
+        require_eq(payment_deposit.owner(), *owner);
         require_eq(payment_deposit.asset(), terms.payment_mint);
 
         // 7. Create the buyer's delivery settlement.
@@ -137,32 +140,5 @@ impl SettleDvp {
             .with(delivery_change)
             .with(payment_change)
             .check()
-    }
-}
-
-impl zolana_program::circuit::PublicInputs for SettleDvpPublicInputs {
-    fn hash(&self, transaction_hash: &Field) -> Result<Field, CircuitError> {
-        zolana_program::poseidon(&[
-            self.creator_identity,
-            self.dvp_id,
-            self.dvp_owner.owner().hash()?,
-            self.settlement_authority_identity,
-            Field::from(self.current_timestamp),
-            *transaction_hash,
-        ])
-    }
-}
-
-#[cfg(all(feature = "r1cs-export", not(xark), not(xark_client)))]
-impl zolana_program::build::PublicInputLayout for SettleDvpPublicInputs {
-    fn layout() -> Vec<(&'static str, zolana_program::build::PublicFieldKind)> {
-        use zolana_program::build::PublicFieldKind;
-        vec![
-            ("creator_identity", PublicFieldKind::Hash),
-            ("dvp_id", PublicFieldKind::Hash),
-            ("dvp_owner", PublicFieldKind::Hash),
-            ("settlement_authority_identity", PublicFieldKind::Hash),
-            ("current_timestamp", PublicFieldKind::Integer { bits: 64 }),
-        ]
     }
 }

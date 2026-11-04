@@ -107,12 +107,13 @@ Set these paths for your platform:
 |----------|-------|
 | `ZOLANA_CLI_BIN` | `.tools/zolana/target/release/zolana` built above |
 | `PROVER_BIN` | `prover-<platform>-v0.5.0-alpha` |
-| `ZOLANA_PHOTON_BIN` | `photon-<platform>-v0.5.0-alpha` |
+| `ZOLANA_PHOTON_BIN` | `scripts/photon-localnet.sh`, with `DVP_PHOTON_BIN` set to `photon-<platform>-v0.5.0-alpha` |
 | `SHIELDED_POOL_PROGRAM_PATH` | `shielded_pool_program-v0.5.0-alpha.so` |
 | `SURFPOOL_BIN` | `surfpool` from [v1.6.0-light](https://github.com/Lightprotocol/surfpool/releases/tag/v1.6.0-light) |
 
 `<platform>` is `linux-x64` or `darwin-arm64`. The release's `SHA256SUMS`
-records each asset's checksum. The prover downloads missing SPP keys to
+records each asset's checksum. The Photon wrapper passes `--max-db-conn 1` so
+the localnet indexer runs its temporary SQLite migrations on one connection. The prover downloads missing SPP keys to
 `ZOLANA_PROVER_KEYS_DIR`, or `~/.config/zolana/proving-keys` by default.
 
 ```bash
@@ -135,9 +136,9 @@ records Node.js proof timings.
 and shows how to generate Xark's source and call-chain profiles.
 
 Circuit input counts are fixed: reclaim has one deposit; settle has the DvP UTXO
-and two deposits; abort has those same three circuit slots, with dummy witnesses
-for absent deposits. Its SPP transaction includes only the state and funded
-deposits. Create reserves one address and has no token UTXO inputs.
+and two deposits; abort has those same three slots, with padding for absent
+deposits, so its SPP transaction does not show how many legs were funded.
+Create reserves one address and has no token UTXO inputs.
 `TokenUtxos::new_init` allocates no input UTXOs. The circuit tests check these
 witness counts so a larger padding default cannot add unused inputs.
 

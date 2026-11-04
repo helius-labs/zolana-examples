@@ -9,6 +9,7 @@ use super::{proof::create_inputs, CreateDvp, CreateDvpDerivation};
 use crate::{
     encryption::{encrypt_terms_messages, TERMS_RECIPIENTS},
     err,
+    shared::catch_requirement,
     state::SwapDvp,
 };
 
@@ -51,7 +52,8 @@ impl CreateDvpTransactionParams {
             .address(viewing_key.pubkey())
             .map_err(err)?;
         let proof_inputs = create_inputs(&self.terms, owner, self.tree_id)?;
-        let transaction = proof_inputs.prepare(&owner, self.payer).map_err(err)?;
+        let transaction =
+            catch_requirement(|| proof_inputs.prepare(&owner, self.payer).map_err(err))?;
         let finalized = transaction.finalized;
         let proof_inputs = transaction.proof_inputs;
         let mut spp_proof_inputs = finalized

@@ -1,7 +1,7 @@
-use super::SwapDvpTerms;
+use super::{shared::dvp_owner, SwapDvpTerms};
 use zolana_program::circuit::Utxo;
 use zolana_program::{
-    circuit::{CheckedTransaction, ConfidentialTransaction, TokenUtxos, UtxoTrait},
+    circuit::{CheckedTransaction, ConfidentialTransaction, PublicInputs, TokenUtxos, UtxoTrait},
     input, require_eq, CircuitError, ClientInputs, Field, ShieldedAddress, TxContext, ZkProgram,
 };
 
@@ -21,14 +21,16 @@ pub struct ReclaimDvpPrivateInputs {
     pub deposit: Utxo,
     pub payment_leg: bool,
     pub refund_destination: ShieldedAddress,
+    pub dvp_address: ShieldedAddress,
 }
 
 #[input]
-#[derive(ClientInputs)]
+#[derive(PublicInputs)]
 pub struct ReclaimDvpPublicInputs {
     pub creator_identity: Field,
     pub dvp_id: Field,
-    pub dvp_owner: ShieldedAddress,
+    /// Owner hash of the DvP PDA.
+    pub dvp_owner: Field,
     pub signer_identity: Field,
 }
 
@@ -67,7 +69,10 @@ impl ReclaimDvp {
         let mut deposit = TokenUtxos::new_mut(core::array::from_ref(&private.deposit))?.close();
 
         // 4. Check DvP PDA ownership.
-        require_eq(deposit.owner(), *public.dvp_owner.owner());
+        require_eq(
+            deposit.owner(),
+            *dvp_owner(&private.dvp_address, &public.dvp_owner)?,
+        );
 
         // 5. Check the leg mint.
         require_eq(deposit.asset(), asset);
@@ -84,30 +89,5 @@ impl ReclaimDvp {
             .with(deposit)
             .with(refund)
             .check()
-    }
-}
-
-impl zolana_program::circuit::PublicInputs for ReclaimDvpPublicInputs {
-    fn hash(&self, transaction_hash: &Field) -> Result<Field, CircuitError> {
-        zolana_program::poseidon(&[
-            self.creator_identity,
-            self.dvp_id,
-            self.dvp_owner.owner().hash()?,
-            self.signer_identity,
-            *transaction_hash,
-        ])
-    }
-}
-
-#[cfg(all(feature = "r1cs-export", not(xark), not(xark_client)))]
-impl zolana_program::build::PublicInputLayout for ReclaimDvpPublicInputs {
-    fn layout() -> Vec<(&'static str, zolana_program::build::PublicFieldKind)> {
-        use zolana_program::build::PublicFieldKind;
-        vec![
-            ("creator_identity", PublicFieldKind::Hash),
-            ("dvp_id", PublicFieldKind::Hash),
-            ("dvp_owner", PublicFieldKind::Hash),
-            ("signer_identity", PublicFieldKind::Hash),
-        ]
     }
 }

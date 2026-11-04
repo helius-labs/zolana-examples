@@ -12,10 +12,6 @@ pub struct DvpDestination {
 
 impl DvpDestination {
     pub fn hash(&self) -> Result<Field, CircuitError> {
-        require_eq(
-            self.viewing_key_hash,
-            hash_bytes(self.address.viewing_pubkey())?,
-        );
         poseidon(&[self.address.owner().hash()?, self.viewing_key_hash])
     }
 }

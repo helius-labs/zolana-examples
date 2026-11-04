@@ -11,7 +11,7 @@ use zolana_program::{ProgramOwner, TransactionOptions};
 use zolana_transaction::instructions::transact::SppProofInputs;
 
 use super::ReclaimDvp;
-use crate::shared::field_decimal;
+use crate::shared::{catch_requirement, field_decimal};
 use crate::{
     err,
     shared::{ensure_output_tree, prove_pda_transact},
@@ -62,6 +62,9 @@ impl ReclaimDvpTransactionParams {
             Leg::Delivery => circuit_terms.delivery_mint = self.deposit.mint,
             Leg::Payment => circuit_terms.payment_mint = self.deposit.mint,
         }
+        let dvp_address = ProgramOwner::new(pda)
+            .address(signer.viewing_pubkey())
+            .map_err(err)?;
         // 2. Build the program transaction.
         let proof_inputs = ReclaimDvpInputs {
             private: ReclaimDvpPrivateInputsClient {
@@ -73,21 +76,21 @@ impl ReclaimDvpTransactionParams {
                 deposit: self.deposit.to_input_utxo()?,
                 payment_leg: self.deposit.leg == Leg::Payment,
                 refund_destination,
+                dvp_address,
             },
             public: ReclaimDvpPublicInputsClient {
                 creator_identity: field_decimal(
                     solana_owner_identity(creator.as_array()).map_err(err)?,
                 )?,
                 dvp_id: field_decimal(terms.dvp_id()?)?,
-                dvp_owner: ProgramOwner::new(pda)
-                    .address(signer.viewing_pubkey())
-                    .map_err(err)?,
+                dvp_owner: field_decimal(dvp_address.owner_hash().map_err(err)?)?,
                 signer_identity: field_decimal(
                     solana_owner_identity(signer_address.as_array()).map_err(err)?,
                 )?,
             },
         };
-        let transaction = proof_inputs.prepare(&sender, self.payer).map_err(err)?;
+        let transaction =
+            catch_requirement(|| proof_inputs.prepare(&sender, self.payer).map_err(err))?;
         let finalized = transaction.finalized;
         let proof_inputs = transaction.proof_inputs;
         // 3. Encrypt the refund UTXO.

@@ -108,11 +108,12 @@ pub fn create_inputs(terms: &SwapDvp) -> CreateDvp {
     let private = circuit::CreateDvpPrivateInputs {
         tx_context: context(terms.create_blinding_seed().unwrap()),
         terms: circuit::SwapDvpTerms::from_client(terms.try_into().unwrap(), &mut records).unwrap(),
+        dvp_address: records.address(&owner(terms)).unwrap(),
     };
     let public = circuit::CreateDvpPublicInputs {
         creator_identity: field_identity(terms.creator),
         dvp_id: from_bytes(&terms.dvp_id().unwrap()).unwrap(),
-        dvp_owner: records.address(&owner(terms)).unwrap(),
+        dvp_owner: owner_hash(&owner(terms)),
     };
     Fixture::new(circuit::CreateDvp { private, public }, records)
 }
@@ -143,11 +144,12 @@ pub fn settle_inputs_with_state(surplus: [u64; 2], state: Option<WalletUtxo>) ->
                     .unwrap(),
             )
             .unwrap(),
+        dvp_address: records.address(&owner(&terms)).unwrap(),
     };
     let public = circuit::SettleDvpPublicInputs {
         creator_identity: field_identity(terms.creator),
         dvp_id: from_bytes(&terms.dvp_id().unwrap()).unwrap(),
-        dvp_owner: records.address(&owner(&terms)).unwrap(),
+        dvp_owner: owner_hash(&owner(&terms)),
         settlement_authority_identity: field_identity(terms.settlement_authority),
         current_timestamp: NOW,
     };
@@ -176,11 +178,12 @@ pub fn reclaim_inputs(payment: bool) -> ReclaimDvp {
                 terms.seller_refund_destination
             })
             .unwrap(),
+        dvp_address: records.address(&owner(&terms)).unwrap(),
     };
     let public = circuit::ReclaimDvpPublicInputs {
         creator_identity: field_identity(terms.creator),
         dvp_id: from_bytes(&terms.dvp_id().unwrap()).unwrap(),
-        dvp_owner: records.address(&owner(&terms)).unwrap(),
+        dvp_owner: owner_hash(&owner(&terms)),
         signer_identity: field_identity(if payment { terms.buyer } else { terms.seller }),
     };
     Fixture::new(circuit::ReclaimDvp { private, public }, records)
@@ -214,11 +217,12 @@ pub fn abort_inputs(reject: bool, buyer: bool, delivery: bool, payment: bool) ->
             })
             .unwrap(),
         buyer_rejects: buyer,
+        dvp_address: records.address(&owner(&terms)).unwrap(),
     };
     let public = circuit::AbortDvpPublicInputs {
         creator_identity: field_identity(terms.creator),
         dvp_id: from_bytes(&terms.dvp_id().unwrap()).unwrap(),
-        dvp_owner: records.address(&owner(&terms)).unwrap(),
+        dvp_owner: owner_hash(&owner(&terms)),
         signer_identity: field_identity(if reject {
             if buyer {
                 terms.buyer
@@ -241,9 +245,8 @@ pub fn prove_and_verify<P: Execute>(
     let tx = inputs
         .create_program_transaction(&destination(91), Address::default())
         .unwrap();
-    zolana_program::xark::prover::circuit_at(dvp_sdk::proof::keys_dir().join(id.name()))
-        .check_constrained(tx.proof_inputs.clone())
-        .unwrap();
+    let (_private, circuit) = dvp_sdk::proof::checked_circuit(id).unwrap();
+    circuit.check_constrained(tx.proof_inputs.clone()).unwrap();
     let proof = dvp_sdk::proof::prove(id, &tx.proof_inputs).unwrap();
     assert!(proof.a.iter().any(|&byte| byte != 0));
     let a = groth16_solana::decompression::decompress_g1(&proof.a).unwrap();
@@ -269,10 +272,10 @@ pub fn assert_invalid<P: Execute>(id: CircuitId, inputs: &Fixture<P>) {
         !matches!(native, Ok(Ok(_))),
         "the native circuit accepted invalid inputs"
     );
-    let error =
-        zolana_program::xark::prover::circuit_at(dvp_sdk::proof::keys_dir().join(id.name()))
-            .check(ProgramProofInputs::new(&inputs.program, Field::zero()))
-            .expect_err("the compiled circuit must reject invalid inputs");
+    let (_private, circuit) = dvp_sdk::proof::checked_circuit(id).unwrap();
+    let error = circuit
+        .check(ProgramProofInputs::new(&inputs.program, Field::zero()))
+        .expect_err("the compiled circuit must reject invalid inputs");
     assert!(
         error.to_string().contains("in execute"),
         "expected the program's constraint to fail before the outer public-hash check: {error}"
@@ -284,6 +287,9 @@ pub fn context(seed: [u8; 32]) -> TxContext {
 }
 pub fn identity(address: Address) -> [u8; 32] {
     solana_owner_identity(address.as_array()).unwrap()
+}
+pub fn owner_hash(address: &ShieldedAddress) -> Field {
+    from_bytes(&address.owner_hash().unwrap()).unwrap()
 }
 pub fn field_identity(address: Address) -> Field {
     from_bytes(&identity(address)).unwrap()

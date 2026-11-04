@@ -12,6 +12,19 @@ pub(crate) fn field_decimal(bytes: [u8; 32]) -> Result<String> {
         .to_decimal())
 }
 
+/// Runs a program transaction's `prepare`, whose native circuit `execute`
+/// panics when an Xark `require` fails, and returns that failure as an error.
+pub(crate) fn catch_requirement<T>(prepare: impl FnOnce() -> Result<T>) -> Result<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(prepare)).unwrap_or_else(|panic| {
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or("the circuit rejects these values");
+        Err(anyhow::anyhow!("{message}"))
+    })
+}
+
 /// Proves a transaction whose real inputs are all owned by the DvP PDA under
 /// the zero nullifier secret (padding inputs carry their own) through
 /// `indexer`, which serves their Merkle proofs, and checks that the SPP
@@ -39,4 +52,24 @@ pub(crate) fn ensure_output_tree(what: &str, input_tree_id: u16, tree_id: u16) -
         "{what} is in tree {input_tree_id}, not in the output tree {tree_id}"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::catch_requirement;
+
+    #[test]
+    fn catch_requirement_returns_a_failed_requirement_as_an_error() {
+        // 1. A native Xark requirement failure panics inside prepare.
+        let error = catch_requirement(|| -> anyhow::Result<()> {
+            zolana_program::require(false);
+            Ok(())
+        })
+        .expect_err("a failed requirement is an error");
+        assert!(error.to_string().contains("requirement failed"), "{error}");
+        // 2. Successful and fallible results pass through unchanged.
+        assert_eq!(catch_requirement(|| Ok(7)).unwrap(), 7);
+        let failed = catch_requirement(|| -> anyhow::Result<()> { anyhow::bail!("rejected") });
+        assert_eq!(failed.unwrap_err().to_string(), "rejected");
+    }
 }
