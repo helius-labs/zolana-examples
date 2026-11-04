@@ -31,9 +31,13 @@
 
 CI runs all five Rust and TypeScript client examples, the swap (take, cancel,
 and verifiable encryption), and timelock escrow flows. Rust dependencies, the
-CLI, prover, and the shielded-pool program use Zolana commit
-`6bb4f7008294695ebe614f08affb215d4321a538`, the TypeScript `0.8.0-alpha` release
-commit. The CLI, prover and shielded-pool program are built from source because
+CLI, prover, and the shielded-pool program use the Rust SDK `0.8.0` release.
+Published Rust SDK crates come from crates.io. The unpublished `spr-test-utils`
+helpers and source builds use release commit
+`6aba4a70177caaef602baf972ce4958691ec1e65` (`rust-sdk-v0.8.0`), which preserves the
+TypeScript `0.8.0-alpha` implementation. Git dependency patches make the test
+helpers use the same published SDK crates as the examples.
+The CLI, prover and shielded-pool program are built from source because
 the published binaries predate the SDK's attestation protocol, key catalog and
 finalized ceremony keys. The user registry and Photon use the `v0.6.0-alpha` release binaries;
 their sizes and SHA-256 hashes are pinned in
@@ -44,7 +48,7 @@ earlier program IDs are not migrated.
 
 To run the same tests locally, install Rust, Go 1.27.3+, and the Solana CLI
 with `cargo build-sbf`, and check out Zolana commit
-`6bb4f7008294695ebe614f08affb215d4321a538` in a sibling
+`6aba4a70177caaef602baf972ce4958691ec1e65` in a sibling
 directory named `zolana`. Install the TypeScript dependencies with
 `cd typescript-client && pnpm install --frozen-lockfile`, then run from the
 repository root:

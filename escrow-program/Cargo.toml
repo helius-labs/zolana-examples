@@ -5,23 +5,22 @@ members = ["program", "sdk", "prover", "test"]
 [workspace.package]
 edition = "2021"
 
-# The zolana crates are pulled from the zolana repo by git, pinned to a release
-# tag; the solana-* and other crates are pinned to the versions the SDK builds
-# against.
+# Use the published Zolana SDK; the unpublished test helpers are pinned to
+# its release source. Other crates match the versions the SDK builds against.
 [workspace.dependencies]
-spr-account-checks = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538", default-features = false }
-spr-client = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538" }
-spr-gnark-ffi-prover = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538" }
-spr-gnark-ffi-prover-build = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538" }
-spr-hasher = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538", default-features = false }
-spr-interface = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538" }
-spr-keypair = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538" }
-spr-merkle-tree = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538" }
-spr-program = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538" }
-spr-program-test = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538" }
-spr-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538" }
-spr-transaction = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538" }
-spr-tree = { git = "https://github.com/helius-labs/zolana", rev = "6bb4f7008294695ebe614f08affb215d4321a538" }
+spr-account-checks = { version = "0.8.0", default-features = false }
+spr-client = { version = "0.8.0" }
+spr-gnark-ffi-prover = { version = "0.8.0" }
+spr-gnark-ffi-prover-build = { version = "0.8.0" }
+spr-hasher = { version = "0.8.0", default-features = false }
+spr-interface = { version = "0.8.0" }
+spr-keypair = { version = "0.8.0" }
+spr-merkle-tree = { version = "0.8.0" }
+spr-program = { version = "0.8.0" }
+spr-program-test = { version = "0.8.0" }
+spr-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "6aba4a70177caaef602baf972ce4958691ec1e65" }
+spr-transaction = { version = "0.8.0" }
+spr-tree = { version = "0.8.0" }
 
 groth16-solana = { version = "0.3.1", features = ["bsb22"] }
 light-program-profiler = { git = "https://github.com/Lightprotocol/light-program-profiler", rev = "db49f3c801996a80e1cb7e4e92b13a694e962b65" }
@@ -43,3 +42,21 @@ solana-signer = "3.0"
 
 [profile.release]
 overflow-checks = true
+
+# spr-test-utils is unpublished. Use the released SDK for its dependencies too,
+# so test helpers and examples share the same Rust types.
+[patch."https://github.com/helius-labs/zolana"]
+spr-client = "0.8.0"
+spr-event = "0.8.0"
+spr-event-parser = "0.8.0"
+spr-hasher = "0.8.0"
+spr-interface = "0.8.0"
+spr-keypair = "0.8.0"
+spr-merkle-tree = "0.8.0"
+spr-program = "0.8.0"
+spr-program-test = "0.8.0"
+spr-protocol-instructions = "0.8.0"
+spr-smart-account-client = "0.8.0"
+spr-transaction = "0.8.0"
+spr-tree = "0.8.0"
+spr-user-registry-interface = "0.8.0"
