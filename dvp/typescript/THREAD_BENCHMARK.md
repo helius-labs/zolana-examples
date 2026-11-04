@@ -1,21 +1,21 @@
 # Node WASM worker comparison
 
-Measured 2026-11-04T03:49:40.533Z at application commit `3597be32b77bc480a0eaa8289ae3dc126e7f982f` on Apple M5 Pro; Node.js v26.0.0.
+Measured 2026-11-04T23:21:02.545Z at application commit `c572fffecbe36dd3eef638c6e17c27ac15f103ce` on Apple M5 Pro; Node.js v26.0.0.
 
 Warm proof medians in milliseconds:
 
 | Circuit     | Single session | 4 workers | 8 workers | 18 workers |
 | ----------- | -------------: | --------: | --------: | ---------: |
-| create_dvp  |          799.5 |     628.2 |     409.4 |      267.2 |
-| reclaim_dvp |          867.0 |     671.4 |     429.6 |      282.3 |
-| settle_dvp  |         1203.9 |    1049.6 |     674.2 |      436.2 |
-| abort_dvp   |         1300.2 |     932.2 |     569.7 |      399.3 |
+| create_dvp  |          779.6 |     605.0 |     376.5 |      262.8 |
+| reclaim_dvp |          819.7 |     634.6 |     395.6 |      313.3 |
+| settle_dvp  |         1345.5 |     994.9 |     617.1 |      464.9 |
+| abort_dvp   |         1196.5 |     898.3 |     572.6 |      377.0 |
 
 Each configuration runs in a fresh process, with three samples after one warm-up and identical captured transaction inputs. The single session keeps a decoded key; the worker path uses Xark's streaming API with a shared worker pool and compressed key bytes. Circuit/key preparation, worker startup, transaction construction, encryption and SPP proofs are excluded. All proofs are verified, checked against the transaction's public hash, and checked for distinct randomness. Worker configurations must invoke both FFT and MSM kernels.
 
-The fixtures cover create, delivery reclaim, settlement with surplus, and cancellation with both deposits funded. The normal circuit tests pass before measurements begin. These timings show the available threaded API; the application's `ProgramProver` still defaults to a single session. Native Rust already uses Rayon.
+The fixtures cover create, delivery reclaim, settlement with surplus, and cancellation with both deposits funded. The normal circuit tests pass before measurements begin. The application's `ProgramProver` uses the single session by default and the worker path after `useWorkerPool(pool)`; `bench/proofs.ts` measures it with all available workers. Native Rust proves with Rayon.
 
-WASM SHA-256: `47f58127c561e478fcc8c83fbd061cdb698ee97209d81dd163dfcb0d59e94b03`. Raw samples: `../target/wasm-thread-benchmark.json`.
+WASM SHA-256: `0b73141b5c3b1907704ffa658e8e9c31611f006f1d26254ecf3aa6cca7dbb1ab`. Raw samples: `../target/wasm-thread-benchmark.json`.
 
 Reproduce from `dvp/typescript`:
 

@@ -1,8 +1,8 @@
 use dvp_program::{error::DvpError, tag};
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
-use zolana_account_checks::error::AccountError;
-use zolana_test_utils::mollusk::expect_err_exact;
+use spr_account_checks::error::AccountError;
+use spr_test_utils::mollusk::expect_err_exact;
 
 use crate::common::{
     dvp_authority, non_canonical_bump, on_curve_bump, reject_dvp_data, reject_dvp_fixture,

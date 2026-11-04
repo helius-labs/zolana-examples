@@ -22,13 +22,13 @@ fn settle_pays_both_legs_and_preserves_real_zero_change() {
             ),
             (
                 terms.seller_settlement_destination,
-                zolana_transaction::Mint::SOL,
+                spr_transaction::Mint::SOL,
                 terms.payment_amount,
             ),
             (terms.seller_refund_destination, delivery_mint(), surplus[0]),
             (
                 terms.buyer_refund_destination,
-                zolana_transaction::Mint::SOL,
+                spr_transaction::Mint::SOL,
                 surplus[1],
             ),
         ];
@@ -63,7 +63,7 @@ fn settle_accepts_both_time_bounds_and_optional_lower_bound() {
     terms.earliest_settlement_timestamp = None;
     let mut inputs = settle_inputs([0, 0]);
     inputs.private.terms = inputs.terms_input(&terms);
-    inputs.public.dvp_id = zolana_program::from_bytes(&terms.dvp_id().unwrap()).unwrap();
+    inputs.public.dvp_id = spr_program::from_bytes(&terms.dvp_id().unwrap()).unwrap();
     inputs.private.dvp_address = inputs.address(owner(&terms));
     inputs.public.dvp_owner = owner_hash(&owner(&terms));
     inputs.private.dvp_utxo = inputs.wallet(
@@ -145,7 +145,7 @@ fn settle_program_proof_rejects_modified_outputs() {
         match mutation {
             0 => output.amount += 1,
             1 => output.owner_address = Some(destination(91)),
-            2 => output.asset = zolana_transaction::Mint::SOL,
+            2 => output.asset = spr_transaction::Mint::SOL,
             3 => output.blinding = fe(99),
             _ => unreachable!(),
         }
@@ -153,7 +153,7 @@ fn settle_program_proof_rejects_modified_outputs() {
             .iter()
             .map(|output| output.hash(OUTPUT_TREE_ID).unwrap())
             .collect::<Vec<_>>();
-        let private_hash = zolana_program::PrivateTxHash::new(
+        let private_hash = spr_program::PrivateTxHash::new(
             &finalized
                 .input_utxos()
                 .iter()
@@ -200,7 +200,7 @@ fn settlement_proof_rejects_a_different_state_commitment_or_first_nullifier() {
                 .utxo
                 .nullifier(
                     &state.utxo_hash,
-                    &zolana_program::ProgramOwner::nullifier_key(),
+                    &spr_program::ProgramOwner::nullifier_key(),
                 )
                 .unwrap();
         } else {
@@ -221,10 +221,10 @@ fn settlement_proof_rejects_a_different_state_commitment_or_first_nullifier() {
 }
 
 fn verify(
-    proof: &zolana_program::CompressedProof,
+    proof: &spr_program::CompressedProof,
     public: &dvp_program::verifier::settle_dvp::PublicInputs,
     private_tx_hash: &[u8; 32],
-) -> Result<(), zolana_program::verifier::VerifyError> {
+) -> Result<(), spr_program::verifier::VerifyError> {
     dvp_program::verifier::settle_dvp::Verifier {
         proof,
         public_inputs: dvp_program::verifier::settle_dvp::PublicInputs {

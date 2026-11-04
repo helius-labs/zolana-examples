@@ -1,8 +1,8 @@
 use anyhow::{ensure, Result};
 use solana_address::Address;
-use zolana_keypair::{ShieldedAddress, ViewingKey, X25519Pubkey};
-use zolana_program::ProgramOwner;
-use zolana_transaction::{Mint, SppProofOutputUtxo, WalletUtxo};
+use spr_keypair::{ShieldedAddress, ViewingKey, X25519Pubkey};
+use spr_program::ProgramOwner;
+use spr_transaction::{Mint, SppProofOutputUtxo, WalletUtxo};
 
 use crate::state::SwapDvp;
 
@@ -116,7 +116,7 @@ impl Deposit {
 
 #[cfg(test)]
 mod tests {
-    use zolana_transaction::{instructions::transact::SppProofOutputUtxo, SOL_MINT};
+    use spr_transaction::{instructions::transact::SppProofOutputUtxo, SOL_MINT};
 
     use super::*;
     use crate::index::fixture::{fixture_parties, sample_terms};
@@ -148,7 +148,7 @@ mod tests {
         let terms = sample_terms(&parties);
         let [_, _, authority] = &parties;
         let address = Deposit::address(&terms, authority.viewing_pubkey()).unwrap();
-        let blinding = zolana_keypair::random_blinding();
+        let blinding = spr_keypair::random_blinding();
         let deposit = Deposit {
             terms: terms.clone(),
             leg: Leg::Payment,
@@ -177,7 +177,7 @@ mod tests {
             (
                 sent.hash(1).unwrap(),
                 ProgramOwner::nullifier_pubkey().unwrap(),
-                *zolana_program::program::PdaOwner::new(&pda)
+                *spr_program::program::PdaOwner::new(&pda)
                     .unwrap()
                     .owner_hash(),
                 4,

@@ -1,8 +1,8 @@
 use anyhow::Result;
-use zolana_interface::{
+use spr_interface::{
     event::OutputDataEncoding, instruction::instruction_data::transact::MessageData,
 };
-use zolana_transaction::{
+use spr_transaction::{
     instructions::transact::OutputSlot, AssetRegistry, EncryptedScheme, Mint, ShieldedTransaction,
     SOL_ASSET_ID,
 };
@@ -33,7 +33,7 @@ pub(crate) fn tagged_outputs<'a>(
 /// The output slots of `tx` tagged `tag` that carry a confidential
 /// ciphertext, with the ciphertext body and the slot index it was encrypted
 /// under. The index is the slot's position among all outputs, as the sender
-/// encrypts it and as `zolana_transaction::decrypt` reads it. A slot without
+/// encrypts it and as `spr_transaction::decrypt` reads it. A slot without
 /// data, such as the DvP UTXO, is skipped.
 pub(crate) fn tagged_confidential_outputs<'a>(
     tx: &'a ShieldedTransaction,

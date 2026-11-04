@@ -4,28 +4,26 @@ use dvp_sdk::{
     state::{Deposit, DvpUtxo, Leg, SwapDvp},
 };
 use solana_address::Address;
-use std::ops::{Deref, DerefMut};
-use zolana_hasher::primitives::solana_owner_identity;
-use zolana_keypair::{NullifierKey, PublicKey, ShieldedAddress, ViewingKey};
-use zolana_program::{
+use spr_hasher::primitives::solana_owner_identity;
+use spr_keypair::{NullifierKey, PublicKey, ShieldedAddress, ViewingKey};
+use spr_program::{
     circuit::CheckedTransaction, from_bytes, to_bytes, ClientInputs, Field, InputRecords,
     ProgramOwner, ProgramProofInputs, ProgramTransaction, TxContext,
 };
-use zolana_transaction::{
-    instructions::transact::FinalizedTransaction, Mint, WalletUtxo, SOL_MINT,
-};
+use spr_transaction::{instructions::transact::FinalizedTransaction, Mint, WalletUtxo, SOL_MINT};
+use std::ops::{Deref, DerefMut};
 
 pub const OUTPUT_TREE_ID: u16 = 7;
 pub const NOW: u64 = 1_750_000_000;
 
-pub trait Execute: zolana_program::xark::Input {
-    fn execute(&self) -> Result<CheckedTransaction, zolana_program::CircuitError>;
+pub trait Execute: spr_program::xark::Input {
+    fn execute(&self) -> Result<CheckedTransaction, spr_program::CircuitError>;
 }
 
 macro_rules! program {
     ($($name:ident),*) => {$(
         impl Execute for circuit::$name {
-            fn execute(&self) -> Result<CheckedTransaction, zolana_program::CircuitError> {
+            fn execute(&self) -> Result<CheckedTransaction, spr_program::CircuitError> {
                 circuit::$name::execute(self)
             }
         }
@@ -82,11 +80,11 @@ impl<P: Execute> Fixture<P> {
         ProgramProofInputs::new(&self.program, *self.execute().unwrap().public_hash())
     }
 
-    pub fn address(&mut self, address: ShieldedAddress) -> zolana_program::ShieldedAddress {
+    pub fn address(&mut self, address: ShieldedAddress) -> spr_program::ShieldedAddress {
         self.records.address(&address).unwrap()
     }
 
-    pub fn wallet(&mut self, wallet: &WalletUtxo) -> zolana_program::circuit::Utxo {
+    pub fn wallet(&mut self, wallet: &WalletUtxo) -> spr_program::circuit::Utxo {
         self.records.utxo(wallet).unwrap()
     }
 

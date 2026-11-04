@@ -3,13 +3,13 @@ use dvp_program::circuits::{
     SettleDvpClient as SettleDvpInputs, SettleDvpPrivateInputsClient, SettleDvpPublicInputsClient,
 };
 use solana_address::Address;
-use zolana_client::ZolanaIndexer;
-use zolana_keypair::ShieldedKeypair;
-use zolana_program::{ProgramOwner, TransactionOptions};
-use zolana_transaction::instructions::transact::SppProofInputs;
+use spr_client::ZolanaIndexer;
+use spr_keypair::ShieldedKeypair;
+use spr_program::{ProgramOwner, TransactionOptions};
+use spr_transaction::instructions::transact::SppProofInputs;
 
 use super::SettleDvp;
-use crate::shared::{catch_requirement, field_decimal, identity_decimal};
+use crate::shared::{field, identity};
 use crate::{
     err,
     shared::{ensure_output_tree, prove_pda_transact},
@@ -33,7 +33,7 @@ pub struct SettleDvpTransaction {
     bump: u8,
     current_timestamp: i64,
     pub spp_proof_inputs: SppProofInputs,
-    pub proof_inputs: zolana_program::ProgramProofInputs,
+    pub proof_inputs: spr_program::ProgramProofInputs,
     dvp_id: [u8; 32],
 }
 
@@ -101,15 +101,14 @@ impl SettleDvpTransactionParams {
                 dvp_address,
             },
             public: SettleDvpPublicInputsClient {
-                creator_identity: identity_decimal(&creator)?,
-                dvp_id: field_decimal(self.terms.dvp_id()?)?,
-                dvp_owner: field_decimal(dvp_address.owner_hash().map_err(err)?)?,
-                settlement_authority_identity: identity_decimal(&settlement_authority)?,
+                creator_identity: identity(&creator)?,
+                dvp_id: field(self.terms.dvp_id()?)?,
+                dvp_owner: field(dvp_address.owner_hash().map_err(err)?)?,
+                settlement_authority_identity: identity(&settlement_authority)?,
                 current_timestamp: u64::try_from(self.current_timestamp)?,
             },
         };
-        let transaction =
-            catch_requirement(|| proof_inputs.prepare(&signer, self.payer).map_err(err))?;
+        let transaction = proof_inputs.prepare(&signer, self.payer).map_err(err)?;
         let finalized = transaction.finalized;
         let proof_inputs = transaction.proof_inputs;
         // 3. Encrypt the settlement and change UTXOs.

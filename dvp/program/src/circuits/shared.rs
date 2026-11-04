@@ -1,4 +1,4 @@
-use zolana_program::{
+use spr_program::{
     circuit::{DataUtxo, Utxo, UtxoTrait},
     poseidon, require_eq, CircuitError, Field, ShieldedAddress, TxContext, UtxoOwner,
 };

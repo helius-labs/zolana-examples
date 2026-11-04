@@ -25,7 +25,7 @@ fn each_party_reclaims_its_leg_to_a_chosen_destination() {
             (
                 Some(destination(91)),
                 if payment {
-                    zolana_transaction::Mint::SOL
+                    spr_transaction::Mint::SOL
                 } else {
                     delivery_mint()
                 },
@@ -78,11 +78,11 @@ fn reclaim_proof_rejects_partial_or_wrong_asset_refunds() {
     for wrong_asset in [false, true] {
         let mut output = finalized.output_utxos().first().unwrap().clone();
         if wrong_asset {
-            output.asset = zolana_transaction::Mint::SOL;
+            output.asset = spr_transaction::Mint::SOL;
         } else {
             output.amount -= 1;
         }
-        let hash = zolana_program::PrivateTxHash::new(
+        let hash = spr_program::PrivateTxHash::new(
             &[field_bytes(inputs.private.deposit.hash().unwrap())],
             &[output.hash(OUTPUT_TREE_ID).unwrap(), [0; 32]],
             &finalized.private_tx_blinding().unwrap(),
@@ -94,10 +94,10 @@ fn reclaim_proof_rejects_partial_or_wrong_asset_refunds() {
 }
 
 fn verify(
-    proof: &zolana_program::CompressedProof,
+    proof: &spr_program::CompressedProof,
     public: &dvp_program::verifier::reclaim_dvp::PublicInputs,
     private_tx_hash: &[u8; 32],
-) -> Result<(), zolana_program::verifier::VerifyError> {
+) -> Result<(), spr_program::verifier::VerifyError> {
     dvp_program::verifier::reclaim_dvp::Verifier {
         proof,
         public_inputs: dvp_program::verifier::reclaim_dvp::PublicInputs {

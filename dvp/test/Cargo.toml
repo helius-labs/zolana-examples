@@ -7,12 +7,12 @@ autotests = false
 
 [dependencies]
 anyhow = { workspace = true }
-dvp-program = { path = "../program", features = ["circuits", "parallel"] }
+dvp-program = { path = "../program", features = ["circuits"] }
 dvp-sdk = { path = "../sdk" }
 solana-clock = { workspace = true }
 solana-signature = { workspace = true }
 wincode = { workspace = true }
-zolana-client = { workspace = true, features = ["reqwest", "solana-rpc"] }
+spr-client = { workspace = true, features = ["reqwest", "solana-rpc"] }
 
 [dev-dependencies]
 light-program-profiler = { workspace = true, features = ["mollusk"] }
@@ -23,14 +23,14 @@ solana-address = { workspace = true }
 solana-instruction = { workspace = true }
 solana-keypair = { workspace = true }
 solana-signer = { workspace = true }
-zolana-hasher = { workspace = true }
-zolana-interface = { workspace = true }
-zolana-keypair = { workspace = true }
-zolana-merkle-tree = { workspace = true }
-zolana-program-test = { workspace = true, features = ["localnet"] }
-zolana-test-utils = { workspace = true }
-zolana-transaction = { workspace = true }
-zolana-tree = { workspace = true }
+spr-hasher = { workspace = true }
+spr-interface = { workspace = true }
+spr-keypair = { workspace = true }
+spr-merkle-tree = { workspace = true }
+spr-program-test = { workspace = true, features = ["localnet"] }
+spr-test-utils = { workspace = true }
+spr-transaction = { workspace = true }
+spr-tree = { workspace = true }
 
 [[test]]
 name = "abort_dvp"

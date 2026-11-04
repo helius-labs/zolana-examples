@@ -48,7 +48,7 @@ fn cancel_and_reject_refund_every_funding_combination() {
                     ),
                     (
                         terms.buyer_refund_destination,
-                        zolana_transaction::Mint::SOL,
+                        spr_transaction::Mint::SOL,
                         if payment { 2_499_999_995 } else { 0 },
                         false
                     ),
@@ -121,7 +121,7 @@ fn abort_proof_rejects_wrong_refunds_and_spp_rejects_padding_before_a_deposit() 
             .iter()
             .map(|output| output.hash(OUTPUT_TREE_ID).unwrap())
             .collect::<Vec<_>>();
-        let hash = zolana_program::PrivateTxHash::new(
+        let hash = spr_program::PrivateTxHash::new(
             &input_hashes,
             &hashes,
             &finalized.private_tx_blinding().unwrap(),
@@ -132,20 +132,20 @@ fn abort_proof_rejects_wrong_refunds_and_spp_rejects_padding_before_a_deposit() 
     }
     // 3. Check SPP rejects a real deposit after a dummy.
     let mut spp = finalized
-        .encrypt_with_viewing_key(&zolana_keypair::ViewingKey::new())
+        .encrypt_with_viewing_key(&spr_keypair::ViewingKey::new())
         .unwrap();
     spp.input_utxos.swap(1, 2);
     assert!(matches!(
         spp.check_shape(),
-        Err(zolana_transaction::TransactionError::RealInputAfterDummy { index: 2 })
+        Err(spr_transaction::TransactionError::RealInputAfterDummy { index: 2 })
     ));
 }
 
 fn verify(
-    proof: &zolana_program::CompressedProof,
+    proof: &spr_program::CompressedProof,
     public: &dvp_program::verifier::abort_dvp::PublicInputs,
     private_tx_hash: &[u8; 32],
-) -> Result<(), zolana_program::verifier::VerifyError> {
+) -> Result<(), spr_program::verifier::VerifyError> {
     dvp_program::verifier::abort_dvp::Verifier {
         proof,
         public_inputs: dvp_program::verifier::abort_dvp::PublicInputs {

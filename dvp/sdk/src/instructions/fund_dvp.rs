@@ -1,10 +1,10 @@
 use anyhow::{ensure, Result};
 use solana_address::Address;
 use solana_instruction::Instruction;
-use zolana_interface::instruction::instruction_data::transact::TransactIxData;
-use zolana_keypair::{ShieldedKeypair, X25519Pubkey};
-use zolana_program::instruction::Transact;
-use zolana_transaction::{
+use spr_interface::instruction::instruction_data::transact::TransactIxData;
+use spr_keypair::{ShieldedKeypair, X25519Pubkey};
+use spr_program::instruction::Transact;
+use spr_transaction::{
     instructions::transact::{ConfidentialTransaction, SppProofInputs},
     WalletUtxo, SOL_MINT,
 };
@@ -94,7 +94,7 @@ impl FundDvp {
 
 #[cfg(test)]
 mod tests {
-    use zolana_transaction::Mint;
+    use spr_transaction::Mint;
 
     use super::*;
     use crate::index::fixture::{

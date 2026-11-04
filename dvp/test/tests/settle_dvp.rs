@@ -12,8 +12,8 @@ use dvp_sdk::{
 use dvp_test::{assert_dvp_error, assert_spp_rejects, has_dvp, has_legs, settle_timestamp};
 use shared::{setup, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT};
 use solana_signer::Signer;
-use zolana_test_utils::test_validator_asserts::wait_for_nullifier_present;
-use zolana_transaction::SOL_MINT;
+use spr_test_utils::test_validator_asserts::wait_for_nullifier_present;
+use spr_transaction::SOL_MINT;
 
 /// What the seller sends above the delivery amount, returned to its refund
 /// destination at settlement.

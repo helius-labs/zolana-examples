@@ -2,7 +2,7 @@ use super::{
     shared::{assert_blinding_seed, dvp_owner},
     SwapDvpTerms,
 };
-use zolana_program::{
+use spr_program::{
     circuit::{CheckedTransaction, ConfidentialTransaction, DataUtxo, PublicInputs},
     input, CircuitError, ClientInputs, Field, ShieldedAddress, TxContext, ZkProgram,
 };
@@ -18,7 +18,6 @@ pub struct CreateDvp {
 #[derive(ClientInputs)]
 pub struct CreateDvpPrivateInputs {
     pub tx_context: TxContext,
-    #[client(nested)]
     pub terms: SwapDvpTerms,
     pub dvp_address: ShieldedAddress,
 }
@@ -63,7 +62,7 @@ impl CreateDvp {
 
         // 5. Reserve the DvP address and check the transaction.
         ConfidentialTransaction::new(&private.tx_context, public)
-            .with(zolana_program::circuit::NewAddress::new(
+            .with(spr_program::circuit::NewAddress::new(
                 owner,
                 &public.dvp_id,
             )?)

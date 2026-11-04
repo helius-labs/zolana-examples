@@ -4,13 +4,13 @@ use dvp_program::circuits::{
     ReclaimDvpPublicInputsClient,
 };
 use solana_address::Address;
-use zolana_client::ZolanaIndexer;
-use zolana_keypair::{ShieldedAddress, ShieldedKeypair};
-use zolana_program::{ProgramOwner, TransactionOptions};
-use zolana_transaction::instructions::transact::SppProofInputs;
+use spr_client::ZolanaIndexer;
+use spr_keypair::{ShieldedAddress, ShieldedKeypair};
+use spr_program::{ProgramOwner, TransactionOptions};
+use spr_transaction::instructions::transact::SppProofInputs;
 
 use super::ReclaimDvp;
-use crate::shared::{catch_requirement, field_decimal, identity_decimal};
+use crate::shared::{field, identity};
 use crate::{
     err,
     shared::{ensure_output_tree, prove_pda_transact},
@@ -29,7 +29,7 @@ pub struct ReclaimDvpTransaction {
     creator: Address,
     bump: u8,
     pub spp_proof_inputs: SppProofInputs,
-    pub proof_inputs: zolana_program::ProgramProofInputs,
+    pub proof_inputs: spr_program::ProgramProofInputs,
     dvp_id: [u8; 32],
 }
 
@@ -78,14 +78,13 @@ impl ReclaimDvpTransactionParams {
                 dvp_address,
             },
             public: ReclaimDvpPublicInputsClient {
-                creator_identity: identity_decimal(&creator)?,
-                dvp_id: field_decimal(terms.dvp_id()?)?,
-                dvp_owner: field_decimal(dvp_address.owner_hash().map_err(err)?)?,
-                signer_identity: identity_decimal(&signer_address)?,
+                creator_identity: identity(&creator)?,
+                dvp_id: field(terms.dvp_id()?)?,
+                dvp_owner: field(dvp_address.owner_hash().map_err(err)?)?,
+                signer_identity: identity(&signer_address)?,
             },
         };
-        let transaction =
-            catch_requirement(|| proof_inputs.prepare(&sender, self.payer).map_err(err))?;
+        let transaction = proof_inputs.prepare(&sender, self.payer).map_err(err)?;
         let finalized = transaction.finalized;
         let proof_inputs = transaction.proof_inputs;
         // 3. Encrypt the refund UTXO.

@@ -1,6 +1,6 @@
 use super::{shared::dvp_owner, SwapDvpTerms};
-use zolana_program::circuit::Utxo;
-use zolana_program::{
+use spr_program::circuit::Utxo;
+use spr_program::{
     circuit::{CheckedTransaction, ConfidentialTransaction, PublicInputs, TokenUtxos, UtxoTrait},
     input, require_eq, CircuitError, ClientInputs, Field, ShieldedAddress, TxContext, ZkProgram,
 };
@@ -16,7 +16,6 @@ pub struct ReclaimDvp {
 #[derive(ClientInputs)]
 pub struct ReclaimDvpPrivateInputs {
     pub tx_context: TxContext,
-    #[client(nested)]
     pub terms: SwapDvpTerms,
     pub deposit: Utxo,
     pub payment_leg: bool,

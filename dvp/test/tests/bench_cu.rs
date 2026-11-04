@@ -58,13 +58,13 @@ use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
-use zolana_client::{
+use spr_client::{
     transaction_size, ClientError, ComputeBudgetConfig, MerkleContext, MerkleProof,
     NonInclusionProof, Proof, ProveRequest, Prover, ProverClient, ProverExt, SpendProof,
     STATE_TREE_HEIGHT,
 };
-use zolana_hasher::Poseidon;
-use zolana_interface::{
+use spr_hasher::Poseidon;
+use spr_interface::{
     instruction::instruction_data::transact::TransactIxData,
     state::{
         default_tree_fees, discriminator::TREE_ACCOUNT_DISCRIMINATOR, nullifier_tree_params,
@@ -72,11 +72,11 @@ use zolana_interface::{
     },
     SHIELDED_POOL_PROGRAM_ID,
 };
-use zolana_keypair::{random_blinding, NullifierKey, ShieldedKeypair};
-use zolana_merkle_tree::{indexed::IndexedMerkleTree, MerkleTree};
-use zolana_test_utils::{transact::nullifier_tree, utxo::dummy_proofs};
-use zolana_transaction::{instructions::transact::SppProofInputs, Mint, SOL_MINT};
-use zolana_tree::TreeAccount;
+use spr_keypair::{random_blinding, NullifierKey, ShieldedKeypair};
+use spr_merkle_tree::{indexed::IndexedMerkleTree, MerkleTree};
+use spr_test_utils::{transact::nullifier_tree, utxo::dummy_proofs};
+use spr_transaction::{instructions::transact::SppProofInputs, Mint, SOL_MINT};
+use spr_tree::TreeAccount;
 
 const PROFILING_SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/bench");
 const OUTPUT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../BENCHMARK.md");
@@ -124,7 +124,7 @@ fn bench_cu_dvp() {
 
     let report = CuBenchmark::new(ReadmeConfig {
         title: "Private DvP -- CU Benchmark".into(),
-        description: "1. Measure the five DvP instructions under Mollusk using the v0.5.0-alpha shielded-pool program and the Xark-backed SDK. Each DvP handler verifies its generated program proof and invokes SPP directly. Cancellation and rejection share process_abort_dvp.\n\n2. Record SPP and program proving times, consumed compute units, and serialized v1 transaction sizes. Create/reclaim use 1x2 with compact output padding; settle uses 3x4; cancel/reject use 3x2 with real optional deposits before random input padding.\n\n3. Report compiled program constraints, checksummed Xark proving-key and verifying-key sizes. Native proof times are single samples in the release profile, including artifact checksum checks, circuit/key loading, proving and verification. Build the profiling program first with cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.54 --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program.".into(),
+        description: "1. Measure the five DvP instructions under Mollusk using the shielded-pool program built from Zolana 7c61c47a3 and the Xark-backed SDK. Each DvP handler verifies its generated program proof and invokes SPP directly. Cancellation and rejection share process_abort_dvp.\n\n2. Record SPP and program proving times, consumed compute units, and serialized v1 transaction sizes. Create/reclaim use 1x2 with compact output padding; settle uses 3x4; cancel/reject use 3x2 with real optional deposits before random input padding.\n\n3. Report compiled program constraints, checksummed Xark proving-key and verifying-key sizes. Native proof times are single samples in the release profile, including artifact checksum checks, circuit/key loading, proving and verification. Build the profiling program first with cargo build-sbf --manifest-path dvp/program/Cargo.toml --tools-version v1.54 --sbf-out-dir dvp/target/bench -- --features bpf-entrypoint,profile-program.".into(),
         output_path: OUTPUT_PATH.into(),
         regenerate_command: Some(
             "cargo test --release --locked -p dvp-test --test bench_cu -- --ignored --nocapture".into(),
@@ -140,7 +140,7 @@ fn bench_cu_dvp() {
 
     let mut bench = Bench {
         mollusk,
-        tree: zolana_interface::pda::tree(BENCH_TREE_ID),
+        tree: spr_interface::pda::tree(BENCH_TREE_ID),
         prover: ProverClient::local(),
         report,
         circuit_proof_times: Vec::new(),
@@ -347,7 +347,7 @@ fn start_prover() {
             Path::new(&home).join(".config/zolana/proving-keys"),
         );
     }
-    zolana_client::spawn_prover().expect("spawn prover");
+    spr_client::spawn_prover().expect("spawn prover");
 }
 
 /// The release shielded pool program: `SHIELDED_POOL_PROGRAM_PATH`, else

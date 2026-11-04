@@ -1,5 +1,5 @@
-use zolana_program::circuit::Utxo;
-use zolana_program::{
+use spr_program::circuit::Utxo;
+use spr_program::{
     circuit::{CheckedTransaction, ConfidentialTransaction, PublicInputs, TokenUtxos, UtxoTrait},
     input, require_eq, CircuitError, ClientInputs, Field, ShieldedAddress, TxContext, ZkProgram,
 };
@@ -20,7 +20,6 @@ pub struct AbortDvp {
 #[derive(ClientInputs)]
 pub struct AbortDvpPrivateInputs {
     pub tx_context: TxContext,
-    #[client(nested)]
     pub terms: SwapDvpTerms,
     pub dvp_utxo: Utxo,
     pub delivery_deposit: Utxo,

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Prepare the exact SDK and compiler sources used by this example.
+# Prepare the exact SDK source used by this example and build its tools.
 set -euo pipefail
 
 dvp=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-zolana_revision=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb
-xark_revision=38c0de6fec56cff52f5a4e0cf2d86721ea29e583
+zolana_revision=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989
+xark_revision=ad7baad990cb949227ad7d6046e4cfbe3806d357
 
 checkout() {
     local repository=$1 revision=$2 directory=$3
@@ -21,8 +21,8 @@ checkout() {
     fi
 }
 
-# Cargo manifests and the build patch cannot read these variables; fail when
-# any of their Git pins drifts from the revisions above.
+# Cargo manifests cannot read these variables; fail when any of their Git
+# pins drifts from the revisions above.
 check_pins() {
     local repository=$1 revision=$2 file
     shift 2
@@ -33,51 +33,17 @@ check_pins() {
         fi
     done
 }
-check_pins https://github.com/helius-labs/zolana "$zolana_revision" "$dvp/Cargo.toml"
-check_pins https://github.com/ananas-block/xark "$xark_revision" \
-    "$dvp/Cargo.toml" "$dvp/scripts/zk-build-git-deps.patch"
 
 checkout https://github.com/helius-labs/zolana.git "$zolana_revision" "$dvp/.tools/zolana"
-checkout https://github.com/ananas-block/xark.git "$xark_revision" "$dvp/.tools/xark"
-
-# Use the same Git dependencies when building the CLI from its source checkout.
-python3 - "$dvp/.tools/zolana/Cargo.toml" "$xark_revision" <<'PY'
-import pathlib
-import re
-import sys
-
-manifest = pathlib.Path(sys.argv[1])
-revision = sys.argv[2]
-source = manifest.read_text()
-crates = {"xark", "xark-groth16", "xark-wasm"}
-source, count = re.subn(
-    r'(?m)^(xark(?:-groth16|-wasm)?) = \{ (?:path|git) = [^\n]+ \}$',
-    lambda match: f'{match[1]} = {{ git = "https://github.com/ananas-block/xark", rev = "{revision}" }}',
-    source,
-)
-if count != len(crates):
-    raise SystemExit("The pinned Zolana manifest has unexpected Xark dependencies")
-manifest.write_text(source)
-PY
-
-# Keep the generated circuit crates on those Git dependencies too.
-patch_file="$dvp/scripts/zk-build-git-deps.patch"
-if ! git -C "$dvp/.tools/zolana" apply --reverse --check "$patch_file" 2>/dev/null; then
-    git -C "$dvp/.tools/zolana" apply --check "$patch_file"
-    git -C "$dvp/.tools/zolana" apply "$patch_file"
-fi
+check_pins https://github.com/helius-labs/zolana "$zolana_revision" "$dvp/Cargo.toml"
+# The SDK, its CLI and the generated circuit crates must share one Xark.
+check_pins https://github.com/ananas-block/xark "$xark_revision" \
+    "$dvp/Cargo.toml" "$dvp/.tools/zolana/Cargo.toml"
 
 if [[ ${1:-} == --prepare-only ]]; then
     exit 0
 fi
 
-# Both security fixes are committed in the pinned Xark revision. Require them
-# before building; keep SDK validation files matched to the unmodified source.
-for name in input-region-indices proof-randomness; do
-    git -C "$dvp/.tools/xark" apply --reverse --check "$dvp/.tools/zolana/tools/xark/$name.patch"
-done
-
-"$dvp/.tools/zolana/tools/xark/build.sh" "$dvp/.tools/xark"
-cargo build --release --manifest-path "$dvp/.tools/zolana/Cargo.toml" -p zolana-cli
+cargo build --release --manifest-path "$dvp/.tools/zolana/Cargo.toml" -p spr-cli -p xark-cli
 echo "Zolana CLI: $dvp/.tools/zolana/target/release/zolana"
-echo "Xark source: $dvp/.tools/xark (export XARK_SOURCE to this path)"
+echo "Xark CLI: $dvp/.tools/zolana/target/release/xark"

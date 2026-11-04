@@ -3,8 +3,8 @@
 //! output ciphertexts of the transactions that spend DvP UTXOs.
 
 use anyhow::{ensure, Result};
-use zolana_interface::instruction::instruction_data::transact::MessageData;
-use zolana_keypair::{ShieldedAddress, ViewingKey, X25519Pubkey};
+use spr_interface::instruction::instruction_data::transact::MessageData;
+use spr_keypair::{ShieldedAddress, ViewingKey, X25519Pubkey};
 
 use crate::{err, state::SwapDvp};
 

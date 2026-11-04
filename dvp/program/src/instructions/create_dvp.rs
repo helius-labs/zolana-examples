@@ -4,15 +4,15 @@ use pinocchio::{
     error::ProgramError,
     AccountView, Address, ProgramResult,
 };
-use wincode::{SchemaRead, SchemaWrite};
-use zolana_account_checks::AccountIterator;
-use zolana_hasher::primitives::solana_owner_identity;
-use zolana_interface::instruction::instruction_data::transact::TransactIxData;
-use zolana_program::{
+use spr_account_checks::AccountIterator;
+use spr_hasher::primitives::solana_owner_identity;
+use spr_interface::instruction::instruction_data::transact::TransactIxData;
+use spr_program::{
     cpi::{SppTransactAccounts, TransactAccountsError},
     program::PdaOwner,
     verifier::VerifyError,
 };
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{error::DvpError, verifier::create_dvp, DVP_AUTHORITY_PDA_SEED};
 
@@ -91,7 +91,7 @@ pub fn process_create_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> Progr
     accounts.invoke::<16>(&transact, &[Signer::from(&seeds)])
 }
 
-pub use zolana_program::CompressedProof as CreateDvpProof;
+pub use spr_program::CompressedProof as CreateDvpProof;
 
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct CreateDvpIxData {

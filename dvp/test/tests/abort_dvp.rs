@@ -15,9 +15,9 @@ use dvp_test::{assert_dvp_error, assert_spp_rejects, has_dvp, has_legs, settle_t
 use shared::{setup, Actor, TestEnv, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT};
 use solana_signature::Signature;
 use solana_signer::Signer;
-use zolana_program_test::fixture;
-use zolana_test_utils::test_validator_asserts::wait_for_nullifier_present;
-use zolana_transaction::{Mint, SOL_MINT};
+use spr_program_test::fixture;
+use spr_test_utils::test_validator_asserts::wait_for_nullifier_present;
+use spr_transaction::{Mint, SOL_MINT};
 
 /// What the seller sends above the delivery amount; an abort refunds the
 /// whole deposit, surplus included.

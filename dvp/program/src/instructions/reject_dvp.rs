@@ -1,7 +1,7 @@
 use light_program_profiler::profile;
 use pinocchio::{AccountView, Address, ProgramResult};
+use spr_interface::instruction::instruction_data::transact::TransactIxData;
 use wincode::{SchemaRead, SchemaWrite};
-use zolana_interface::instruction::instruction_data::transact::TransactIxData;
 
 use crate::{
     instructions::abort_dvp::{process_abort_dvp, AbortDvpProof},

@@ -1,6 +1,6 @@
 use solana_instruction::AccountMeta;
-use zolana_account_checks::error::AccountError;
-use zolana_test_utils::mollusk::expect_err_exact;
+use spr_account_checks::error::AccountError;
+use spr_test_utils::mollusk::expect_err_exact;
 
 use crate::common::{
     cancel_dvp_fixture, create_dvp_fixture, edit_payer, reclaim_dvp_fixture, reject_dvp_fixture,

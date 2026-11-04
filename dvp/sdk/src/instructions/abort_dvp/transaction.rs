@@ -4,13 +4,13 @@ use dvp_program::circuits::{
 };
 use solana_address::Address;
 use solana_instruction::Instruction;
-use zolana_client::ZolanaIndexer;
-use zolana_keypair::ShieldedKeypair;
-use zolana_program::{ProgramOwner, TransactionOptions};
-use zolana_transaction::{instructions::transact::SppProofInputs, Mint, WalletUtxo};
+use spr_client::ZolanaIndexer;
+use spr_keypair::ShieldedKeypair;
+use spr_program::{ProgramOwner, TransactionOptions};
+use spr_transaction::{instructions::transact::SppProofInputs, Mint, WalletUtxo};
 
 use super::AbortMode;
-use crate::shared::{catch_requirement, field_decimal, identity_decimal};
+use crate::shared::{field, identity};
 use crate::{
     err,
     instructions::{cancel_dvp::CancelDvp, reject_dvp::RejectDvp},
@@ -37,7 +37,7 @@ pub struct AbortDvpTransaction {
     creator: Address,
     bump: u8,
     pub spp_proof_inputs: SppProofInputs,
-    pub proof_inputs: zolana_program::ProgramProofInputs,
+    pub proof_inputs: spr_program::ProgramProofInputs,
     dvp_id: [u8; 32],
 }
 
@@ -116,15 +116,14 @@ impl AbortDvpTransactionParams {
                 dvp_address,
             },
             public: AbortDvpPublicInputsClient {
-                creator_identity: identity_decimal(&creator)?,
-                dvp_id: field_decimal(self.terms.dvp_id()?)?,
-                dvp_owner: field_decimal(dvp_address.owner_hash().map_err(err)?)?,
-                signer_identity: identity_decimal(&signer_address)?,
+                creator_identity: identity(&creator)?,
+                dvp_id: field(self.terms.dvp_id()?)?,
+                dvp_owner: field(dvp_address.owner_hash().map_err(err)?)?,
+                signer_identity: identity(&signer_address)?,
                 reject: self.mode == AbortMode::Reject,
             },
         };
-        let transaction =
-            catch_requirement(|| proof_inputs.prepare(&sender, self.payer).map_err(err))?;
+        let transaction = proof_inputs.prepare(&sender, self.payer).map_err(err)?;
         let finalized = transaction.finalized;
         let proof_inputs = transaction.proof_inputs;
         // 3. Encrypt both refund UTXOs, including zero amounts.

@@ -4,8 +4,8 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use zolana_client::Rpc;
-use zolana_transaction::ShieldedTransaction;
+use spr_client::{HistoryFilters, Rpc};
+use spr_transaction::ShieldedTransaction;
 
 use crate::err;
 
@@ -54,17 +54,23 @@ pub(crate) fn collect_tagged<I: Rpc, F: IntoIterator>(
     let mut cursor = None;
     loop {
         let page = indexer
-            .get_shielded_transactions_by_tags(vec![tag], cursor, None, None)
+            .get_shielded_transactions_by_tags(
+                vec![tag],
+                cursor,
+                None,
+                HistoryFilters::default(),
+                None,
+            )
             .map_err(err)?;
-        for tx in &page.transactions {
+        for tx in page.data.iter().flat_map(|group| &group.events) {
             if seen.insert((tx.tx_signature, tx.event_index)) {
                 found.extend(scan(tx)?);
             }
         }
-        let Some(next) = page.next_cursor else {
+        cursor = page.pagination_token;
+        if cursor.is_none() {
             return Ok(found);
-        };
-        cursor = Some(next);
+        }
     }
 }
 
@@ -83,19 +89,21 @@ pub(crate) fn spent_nullifiers<I: Rpc>(
                     chunk.to_vec(),
                     cursor,
                     Some(PAGE_LIMIT),
+                    HistoryFilters::default(),
                     None,
                 )
                 .map_err(err)?;
             spent.extend(
-                page.transactions
+                page.data
                     .iter()
+                    .flat_map(|group| &group.events)
                     .flat_map(|tx| tx.nullifiers.iter().copied())
                     .filter(|nullifier| wanted.contains(nullifier)),
             );
-            let Some(next) = page.next_cursor else {
+            cursor = page.pagination_token;
+            if cursor.is_none() {
                 break;
-            };
-            cursor = Some(next);
+            }
         }
     }
     Ok(spent)

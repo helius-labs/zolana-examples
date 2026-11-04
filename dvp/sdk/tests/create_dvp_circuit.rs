@@ -101,7 +101,7 @@ fn create_rejects_non_pda_address_owners() {
 fn create_rejects_a_dvp_address_outside_the_public_owner() {
     // 1. Supply another PDA's address under the original public owner hash.
     let mut inputs = create_inputs(&sample_terms());
-    let other = zolana_program::ProgramOwner::new(solana_address::Address::new_from_array([9; 32]))
+    let other = spr_program::ProgramOwner::new(solana_address::Address::new_from_array([9; 32]))
         .address(destination(91).viewing_pubkey)
         .unwrap();
     inputs.private.dvp_address = inputs.address(other);
@@ -135,7 +135,7 @@ fn create_proof_rejects_changed_state_owner_tree_data_and_blinding() {
             3 => output.blinding = fe(99),
             _ => unreachable!(),
         }
-        let private_hash = zolana_program::PrivateTxHash {
+        let private_hash = spr_program::PrivateTxHash {
             input_hashes: &[[0; 32]],
             output_hashes: &[output.hash(tree).unwrap(), [0; 32]],
             address_nullifiers: Some(&[address]),
@@ -159,10 +159,10 @@ fn create_proof_rejects_changed_state_owner_tree_data_and_blinding() {
 }
 
 fn verify(
-    proof: &zolana_program::CompressedProof,
+    proof: &spr_program::CompressedProof,
     public: &dvp_program::verifier::create_dvp::PublicInputs,
     private_tx_hash: &[u8; 32],
-) -> Result<(), zolana_program::verifier::VerifyError> {
+) -> Result<(), spr_program::verifier::VerifyError> {
     dvp_program::verifier::create_dvp::Verifier {
         proof,
         public_inputs: dvp_program::verifier::create_dvp::PublicInputs {

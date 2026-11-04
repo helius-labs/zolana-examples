@@ -1637,18 +1637,18 @@ dependencies = [
  "solana-address 2.6.1",
  "solana-instruction",
  "solana-program-error",
+ "spr-account-checks",
+ "spr-hasher",
+ "spr-interface",
+ "spr-keypair",
+ "spr-program",
+ "spr-test-utils",
+ "spr-transaction",
  "thiserror 2.0.20",
  "tsify",
  "wasm-bindgen",
  "wincode",
  "xark",
- "zolana-account-checks",
- "zolana-hasher",
- "zolana-interface",
- "zolana-keypair",
- "zolana-program",
- "zolana-test-utils",
- "zolana-transaction",
 ]
 
 [[package]]
@@ -1666,16 +1666,16 @@ dependencies = [
  "solana-instruction",
  "solana-keypair",
  "solana-signature",
+ "spr-client",
+ "spr-hasher",
+ "spr-interface",
+ "spr-keypair",
+ "spr-program",
+ "spr-transaction",
  "tempfile",
  "wincode",
  "xark",
  "xark-groth16",
- "zolana-client",
- "zolana-hasher",
- "zolana-interface",
- "zolana-keypair",
- "zolana-program",
- "zolana-transaction",
 ]
 
 [[package]]
@@ -1695,16 +1695,16 @@ dependencies = [
  "solana-keypair",
  "solana-signature",
  "solana-signer",
+ "spr-client",
+ "spr-hasher",
+ "spr-interface",
+ "spr-keypair",
+ "spr-merkle-tree",
+ "spr-program-test",
+ "spr-test-utils",
+ "spr-transaction",
+ "spr-tree",
  "wincode",
- "zolana-client",
- "zolana-hasher",
- "zolana-interface",
- "zolana-keypair",
- "zolana-merkle-tree",
- "zolana-program-test",
- "zolana-test-utils",
- "zolana-transaction",
- "zolana-tree",
 ]
 
 [[package]]
@@ -2204,12 +2204,13 @@ dependencies = [
 
 [[package]]
 name = "groth16-solana"
-version = "0.2.0"
-source = "git+https://github.com/Lightprotocol/groth16-solana?rev=70a93803e5f55b8425301d506c625169ef557c9d#70a93803e5f55b8425301d506c625169ef557c9d"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3445d72a7fe1f2d06aa93ae5ade8ad8900bce0559fd098ae3433e04173bc8d20"
 dependencies = [
- "ark-bn254 0.5.0",
- "ark-ff 0.5.0",
- "ark-serialize 0.5.0",
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-serialize 0.6.0",
  "pinocchio 0.10.2",
  "sha2 0.10.9",
  "solana-bn254",
@@ -2926,6 +2927,18 @@ checksum = "47a1ccadd0bb5a32c196da536fd72c59183de24a055f6bf0513bf845fefab862"
 dependencies = [
  "ark-bn254 0.5.0",
  "ark-ff 0.5.0",
+ "num-bigint 0.4.8",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "light-poseidon"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a8988878057561648d6ff78522edf4fc0b43b75ca88d0f4da33c052880d6abf"
+dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
  "num-bigint 0.4.8",
  "thiserror 1.0.69",
 ]
@@ -6444,6 +6457,437 @@ dependencies = [
 ]
 
 [[package]]
+name = "spr-account-checks"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "solana-account-view 2.0.0",
+ "solana-address 2.6.1",
+ "solana-program-error",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "spr-api"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "http",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "spr-indexer-api",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
+name = "spr-circuit"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "ark-bn254 0.5.0",
+ "ark-ff 0.5.0",
+ "borsh",
+ "light-poseidon 0.4.0",
+ "serde",
+ "serde_bytes",
+ "spr-instruction",
+ "spr-interface",
+ "tsify",
+ "wasm-bindgen",
+ "xark",
+]
+
+[[package]]
+name = "spr-client"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bs58",
+ "futures",
+ "groth16-solana",
+ "hex",
+ "http",
+ "httpdate",
+ "num-bigint 0.4.8",
+ "num-traits",
+ "rand_core 0.9.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "solana-account 4.3.2",
+ "solana-address 2.6.1",
+ "solana-bn254",
+ "solana-commitment-config",
+ "solana-hash",
+ "solana-instruction",
+ "solana-keypair",
+ "solana-message",
+ "solana-pubkey 4.2.1",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-signature",
+ "solana-signer",
+ "solana-transaction",
+ "solana-transaction-status-client-types",
+ "spr-api",
+ "spr-event",
+ "spr-event-parser",
+ "spr-hasher",
+ "spr-indexer-api",
+ "spr-instruction",
+ "spr-interface",
+ "spr-keypair",
+ "spr-prover-tee",
+ "spr-transaction",
+ "spr-tree",
+ "spr-user-registry-interface",
+ "thiserror 2.0.20",
+ "tokio",
+ "url",
+ "zeroize",
+]
+
+[[package]]
+name = "spr-event"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "borsh",
+ "wincode",
+]
+
+[[package]]
+name = "spr-event-parser"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "borsh",
+ "solana-pubkey 4.2.1",
+ "spr-event",
+ "spr-interface",
+]
+
+[[package]]
+name = "spr-hasher"
+version = "0.1.1"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
+ "light-poseidon 0.5.0",
+ "num-bigint 0.4.8",
+ "sha2 0.10.9",
+ "sha3",
+ "solana-program-error",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "spr-indexer-api"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "base64 0.22.1",
+ "bs58",
+ "serde",
+ "solana-pubkey 4.2.1",
+ "solana-signature",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "spr-instruction"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "pinocchio 0.11.2",
+ "solana-address 2.6.1",
+ "solana-instruction",
+ "solana-pubkey 4.2.1",
+ "spr-hasher",
+ "spr-interface",
+ "thiserror 2.0.20",
+ "wincode",
+]
+
+[[package]]
+name = "spr-interface"
+version = "0.1.1"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "arrayvec",
+ "borsh",
+ "bytemuck",
+ "groth16-solana",
+ "solana-address 2.6.1",
+ "solana-program-error",
+ "solana-pubkey 4.2.1",
+ "spr-event",
+ "spr-hasher",
+ "spr-tree",
+ "thiserror 2.0.20",
+ "wincode",
+]
+
+[[package]]
+name = "spr-keypair"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "aes",
+ "bs58",
+ "ctr",
+ "ed25519-dalek",
+ "getrandom 0.2.17",
+ "getrandom 0.3.4",
+ "hkdf",
+ "rand 0.8.8",
+ "serde",
+ "serde_bytes",
+ "sha2 0.10.9",
+ "solana-address 2.6.1",
+ "solana-keypair",
+ "solana-signer",
+ "spr-hasher",
+ "thiserror 2.0.20",
+ "tsify",
+ "wasm-bindgen",
+ "x25519-dalek",
+ "zeroize",
+]
+
+[[package]]
+name = "spr-macros"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "spr-hasher",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "spr-merkle-tree"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "num-bigint 0.4.8",
+ "num-traits",
+ "spr-hasher",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "spr-program"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-ec 0.6.0",
+ "ark-serialize 0.6.0",
+ "borsh",
+ "groth16-solana",
+ "js-sys",
+ "pinocchio 0.11.2",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "sha2 0.10.9",
+ "solana-address 2.6.1",
+ "solana-bn254",
+ "solana-program-error",
+ "spr-circuit",
+ "spr-hasher",
+ "spr-instruction",
+ "spr-interface",
+ "spr-keypair",
+ "spr-macros",
+ "spr-transaction",
+ "spr-tree",
+ "thiserror 2.0.20",
+ "tsify",
+ "wasm-bindgen",
+ "wincode",
+]
+
+[[package]]
+name = "spr-program-test"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "base64 0.22.1",
+ "litesvm",
+ "num-bigint 0.4.8",
+ "sha2 0.10.9",
+ "solana-account 4.3.2",
+ "solana-address 2.6.1",
+ "solana-clock",
+ "solana-hash",
+ "solana-instruction",
+ "solana-keypair",
+ "solana-message",
+ "solana-pubkey 4.2.1",
+ "solana-signature",
+ "solana-signer",
+ "solana-transaction",
+ "solana-transaction-error",
+ "spr-client",
+ "spr-event",
+ "spr-event-parser",
+ "spr-hasher",
+ "spr-instruction",
+ "spr-interface",
+ "spr-keypair",
+ "spr-merkle-tree",
+ "spr-protocol-instructions",
+ "spr-transaction",
+ "spr-tree",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "spr-protocol-instructions"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "solana-address 2.6.1",
+ "solana-instruction",
+ "solana-pubkey 4.2.1",
+ "spr-interface",
+ "spr-tree",
+]
+
+[[package]]
+name = "spr-prover-tee"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "aes-gcm",
+ "ciborium",
+ "ciborium-ll",
+ "coset",
+ "dcap-qvl",
+ "ed25519-dalek",
+ "form_urlencoded",
+ "hex",
+ "hpke",
+ "p384",
+ "rand_core 0.9.5",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "x509-cert",
+ "zeroize",
+]
+
+[[package]]
+name = "spr-smart-account-client"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "borsh",
+ "solana-instruction",
+ "solana-pubkey 4.2.1",
+]
+
+[[package]]
+name = "spr-test-utils"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "borsh",
+ "bytemuck",
+ "futures",
+ "groth16-solana",
+ "mollusk-svm",
+ "num-bigint 0.4.8",
+ "rand 0.8.8",
+ "solana-account 4.3.2",
+ "solana-address 2.6.1",
+ "solana-hash",
+ "solana-instruction",
+ "solana-instruction-error",
+ "solana-keypair",
+ "solana-message",
+ "solana-program-error",
+ "solana-pubkey 4.2.1",
+ "solana-signature",
+ "solana-signer",
+ "solana-transaction",
+ "solana-transaction-error",
+ "spr-client",
+ "spr-event",
+ "spr-event-parser",
+ "spr-hasher",
+ "spr-interface",
+ "spr-keypair",
+ "spr-merkle-tree",
+ "spr-program",
+ "spr-program-test",
+ "spr-protocol-instructions",
+ "spr-smart-account-client",
+ "spr-transaction",
+ "spr-tree",
+ "spr-user-registry-interface",
+]
+
+[[package]]
+name = "spr-transaction"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "borsh",
+ "num-bigint 0.4.8",
+ "serde",
+ "solana-address 2.6.1",
+ "solana-signature",
+ "spr-event",
+ "spr-hasher",
+ "spr-instruction",
+ "spr-interface",
+ "spr-keypair",
+ "thiserror 2.0.20",
+ "tsify",
+ "wasm-bindgen",
+ "wincode",
+]
+
+[[package]]
+name = "spr-tree"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "borsh",
+ "bytemuck",
+ "groth16-solana",
+ "spr-event",
+ "spr-hasher",
+ "thiserror 2.0.20",
+ "wincode",
+ "zerocopy",
+]
+
+[[package]]
+name = "spr-user-registry-interface"
+version = "0.1.0"
+source = "git+https://github.com/helius-labs/zolana?rev=7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989#7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989"
+dependencies = [
+ "borsh",
+ "solana-instruction",
+ "solana-pubkey 4.2.1",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7289,7 +7733,7 @@ dependencies = [
 [[package]]
 name = "xark"
 version = "0.3.0"
-source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
+source = "git+https://github.com/ananas-block/xark?rev=ad7baad990cb949227ad7d6046e4cfbe3806d357#ad7baad990cb949227ad7d6046e4cfbe3806d357"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -7303,7 +7747,7 @@ dependencies = [
 [[package]]
 name = "xark-groth16"
 version = "0.3.0"
-source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
+source = "git+https://github.com/ananas-block/xark?rev=ad7baad990cb949227ad7d6046e4cfbe3806d357#ad7baad990cb949227ad7d6046e4cfbe3806d357"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ec 0.6.0",
@@ -7320,7 +7764,7 @@ dependencies = [
 [[package]]
 name = "xark-ir"
 version = "0.3.0"
-source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
+source = "git+https://github.com/ananas-block/xark?rev=ad7baad990cb949227ad7d6046e4cfbe3806d357#ad7baad990cb949227ad7d6046e4cfbe3806d357"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -7334,7 +7778,7 @@ dependencies = [
 [[package]]
 name = "xark-macros"
 version = "0.3.0"
-source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
+source = "git+https://github.com/ananas-block/xark?rev=ad7baad990cb949227ad7d6046e4cfbe3806d357#ad7baad990cb949227ad7d6046e4cfbe3806d357"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7344,7 +7788,7 @@ dependencies = [
 [[package]]
 name = "xark-prover"
 version = "0.3.0"
-source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
+source = "git+https://github.com/ananas-block/xark?rev=ad7baad990cb949227ad7d6046e4cfbe3806d357#ad7baad990cb949227ad7d6046e4cfbe3806d357"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -7360,7 +7804,7 @@ dependencies = [
 [[package]]
 name = "xark-schema"
 version = "0.3.0"
-source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"
+source = "git+https://github.com/ananas-block/xark?rev=ad7baad990cb949227ad7d6046e4cfbe3806d357#ad7baad990cb949227ad7d6046e4cfbe3806d357"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -7498,436 +7942,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
-name = "zolana-account-checks"
-version = "0.8.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "solana-account-view 2.0.0",
- "solana-address 2.6.1",
- "solana-program-error",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "zolana-api"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "http",
- "reqwest",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "tokio",
- "zeroize",
- "zolana-indexer-api",
-]
-
-[[package]]
-name = "zolana-circuit"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "ark-bn254 0.5.0",
- "ark-ff 0.5.0",
- "borsh",
- "light-poseidon 0.4.0",
- "serde",
- "serde_bytes",
- "tinyvec",
- "tsify",
- "wasm-bindgen",
- "xark",
- "zolana-instruction",
- "zolana-interface",
-]
-
-[[package]]
-name = "zolana-client"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "bs58",
- "futures",
- "groth16-solana",
- "hex",
- "http",
- "httpdate",
- "num-bigint 0.4.8",
- "num-traits",
- "rand_core 0.9.5",
- "reqwest",
- "serde",
- "serde_json",
- "solana-account 4.3.2",
- "solana-address 2.6.1",
- "solana-bn254",
- "solana-commitment-config",
- "solana-hash",
- "solana-instruction",
- "solana-keypair",
- "solana-message",
- "solana-pubkey 4.2.1",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-signature",
- "solana-signer",
- "solana-transaction",
- "solana-transaction-status-client-types",
- "thiserror 2.0.20",
- "tokio",
- "url",
- "zeroize",
- "zolana-api",
- "zolana-event",
- "zolana-event-parser",
- "zolana-hasher",
- "zolana-indexer-api",
- "zolana-interface",
- "zolana-keypair",
- "zolana-program",
- "zolana-prover-tee",
- "zolana-transaction",
- "zolana-tree",
- "zolana-user-registry-interface",
-]
-
-[[package]]
-name = "zolana-event"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "borsh",
- "wincode",
-]
-
-[[package]]
-name = "zolana-event-parser"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "borsh",
- "solana-pubkey 4.2.1",
- "zolana-event",
- "zolana-interface",
-]
-
-[[package]]
-name = "zolana-hasher"
-version = "5.0.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "ark-bn254 0.5.0",
- "ark-ff 0.5.0",
- "light-poseidon 0.4.0",
- "num-bigint 0.4.8",
- "sha2 0.10.9",
- "sha3",
- "solana-program-error",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "zolana-indexed-array"
-version = "0.3.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "num-bigint 0.4.8",
- "num-traits",
- "thiserror 2.0.20",
- "zolana-hasher",
-]
-
-[[package]]
-name = "zolana-indexer-api"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "base64 0.22.1",
- "bs58",
- "serde",
- "solana-pubkey 4.2.1",
- "solana-signature",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "zolana-instruction"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "pinocchio 0.11.2",
- "solana-address 2.6.1",
- "solana-instruction",
- "solana-pubkey 4.2.1",
- "thiserror 2.0.20",
- "wincode",
- "zolana-hasher",
- "zolana-interface",
- "zolana-tree",
-]
-
-[[package]]
-name = "zolana-interface"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "arrayvec",
- "borsh",
- "bytemuck",
- "groth16-solana",
- "solana-address 2.6.1",
- "solana-program-error",
- "solana-pubkey 4.2.1",
- "thiserror 2.0.20",
- "wincode",
- "zolana-event",
- "zolana-hasher",
- "zolana-tree",
-]
-
-[[package]]
-name = "zolana-keypair"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "aes",
- "bs58",
- "ctr",
- "ed25519-dalek",
- "getrandom 0.2.17",
- "getrandom 0.3.4",
- "hkdf",
- "rand 0.8.8",
- "serde",
- "serde_bytes",
- "sha2 0.10.9",
- "solana-address 2.6.1",
- "solana-keypair",
- "solana-signer",
- "thiserror 2.0.20",
- "tsify",
- "wasm-bindgen",
- "x25519-dalek",
- "zeroize",
- "zolana-hasher",
-]
-
-[[package]]
-name = "zolana-macros"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "zolana-hasher",
-]
-
-[[package]]
-name = "zolana-merkle-tree"
-version = "4.0.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "num-bigint 0.4.8",
- "num-traits",
- "thiserror 2.0.20",
- "zolana-hasher",
- "zolana-indexed-array",
-]
-
-[[package]]
-name = "zolana-program"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "ark-bn254 0.6.0",
- "ark-serialize 0.6.0",
- "borsh",
- "groth16-solana",
- "js-sys",
- "pinocchio 0.11.2",
- "serde",
- "serde-wasm-bindgen",
- "serde_json",
- "sha2 0.10.9",
- "solana-address 2.6.1",
- "solana-bn254",
- "solana-program-error",
- "thiserror 2.0.20",
- "tsify",
- "wasm-bindgen",
- "wincode",
- "xark-groth16",
- "zolana-circuit",
- "zolana-hasher",
- "zolana-instruction",
- "zolana-interface",
- "zolana-keypair",
- "zolana-macros",
- "zolana-transaction",
- "zolana-tree",
-]
-
-[[package]]
-name = "zolana-program-test"
-version = "0.23.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "base64 0.22.1",
- "litesvm",
- "num-bigint 0.4.8",
- "sha2 0.10.9",
- "solana-account 4.3.2",
- "solana-address 2.6.1",
- "solana-clock",
- "solana-hash",
- "solana-instruction",
- "solana-keypair",
- "solana-message",
- "solana-pubkey 4.2.1",
- "solana-signature",
- "solana-signer",
- "solana-transaction",
- "solana-transaction-error",
- "thiserror 2.0.20",
- "zolana-client",
- "zolana-event",
- "zolana-event-parser",
- "zolana-hasher",
- "zolana-interface",
- "zolana-keypair",
- "zolana-merkle-tree",
- "zolana-program",
- "zolana-transaction",
- "zolana-tree",
-]
-
-[[package]]
-name = "zolana-prover-tee"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "aes-gcm",
- "ciborium",
- "ciborium-ll",
- "coset",
- "dcap-qvl",
- "form_urlencoded",
- "hex",
- "hpke",
- "p384",
- "rand_core 0.9.5",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.20",
- "x509-cert",
- "zeroize",
-]
-
-[[package]]
-name = "zolana-smart-account-client"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "borsh",
- "solana-instruction",
- "solana-pubkey 4.2.1",
-]
-
-[[package]]
-name = "zolana-test-utils"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "borsh",
- "bytemuck",
- "futures",
- "groth16-solana",
- "mollusk-svm",
- "num-bigint 0.4.8",
- "rand 0.8.8",
- "solana-account 4.3.2",
- "solana-address 2.6.1",
- "solana-hash",
- "solana-instruction",
- "solana-instruction-error",
- "solana-keypair",
- "solana-message",
- "solana-program-error",
- "solana-pubkey 4.2.1",
- "solana-signature",
- "solana-signer",
- "solana-transaction",
- "solana-transaction-error",
- "zolana-client",
- "zolana-event",
- "zolana-event-parser",
- "zolana-hasher",
- "zolana-interface",
- "zolana-keypair",
- "zolana-merkle-tree",
- "zolana-program",
- "zolana-program-test",
- "zolana-smart-account-client",
- "zolana-transaction",
- "zolana-tree",
- "zolana-user-registry-interface",
-]
-
-[[package]]
-name = "zolana-transaction"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "borsh",
- "num-bigint 0.4.8",
- "serde",
- "solana-address 2.6.1",
- "solana-signature",
- "thiserror 2.0.20",
- "tsify",
- "wasm-bindgen",
- "wincode",
- "zolana-event",
- "zolana-hasher",
- "zolana-instruction",
- "zolana-interface",
- "zolana-keypair",
-]
-
-[[package]]
-name = "zolana-tree"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "borsh",
- "bytemuck",
- "groth16-solana",
- "thiserror 2.0.20",
- "wincode",
- "zerocopy",
- "zolana-event",
- "zolana-hasher",
-]
-
-[[package]]
-name = "zolana-user-registry-interface"
-version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb#226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb"
-dependencies = [
- "borsh",
- "solana-instruction",
- "solana-pubkey 4.2.1",
-]
-
-[[package]]
 name = "zstd"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7954,8 +7968,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "xark-wasm"
-version = "0.3.0"
-source = "git+https://github.com/ananas-block/xark?rev=38c0de6fec56cff52f5a4e0cf2d86721ea29e583#38c0de6fec56cff52f5a4e0cf2d86721ea29e583"

@@ -35,22 +35,20 @@ settlement, reclaim, cancellation and rejection with each flow inlined.
 Use Rust 1.95.0, Node.js 24 or newer, Python 3, `wasm-pack`, and Agave with
 SBF platform tools v1.54. `rust-toolchain.toml` pins the compiler used to
 generate the checked bytecode. The workspace uses Zolana
-[`226ddcb7e`](https://github.com/helius-labs/zolana/commit/226ddcb7ea4bdd1e328bf523a573f7c8d63d40eb)
+[`7c61c47a3`](https://github.com/helius-labs/zolana/commit/7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989)
 and Xark
-[`38c0de6`](https://github.com/ananas-block/xark/commit/38c0de6fec56cff52f5a4e0cf2d86721ea29e583).
-Cargo pins the SDK and prover to Git revisions, with Git patches overriding
-the SDK revision's developer-specific Xark paths. The setup script checks out
-the build tools under `.tools/`, applies the same Git pins to the CLI and its
-generated circuit crates, and builds the CLI and compiler. The TypeScript
-package uses the SDK checkout; run setup before building circuit artifacts or
-installing the TypeScript dependencies.
+[`ad7baad`](https://github.com/ananas-block/xark/commit/ad7baad990cb949227ad7d6046e4cfbe3806d357),
+the Xark revision that Zolana revision pins. Cargo pins both to Git
+revisions. The setup script checks out the SDK under `.tools/`, checks that
+the SDK and this workspace pin the same Xark revision, and builds the Zolana
+and Xark CLIs. The TypeScript package uses the SDK checkout; run setup before
+building circuit artifacts or installing the TypeScript dependencies.
 
 Run these commands from `dvp/`:
 
 ```bash
 scripts/setup-zk-tools.sh
 export ZOLANA_CLI_BIN="$PWD/.tools/zolana/target/release/zolana"
-export XARK_SOURCE="$PWD/.tools/xark"
 "$ZOLANA_CLI_BIN" zk compile --test --manifest-path program/Cargo.toml --wasm-target nodejs --verifier
 scripts/check-keys.sh
 cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 -- --locked --features bpf-entrypoint
@@ -98,21 +96,20 @@ cargo test --release --locked -p dvp-sdk
 ```
 
 The end-to-end tests start a localnet with surfpool, Photon and the SPP prover.
-Download the protocol binaries from
-[v0.5.0-alpha](https://github.com/helius-labs/zolana/releases/tag/v0.5.0-alpha),
-the release pinned by this SDK revision's `cli/release-artifacts.lock`.
-Set these paths for your platform:
+This SDK revision is newer than its last protocol release, v0.6.0-alpha: that
+release's prover and shielded-pool program do not match the SDK. Build all three
+from the SDK checkout with `scripts/build-localnet.sh` (needs Go), which prints
+the variables to export:
 
-| Variable | Asset |
+| Variable | Value |
 |----------|-------|
 | `ZOLANA_CLI_BIN` | `.tools/zolana/target/release/zolana` built above |
-| `PROVER_BIN` | `prover-<platform>-v0.5.0-alpha` |
-| `ZOLANA_PHOTON_BIN` | `scripts/photon-localnet.sh`, with `DVP_PHOTON_BIN` set to `photon-<platform>-v0.5.0-alpha` |
-| `SHIELDED_POOL_PROGRAM_PATH` | `shielded_pool_program-v0.5.0-alpha.so` |
+| `PROVER_BIN` | `.tools/zolana/target/prover-server` |
+| `ZOLANA_PHOTON_BIN` | `scripts/photon-localnet.sh`, with `DVP_PHOTON_BIN` set to `.tools/zolana/target/release/photon` |
+| `SHIELDED_POOL_PROGRAM_PATH` | `.tools/zolana/target/deploy/shielded_pool_program.so` |
 | `SURFPOOL_BIN` | `surfpool` from [v1.6.0-light](https://github.com/Lightprotocol/surfpool/releases/tag/v1.6.0-light) |
 
-`<platform>` is `linux-x64` or `darwin-arm64`. The release's `SHA256SUMS`
-records each asset's checksum. The Photon wrapper passes `--max-db-conn 1` so
+The Photon wrapper passes `--max-db-conn 1` so
 the localnet indexer runs its temporary SQLite migrations on one connection. The prover downloads missing SPP keys to
 `ZOLANA_PROVER_KEYS_DIR`, or `~/.config/zolana/proving-keys` by default.
 

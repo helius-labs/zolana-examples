@@ -1,12 +1,13 @@
 use solana_address::Address;
 use solana_keypair::Keypair;
 use solana_signature::Signature;
-use zolana_client::{
+use spr_client::{
     rpc::GetShieldedTransactionsByNullifiersResponse, ClientError, Context,
-    GetShieldedTransactionsByTagsResponse, IndexerRpcConfig, MerkleContext, NonInclusionProof, Rpc,
+    GetShieldedTransactionsByTagsResponse, HistoryFilters, IndexerRpcConfig, MerkleContext,
+    NonInclusionProof, PaginationToken, Rpc, TransactionEvents,
 };
-use zolana_keypair::{ShieldedKeypair, X25519Pubkey};
-use zolana_transaction::{
+use spr_keypair::{ShieldedKeypair, X25519Pubkey};
+use spr_transaction::{
     instructions::transact::{OutputContext, OutputSlot, SppProofInputs},
     AssetRegistry, Data, Mint, ShieldedTransaction, Utxo, WalletUtxo, SOL_MINT,
 };
@@ -64,7 +65,7 @@ pub(crate) fn sample_terms(parties: &[ShieldedKeypair; 3]) -> SwapDvp {
         seller_refund_destination: seller_address,
         buyer_refund_destination: buyer_address,
         creator: pubkey(seller),
-        blinding: zolana_keypair::random_blinding(),
+        blinding: spr_keypair::random_blinding(),
     }
 }
 
@@ -174,7 +175,7 @@ pub(crate) fn wallet_utxo(owner: &ShieldedKeypair, mint: Mint, amount: u64) -> W
         owner: owner.signing_pubkey(),
         asset: mint,
         amount,
-        blinding: zolana_keypair::random_blinding(),
+        blinding: spr_keypair::random_blinding(),
         ring_program_id: None,
         data: Data::default(),
     };
@@ -252,7 +253,7 @@ pub(crate) fn spendable_amounts(
     mint: &Address,
 ) -> Vec<u64> {
     let mut amounts: Vec<u64> =
-        zolana_transaction::decrypt_spendable(owner, std::slice::from_ref(tx), registry)
+        spr_transaction::decrypt_spendable(owner, std::slice::from_ref(tx), registry)
             .expect("decrypt")
             .balances
             .get_balance(*mint)
@@ -333,8 +334,9 @@ impl Rpc for FixtureIndexer {
     fn get_shielded_transactions_by_tags(
         &self,
         tags: Vec<[u8; 32]>,
-        cursor: Option<Vec<u8>>,
+        cursor: Option<PaginationToken>,
         _limit: Option<u32>,
+        _filters: HistoryFilters,
         _config: Option<IndexerRpcConfig>,
     ) -> Result<GetShieldedTransactionsByTagsResponse, ClientError> {
         let matching: Vec<&ShieldedTransaction> = self
@@ -351,36 +353,34 @@ impl Rpc for FixtureIndexer {
             })
             .collect();
         let page = cursor
-            .as_deref()
-            .and_then(<[u8]>::first)
-            .map_or(0, |&page| usize::from(page));
-        let transactions = matching
+            .and_then(|token| usize::try_from(token.slot()).ok())
+            .unwrap_or(0);
+        let data = matching
             .get(page.saturating_sub(1)..=page)
             .unwrap_or_default()
             .iter()
-            .map(|tx| (*tx).clone())
+            .map(|tx| events(tx))
             .collect();
-        let next_cursor = u8::try_from(page + 1)
-            .ok()
-            .filter(|&next| usize::from(next) < matching.len())
-            .map(|next| vec![next]);
+        let next = page + 1;
+        let pagination_token = (next < matching.len())
+            .then(|| PaginationToken::new(next as u64, Signature::default()));
         Ok(GetShieldedTransactionsByTagsResponse {
             context: Context {
                 block_time: 0,
                 slot: 0,
             },
             output_tree_id: Some(FIXTURE_TREE_ID),
-            transactions,
-            next_cursor,
-            scanned_through: None,
+            data,
+            pagination_token,
         })
     }
 
     fn get_shielded_transactions_by_nullifiers(
         &self,
         nullifiers: Vec<[u8; 32]>,
-        _cursor: Option<Vec<u8>>,
+        _cursor: Option<PaginationToken>,
         _limit: Option<u32>,
+        _filters: HistoryFilters,
         _config: Option<IndexerRpcConfig>,
     ) -> Result<GetShieldedTransactionsByNullifiersResponse, ClientError> {
         Ok(GetShieldedTransactionsByNullifiersResponse {
@@ -389,14 +389,22 @@ impl Rpc for FixtureIndexer {
                 slot: 0,
             },
             output_tree_id: Some(FIXTURE_TREE_ID),
-            transactions: self
+            data: self
                 .txs
                 .iter()
                 .filter(|tx| tx.nullifiers.iter().any(|n| nullifiers.contains(n)))
-                .cloned()
+                .map(events)
                 .collect(),
-            next_cursor: None,
-            scanned_through: None,
+            pagination_token: None,
         })
+    }
+}
+
+/// One indexed Solana transaction carrying the single event `tx`.
+fn events(tx: &ShieldedTransaction) -> TransactionEvents<ShieldedTransaction, Signature> {
+    TransactionEvents {
+        slot: tx.slot,
+        signature: tx.tx_signature,
+        events: vec![tx.clone()],
     }
 }

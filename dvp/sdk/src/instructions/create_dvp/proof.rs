@@ -4,14 +4,14 @@ use dvp_program::circuits::{
     SwapDvpTermsClient as SwapDvpTerms,
 };
 use solana_address::Address;
-use zolana_keypair::ViewingKey;
-use zolana_program::{
+use spr_keypair::ViewingKey;
+use spr_program::{
     program::{AddressSeed, NewAddress, PdaOwner},
     ProgramOwner, TransactionOptions,
 };
-use zolana_transaction::SppProofOutputUtxo;
+use spr_transaction::SppProofOutputUtxo;
 
-use crate::shared::{catch_requirement, field_decimal, identity_decimal};
+use crate::shared::{field, identity};
 use crate::{err, state::SwapDvp};
 
 #[derive(Clone, Debug)]
@@ -45,7 +45,7 @@ impl CreateDvpDerivation {
             .address(ViewingKey::new().pubkey())
             .map_err(err)?;
         let inputs = create_inputs(terms, owner, tree_id)?;
-        let finalized = catch_requirement(|| inputs.prepare(&owner, terms.creator).map_err(err))?;
+        let finalized = inputs.prepare(&owner, terms.creator).map_err(err)?;
         let finalized = finalized.finalized;
         let output = finalized
             .output_utxos()
@@ -73,7 +73,7 @@ impl CreateDvpDerivation {
 
 pub(crate) fn create_inputs(
     terms: &SwapDvp,
-    owner: zolana_keypair::ShieldedAddress,
+    owner: spr_keypair::ShieldedAddress,
     tree_id: u16,
 ) -> Result<CreateDvp> {
     Ok(CreateDvp {
@@ -86,9 +86,9 @@ pub(crate) fn create_inputs(
             dvp_address: owner,
         },
         public: CreateDvpPublicInputsClient {
-            creator_identity: identity_decimal(&terms.creator)?,
-            dvp_id: field_decimal(terms.dvp_id()?)?,
-            dvp_owner: field_decimal(owner.owner_hash().map_err(err)?)?,
+            creator_identity: identity(&terms.creator)?,
+            dvp_id: field(terms.dvp_id()?)?,
+            dvp_owner: field(owner.owner_hash().map_err(err)?)?,
         },
     })
 }

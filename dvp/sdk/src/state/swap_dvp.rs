@@ -1,4 +1,4 @@
-use crate::shared::{field_decimal, identity_decimal};
+use crate::shared::{field, identity};
 use anyhow::{bail, ensure, Result};
 use dvp_program::circuits::{
     DvpDestinationClient as DvpDestination, SwapDvpTerms as RawTerms,
@@ -6,10 +6,10 @@ use dvp_program::circuits::{
 };
 use dvp_program::{ABORT_TAG, CREATE_TAG, DVP_AUTHORITY_PDA_SEED, SETTLEMENT_TAG};
 use solana_address::Address;
-use zolana_hasher::primitives::{hash_bytes, right_align};
-use zolana_keypair::{hash::poseidon, shielded::SHIELDED_ADDRESS_LEN, ShieldedAddress};
-use zolana_program::{to_bytes, ClientInputs, InputRecords};
-use zolana_transaction::Mint;
+use spr_hasher::primitives::{hash_bytes, right_align};
+use spr_keypair::{hash::poseidon, shielded::SHIELDED_ADDRESS_LEN, ShieldedAddress};
+use spr_program::{to_bytes, ClientInputs, InputRecords};
+use spr_transaction::Mint;
 
 use crate::err;
 
@@ -135,10 +135,10 @@ impl SwapDvp {
             "payment mint differs from the terms"
         );
         Ok(SwapDvpTerms {
-            seller_identity: identity_decimal(&self.seller)?,
-            buyer_identity: identity_decimal(&self.buyer)?,
-            settlement_authority_identity: identity_decimal(&self.settlement_authority)?,
-            creator_identity: identity_decimal(&self.creator)?,
+            seller_identity: identity(&self.seller)?,
+            buyer_identity: identity(&self.buyer)?,
+            settlement_authority_identity: identity(&self.settlement_authority)?,
+            creator_identity: identity(&self.creator)?,
             delivery_mint,
             payment_mint,
             delivery_amount: self.delivery_amount,
@@ -149,7 +149,7 @@ impl SwapDvp {
                 .earliest_settlement_timestamp
                 .map_or(Ok(0), timestamp)?,
             nonce: self.nonce,
-            reference_hash: field_decimal(hash_bytes(&self.ref_string).map_err(err)?)?,
+            reference_hash: field(hash_bytes(&self.ref_string).map_err(err)?)?,
             seller_settlement_destination: destination_proof_input(
                 &self.seller_settlement_destination,
             )?,
@@ -158,7 +158,7 @@ impl SwapDvp {
             )?,
             seller_refund_destination: destination_proof_input(&self.seller_refund_destination)?,
             buyer_refund_destination: destination_proof_input(&self.buyer_refund_destination)?,
-            blinding: field_decimal(self.blinding)?,
+            blinding: field(self.blinding)?,
         })
     }
 }
@@ -167,7 +167,7 @@ impl TryFrom<&SwapDvp> for SwapDvpTerms {
     type Error = anyhow::Error;
     fn try_from(terms: &SwapDvp) -> Result<Self> {
         let mint = |asset| {
-            if asset == zolana_transaction::SOL_MINT {
+            if asset == spr_transaction::SOL_MINT {
                 Mint::SOL
             } else {
                 Mint::new(asset, 0)
@@ -278,9 +278,7 @@ fn swap_dvp_id(input: SwapDvpTerms) -> Result<[u8; 32]> {
 fn destination_proof_input(address: &ShieldedAddress) -> Result<DvpDestination> {
     Ok(DvpDestination {
         address: *address,
-        viewing_key_hash: field_decimal(
-            hash_bytes(address.viewing_pubkey.as_bytes()).map_err(err)?,
-        )?,
+        viewing_key_hash: field(hash_bytes(address.viewing_pubkey.as_bytes()).map_err(err)?)?,
     })
 }
 
@@ -307,7 +305,7 @@ impl Reader<'_> {
 
 #[cfg(test)]
 mod tests {
-    use zolana_keypair::{NullifierKey, PublicKey, ViewingKey};
+    use spr_keypair::{NullifierKey, PublicKey, ViewingKey};
 
     use super::*;
 

@@ -15,22 +15,21 @@ ark-poly = { version = "0.6", default-features = false, features = ["std", "para
 sha2 = "0.10"
 tempfile = "3"
 anyhow = { workspace = true }
-dvp-program = { path = "../program", features = ["circuits", "parallel"] }
+dvp-program = { path = "../program", features = ["circuits"] }
 num-bigint = { workspace = true }
 solana-address = { workspace = true, features = ["curve25519"] }
 solana-instruction = { workspace = true }
 solana-signature = { workspace = true }
 wincode = { workspace = true }
-zolana-client = { workspace = true, features = ["reqwest"] }
-zolana-hasher = { workspace = true }
-zolana-interface = { workspace = true }
-zolana-keypair = { workspace = true }
-zolana-program = { workspace = true, features = ["compression", "client", "parallel"] }
-zolana-transaction = { workspace = true }
+spr-client = { workspace = true, features = ["reqwest"] }
+spr-hasher = { workspace = true }
+spr-interface = { workspace = true }
+spr-keypair = { workspace = true }
+spr-program = { workspace = true, features = ["compression", "client"] }
+spr-transaction = { workspace = true }
 
 
 [dev-dependencies]
-zolana-program = { workspace = true, features = ["test-support"] }
 groth16-solana = { workspace = true }
 solana-keypair = { workspace = true }
 

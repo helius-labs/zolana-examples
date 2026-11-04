@@ -1,12 +1,12 @@
 //! Loads checksum-pinned Xark artifacts and converts proofs to the Solana ABI.
 use anyhow::{ensure, Context, Result};
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
-use xark_groth16::PkSource;
-use zolana_program::{
+use spr_program::{
     proof::{compressed_proof, SolanaVerifyingKey},
     CompressedProof, ProgramProofInputs,
 };
+use std::path::PathBuf;
+use xark_groth16::PkSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CircuitId {
@@ -96,13 +96,9 @@ pub fn prove(id: CircuitId, inputs: &ProgramProofInputs) -> Result<CompressedPro
     let proof = compressed_proof(&proven.proof).map_err(anyhow::Error::msg)?;
     let encoded = inputs.encoded();
     let hash = encoded.get("public_hash").context("missing public hash")?;
-    let hash = zolana_program::from_decimal(hash)?;
-    zolana_program::verifier::verify_groth16(
-        &proof,
-        zolana_program::to_bytes(&hash),
-        &key.as_key(),
-    )
-    .map_err(|error| anyhow::anyhow!("invalid program proof: {error:?}"))?;
+    let hash = spr_program::from_decimal(hash)?;
+    spr_program::verifier::verify_groth16(&proof, spr_program::to_bytes(&hash), &key.as_key())
+        .map_err(|error| anyhow::anyhow!("invalid program proof: {error:?}"))?;
     Ok(proof)
 }
 

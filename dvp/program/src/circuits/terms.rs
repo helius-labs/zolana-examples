@@ -1,6 +1,6 @@
-use zolana_program::circuit::hash_bytes;
-use zolana_program::{
-    input, poseidon, require, require_eq, CircuitError, ClientInputs, Field, ShieldedAddress,
+use spr_program::circuit::hash_bytes;
+use spr_program::{
+    input, poseidon, require, require_eq, Asset, CircuitError, ClientInputs, Field, ShieldedAddress,
 };
 
 #[input]
@@ -17,13 +17,14 @@ impl DvpDestination {
 }
 
 #[input]
+#[derive(ClientInputs)]
 pub struct SwapDvpTerms {
     pub seller_identity: Field,
     pub buyer_identity: Field,
     pub settlement_authority_identity: Field,
     pub creator_identity: Field,
-    pub delivery_mint: [u8; 32],
-    pub payment_mint: [u8; 32],
+    pub delivery_mint: Asset,
+    pub payment_mint: Asset,
     pub delivery_amount: u64,
     pub payment_amount: u64,
     pub expiry_timestamp: u64,
@@ -94,105 +95,3 @@ impl SwapDvpTerms {
         Ok(())
     }
 }
-
-#[cfg(all(not(xark), not(xark_client)))]
-mod client {
-    use super::*;
-    use zolana_program::{ClientError, InputRecords};
-
-    #[cfg_attr(
-        feature = "wasm",
-        derive(serde::Deserialize, tsify::Tsify),
-        serde(rename_all = "camelCase", deny_unknown_fields),
-        tsify(large_number_types_as_bigints)
-    )]
-    pub struct SwapDvpTermsClient {
-        pub seller_identity: String,
-        pub buyer_identity: String,
-        pub settlement_authority_identity: String,
-        pub creator_identity: String,
-        #[cfg_attr(feature = "wasm", tsify(type = "Mint"))]
-        pub delivery_mint: zolana_transaction::Mint,
-        #[cfg_attr(feature = "wasm", tsify(type = "Mint"))]
-        pub payment_mint: zolana_transaction::Mint,
-        pub delivery_amount: u64,
-        pub payment_amount: u64,
-        pub expiry_timestamp: u64,
-        pub has_earliest_settlement: bool,
-        pub earliest_settlement_timestamp: u64,
-        pub nonce: u64,
-        pub reference_hash: String,
-        #[cfg_attr(
-            feature = "wasm",
-            tsify(type = "DvpDestinationClient"),
-            serde(deserialize_with = "zolana_program::wasm::deserialize_client_input")
-        )]
-        pub seller_settlement_destination: DvpDestinationClient,
-        #[cfg_attr(
-            feature = "wasm",
-            tsify(type = "DvpDestinationClient"),
-            serde(deserialize_with = "zolana_program::wasm::deserialize_client_input")
-        )]
-        pub buyer_settlement_destination: DvpDestinationClient,
-        #[cfg_attr(
-            feature = "wasm",
-            tsify(type = "DvpDestinationClient"),
-            serde(deserialize_with = "zolana_program::wasm::deserialize_client_input")
-        )]
-        pub seller_refund_destination: DvpDestinationClient,
-        #[cfg_attr(
-            feature = "wasm",
-            tsify(type = "DvpDestinationClient"),
-            serde(deserialize_with = "zolana_program::wasm::deserialize_client_input")
-        )]
-        pub buyer_refund_destination: DvpDestinationClient,
-        pub blinding: String,
-    }
-
-    impl ClientInputs for SwapDvpTerms {
-        type Client = SwapDvpTermsClient;
-        fn from_client(
-            client: Self::Client,
-            records: &mut InputRecords,
-        ) -> Result<Self, ClientError> {
-            let field = |value: &str| {
-                zolana_program::from_decimal(value)
-                    .map_err(|error| ClientError::InvalidInput(error.to_string()))
-            };
-            Ok(Self {
-                seller_identity: field(&client.seller_identity)?,
-                buyer_identity: field(&client.buyer_identity)?,
-                settlement_authority_identity: field(&client.settlement_authority_identity)?,
-                creator_identity: field(&client.creator_identity)?,
-                delivery_mint: records.asset(client.delivery_mint),
-                payment_mint: records.asset(client.payment_mint),
-                delivery_amount: client.delivery_amount,
-                payment_amount: client.payment_amount,
-                expiry_timestamp: client.expiry_timestamp,
-                has_earliest_settlement: client.has_earliest_settlement,
-                earliest_settlement_timestamp: client.earliest_settlement_timestamp,
-                nonce: client.nonce,
-                reference_hash: field(&client.reference_hash)?,
-                seller_settlement_destination: DvpDestination::from_client(
-                    client.seller_settlement_destination,
-                    records,
-                )?,
-                buyer_settlement_destination: DvpDestination::from_client(
-                    client.buyer_settlement_destination,
-                    records,
-                )?,
-                seller_refund_destination: DvpDestination::from_client(
-                    client.seller_refund_destination,
-                    records,
-                )?,
-                buyer_refund_destination: DvpDestination::from_client(
-                    client.buyer_refund_destination,
-                    records,
-                )?,
-                blinding: field(&client.blinding)?,
-            })
-        }
-    }
-}
-#[cfg(all(not(xark), not(xark_client)))]
-pub use client::SwapDvpTermsClient;

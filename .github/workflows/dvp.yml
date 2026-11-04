@@ -21,7 +21,6 @@ permissions:
 
 env:
   AGAVE_VERSION: v4.0.2
-  ZOLANA_TAG: v0.5.0-alpha
   SURFPOOL_RELEASE_TAG: v1.6.0-light
   SBF_TOOLS_VERSION: v1.54
 
@@ -42,7 +41,7 @@ jobs:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
 
-      - name: Prepare pinned SDK and Xark sources
+      - name: Prepare pinned SDK source
         run: scripts/setup-zk-tools.sh --prepare-only
 
       - name: Cache cargo build
@@ -51,7 +50,6 @@ jobs:
           workspaces: |
             dvp
             dvp/.tools/zolana
-            dvp/.tools/xark
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -74,43 +72,33 @@ jobs:
         working-directory: dvp/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
 
-      - name: Build pinned Zolana CLI and Xark
+      - name: Build pinned Zolana and Xark CLIs
         run: |
           scripts/setup-zk-tools.sh
           echo "ZOLANA_CLI_BIN=$PWD/.tools/zolana/target/release/zolana" >> "$GITHUB_ENV"
-          echo "XARK_SOURCE=$PWD/.tools/xark" >> "$GITHUB_ENV"
 
-      - name: Download protocol release binaries
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: dvp/.tools/zolana/prover/server/go.mod
+          cache: false
+
+      - name: Build localnet services from the pinned SDK
+        run: scripts/build-localnet.sh >> "$GITHUB_ENV"
+
+      - name: Download surfpool
         run: |
-          bin="$RUNNER_TEMP/zolana-bin"
+          bin="$RUNNER_TEMP/surfpool-bin"
           mkdir -p "$bin"
-          base="https://github.com/helius-labs/zolana/releases/download/${ZOLANA_TAG}"
-          curl -sSfL --retry 5 "${base}/SHA256SUMS" -o "$bin/SHA256SUMS"
-          for name in prover photon; do
-            asset="${name}-linux-x64-${ZOLANA_TAG}"
-            curl -sSfL --retry 5 "${base}/${asset}" -o "$bin/$asset"
-            (cd "$bin" && grep "  ${asset}$" SHA256SUMS | sha256sum --check --strict)
-            chmod +x "$bin/$asset"
-            ln -s "$asset" "$bin/$name"
-          done
-          asset="shielded_pool_program-${ZOLANA_TAG}.so"
-          curl -sSfL --retry 5 "${base}/${asset}" -o "$bin/$asset"
-          (cd "$bin" && grep "  ${asset}$" SHA256SUMS | sha256sum --check --strict)
           curl -sSfL --retry 5 "https://github.com/Lightprotocol/surfpool/releases/download/${SURFPOOL_RELEASE_TAG}/surfpool-linux-x64.tar.gz" | tar -xz -C "$bin"
           test -x "$bin/surfpool"
-          {
-            echo "PROVER_BIN=$bin/prover"
-            echo "DVP_PHOTON_BIN=$bin/photon"
-            echo "ZOLANA_PHOTON_BIN=$GITHUB_WORKSPACE/dvp/scripts/photon-localnet.sh"
-            echo "SURFPOOL_BIN=$bin/surfpool"
-            echo "SHIELDED_POOL_PROGRAM_PATH=$bin/$asset"
-          } >> "$GITHUB_ENV"
+          echo "SURFPOOL_BIN=$bin/surfpool" >> "$GITHUB_ENV"
 
       - name: Cache SPP proving keys
         uses: actions/cache@v4
         with:
           path: ~/.config/zolana/proving-keys
-          key: zolana-proving-keys-${{ env.ZOLANA_TAG }}
+          key: zolana-proving-keys-${{ hashFiles('dvp/.tools/zolana/prover/server/prover/provingkeys/proving-keys.lock') }}
 
       - name: Cache DvP proving keys
         uses: actions/cache@v4

@@ -11,7 +11,6 @@ artifacts with their matching CLI:
 ```sh
 scripts/setup-zk-tools.sh
 export ZOLANA_CLI_BIN="$PWD/.tools/zolana/target/release/zolana"
-export XARK_SOURCE="$PWD/.tools/xark"
 "$ZOLANA_CLI_BIN" zk compile --test --manifest-path program/Cargo.toml --wasm-target nodejs --verifier
 npm --prefix .tools/zolana ci
 npm --prefix .tools/zolana run build:ts

@@ -1,15 +1,14 @@
 use anyhow::{ensure, Result};
 use solana_address::Address;
-use zolana_client::{NonInclusionProof, ProverExt};
-use zolana_keypair::{ShieldedAddress, ViewingKey};
-use zolana_program::ProgramOwner;
-use zolana_transaction::instructions::transact::SppProofInputs;
+use spr_client::{NonInclusionProof, ProverExt};
+use spr_keypair::{ShieldedAddress, ViewingKey};
+use spr_program::ProgramOwner;
+use spr_transaction::instructions::transact::SppProofInputs;
 
 use super::{proof::create_inputs, CreateDvp, CreateDvpDerivation};
 use crate::{
     encryption::{encrypt_terms_messages, TERMS_RECIPIENTS},
     err,
-    shared::catch_requirement,
     state::SwapDvp,
 };
 
@@ -27,7 +26,7 @@ pub struct CreateDvpTransaction {
     non_inclusion: NonInclusionProof,
     pub derivation: CreateDvpDerivation,
     pub spp_proof_inputs: SppProofInputs,
-    pub proof_inputs: zolana_program::ProgramProofInputs,
+    pub proof_inputs: spr_program::ProgramProofInputs,
 }
 
 impl CreateDvpTransactionParams {
@@ -52,8 +51,7 @@ impl CreateDvpTransactionParams {
             .address(viewing_key.pubkey())
             .map_err(err)?;
         let proof_inputs = create_inputs(&self.terms, owner, self.tree_id)?;
-        let transaction =
-            catch_requirement(|| proof_inputs.prepare(&owner, self.payer).map_err(err))?;
+        let transaction = proof_inputs.prepare(&owner, self.payer).map_err(err)?;
         let finalized = transaction.finalized;
         let proof_inputs = transaction.proof_inputs;
         let mut spp_proof_inputs = finalized

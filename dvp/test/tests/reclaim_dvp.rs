@@ -10,11 +10,11 @@ use dvp_sdk::{
 use dvp_test::{assert_dvp_error, assert_spp_rejects, failure_text, has_legs};
 use shared::{setup, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT};
 use solana_signer::Signer;
-use zolana_client::Rpc;
-use zolana_test_utils::{
+use spr_client::Rpc;
+use spr_test_utils::{
     nullifier_pda::assert_nullifier_pdas_absent, test_validator_asserts::wait_for_nullifier_present,
 };
-use zolana_transaction::SOL_MINT;
+use spr_transaction::SOL_MINT;
 
 /// What each funder shields into its private balance before funding.
 const SHIELD_AMOUNT: u64 = 600_000_000;

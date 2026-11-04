@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { createZolanaClient } from "@heliuslabs/zolana";
-import { atSlot, LocalKeys, NullifierKeyProofAuthority } from "@heliuslabs/zolana/client";
+import {
+  atSlot,
+  LocalKeys,
+  NullifierKeyProofAuthority,
+  type PaginationToken,
+} from "@heliuslabs/zolana/client";
 import { transactInstruction } from "@heliuslabs/zolana/interface";
 import {
   bytes32,
@@ -234,18 +239,18 @@ async function main(): Promise<void> {
 
     // 6. Select the delivery funds from the seller's private balance.
     const deliveryHistory: IndexedShieldedTransaction[] = [];
-    let deliveryCursor: Uint8Array | undefined;
+    let deliveryCursor: PaginationToken | undefined;
     do {
       const page = await client.getShieldedTransactionsByTags(
         {
           tags: [seller.shieldedAddress().confidentialViewTag(), seller.viewingPublicKey().x()],
           limit: 50,
-          ...(deliveryCursor === undefined ? {} : { cursor: deliveryCursor }),
+          ...(deliveryCursor === undefined ? {} : { paginationToken: deliveryCursor }),
         },
         atSlot(createTx.slot),
       );
-      deliveryHistory.push(...page.transactions);
-      deliveryCursor = page.nextCursor;
+      deliveryHistory.push(...page.data.flatMap((group) => group.events));
+      deliveryCursor = page.paginationToken ?? undefined;
     } while (deliveryCursor !== undefined);
     const deliveryBalances = await decryptToBalances({
       keypair: seller,

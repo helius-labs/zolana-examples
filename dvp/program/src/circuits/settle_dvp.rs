@@ -2,8 +2,8 @@ use super::{
     shared::{assert_blinding_seed, close_dvp_state, dvp_owner},
     SwapDvpTerms,
 };
-use zolana_program::circuit::Utxo;
-use zolana_program::{
+use spr_program::circuit::Utxo;
+use spr_program::{
     circuit::{CheckedTransaction, ConfidentialTransaction, PublicInputs, TokenUtxos, UtxoTrait},
     input, require, require_eq, CircuitError, ClientInputs, Field, ShieldedAddress, TxContext,
     ZkProgram,
@@ -20,7 +20,6 @@ pub struct SettleDvp {
 #[derive(ClientInputs)]
 pub struct SettleDvpPrivateInputs {
     pub tx_context: TxContext,
-    #[client(nested)]
     pub terms: SwapDvpTerms,
     pub dvp_utxo: Utxo,
     pub delivery_deposit: Utxo,
