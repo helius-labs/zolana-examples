@@ -88,7 +88,7 @@ fn reclaim_dvp_without_closing_the_dvp() -> Result<()> {
 
     let reclaim_ix = reclaim()
         .build(&env.seller.shielded)?
-        .prove(client.indexer(), tree)?
+        .prove(client, tree)?
         .instruction()?;
 
     // 4. Check the buyer cannot submit the seller’s proof.

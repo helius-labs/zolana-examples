@@ -90,7 +90,7 @@ fn authority_cancels_with_both_deposits() -> Result<()> {
         tree_id: env.localnet.tree_id,
     }
     .build(&authority.shielded)?
-    .prove(client.indexer(), env.localnet.tree)?;
+    .prove(client, env.localnet.tree)?;
     ensure!(
         matches!(cancel, AbortDvp::Cancel(_)),
         "a cancel proves to a reject"
@@ -134,7 +134,7 @@ fn authority_cancels_with_both_deposits() -> Result<()> {
         tree_id: env.localnet.tree_id,
     }
     .build(&authority.shielded)?
-    .prove(client.indexer(), tree)?
+    .prove(client, tree)?
     .instruction()?;
 
     let cancel_signature = env.send(cancel_ix, &[&authority.solana], None)?;
@@ -218,7 +218,7 @@ fn buyer_rejects_with_only_the_payment_deposit() -> Result<()> {
         tree_id: env.localnet.tree_id,
     }
     .build(&env.buyer.shielded)?
-    .prove(client.indexer(), env.localnet.tree)?;
+    .prove(client, env.localnet.tree)?;
     ensure!(
         matches!(reject, AbortDvp::Reject(_)),
         "a reject proves to a cancel"
@@ -256,7 +256,7 @@ fn buyer_rejects_with_only_the_payment_deposit() -> Result<()> {
         tree_id: env.localnet.tree_id,
     }
     .build(&env.seller.shielded)?
-    .prove(client.indexer(), tree)?
+    .prove(client, tree)?
     .instruction()?;
     let reclaim_signature = env.send(reclaim_ix, &[&env.seller.solana], None)?;
     client.confirm_private_transaction_sync(reclaim_signature)?;
@@ -299,7 +299,7 @@ fn seller_rejects_without_deposits() -> Result<()> {
         tree_id: env.localnet.tree_id,
     }
     .build(&env.seller.shielded)?
-    .prove(client.indexer(), env.localnet.tree)?;
+    .prove(client, env.localnet.tree)?;
     let reject_signature = env.send(reject.instruction()?, &[&env.seller.solana], None)?;
     client.confirm_private_transaction_sync(reject_signature)?;
 

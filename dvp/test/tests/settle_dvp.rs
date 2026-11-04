@@ -88,7 +88,7 @@ fn settle_dvp_full_flow() -> Result<()> {
         tree_id: env.localnet.tree_id,
     }
     .build(&authority.shielded)?
-    .prove(client.indexer(), tree)?
+    .prove(client, tree)?
     .instruction()?;
 
     // 2. Check the buyer cannot submit the authority’s proof.
@@ -170,7 +170,7 @@ fn settle_dvp_full_flow() -> Result<()> {
         tree_id: env.localnet.tree_id,
     }
     .build(&env.buyer.shielded)?
-    .prove(client.indexer(), tree)?
+    .prove(client, tree)?
     .instruction()?;
     let reclaim_signature = env.send(reclaim_ix, &[&env.buyer.solana], None)?;
     client.confirm_private_transaction_sync(reclaim_signature)?;

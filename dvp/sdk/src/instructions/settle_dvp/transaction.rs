@@ -4,7 +4,7 @@ use dvp_program::circuits::{
 };
 use solana_address::Address;
 use spr_program::{ProgramOwner, TxContext, ZkProgramCircuit};
-use zolana_client::ZolanaIndexer;
+use zolana_client::{BlockingIndexer, BlockingRpc, ZolanaClient};
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::ShieldedKeypair;
 use zolana_transaction::instructions::transact::SppProofInputs;
@@ -110,14 +110,18 @@ impl SettleDvpTransactionParams {
 impl SettleDvpTransaction {
     /// 1. Prove the SPP transaction.
     /// 2. Prove settle_dvp and build the instruction.
-    pub fn prove(self, indexer: &ZolanaIndexer, tree: Address) -> Result<SettleDvp> {
+    pub fn prove<R: BlockingRpc, I: BlockingIndexer>(
+        self,
+        client: &ZolanaClient<R, I>,
+        tree: Address,
+    ) -> Result<SettleDvp> {
         let private_tx_hash = self
             .spp_proof_inputs
             .padding_independent_private_tx_hash()
             .map_err(err)?;
         let payer = self.spp_proof_inputs.payer;
         // 1. Prove the SPP transaction.
-        let spp = prove_pda_transact(indexer, self.spp_proof_inputs, &private_tx_hash)?;
+        let spp = prove_pda_transact(client, self.spp_proof_inputs, &private_tx_hash)?;
         // 2. Prove settle_dvp and build the instruction.
         let settle_proof =
             crate::proof::prove(crate::proof::CircuitId::SettleDvp, &self.proof_inputs)?;
