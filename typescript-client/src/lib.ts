@@ -55,13 +55,7 @@ export interface ConfirmedTransaction {
   readonly slot: bigint;
 }
 
-// Will be exposed through a single devnet URL. Currently exposed as they are.
 const RPC_URL = "https://devnet.helius-rpc.com";
-const INDEXER_URL = "https://d34xe1hqb2ibg2.cloudfront.net";
-const PROVER_URL = "https://dd73hh473h6ha.cloudfront.net";
-// localnet: const RPC_URL = "http://127.0.0.1:8899";
-// localnet: const INDEXER_URL = "http://127.0.0.1:8784";
-// localnet: const PROVER_URL = "http://127.0.0.1:3001";
 
 function expandedPath(value: string): string {
   return value === "~"
@@ -102,8 +96,8 @@ function clientConfigFromEnv(): ZolanaClientConfig {
   const endpoint = process.env["ZOLANA_ENDPOINT"]?.trim();
   const apiKey = process.env["API_KEY"]?.trim();
   const solanaRpcUrl =
-    endpoint || (apiKey ? `${RPC_URL}/?api-key=${apiKey}` : undefined);
-  // localnet: const solanaRpcUrl = endpoint || RPC_URL;
+    endpoint ||
+    (apiKey ? `${RPC_URL}/?api-key=${encodeURIComponent(apiKey)}` : undefined);
   if (!solanaRpcUrl) {
     throw new Error("set API_KEY or ZOLANA_ENDPOINT");
   }
@@ -111,15 +105,21 @@ function clientConfigFromEnv(): ZolanaClientConfig {
   if (proofDataSource !== "client" && proofDataSource !== "prover") {
     throw new Error("ZOLANA_PROOF_DATA_SOURCE must be client or prover");
   }
-  const proverUrl = process.env["ZOLANA_PROVER_URL"]?.trim() || PROVER_URL;
+  const indexerUrl = process.env["ZOLANA_INDEXER_URL"]?.trim();
+  const proverUrl = process.env["ZOLANA_PROVER_URL"]?.trim();
+  const proverHost = new URL(proverUrl || solanaRpcUrl).hostname;
+  const network =
+    proverHost === "mainnet.helius-rpc.com"
+      ? "mainnet"
+      : proverHost === "devnet.helius-rpc.com"
+        ? "devnet"
+        : undefined;
   return Object.freeze({
     solanaRpcUrl,
     proofDataSource,
-    indexerUrl: process.env["ZOLANA_INDEXER_URL"]?.trim() || INDEXER_URL,
-    proverUrl,
-    ...(proverUrl.replace(/\/$/, "") === PROVER_URL
-      ? { proverTee: SignedTeePolicy.forNetwork("devnet") }
-      : {}),
+    ...(indexerUrl ? { indexerUrl } : {}),
+    ...(proverUrl ? { proverUrl } : {}),
+    ...(network ? { proverTee: SignedTeePolicy.forNetwork(network) } : {}),
   });
 }
 

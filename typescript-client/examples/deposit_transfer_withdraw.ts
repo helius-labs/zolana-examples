@@ -34,7 +34,7 @@ const WITHDRAW_AMOUNT = 3_000_000n;
 async function main(): Promise<void> {
   const { clientConfig } = await setup();
 
-  // Connect to Helius devnet RPC plus the Photon indexer and prover.
+  // Connect to Helius RPC, which also serves the Photon indexer and prover.
   const client =
     await createZolanaClient(clientConfig);
 
