@@ -4,9 +4,9 @@ use dvp_sdk::{
     state::{Deposit, DvpUtxo, Leg, SwapDvp},
 };
 use solana_address::Address;
+use spr_program::{ProgramOwner, TxContext, ZkProgramCircuit};
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::{NullifierKey, PublicKey, ShieldedAddress, ViewingKey};
-use zolana_program::{ProgramOwner, TxContext, ZkProgramCircuit};
 use zolana_transaction::{Mint, WalletUtxo, SOL_MINT};
 
 pub const OUTPUT_TREE_ID: u16 = 7;
@@ -150,15 +150,13 @@ pub fn assert_invalid<P: ZkProgramCircuit>(id: CircuitId, inputs: &P) {
         .is_err());
     let error = dvp_sdk::proof::prove(id, inputs).expect_err("invalid witness must be unprovable");
     assert!(
-        error
-            .downcast_ref::<zolana_program::CircuitError>()
-            .is_some()
+        error.downcast_ref::<spr_program::CircuitError>().is_some()
             || error
-                .downcast_ref::<zolana_program::ProverError>()
+                .downcast_ref::<spr_program::ProverError>()
                 .is_some_and(|error| matches!(
                     error.kind(),
-                    zolana_program::ProverErrorKind::ProofInputsBreakRule(_)
-                        | zolana_program::ProverErrorKind::Circuit(_)
+                    spr_program::ProverErrorKind::ProofInputsBreakRule(_)
+                        | spr_program::ProverErrorKind::Circuit(_)
                 )),
         "expected a constraint failure, received {error}"
     );

@@ -1,4 +1,4 @@
-use zolana_program::{
+use spr_program::{
     circuit::{
         constant, poseidon, zero, Assert, CircuitVar, DataUtxo, SolanaAddress, TxContext, Utxo,
         UtxoOwner, UtxoTrait,

@@ -1,7 +1,7 @@
 use crate::shared::*;
 use dvp_program::{circuits::SettleDvp, verifier::settle_dvp::VERIFYINGKEY};
 use dvp_sdk::proof::CircuitId;
-use zolana_program::ZkProgramCircuit;
+use spr_program::ZkProgramCircuit;
 
 const CIRCUIT: CircuitId = CircuitId::SettleDvp;
 
@@ -126,7 +126,7 @@ fn settle_program_proof_rejects_modified_outputs() {
     let public = dvp_program::verifier::settle_dvp::PublicInputs {
         creator_identity: inputs.public.creator_identity,
         dvp_id: inputs.public.dvp_id,
-        dvp_owner: zolana_program::verifier::address_hash(
+        dvp_owner: spr_program::verifier::address_hash(
             &inputs.public.dvp_owner.owner_hash().unwrap(),
             inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
         )
@@ -157,7 +157,7 @@ fn settle_program_proof_rejects_modified_outputs() {
             .iter()
             .map(|output| output.hash(OUTPUT_TREE_ID).unwrap())
             .collect::<Vec<_>>();
-        let private_hash = zolana_program::PrivateTxHash::new(
+        let private_hash = spr_program::PrivateTxHash::new(
             &finalized
                 .input_utxos()
                 .iter()
@@ -190,7 +190,7 @@ fn settlement_proof_rejects_a_different_state_commitment_or_first_nullifier() {
     let public = dvp_program::verifier::settle_dvp::PublicInputs {
         creator_identity: inputs.public.creator_identity,
         dvp_id: inputs.public.dvp_id,
-        dvp_owner: zolana_program::verifier::address_hash(
+        dvp_owner: spr_program::verifier::address_hash(
             &inputs.public.dvp_owner.owner_hash().unwrap(),
             inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
         )
@@ -225,7 +225,7 @@ fn settlement_proof_rejects_a_different_state_commitment_or_first_nullifier() {
                 .utxo
                 .nullifier(
                     &state.utxo_hash,
-                    &zolana_program::ProgramOwner::nullifier_key(),
+                    &spr_program::ProgramOwner::nullifier_key(),
                 )
                 .unwrap();
         } else {

@@ -1,7 +1,7 @@
 use crate::shared::*;
 use dvp_program::{circuits::ReclaimDvp, verifier::reclaim_dvp::VERIFYINGKEY};
 use dvp_sdk::proof::CircuitId;
-use zolana_program::ZkProgramCircuit;
+use spr_program::ZkProgramCircuit;
 
 const CIRCUIT: CircuitId = CircuitId::ReclaimDvp;
 
@@ -68,7 +68,7 @@ fn reclaim_proof_rejects_partial_or_wrong_asset_refunds() {
     let public = dvp_program::verifier::reclaim_dvp::PublicInputs {
         creator_identity: inputs.public.creator_identity,
         dvp_id: inputs.public.dvp_id,
-        dvp_owner: zolana_program::verifier::address_hash(
+        dvp_owner: spr_program::verifier::address_hash(
             &inputs.public.dvp_owner.owner_hash().unwrap(),
             inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
         )
@@ -91,7 +91,7 @@ fn reclaim_proof_rejects_partial_or_wrong_asset_refunds() {
         } else {
             output.amount -= 1;
         }
-        let hash = zolana_program::PrivateTxHash::new(
+        let hash = spr_program::PrivateTxHash::new(
             &[inputs.private.deposit.utxo_hash],
             &[output.hash(OUTPUT_TREE_ID).unwrap(), [0; 32]],
             &finalized.private_tx_blinding().unwrap(),

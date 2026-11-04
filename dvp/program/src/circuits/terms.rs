@@ -1,9 +1,9 @@
-use zolana_keypair::ShieldedAddress;
-use zolana_program::{
+use spr_program::{
     circuit::{poseidon, zero, Assert, CircuitVar, DataHash},
     conversion::ProofInput,
     CircuitError,
 };
+use zolana_keypair::ShieldedAddress;
 use zolana_transaction::Mint;
 
 #[derive(Clone, Debug, ProofInput)]

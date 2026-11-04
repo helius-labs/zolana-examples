@@ -172,8 +172,8 @@ fn fund_dvp_and_discover_deposits() -> Result<()> {
 #[ignore = "requires the Node WASM build and npm ci; run explicitly after the Rust flows"]
 fn node_client_lifecycles() -> anyhow::Result<()> {
     use anyhow::ensure;
+    use spr_program_test::{fixture, localnet::LocalnetPorts};
     use std::{path::Path, process::Command};
-    use zolana_program_test::{fixture, localnet::LocalnetPorts};
     use zolana_transaction::SOL_MINT;
     let env = shared::setup(12)?;
     env.shield(&env.seller, fixture::spl_mint(), 900_000_000)?;

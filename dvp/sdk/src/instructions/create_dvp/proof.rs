@@ -3,12 +3,12 @@ use dvp_program::circuits::{
     CreateDvp, CreateDvpPrivateInputs, CreateDvpPublicInputs, SwapDvpTerms,
 };
 use solana_address::Address;
-use zolana_hasher::primitives::solana_owner_identity;
-use zolana_keypair::ViewingKey;
-use zolana_program::{
+use spr_program::{
     program::{AddressSeed, NewAddress, PdaOwner},
     ProgramOwner, TxContext, ZkProgramCircuit,
 };
+use zolana_hasher::primitives::solana_owner_identity;
+use zolana_keypair::ViewingKey;
 use zolana_transaction::SppProofOutputUtxo;
 
 use crate::{err, state::SwapDvp};

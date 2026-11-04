@@ -1,9 +1,9 @@
 use anyhow::{ensure, Result};
 use solana_address::Address;
 use solana_instruction::Instruction;
+use spr_program::instruction::Transact;
 use zolana_interface::instruction::instruction_data::transact::TransactIxData;
 use zolana_keypair::{ShieldedKeypair, X25519Pubkey};
-use zolana_program::instruction::Transact;
 use zolana_transaction::{
     instructions::transact::{ConfidentialTransaction, SppProofInputs},
     WalletUtxo, SOL_MINT,

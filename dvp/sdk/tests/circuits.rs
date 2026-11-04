@@ -1,6 +1,6 @@
 #[test]
 fn circuits_allocate_only_their_specified_utxo_inputs() {
-    use zolana_program::{circuit::LabelKind, testing::constraint_labels};
+    use spr_program::{circuit::LabelKind, testing::constraint_labels};
 
     // 1. Inspect the compiled witness allocations for every circuit.
     let cases = [

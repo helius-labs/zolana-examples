@@ -2,9 +2,9 @@ use anyhow::{bail, ensure, Result};
 use dvp_program::circuits::{DvpDestination, SwapDvpTerms};
 use dvp_program::{ABORT_TAG, CREATE_TAG, DVP_AUTHORITY_PDA_SEED, SETTLEMENT_TAG};
 use solana_address::Address;
+use spr_program::conversion::{to_bytes, Allocator, ProofInput};
 use zolana_hasher::primitives::{hash_bytes, right_align, solana_owner_identity};
 use zolana_keypair::{hash::poseidon, shielded::SHIELDED_ADDRESS_LEN, Curve, ShieldedAddress};
-use zolana_program::conversion::{to_bytes, Allocator, ProofInput};
 use zolana_transaction::Mint;
 
 use crate::err;

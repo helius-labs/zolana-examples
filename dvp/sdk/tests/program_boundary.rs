@@ -13,10 +13,10 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
+use spr_program::{CompressedProof, ZkProgramCircuit};
 use zolana_interface::instruction::instruction_data::transact::{
     CircuitId as SppCircuitId, TransactIxData, TransactProof,
 };
-use zolana_program::{CompressedProof, ZkProgramCircuit};
 
 use crate::shared::*;
 
@@ -31,7 +31,7 @@ fn proof_and_spp<P: ZkProgramCircuit>(
     let spp = TransactIxData {
         expiry_unix_ts: u64::MAX,
         private_tx_hash: finalized.padding_independent_private_tx_hash().unwrap(),
-        circuit: SppCircuitId::ConfidentialEddsa(1, 2, zolana_interface::N_PUBLIC_SLOTS as u8),
+        circuit: SppCircuitId::ConfidentialSigner(1, 2, zolana_interface::N_PUBLIC_SLOTS as u8),
         tx_viewing_pk: [2; 33],
         salt: [3; 16],
         proof: TransactProof::zeroed(),

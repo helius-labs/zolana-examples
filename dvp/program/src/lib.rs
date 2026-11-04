@@ -56,7 +56,7 @@ mod entrypoint {
     pinocchio::entrypoint!(crate::process_instruction);
 }
 
-pinocchio::address::declare_id!("7eGHQWQQMCuYBV3rGhMwasi2R1VmjLfYPA5jnUpjyGsb");
+pinocchio::address::declare_id!("G3ioSQ2fu8WjMUE96E9oBM34YTJrgDShgNSGMyESKgoF");
 
 #[cfg(not(feature = "r1cs-export"))]
 pub fn process_instruction(

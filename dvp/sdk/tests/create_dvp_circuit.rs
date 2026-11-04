@@ -1,7 +1,7 @@
 use crate::shared::*;
 use dvp_program::{circuits::CreateDvp, verifier::create_dvp::VERIFYINGKEY};
 use dvp_sdk::{instructions::create_dvp::CreateDvpDerivation, proof::CircuitId};
-use zolana_program::ZkProgramCircuit;
+use spr_program::ZkProgramCircuit;
 
 const CIRCUIT: CircuitId = CircuitId::CreateDvp;
 
@@ -109,7 +109,7 @@ fn create_proof_rejects_changed_state_owner_tree_data_and_blinding() {
     let public = dvp_program::verifier::create_dvp::PublicInputs {
         creator_identity: inputs.public.creator_identity,
         dvp_id: inputs.public.dvp_id,
-        dvp_owner: zolana_program::verifier::address_hash(
+        dvp_owner: spr_program::verifier::address_hash(
             &inputs.public.dvp_owner.owner_hash().unwrap(),
             inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
         )
@@ -135,7 +135,7 @@ fn create_proof_rejects_changed_state_owner_tree_data_and_blinding() {
             3 => output.blinding = fe(99),
             _ => unreachable!(),
         }
-        let private_hash = zolana_program::PrivateTxHash {
+        let private_hash = spr_program::PrivateTxHash {
             input_hashes: &[[0; 32]],
             output_hashes: &[output.hash(tree).unwrap(), [0; 32]],
             address_nullifiers: Some(&[address]),

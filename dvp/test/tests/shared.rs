@@ -18,13 +18,13 @@ use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_signature::Signature;
 use solana_signer::Signer;
-use zolana_client::{ComputeBudgetConfig, ProverClient, Rpc};
-use zolana_interface::pda::spl_token_program_id;
-use zolana_keypair::{ShieldedAddress, ShieldedKeypair};
-use zolana_program_test::{
+use spr_program_test::{
     fixture,
     localnet::{FixtureLocalnet, LocalnetPaths, LocalnetPorts},
 };
+use zolana_client::{ComputeBudgetConfig, ProverClient, Rpc};
+use zolana_interface::pda::spl_token_program_id;
+use zolana_keypair::{ShieldedAddress, ShieldedKeypair};
 use zolana_test_utils::{
     test_validator_asserts::wait_for_non_inclusion_proof,
     wallet::{Deposit as ShieldDeposit, DepositParams},

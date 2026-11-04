@@ -1,7 +1,7 @@
 use anyhow::{ensure, Result};
 use solana_address::Address;
+use spr_program::ProgramOwner;
 use zolana_keypair::{ShieldedAddress, ViewingKey, X25519Pubkey};
-use zolana_program::ProgramOwner;
 use zolana_transaction::{Mint, SppProofOutputUtxo, WalletUtxo};
 
 use crate::state::SwapDvp;
@@ -177,7 +177,7 @@ mod tests {
             (
                 sent.hash(1).unwrap(),
                 ProgramOwner::nullifier_pubkey().unwrap(),
-                *zolana_program::program::PdaOwner::new(&pda)
+                *spr_program::program::PdaOwner::new(&pda)
                     .unwrap()
                     .owner_hash(),
                 4,

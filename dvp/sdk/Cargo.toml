@@ -18,7 +18,7 @@ zolana-client = { workspace = true, features = ["reqwest"] }
 zolana-hasher = { workspace = true }
 zolana-interface = { workspace = true }
 zolana-keypair = { workspace = true }
-zolana-program = { workspace = true, features = ["compression", "client", "parallel"] }
+spr-program = { workspace = true, features = ["compression", "client", "parallel"] }
 zolana-transaction = { workspace = true }
 
 
@@ -26,7 +26,7 @@ zolana-transaction = { workspace = true }
 mollusk-svm = { workspace = true }
 solana-account = { workspace = true }
 solana-program-error = { workspace = true }
-zolana-program = { workspace = true, features = ["test-support"] }
+spr-program = { workspace = true, features = ["test-support"] }
 groth16-solana = { workspace = true }
 solana-keypair = { workspace = true }
 

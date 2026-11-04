@@ -1,10 +1,10 @@
 use super::{shared::assert_blinding_seed, SwapDvpTerms};
-use zolana_keypair::ShieldedAddress;
-use zolana_program::{
+use spr_program::{
     circuit::{CheckedTransaction, Circuit, ConfidentialTransaction, DataUtxo, PublicInputs},
     conversion::ProofInput,
     CircuitError, TxContext, ZkProgramCircuit,
 };
+use zolana_keypair::ShieldedAddress;
 
 #[derive(Clone, ZkProgramCircuit)]
 pub struct CreateDvp {
@@ -57,7 +57,7 @@ impl Circuit for <CreateDvp as ProofInput>::Circuit {
 
         // 5. Reserve the DvP address and check the transaction.
         ConfidentialTransaction::new(&private.tx_context, public)
-            .with(zolana_program::circuit::NewAddress::new(
+            .with(spr_program::circuit::NewAddress::new(
                 &public.dvp_owner,
                 &public.dvp_id,
             )?)

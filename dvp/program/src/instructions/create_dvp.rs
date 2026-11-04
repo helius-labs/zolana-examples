@@ -4,15 +4,15 @@ use pinocchio::{
     error::ProgramError,
     AccountView, Address, ProgramResult,
 };
-use wincode::{SchemaRead, SchemaWrite};
-use zolana_account_checks::AccountIterator;
-use zolana_hasher::primitives::solana_owner_identity;
-use zolana_interface::instruction::instruction_data::transact::TransactIxData;
-use zolana_program::{
+use spr_program::{
     cpi::{SppTransactAccounts, TransactAccountsError},
     program::PdaOwner,
     verifier::VerifyError,
 };
+use wincode::{SchemaRead, SchemaWrite};
+use zolana_account_checks::AccountIterator;
+use zolana_hasher::primitives::solana_owner_identity;
+use zolana_interface::instruction::instruction_data::transact::TransactIxData;
 
 use crate::{error::DvpError, verifier::create_dvp, DVP_AUTHORITY_PDA_SEED};
 
@@ -49,7 +49,7 @@ pub fn process_create_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> Progr
         return Err(DvpError::InvalidDvpAuthority.into());
     }
     let owner = PdaOwner::new(&dvp_authority).map_err(|_| DvpError::HashingFailed)?;
-    let dvp_owner = zolana_program::verifier::address_hash(owner.owner_hash(), &viewing_pubkey)
+    let dvp_owner = spr_program::verifier::address_hash(owner.owner_hash(), &viewing_pubkey)
         .map_err(|_| DvpError::HashingFailed)?;
     let creator_identity = solana_owner_identity(creator.as_array()).map_err(DvpError::from)?;
 
@@ -93,7 +93,7 @@ pub fn process_create_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> Progr
     accounts.invoke::<16>(&transact, &[Signer::from(&seeds)])
 }
 
-pub use zolana_program::CompressedProof as CreateDvpProof;
+pub use spr_program::CompressedProof as CreateDvpProof;
 
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct CreateDvpIxData {

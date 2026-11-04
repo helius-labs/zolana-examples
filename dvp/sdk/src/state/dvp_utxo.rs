@@ -1,5 +1,5 @@
 use anyhow::{ensure, Result};
-use zolana_program::ProgramOwner;
+use spr_program::ProgramOwner;
 use zolana_transaction::WalletUtxo;
 
 use crate::{err, instructions::create_dvp::CreateDvpDerivation, state::SwapDvp};
@@ -57,7 +57,7 @@ impl DvpUtxo {
 
 #[cfg(test)]
 mod tests {
-    use zolana_program::ProgramOwner;
+    use spr_program::ProgramOwner;
 
     use super::*;
     use crate::index::fixture::terms_fixture;

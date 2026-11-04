@@ -1,5 +1,4 @@
-use zolana_keypair::ShieldedAddress;
-use zolana_program::{
+use spr_program::{
     circuit::{
         Assert, CheckedTransaction, Circuit, ConfidentialTransaction, PublicInputs, TokenUtxos,
         UtxoTrait,
@@ -7,6 +6,7 @@ use zolana_program::{
     conversion::ProofInput,
     CircuitError, TxContext, ZkProgramCircuit,
 };
+use zolana_keypair::ShieldedAddress;
 use zolana_transaction::WalletUtxo;
 
 use super::{

@@ -3,10 +3,10 @@ use dvp_program::circuits::{
     SettleDvp as SettleDvpInputs, SettleDvpPrivateInputs, SettleDvpPublicInputs,
 };
 use solana_address::Address;
+use spr_program::{ProgramOwner, TxContext, ZkProgramCircuit};
 use zolana_client::ZolanaIndexer;
 use zolana_hasher::primitives::solana_owner_identity;
 use zolana_keypair::ShieldedKeypair;
-use zolana_program::{ProgramOwner, TxContext, ZkProgramCircuit};
 use zolana_transaction::instructions::transact::SppProofInputs;
 
 use super::SettleDvp;

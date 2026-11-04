@@ -1,7 +1,7 @@
 use anyhow::{ensure, Result};
+use spr_program::ProgramOwner;
 use zolana_client::ZolanaIndexer;
 use zolana_interface::instruction::instruction_data::transact::TransactIxData;
-use zolana_program::ProgramOwner;
 use zolana_transaction::instructions::transact::SppProofInputs;
 
 use crate::err;

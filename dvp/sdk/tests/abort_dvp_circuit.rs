@@ -1,7 +1,7 @@
 use crate::shared::*;
 use dvp_program::{circuits::AbortDvp, verifier::abort_dvp::VERIFYINGKEY};
 use dvp_sdk::proof::CircuitId;
-use zolana_program::ZkProgramCircuit;
+use spr_program::ZkProgramCircuit;
 
 const CIRCUIT: CircuitId = CircuitId::AbortDvp;
 
@@ -99,7 +99,7 @@ fn abort_proof_rejects_wrong_refunds_and_spp_rejects_padding_before_a_deposit() 
     let public = dvp_program::verifier::abort_dvp::PublicInputs {
         creator_identity: inputs.public.creator_identity,
         dvp_id: inputs.public.dvp_id,
-        dvp_owner: zolana_program::verifier::address_hash(
+        dvp_owner: spr_program::verifier::address_hash(
             &inputs.public.dvp_owner.owner_hash().unwrap(),
             inputs.public.dvp_owner.viewing_pubkey.as_bytes(),
         )
@@ -132,7 +132,7 @@ fn abort_proof_rejects_wrong_refunds_and_spp_rejects_padding_before_a_deposit() 
             .iter()
             .map(|output| output.hash(OUTPUT_TREE_ID).unwrap())
             .collect::<Vec<_>>();
-        let hash = zolana_program::PrivateTxHash::new(
+        let hash = spr_program::PrivateTxHash::new(
             &input_hashes,
             &hashes,
             &finalized.private_tx_blinding().unwrap(),
