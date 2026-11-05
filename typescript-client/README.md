@@ -1,6 +1,6 @@
 # Zolana examples: TypeScript client
 
-TypeScript client examples for `@heliuslabs/zolana`.
+TypeScript client examples for `@heliuslabs/spr`.
 
 - **[register_private_wallet](examples/register_private_wallet.ts)** - Register a private wallet
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw
@@ -11,7 +11,7 @@ TypeScript client examples for `@heliuslabs/zolana`.
 ## Setup
 
 Install Node.js 24+ and pnpm. The SDK is pinned to the published npm release
-`@heliuslabs/zolana@^0.8.0-alpha`.
+`@heliuslabs/spr@^0.9.0-alpha`.
 
 ```bash
 pnpm install
@@ -34,7 +34,7 @@ cp .env.example .env # ...and set API_KEY
 To run on localnet, configure in [`src/lib.ts`](src/lib.ts) and install:
 
 ```bash
-cargo install --git https://github.com/helius-labs/zolana --rev 6bb4f7008294695ebe614f08affb215d4321a538 spr-cli
+cargo install --git https://github.com/helius-labs/zolana --rev 6660d98397147531af80e94fb367a597c8d0082d spr-cli
 zolana dev start
 ```
 

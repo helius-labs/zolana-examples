@@ -2,7 +2,7 @@ use anyhow::Result;
 use rust_client_example::{asset_registry, cli_keypair, setup};
 use solana_keypair::Keypair;
 use solana_signer::Signer;
-use spr_client::{SolanaRpc, UtxoScan, ZolanaClient};
+use spr_client::{SolanaRpc, SprClient, UtxoScan};
 use spr_keypair::ShieldedKeypair;
 use spr_transaction::Balances;
 
@@ -12,7 +12,7 @@ fn main() -> Result<()> {
     run(&client, &cli_keypair()?).map(|_| ())
 }
 
-pub fn run(client: &ZolanaClient<SolanaRpc>, payer: &Keypair) -> Result<Balances> {
+pub fn run(client: &SprClient<SolanaRpc>, payer: &Keypair) -> Result<Balances> {
     // Initialize the sender's private wallet and local authority
     // to decrypt transactions and sync balances.
     // The Solana signer and private wallet are derived from the same Ed25519 seed.

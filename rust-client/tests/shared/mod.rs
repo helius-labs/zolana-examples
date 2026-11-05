@@ -2,7 +2,7 @@ use anyhow::{ensure, Result};
 use rust_client_example::SetupContext;
 use solana_address::Address;
 use solana_keypair::{write_keypair_file, Keypair};
-use spr_client::{ProofDataSource, SolanaRpc, ZolanaClient};
+use spr_client::{ProofDataSource, SolanaRpc, SprClient};
 use std::{io::Write, path::Path, process::Command};
 
 const EXAMPLES: &[&str] = &[
@@ -35,7 +35,7 @@ mod sync_balance;
 mod read_history;
 
 pub fn run_rust_examples(
-    client: &ZolanaClient<SolanaRpc>,
+    client: &SprClient<SolanaRpc>,
     tree: Address,
     payer: &Keypair,
 ) -> Result<()> {

@@ -12,7 +12,7 @@ python3 test-utils/download-release.py "$ZOLANA_TEST_ARTIFACTS_DIR"
 # The SDK's attestation protocol, key catalog and finalized ceremony keys
 # postdate the published binaries. Build these services from the SDK revision.
 sdk_dir=$(cd "$repo_dir/../zolana" && pwd)
-sdk_revision=6aba4a70177caaef602baf972ce4958691ec1e65
+sdk_revision=6660d98397147531af80e94fb367a597c8d0082d
 if [ "$(git -C "$sdk_dir" rev-parse HEAD)" != "$sdk_revision" ]; then
     echo "Check out Zolana $sdk_revision at $sdk_dir" >&2
     exit 1

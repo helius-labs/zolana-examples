@@ -2,13 +2,13 @@ import {
   MergeEncryptionScheme,
   ShieldedKeypair,
   SigningKey,
-  createZolanaClient,
-} from "@heliuslabs/zolana";
+  createSprClient,
+} from "@heliuslabs/spr";
 import {
   getRegisterInstructionAsync,
   getSetMergeEncryptionInstructionAsync,
-} from "@heliuslabs/zolana/instructions";
-import { isWalletRegistered } from "@heliuslabs/zolana/wallet";
+} from "@heliuslabs/spr/instructions";
+import { isWalletRegistered } from "@heliuslabs/spr/wallet";
 
 import {
   cliKeypair,
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
 
   // Connect to the RPC, indexer, and prover.
   const client =
-    await createZolanaClient(clientConfig);
+    await createSprClient(clientConfig);
 
   // Initialize the sender's private wallet and local authority
   // to decrypt transactions and sync balances.
