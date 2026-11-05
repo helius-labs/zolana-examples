@@ -1,25 +1,25 @@
 import {
   SOL_MINT,
   ShieldedKeypair,
-  createZolanaClient,
-} from "@heliuslabs/zolana";
+  createSprClient,
+} from "@heliuslabs/spr";
 import {
   LocalKeys,
   atSlot,
-} from "@heliuslabs/zolana/client";
+} from "@heliuslabs/spr/client";
 import {
   depositInstruction,
   transactInstruction,
   DepositAsset,
   TransactWithdrawal,
-} from "@heliuslabs/zolana/interface";
+} from "@heliuslabs/spr/interface";
 import {
   AssetRegistry,
   ConfidentialTransfer,
   ProofInputUtxo,
   decryptToBalances,
   WithdrawalTarget,
-} from "@heliuslabs/zolana/transaction";
+} from "@heliuslabs/spr/transaction";
 
 import {
   cliKeypair,
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
 
   // Connect to Helius devnet RPC plus the Photon indexer and prover.
   const client =
-    await createZolanaClient(clientConfig);
+    await createSprClient(clientConfig);
 
   // Initialize the sender's private wallet and local authority
   // to decrypt transactions and sync balances.
