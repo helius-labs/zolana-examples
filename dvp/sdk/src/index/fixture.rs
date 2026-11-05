@@ -322,10 +322,9 @@ pub(crate) fn deposit_fixture() -> DepositFixture {
 }
 
 /// An in-memory indexer over `txs`. A tag query serves the transactions
-/// with an output or a message so tagged, one per page, so callers follow
-/// the cursor; every page also repeats the previous page's transaction, the
-/// way overlapping pages do. A nullifier query serves the transactions that
-/// spent any of the nullifiers, in one page.
+/// with an output or a message so tagged, grouped by Solana transaction, one
+/// group per page, so callers follow the cursor. A nullifier query serves
+/// the transactions that spent any of the nullifiers, in one page.
 pub(crate) struct FixtureIndexer {
     pub(crate) txs: Vec<ShieldedTransaction>,
 }
@@ -355,15 +354,11 @@ impl Rpc for FixtureIndexer {
         let page = cursor
             .and_then(|token| usize::try_from(token.slot()).ok())
             .unwrap_or(0);
-        let data = matching
-            .get(page.saturating_sub(1)..=page)
-            .unwrap_or_default()
-            .iter()
-            .map(|tx| events(tx))
-            .collect();
+        let groups = group_events(matching);
+        let data = groups.get(page).cloned().into_iter().collect();
         let next = page + 1;
-        let pagination_token = (next < matching.len())
-            .then(|| PaginationToken::new(next as u64, Signature::default()));
+        let pagination_token =
+            (next < groups.len()).then(|| PaginationToken::new(next as u64, Signature::default()));
         Ok(GetShieldedTransactionsByTagsResponse {
             context: Context {
                 block_time: 0,
@@ -389,22 +384,32 @@ impl Rpc for FixtureIndexer {
                 slot: 0,
             },
             output_tree_id: Some(FIXTURE_TREE_ID),
-            data: self
-                .txs
-                .iter()
-                .filter(|tx| tx.nullifiers.iter().any(|n| nullifiers.contains(n)))
-                .map(events)
-                .collect(),
+            data: group_events(
+                self.txs
+                    .iter()
+                    .filter(|tx| tx.nullifiers.iter().any(|n| nullifiers.contains(n)))
+                    .collect(),
+            ),
             pagination_token: None,
         })
     }
 }
 
-/// One indexed Solana transaction carrying the single event `tx`.
-fn events(tx: &ShieldedTransaction) -> TransactionEvents<ShieldedTransaction, Signature> {
-    TransactionEvents {
-        slot: tx.slot,
-        signature: tx.tx_signature,
-        events: vec![tx.clone()],
+/// Groups consecutive events of one Solana transaction, the way the indexer
+/// serves them.
+fn group_events(
+    txs: Vec<&ShieldedTransaction>,
+) -> Vec<TransactionEvents<ShieldedTransaction, Signature>> {
+    let mut groups: Vec<TransactionEvents<ShieldedTransaction, Signature>> = Vec::new();
+    for tx in txs {
+        match groups.last_mut() {
+            Some(group) if group.signature == tx.tx_signature => group.events.push(tx.clone()),
+            _ => groups.push(TransactionEvents {
+                slot: tx.slot,
+                signature: tx.tx_signature,
+                events: vec![tx.clone()],
+            }),
+        }
     }
+    groups
 }

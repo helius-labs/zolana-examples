@@ -32,8 +32,8 @@ settlement, reclaim, cancellation and rejection with each flow inlined.
 
 ## Build
 
-Use Rust 1.95.0, Node.js 24 or newer, Python 3, `wasm-pack`, and Agave with
-SBF platform tools v1.54. `rust-toolchain.toml` pins the compiler used to
+Use Rust 1.95.0, Node.js 24 or newer, `wasm-pack`, Agave with SBF platform
+tools v1.54, and Go for the localnet services. `rust-toolchain.toml` pins the compiler used to
 generate the checked bytecode. The workspace uses Zolana
 [`7c61c47a3`](https://github.com/helius-labs/zolana/commit/7c61c47a31eec4fbbe97f846c6d0f56a5c9a3989)
 and Xark

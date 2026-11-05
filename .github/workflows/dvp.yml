@@ -109,9 +109,12 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt -p dvp-program -p dvp-sdk -p dvp-test -- --check
 
+      # --check needs cached keys. The deterministic test setup regenerates
+      # them and rewrites the verifiers, which must match the committed ones.
       - name: Check generated verifiers and circuit keys
         run: |
-          "$ZOLANA_CLI_BIN" zk compile --test --manifest-path program/Cargo.toml --check
+          "$ZOLANA_CLI_BIN" zk compile --test --manifest-path program/Cargo.toml
+          git diff --exit-code -- program/src/verifier
           scripts/check-keys.sh
 
       - name: Build Node.js circuits

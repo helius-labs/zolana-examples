@@ -41,9 +41,10 @@ pub(crate) fn index_until<T>(
 }
 
 /// Runs `scan` over every indexed transaction with an output or a message
-/// tagged `tag`, page by page, and collects what it returns. A transaction
-/// served on two pages is scanned once; it is keyed by signature and event
-/// index, since one Solana transaction can emit several.
+/// tagged `tag`, page by page, and collects what it returns. Each event is
+/// scanned once, keyed by signature and event index, since one Solana
+/// transaction can emit several; the key also guards against an indexer that
+/// serves an event twice. A page token that does not advance is an error.
 pub(crate) fn collect_tagged<I: Rpc, F: IntoIterator>(
     tag: [u8; 32],
     indexer: &I,
@@ -67,7 +68,7 @@ pub(crate) fn collect_tagged<I: Rpc, F: IntoIterator>(
                 found.extend(scan(tx)?);
             }
         }
-        cursor = page.pagination_token;
+        cursor = page.continuation(cursor).map_err(err)?;
         if cursor.is_none() {
             return Ok(found);
         }
@@ -100,7 +101,7 @@ pub(crate) fn spent_nullifiers<I: Rpc>(
                     .flat_map(|tx| tx.nullifiers.iter().copied())
                     .filter(|nullifier| wanted.contains(nullifier)),
             );
-            cursor = page.pagination_token;
+            cursor = page.continuation(cursor).map_err(err)?;
             if cursor.is_none() {
                 break;
             }
@@ -153,8 +154,8 @@ mod tests {
         assert_eq!(format!("{error:#}"), "timed out discovering numbers");
     }
 
-    /// The fixture indexer repeats a transaction on the next page; it is
-    /// scanned once. Two events of one Solana transaction are both scanned.
+    /// Two events of one Solana transaction arrive in one page group and are
+    /// both scanned.
     #[test]
     fn collect_tagged_scans_each_event_once() {
         let fixture = deposit_fixture();
@@ -164,10 +165,12 @@ mod tests {
             txs: vec![
                 ShieldedTransaction {
                     event_index: Some(0),
-                    ..delivery_tx
+                    ..delivery_tx.clone()
                 },
                 ShieldedTransaction {
                     event_index: Some(1),
+                    tx_signature: delivery_tx.tx_signature,
+                    slot: delivery_tx.slot,
                     ..payment_tx
                 },
             ],
