@@ -7,12 +7,11 @@ import {
 } from "@solana/kit";
 import {
   encodeTransactInstructionData,
-  transactCpiAccounts,
   type TransactInstructionData,
-} from "@heliuslabs/zolana/interface";
-import type { ProgramOwner } from "@heliuslabs/zolana/transaction";
+} from "@heliuslabs/spr/interface";
 import { PROGRAM_ID, concat, encoder, u64 } from "./terms.js";
 import type { CompressedProof } from "./wasm.js";
+import { type ProgramOwner, transactCpiAccounts } from "@heliuslabs/spr/program";
 
 interface DvpInstructionAccounts {
   readonly payer: TransactionSigner;

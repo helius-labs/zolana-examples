@@ -3,7 +3,7 @@ use dvp_program::circuits::{
     SettleDvpClient as SettleDvpInputs, SettleDvpPrivateInputsClient, SettleDvpPublicInputsClient,
 };
 use solana_address::Address;
-use spr_client::ZolanaIndexer;
+use spr_client::SprIndexer;
 use spr_keypair::ShieldedKeypair;
 use spr_program::{ProgramOwner, TransactionOptions};
 use spr_transaction::instructions::transact::SppProofInputs;
@@ -131,7 +131,7 @@ impl SettleDvpTransactionParams {
 impl SettleDvpTransaction {
     /// 1. Prove the SPP transaction.
     /// 2. Prove settle_dvp and build the instruction.
-    pub fn prove(self, indexer: &ZolanaIndexer, tree: Address) -> Result<SettleDvp> {
+    pub fn prove(self, indexer: &SprIndexer, tree: Address) -> Result<SettleDvp> {
         let private_tx_hash = self
             .spp_proof_inputs
             .padding_independent_private_tx_hash()

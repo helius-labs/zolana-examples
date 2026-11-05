@@ -4,7 +4,7 @@ use dvp_program::circuits::{
 };
 use solana_address::Address;
 use solana_instruction::Instruction;
-use spr_client::ZolanaIndexer;
+use spr_client::SprIndexer;
 use spr_keypair::ShieldedKeypair;
 use spr_program::{ProgramOwner, TransactionOptions};
 use spr_transaction::{instructions::transact::SppProofInputs, Mint, WalletUtxo};
@@ -146,7 +146,7 @@ impl AbortDvpTransactionParams {
 impl AbortDvpTransaction {
     /// 1. Prove the SPP transaction.
     /// 2. Prove abort_dvp and build cancel_dvp or reject_dvp.
-    pub fn prove(self, indexer: &ZolanaIndexer, tree: Address) -> Result<AbortDvp> {
+    pub fn prove(self, indexer: &SprIndexer, tree: Address) -> Result<AbortDvp> {
         let private_tx_hash = self
             .spp_proof_inputs
             .padding_independent_private_tx_hash()

@@ -10,7 +10,7 @@
     "format": "oxfmt --write ."
   },
   "dependencies": {
-    "@heliuslabs/zolana": "file:../.tools/zolana/sdk-libs/ts",
+    "@heliuslabs/spr": "file:../.tools/zolana/sdk-libs/ts",
     "@solana/kit": "^8.3.0"
   },
   "devDependencies": {

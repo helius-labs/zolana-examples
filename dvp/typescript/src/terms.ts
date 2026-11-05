@@ -5,8 +5,8 @@ import {
   poseidon,
   solanaOwnerIdentity,
   type Bytes32,
-} from "@heliuslabs/zolana/keypair";
-import { assetField, type AssetRegistry } from "@heliuslabs/zolana/transaction";
+} from "@heliuslabs/spr/keypair";
+import { assetField, type AssetRegistry } from "@heliuslabs/spr/transaction";
 import type { SwapDvpTermsClient } from "./wasm.js";
 export const PROGRAM_ID = address("8ErdEhvg1NgRzzZRSw3Lx4z4rDEruc6Bjwzn7WVooUMx");
 export const VIEWING_PUBLIC_KEY_LENGTH = 33;

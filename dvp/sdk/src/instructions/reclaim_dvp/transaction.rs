@@ -4,7 +4,7 @@ use dvp_program::circuits::{
     ReclaimDvpPublicInputsClient,
 };
 use solana_address::Address;
-use spr_client::ZolanaIndexer;
+use spr_client::SprIndexer;
 use spr_keypair::{ShieldedAddress, ShieldedKeypair};
 use spr_program::{ProgramOwner, TransactionOptions};
 use spr_transaction::instructions::transact::SppProofInputs;
@@ -106,7 +106,7 @@ impl ReclaimDvpTransactionParams {
 impl ReclaimDvpTransaction {
     /// 1. Prove the SPP transaction.
     /// 2. Prove reclaim_dvp and build the instruction.
-    pub fn prove(self, indexer: &ZolanaIndexer, tree: Address) -> Result<ReclaimDvp> {
+    pub fn prove(self, indexer: &SprIndexer, tree: Address) -> Result<ReclaimDvp> {
         let private_tx_hash = self
             .spp_proof_inputs
             .padding_independent_private_tx_hash()

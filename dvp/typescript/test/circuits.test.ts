@@ -11,15 +11,8 @@ import {
   SigningKey,
   randomBlinding,
   bytes31,
-} from "@heliuslabs/zolana/keypair";
-import {
-  AssetRegistry,
-  ProgramOwner,
-  ProofInputUtxo,
-  Utxo,
-  SOL_MINT,
-  decodeProgramTransaction,
-} from "@heliuslabs/zolana/transaction";
+} from "@heliuslabs/spr/keypair";
+import { AssetRegistry, ProofInputUtxo, Utxo, SOL_MINT } from "@heliuslabs/spr/transaction";
 import {
   circuitTerms,
   encodeTerms,
@@ -35,6 +28,7 @@ import {
   type SwapDvp,
 } from "../src/terms.js";
 import { ProgramProver, wasm, type WalletUtxo } from "../src/wasm.js";
+import { ProgramOwner, decodeProgramTransaction } from "@heliuslabs/spr/program";
 
 await initializePoseidon();
 

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { createZolanaClient } from "@heliuslabs/zolana";
+import { createSprClient } from "@heliuslabs/spr";
 import {
   atSlot,
   LocalKeys,
   NullifierKeyProofAuthority,
   type PaginationToken,
-} from "@heliuslabs/zolana/client";
-import { transactInstruction } from "@heliuslabs/zolana/interface";
+} from "@heliuslabs/spr/client";
+import { transactInstruction } from "@heliuslabs/spr/interface";
 import {
   bytes32,
   initializePoseidon,
@@ -15,23 +15,20 @@ import {
   ShieldedKeypair,
   SigningKey,
   ViewingKey,
-} from "@heliuslabs/zolana/keypair";
+} from "@heliuslabs/spr/keypair";
 import {
   AssetRegistry,
   ConfidentialTransfer,
   createExternalData,
-  decodeProgramTransaction,
   SppProofInputs,
   decodeConfidential,
   decodeOutputData,
   decryptToBalances,
-  ProgramOwner,
   ProofInputUtxo,
   SOL_MINT,
   Utxo,
-  toProgramWalletUtxo,
   type IndexedShieldedTransaction,
-} from "@heliuslabs/zolana/transaction";
+} from "@heliuslabs/spr/transaction";
 import {
   address,
   appendTransactionMessageInstructions,
@@ -60,6 +57,11 @@ import {
 } from "../src/terms.js";
 import { createDvpInstruction, rejectDvpInstruction } from "../src/instructions.js";
 import { ProgramProver, wasm, type WalletUtxo } from "../src/wasm.js";
+import {
+  ProgramOwner,
+  decodeProgramTransaction,
+  toProgramWalletUtxo,
+} from "@heliuslabs/spr/program";
 
 async function main(): Promise<void> {
   // 1. Connect the seller, buyer, and settlement authority.
@@ -67,7 +69,7 @@ async function main(): Promise<void> {
   const seller = keypair("DVP_SELLER_SEED");
   const buyer = keypair("DVP_BUYER_SEED");
   const settlementAuthority = keypair("DVP_AUTHORITY_SEED");
-  const client = await createZolanaClient({
+  const client = await createSprClient({
     solanaRpcUrl: env("ZOLANA_LOCALNET_URL"),
     indexerUrl: env("ZOLANA_INDEXER_URL"),
     proverUrl: env("ZOLANA_PROVER_URL"),
@@ -450,7 +452,7 @@ function equal(left: Uint8Array, right: Uint8Array): boolean {
 }
 
 function sendAndConfirmFactory(
-  client: Awaited<ReturnType<typeof createZolanaClient>>,
+  client: Awaited<ReturnType<typeof createSprClient>>,
   payer: ReturnType<ShieldedKeypair["toSolanaSigner"]>,
 ) {
   const send = sendTransactionWithoutConfirmingFactory({ rpc: client.solanaRpc });

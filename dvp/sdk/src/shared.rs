@@ -1,5 +1,5 @@
 use anyhow::{ensure, Result};
-use spr_client::ZolanaIndexer;
+use spr_client::SprIndexer;
 use spr_interface::instruction::instruction_data::transact::TransactIxData;
 use spr_program::{Field, ProgramOwner};
 use spr_transaction::instructions::transact::SppProofInputs;
@@ -22,7 +22,7 @@ pub(crate) fn identity(address: &solana_address::Address) -> Result<Field> {
 /// `indexer`, which serves their Merkle proofs, and checks that the SPP
 /// proof covers `private_tx_hash`, the transaction the DvP proof covers.
 pub(crate) fn prove_pda_transact(
-    indexer: &ZolanaIndexer,
+    indexer: &SprIndexer,
     spp_proof_inputs: SppProofInputs,
     private_tx_hash: &[u8; 32],
 ) -> Result<TransactIxData> {

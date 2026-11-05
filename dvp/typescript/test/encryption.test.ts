@@ -7,20 +7,19 @@ import {
   X25519PublicKey,
   ShieldedKeypair,
   SigningKey,
-} from "@heliuslabs/zolana/keypair";
+} from "@heliuslabs/spr/keypair";
 import {
   AssetRegistry,
   ConfidentialTransfer,
   decodeConfidential,
   decodeOutputData,
-  ProgramOwner,
   ProofInputUtxo,
   SOL_MINT,
   Utxo,
-  toProgramWalletUtxo,
-} from "@heliuslabs/zolana/transaction";
-import { getTreeAddress } from "@heliuslabs/zolana/addresses";
+} from "@heliuslabs/spr/transaction";
+import { getTreeAddress } from "@heliuslabs/spr/addresses";
 import { PROGRAM_ID, VIEWING_PUBLIC_KEY_LENGTH } from "../src/terms.js";
+import { ProgramOwner, toProgramWalletUtxo } from "@heliuslabs/spr/program";
 
 test("the seller recovers its deposit using its transaction viewing key", async () => {
   // 1. Create the seller, settlement authority, and DvP owner.
