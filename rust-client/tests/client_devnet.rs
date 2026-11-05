@@ -5,7 +5,7 @@ use rust_client_example::{SetupContext, INDEXER_URL, PROVER_URL};
 use solana_keypair::{read_keypair_file, Keypair};
 use solana_signer::Signer;
 use solana_system_interface::instruction::transfer;
-use spr_client::{ComputeBudgetConfig, ProofDataSource, Rpc, SolanaRpc, ZolanaClient};
+use spr_client::{ComputeBudgetConfig, ProofDataSource, Rpc, SolanaRpc, SprClient};
 use spr_interface::{pda, PROGRAM_ID_PUBKEY};
 use spr_user_registry_interface::user_registry_program_id;
 
@@ -18,7 +18,7 @@ const DEVNET_GENESIS_HASH: [u8; 32] = [
 ];
 
 fn with_funded_payer(
-    client: &ZolanaClient<SolanaRpc>,
+    client: &SprClient<SolanaRpc>,
     sponsor: &Keypair,
     run: impl FnOnce(&Keypair) -> Result<()>,
 ) -> Result<()> {

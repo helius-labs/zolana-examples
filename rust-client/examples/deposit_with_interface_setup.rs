@@ -3,7 +3,7 @@ use rust_client_example::{cli_keypair, landed_slot, setup, setup_test_token, Tes
 use solana_address::Address;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
-use spr_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
+use spr_client::{IndexerRpcConfig, Rpc, SolanaRpc, SprClient};
 use spr_interface::{pda, state::SplAssetRegistry};
 use spr_keypair::ShieldedKeypair;
 use spr_program::instruction::{
@@ -19,7 +19,7 @@ fn main() -> Result<()> {
     run(&client, context.tree, &cli_keypair()?).map(|_| ())
 }
 
-pub fn run(client: &ZolanaClient<SolanaRpc>, tree: Address, payer: &Keypair) -> Result<Address> {
+pub fn run(client: &SprClient<SolanaRpc>, tree: Address, payer: &Keypair) -> Result<Address> {
     let sender = ShieldedKeypair::from_keypair(payer)?;
     let sender_pubkey = payer.pubkey();
     let sender_shielded_address = sender.shielded_address()?;

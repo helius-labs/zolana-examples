@@ -11,8 +11,7 @@ use spl_token_interface::instruction::{initialize_account3, initialize_mint2, mi
 use spr_client::{
     check_service_url,
     prover::tee::{SignedTeePolicy, TeeNetwork},
-    ProgramAccountsFilter, ProofDataSource, ProverClient, Rpc, SolanaRpc, ZolanaClient,
-    ZolanaIndexer,
+    ProgramAccountsFilter, ProofDataSource, ProverClient, Rpc, SolanaRpc, SprClient, SprIndexer,
 };
 use spr_interface::{
     pda,
@@ -48,11 +47,11 @@ impl SetupContext {
         }
     }
 
-    pub fn client(&self) -> Result<ZolanaClient<SolanaRpc>> {
+    pub fn client(&self) -> Result<SprClient<SolanaRpc>> {
         check_service_url(&self.indexer_url, "indexer_url")?;
-        Ok(ZolanaClient::new(
+        Ok(SprClient::new(
             SolanaRpc::new(self.rpc_url.clone()),
-            ZolanaIndexer::new(&self.indexer_url),
+            SprIndexer::new(&self.indexer_url),
             self.prover_client()?,
         )
         .with_proof_data_source(ProofDataSource::Prover))
@@ -87,7 +86,7 @@ pub fn cli_keypair() -> Result<Keypair> {
 }
 
 /// Load the registered SPL mints before scanning notes that carry a mint address.
-pub fn asset_registry(client: &ZolanaClient<SolanaRpc>) -> Result<AssetRegistry> {
+pub fn asset_registry(client: &SprClient<SolanaRpc>) -> Result<AssetRegistry> {
     let mut assets = AssetRegistry::default();
     let filter =
         ProgramAccountsFilter::new(SplAssetRegistry::SIZE).with_memcmp(0, vec![SPL_ASSET_REGISTRY]);
@@ -115,7 +114,7 @@ pub struct TestToken {
 
 /// Create a test mint and fund the payer's token account.
 pub fn setup_test_token(
-    client: &ZolanaClient<SolanaRpc>,
+    client: &SprClient<SolanaRpc>,
     payer: &Keypair,
     amount: u64,
 ) -> Result<TestToken> {
@@ -170,7 +169,7 @@ pub fn setup_test_token(
 
 /// Slot the confirmed transaction landed in, which drives the indexer
 /// freshness gate on the fetches that read the transaction back.
-pub fn landed_slot(client: &ZolanaClient<SolanaRpc>, signature: Signature) -> Result<u64> {
+pub fn landed_slot(client: &SprClient<SolanaRpc>, signature: Signature) -> Result<u64> {
     client
         .get_signature_statuses(vec![signature])?
         .first()

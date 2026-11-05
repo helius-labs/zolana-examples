@@ -4,7 +4,7 @@ use solana_keypair::Keypair;
 use solana_signer::Signer;
 use solana_system_interface::instruction::transfer;
 use spr_client::user_registry::is_wallet_registered_sync;
-use spr_client::{Rpc, SolanaRpc, ZolanaClient};
+use spr_client::{Rpc, SolanaRpc, SprClient};
 use spr_keypair::ShieldedKeypair;
 use spr_user_registry_interface::{
     instruction::{register, set_merge_encryption, RegisterData},
@@ -19,7 +19,7 @@ fn main() -> Result<()> {
     run(&client, &cli_keypair()?)
 }
 
-pub fn run(client: &ZolanaClient<SolanaRpc>, payer: &Keypair) -> Result<()> {
+pub fn run(client: &SprClient<SolanaRpc>, payer: &Keypair) -> Result<()> {
     // Initialize the sender's private wallet and local authority
     // to decrypt transactions and sync balances.
     // The Solana signer and private wallet are derived from the same Ed25519 seed.

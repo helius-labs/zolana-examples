@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use rust_client_example::{asset_registry, cli_keypair, setup};
 use solana_keypair::Keypair;
-use spr_client::{SolanaRpc, ZolanaClient};
+use spr_client::{SolanaRpc, SprClient};
 use spr_keypair::ShieldedKeypair;
 // The stateful wallet, with its transaction history, lives in spr-test-utils.
 use spr_test_utils::wallet::{
@@ -14,7 +14,7 @@ fn main() -> Result<()> {
     run(&client, &cli_keypair()?).map(|_| ())
 }
 
-pub fn run(client: &ZolanaClient<SolanaRpc>, payer: &Keypair) -> Result<Vec<PrivateTransaction>> {
+pub fn run(client: &SprClient<SolanaRpc>, payer: &Keypair) -> Result<Vec<PrivateTransaction>> {
     // Initialize the sender's private wallet and local authority
     // to decrypt transactions and sync balances.
     // The Solana signer and private wallet are derived from the same Ed25519 seed.
