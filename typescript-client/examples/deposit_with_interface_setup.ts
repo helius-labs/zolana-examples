@@ -1,22 +1,22 @@
 import {
   ShieldedKeypair,
-  createZolanaClient,
-} from "@heliuslabs/zolana";
+  createSprClient,
+} from "@heliuslabs/spr";
 import {
   getSplAssetRegistryAddress,
   getSplAssetVaultAddress,
-} from "@heliuslabs/zolana/addresses";
-import { atSlot } from "@heliuslabs/zolana/client";
-import { getCreateSplInterfaceInstructionAsync } from "@heliuslabs/zolana/instructions";
+} from "@heliuslabs/spr/addresses";
+import { atSlot } from "@heliuslabs/spr/client";
+import { getCreateSplInterfaceInstructionAsync } from "@heliuslabs/spr/instructions";
 import {
   decodeSplAssetRegistry,
   depositInstruction,
   DepositAsset,
-} from "@heliuslabs/zolana/interface";
+} from "@heliuslabs/spr/interface";
 import {
   AssetRegistry,
   decryptToBalances,
-} from "@heliuslabs/zolana/transaction";
+} from "@heliuslabs/spr/transaction";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import type { Instruction } from "@solana/kit";
 
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
       await cliKeypair(),
     );
   const client =
-    await createZolanaClient(clientConfig);
+    await createSprClient(clientConfig);
   const senderSigner =
     senderKeypair.toSolanaSigner();
   const senderAddress =
