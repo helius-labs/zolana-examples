@@ -14,7 +14,7 @@ default = ["insecure-test-setup"]
 insecure-test-setup = []
 bpf-entrypoint = []
 circuits = ["dep:xark", "spr-program/client"]
-r1cs-export = ["circuits", "spr-program/r1cs-export"]
+build-circuits = ["circuits", "spr-program/build"]
 wasm = ["circuits", "spr-program/wasm"]
 
 profile-program = ["light-program-profiler/profile-program"]

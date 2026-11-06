@@ -1,20 +1,20 @@
-#[cfg(all(not(feature = "r1cs-export"), not(feature = "insecure-test-setup")))]
+#[cfg(all(not(feature = "build-circuits"), not(feature = "insecure-test-setup")))]
 compile_error!("DvP verifying keys require the insecure-test-setup feature");
 
 #[cfg(feature = "circuits")]
 pub mod circuits;
 
 pub mod error;
-#[cfg(not(feature = "r1cs-export"))]
+#[cfg(not(feature = "build-circuits"))]
 pub mod instructions;
-#[cfg(not(feature = "r1cs-export"))]
+#[cfg(not(feature = "build-circuits"))]
 #[rustfmt::skip] // Keep the generator's exact output for `zk compile --check`.
 pub mod verifier;
 
-#[cfg(not(feature = "r1cs-export"))]
+#[cfg(not(feature = "build-circuits"))]
 use pinocchio::{address::address_eq, error::ProgramError, AccountView, Address, ProgramResult};
 
-#[cfg(not(feature = "r1cs-export"))]
+#[cfg(not(feature = "build-circuits"))]
 use crate::instructions::{
     cancel_dvp::process_cancel_dvp_ix, create_dvp::process_create_dvp_ix,
     reclaim_dvp::process_reclaim_dvp_ix, reject_dvp::process_reject_dvp_ix,
@@ -51,14 +51,14 @@ pub const DVP_ADDRESS_TREE_ID: u16 = 0;
 pub const ABORT_MODE_CANCEL: u8 = 0;
 pub const ABORT_MODE_REJECT: u8 = 1;
 
-#[cfg(all(feature = "bpf-entrypoint", not(feature = "r1cs-export")))]
+#[cfg(all(feature = "bpf-entrypoint", not(feature = "build-circuits")))]
 mod entrypoint {
     pinocchio::entrypoint!(crate::process_instruction);
 }
 
 pinocchio::address::declare_id!("8ErdEhvg1NgRzzZRSw3Lx4z4rDEruc6Bjwzn7WVooUMx");
 
-#[cfg(not(feature = "r1cs-export"))]
+#[cfg(not(feature = "build-circuits"))]
 pub fn process_instruction(
     program_id: &Address,
     accounts: &mut [AccountView],
