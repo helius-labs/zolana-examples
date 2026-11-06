@@ -15,7 +15,7 @@ insecure-test-setup = []
 bpf-entrypoint = []
 circuits = ["dep:xark", "spr-program/client"]
 r1cs-export = ["circuits", "spr-program/r1cs-export"]
-wasm = ["circuits", "dep:serde", "dep:tsify", "dep:wasm-bindgen", "spr-program/wasm"]
+wasm = ["circuits", "spr-program/wasm"]
 
 profile-program = ["light-program-profiler/profile-program"]
 
@@ -34,11 +34,6 @@ spr-account-checks = { workspace = true }
 spr-hasher = { workspace = true }
 spr-interface = { workspace = true }
 spr-program = { workspace = true, features = ["cpi", "compression", "verifier"] }
-
-[target.'cfg(all(not(xark), not(xark_client)))'.dependencies]
-serde = { workspace = true, optional = true }
-tsify = { workspace = true, optional = true }
-wasm-bindgen = { workspace = true, optional = true }
 
 [dev-dependencies]
 mollusk-svm = { workspace = true }

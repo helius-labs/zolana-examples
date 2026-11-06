@@ -3,7 +3,7 @@
 set -euo pipefail
 
 dvp=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-zolana_revision=407eb346b016d978619cbd84d7fd124c486b9676
+zolana_revision=2bd680ea9197b4a600f5be61b84a391412f8ec53
 xark_revision=ad7baad990cb949227ad7d6046e4cfbe3806d357
 
 checkout() {
