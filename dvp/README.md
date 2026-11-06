@@ -35,7 +35,7 @@ settlement, reclaim, cancellation and rejection with each flow inlined.
 Use Rust 1.95.0, Node.js 24 or newer, `wasm-pack`, Agave with SBF platform
 tools v1.54, and Go for the localnet services. `rust-toolchain.toml` pins the compiler used to
 generate the checked bytecode. The workspace uses Zolana
-[`c32e1ca72`](https://github.com/helius-labs/zolana/commit/c32e1ca72fa38beacdfd250a47abb214b85202a7)
+[`78db640c6`](https://github.com/helius-labs/zolana/commit/78db640c6e0a9cc0a81874146fc850bbe44210d5)
 and Xark
 [`ad7baad`](https://github.com/ananas-block/xark/commit/ad7baad990cb949227ad7d6046e4cfbe3806d357),
 the Xark revision that Zolana revision pins. Cargo pins both to Git
