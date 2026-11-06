@@ -13,16 +13,7 @@ crate-type = ["cdylib", "lib"]
 default = ["insecure-test-setup"]
 insecure-test-setup = []
 bpf-entrypoint = []
-no-entrypoint = []
-cpi = ["no-entrypoint"]
-test-sbf = []
-circuits = [
-    "dep:xark",
-    "dep:spr-keypair",
-    "dep:spr-transaction",
-    "spr-program/client",
-    "spr-program/serde",
-]
+circuits = ["dep:xark", "spr-program/client"]
 r1cs-export = ["circuits", "spr-program/r1cs-export"]
 wasm = ["circuits", "dep:serde", "dep:tsify", "dep:wasm-bindgen", "spr-program/wasm"]
 
@@ -48,8 +39,6 @@ spr-program = { workspace = true, features = ["cpi", "compression", "verifier"] 
 serde = { workspace = true, optional = true }
 tsify = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
-spr-keypair = { workspace = true, optional = true }
-spr-transaction = { workspace = true, optional = true }
 
 [dev-dependencies]
 mollusk-svm = { workspace = true }
@@ -58,8 +47,11 @@ solana-account = { workspace = true }
 solana-instruction = { workspace = true }
 
 [lints.rust.unexpected_cfgs]
-level = "allow"
+level = "warn"
 check-cfg = [
+    'cfg(xark)',
+    'cfg(xark_client)',
     'cfg(target_os, values("solana"))',
-    'cfg(feature, values("frozen-abi", "no-entrypoint"))',
+    # light-program-profiler's `#[profile]` checks this feature.
+    'cfg(feature, values("profile-heap"))',
 ]

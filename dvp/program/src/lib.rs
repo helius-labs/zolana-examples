@@ -51,11 +51,7 @@ pub const DVP_ADDRESS_TREE_ID: u16 = 0;
 pub const ABORT_MODE_CANCEL: u8 = 0;
 pub const ABORT_MODE_REJECT: u8 = 1;
 
-#[cfg(all(
-    feature = "bpf-entrypoint",
-    not(feature = "no-entrypoint"),
-    not(feature = "r1cs-export")
-))]
+#[cfg(all(feature = "bpf-entrypoint", not(feature = "r1cs-export")))]
 mod entrypoint {
     pinocchio::entrypoint!(crate::process_instruction);
 }
