@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use solana_address::Address;
 use solana_signature::Signature;
-use zolana_client::Rpc;
-use zolana_keypair::ShieldedKeypair;
-use zolana_transaction::ShieldedTransaction;
+use spr_client::Rpc;
+use spr_keypair::ShieldedKeypair;
+use spr_transaction::ShieldedTransaction;
 
 use anyhow::Result;
 

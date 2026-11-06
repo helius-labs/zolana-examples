@@ -1,64 +1,63 @@
-use zolana_keypair::ShieldedAddress;
-use zolana_program::{
-    circuit::{poseidon, zero, Assert, CircuitVar},
-    conversion::ProofInput,
-    CircuitError,
+use spr_program::circuit::hash_bytes;
+use spr_program::{
+    input, poseidon, require, require_eq, Asset, CircuitError, ClientInputs, Field, ShieldedAddress,
 };
-use zolana_transaction::Mint;
 
-#[derive(Clone, Debug, ProofInput)]
+#[input]
+#[derive(ClientInputs)]
 pub struct DvpDestination {
     pub address: ShieldedAddress,
-    pub viewing_key_hash: [u8; 32],
+    pub viewing_key_hash: Field,
 }
 
-impl DvpDestinationCircuit {
-    pub fn hash(&self) -> Result<CircuitVar, CircuitError> {
-        poseidon(&[self.address.hash()?, self.viewing_key_hash.clone()])
+impl DvpDestination {
+    pub fn hash(&self) -> Result<Field, CircuitError> {
+        poseidon(&[self.address.owner().hash()?, self.viewing_key_hash])
     }
 }
 
-#[derive(Clone, Debug, ProofInput)]
+#[input]
+#[derive(ClientInputs)]
 pub struct SwapDvpTerms {
-    pub seller_identity: [u8; 32],
-    pub buyer_identity: [u8; 32],
-    pub settlement_authority_identity: [u8; 32],
-    pub creator_identity: [u8; 32],
-    pub delivery_mint: Mint,
-    pub payment_mint: Mint,
+    pub seller_identity: Field,
+    pub buyer_identity: Field,
+    pub settlement_authority_identity: Field,
+    pub creator_identity: Field,
+    pub delivery_mint: Asset,
+    pub payment_mint: Asset,
     pub delivery_amount: u64,
     pub payment_amount: u64,
     pub expiry_timestamp: u64,
     pub has_earliest_settlement: bool,
     pub earliest_settlement_timestamp: u64,
     pub nonce: u64,
-    pub reference_hash: [u8; 32],
+    pub reference_hash: Field,
     pub seller_settlement_destination: DvpDestination,
     pub buyer_settlement_destination: DvpDestination,
     pub seller_refund_destination: DvpDestination,
     pub buyer_refund_destination: DvpDestination,
-    pub blinding: [u8; 32],
+    pub blinding: Field,
 }
 
-impl SwapDvpTermsCircuit {
-    pub fn hash(&self) -> Result<CircuitVar, CircuitError> {
+impl SwapDvpTerms {
+    pub fn hash(&self) -> Result<Field, CircuitError> {
         let parties = poseidon(&[
-            self.seller_identity.clone(),
-            self.buyer_identity.clone(),
-            self.settlement_authority_identity.clone(),
-            self.creator_identity.clone(),
+            self.seller_identity,
+            self.buyer_identity,
+            self.settlement_authority_identity,
+            self.creator_identity,
         ])?;
         let legs = poseidon(&[
-            self.delivery_mint.hash()?,
-            self.payment_mint.hash()?,
-            self.delivery_amount.var(),
-            self.payment_amount.var(),
+            hash_bytes(&self.delivery_mint)?,
+            hash_bytes(&self.payment_mint)?,
+            Field::from(self.delivery_amount),
+            Field::from(self.payment_amount),
         ])?;
         let schedule = poseidon(&[
-            self.expiry_timestamp.var(),
-            self.has_earliest_settlement.var(),
-            self.earliest_settlement_timestamp.var(),
-            self.nonce.var(),
+            Field::from(self.expiry_timestamp),
+            Field::from(self.has_earliest_settlement),
+            Field::from(self.earliest_settlement_timestamp),
+            Field::from(self.nonce),
         ])?;
         let destinations = poseidon(&[
             self.seller_settlement_destination.hash()?,
@@ -71,43 +70,28 @@ impl SwapDvpTermsCircuit {
             legs,
             schedule,
             destinations,
-            self.reference_hash.clone(),
-            self.blinding.clone(),
+            self.reference_hash,
+            self.blinding,
         ])
     }
 
-    pub fn assert_dvp(
-        &self,
-        dvp_id: &CircuitVar,
-        creator: &CircuitVar,
-    ) -> Result<(), CircuitError> {
-        self.expiry_timestamp.var().check_bits(63)?;
-        self.earliest_settlement_timestamp.var().check_bits(63)?;
-        self.earliest_settlement_timestamp.var().assert_equal_if(
-            &zero(),
-            &self.has_earliest_settlement.not(),
-            "an unset earliest settlement timestamp is zero",
-        )?;
-        self.creator_identity
-            .assert_equal(creator, "the creator matches the terms")?;
-        self.hash()?
-            .assert_equal(dvp_id, "the DvP id matches the terms")
+    pub fn assert_dvp(&self, dvp_id: &Field, creator: &Field) -> Result<(), CircuitError> {
+        require(self.expiry_timestamp <= i64::MAX as u64);
+        require(self.earliest_settlement_timestamp <= i64::MAX as u64);
+        require(self.has_earliest_settlement || self.earliest_settlement_timestamp == 0);
+        require_eq(self.creator_identity, *creator);
+        require_eq(self.hash()?, *dvp_id);
+        Ok(())
     }
 
     pub fn assert_valid_trade(&self) -> Result<(), CircuitError> {
-        self.delivery_amount
-            .assert_not_zero("the delivery leg moves value")?;
-        self.payment_amount
-            .assert_not_zero("the payment leg moves value")?;
-        self.delivery_mint.hash()?.assert_not_equal(
-            &self.payment_mint.hash()?,
-            "the trade uses different assets",
-        )?;
-        self.earliest_settlement_timestamp
-            .is_less_or_equal(&self.expiry_timestamp)?
-            .assert_true_if(
-                &self.has_earliest_settlement,
-                "the settlement window is ordered",
-            )
+        require(self.delivery_amount != 0);
+        require(self.payment_amount != 0);
+        require(self.delivery_mint != self.payment_mint);
+        require(
+            !self.has_earliest_settlement
+                || self.earliest_settlement_timestamp <= self.expiry_timestamp,
+        );
+        Ok(())
     }
 }

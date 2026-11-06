@@ -13,7 +13,7 @@ use mollusk_svm::Mollusk;
 use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
-use zolana_interface::{
+use spr_interface::{
     instruction::instruction_data::transact::{
         CircuitId, InputUtxo, OwnerTag, TransactIxData, TransactOutput, TransactProof, TreeContext,
     },
@@ -36,7 +36,7 @@ const SIGNER: Address = Address::new_from_array([25; 32]);
 pub const DVP_ID: [u8; 32] = [1; 32];
 
 pub fn setup_mollusk() -> Mollusk {
-    let (mollusk, _) = zolana_test_utils::mollusk::mollusk_with_program(
+    let (mollusk, _) = spr_test_utils::mollusk::mollusk_with_program(
         SBF_DIR,
         *dvp_program::ID.as_array(),
         "dvp_program",
@@ -69,7 +69,7 @@ fn spp() -> TransactIxData {
     TransactIxData {
         expiry_unix_ts: u64::MAX,
         private_tx_hash: [1; 32],
-        circuit: CircuitId::ConfidentialEddsa(1, 2, N_PUBLIC_SLOTS as u8),
+        circuit: CircuitId::ConfidentialSigner(1, 2, N_PUBLIC_SLOTS as u8),
         tx_viewing_pk: [2; 33],
         salt: [3; 16],
         proof: TransactProof::zeroed(),

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
-import { createZolanaClient } from "@heliuslabs/zolana";
-import { atSlot, LocalKeys, NullifierKeyProofAuthority } from "@heliuslabs/zolana/client";
-import { transactInstruction } from "@heliuslabs/zolana/interface";
+import { createSprClient } from "@heliuslabs/spr";
+import {
+  atSlot,
+  LocalKeys,
+  NullifierKeyProofAuthority,
+  type PaginationToken,
+} from "@heliuslabs/spr/client";
+import { transactInstruction } from "@heliuslabs/spr/interface";
 import {
   bytes32,
   bytes33,
@@ -11,25 +16,21 @@ import {
   ShieldedKeypair,
   SigningKey,
   ViewingKey,
-  P256_PUBLIC_KEY_LENGTH,
-  P256PublicKey,
-} from "@heliuslabs/zolana/keypair";
+  X25519PublicKey,
+} from "@heliuslabs/spr/keypair";
 import {
   AssetRegistry,
   ConfidentialTransfer,
   createExternalData,
-  decodeProgramTransaction,
   SppProofInputs,
   decodeConfidential,
   decodeOutputData,
   decryptToBalances,
-  ProgramOwner,
   ProofInputUtxo,
   SOL_MINT,
   Utxo,
-  toProgramWalletUtxo,
   type IndexedShieldedTransaction,
-} from "@heliuslabs/zolana/transaction";
+} from "@heliuslabs/spr/transaction";
 import {
   address,
   appendTransactionMessageInstructions,
@@ -51,20 +52,26 @@ import {
   dvpId,
   encodeTerms,
   encoder,
+  integer,
   PROGRAM_ID,
+  VIEWING_PUBLIC_KEY_LENGTH,
   type SwapDvp,
 } from "../src/terms.js";
 import { createDvpInstruction, reclaimDvpInstruction } from "../src/instructions.js";
-import { provingKey, initWasm, type WalletUtxo } from "../src/wasm.js";
+import { ProgramProver, wasm, type WalletUtxo } from "../src/wasm.js";
+import {
+  ProgramOwner,
+  decodeProgramTransaction,
+  toProgramWalletUtxo,
+} from "@heliuslabs/spr/program";
 
 async function main(): Promise<void> {
   // 1. Connect the seller, buyer, and settlement authority.
   await initializePoseidon();
-  const wasm = await initWasm();
   const seller = keypair("DVP_SELLER_SEED");
   const buyer = keypair("DVP_BUYER_SEED");
   const settlementAuthority = keypair("DVP_AUTHORITY_SEED");
-  const client = await createZolanaClient({
+  const client = await createSprClient({
     solanaRpcUrl: env("ZOLANA_LOCALNET_URL"),
     indexerUrl: env("ZOLANA_INDEXER_URL"),
     proverUrl: env("ZOLANA_PROVER_URL"),
@@ -115,21 +122,21 @@ async function main(): Promise<void> {
             outputTreeId: client.treeId,
           },
           terms: checkedTerms,
+          dvpAddress: dvpAddress.toBytes(),
         },
         public: {
           creatorIdentity: checkedTerms.creatorIdentity,
-          dvpId: id,
-          dvpOwner: dvpAddress.toBytes(),
+          dvpId: integer(id).toString(),
+          dvpOwner: integer(dvpAddress.ownerHash()).toString(),
         },
       },
       seller.shieldedAddress().toBytes(),
       payer.address,
     );
-    const createKey = provingKey("create_dvp");
-    const createProver = wasm.CreateDvpProver.fromKey(createKey.key, createKey.checksum);
+    const createProver = new ProgramProver("create_dvp");
     let createProof;
     try {
-      createProof = createProver.prove(create.proofInputs);
+      createProof = createProver.prove(create);
       assert.deepEqual(createProof.publicInputs, [create.publicHash]);
     } finally {
       createProver.free();
@@ -234,18 +241,18 @@ async function main(): Promise<void> {
 
     // 6. Select the delivery funds from the seller's private balance.
     const deliveryHistory: IndexedShieldedTransaction[] = [];
-    let deliveryCursor: Uint8Array | undefined;
+    let deliveryCursor: PaginationToken | undefined;
     do {
       const page = await client.getShieldedTransactionsByTags(
         {
           tags: [seller.shieldedAddress().confidentialViewTag(), seller.viewingPublicKey().x()],
           limit: 50,
-          ...(deliveryCursor === undefined ? {} : { cursor: deliveryCursor }),
+          ...(deliveryCursor === undefined ? {} : { paginationToken: deliveryCursor }),
         },
         atSlot(createTx.slot),
       );
-      deliveryHistory.push(...page.transactions);
-      deliveryCursor = page.nextCursor;
+      deliveryHistory.push(...page.data.flatMap((group) => group.events));
+      deliveryCursor = page.paginationToken ?? undefined;
     } while (deliveryCursor !== undefined);
     const deliveryBalances = await decryptToBalances({
       keypair: seller,
@@ -276,6 +283,7 @@ async function main(): Promise<void> {
     const deliveryTx = await sendAndConfirm(
       await transactInstruction({
         payer: seller.toSolanaSigner(),
+        ownerSigners: [seller.toSolanaSigner()],
         inputTree: client.tree,
         outputTree: client.tree,
         data: deliverySpp,
@@ -301,13 +309,13 @@ async function main(): Promise<void> {
     try {
       assert.ok(deliveryTxViewingKey.publicKey().equals(deliveryRecord.txViewingPublicKey));
       const encryptedDeposit = decodeOutputData(deliverySlot.payload).body;
-      const recipientViewingPublicKey = P256PublicKey.fromBytes(
-        bytes33(encryptedDeposit.subarray(0, P256_PUBLIC_KEY_LENGTH)),
+      const recipientViewingPublicKey = X25519PublicKey.fromBytes(
+        bytes33(encryptedDeposit.subarray(0, VIEWING_PUBLIC_KEY_LENGTH)),
       );
       deliveryPlaintext = decodeConfidential(
         deliveryTxViewingKey.decryptSlotEphemeral(
           recipientViewingPublicKey,
-          encryptedDeposit.subarray(P256_PUBLIC_KEY_LENGTH),
+          encryptedDeposit.subarray(VIEWING_PUBLIC_KEY_LENGTH),
           deliveryRecord.salt,
           deliveryIndex,
         ),
@@ -341,22 +349,22 @@ async function main(): Promise<void> {
           deposit: deliveryDeposit,
           paymentLeg: false,
           refundDestination: seller.shieldedAddress().toBytes(),
+          dvpAddress: dvpAddress.toBytes(),
         },
         public: {
           creatorIdentity: checkedTerms.creatorIdentity,
-          dvpId: id,
-          dvpOwner: dvpAddress.toBytes(),
+          dvpId: integer(id).toString(),
+          dvpOwner: integer(dvpAddress.ownerHash()).toString(),
           signerIdentity: checkedTerms.sellerIdentity,
         },
       },
       seller.shieldedAddress().toBytes(),
       payer.address,
     );
-    const reclaimKey = provingKey("reclaim_dvp");
-    const reclaimProver = wasm.ReclaimDvpProver.fromKey(reclaimKey.key, reclaimKey.checksum);
+    const reclaimProver = new ProgramProver("reclaim_dvp");
     let reclaimProof;
     try {
-      reclaimProof = reclaimProver.prove(reclaim.proofInputs);
+      reclaimProof = reclaimProver.prove(reclaim);
       assert.deepEqual(reclaimProof.publicInputs, [reclaim.publicHash]);
     } finally {
       reclaimProver.free();
@@ -364,7 +372,7 @@ async function main(): Promise<void> {
 
     // 10. Encrypt, prove, and submit the refund transaction.
     const reclaimed = await decodeProgramTransaction(reclaim.finalizedTx, assets);
-    const reclaimInputs = reclaimed.toProofInputs(seller);
+    const reclaimInputs = reclaimed.encryptWithKeys(seller);
     const reclaimSpp = await client.proveTransact(reclaimInputs, pdaKeys);
     assert.deepEqual(reclaimSpp.privateTxHash, reclaimed.paddingIndependentPrivateTxHash);
     const reclaimTx = await sendAndConfirm(
@@ -428,7 +436,7 @@ function equal(left: Uint8Array, right: Uint8Array): boolean {
 }
 
 function sendAndConfirmFactory(
-  client: Awaited<ReturnType<typeof createZolanaClient>>,
+  client: Awaited<ReturnType<typeof createSprClient>>,
   payer: ReturnType<ShieldedKeypair["toSolanaSigner"]>,
 ) {
   const send = sendTransactionWithoutConfirmingFactory({ rpc: client.solanaRpc });

@@ -1,12 +1,13 @@
 use solana_address::Address;
 use solana_keypair::Keypair;
 use solana_signature::Signature;
-use zolana_client::{
+use spr_client::{
     rpc::GetShieldedTransactionsByNullifiersResponse, ClientError, Context,
-    GetShieldedTransactionsByTagsResponse, IndexerRpcConfig, MerkleContext, NonInclusionProof, Rpc,
+    GetShieldedTransactionsByTagsResponse, HistoryFilters, IndexerRpcConfig, MerkleContext,
+    NonInclusionProof, PaginationToken, Rpc, TransactionEvents,
 };
-use zolana_keypair::{P256Pubkey, ShieldedKeypair};
-use zolana_transaction::{
+use spr_keypair::{ShieldedKeypair, X25519Pubkey};
+use spr_transaction::{
     instructions::transact::{OutputContext, OutputSlot, SppProofInputs},
     AssetRegistry, Data, Mint, ShieldedTransaction, Utxo, WalletUtxo, SOL_MINT,
 };
@@ -64,7 +65,7 @@ pub(crate) fn sample_terms(parties: &[ShieldedKeypair; 3]) -> SwapDvp {
         seller_refund_destination: seller_address,
         buyer_refund_destination: buyer_address,
         creator: pubkey(seller),
-        blinding: zolana_keypair::random_blinding(),
+        blinding: spr_keypair::random_blinding(),
     }
 }
 
@@ -134,7 +135,7 @@ pub(crate) fn terms_fixture() -> TermsFixture {
         slot: 0,
         tx_signature: Signature::default(),
         event_index: Some(0),
-        tx_viewing_pk: P256Pubkey::from_bytes(spp.tx_viewing_pk).ok(),
+        tx_viewing_pk: X25519Pubkey::from_bytes(spp.tx_viewing_pk).ok(),
         salt: Some(spp.salt),
         output_slots,
         messages: spp.messages,
@@ -174,7 +175,7 @@ pub(crate) fn wallet_utxo(owner: &ShieldedKeypair, mint: Mint, amount: u64) -> W
         owner: owner.signing_pubkey(),
         asset: mint,
         amount,
-        blinding: zolana_keypair::random_blinding(),
+        blinding: spr_keypair::random_blinding(),
         ring_program_id: None,
         data: Data::default(),
     };
@@ -229,7 +230,7 @@ pub(crate) fn shielded_transaction(
         slot: 0,
         tx_signature: Signature::default(),
         event_index: Some(0),
-        tx_viewing_pk: P256Pubkey::from_bytes(external.tx_viewing_pk).ok(),
+        tx_viewing_pk: X25519Pubkey::from_bytes(external.tx_viewing_pk).ok(),
         salt: Some(external.salt),
         output_slots,
         messages: external.messages.clone(),
@@ -252,7 +253,7 @@ pub(crate) fn spendable_amounts(
     mint: &Address,
 ) -> Vec<u64> {
     let mut amounts: Vec<u64> =
-        zolana_transaction::decrypt_spendable(owner, std::slice::from_ref(tx), registry)
+        spr_transaction::decrypt_spendable(owner, std::slice::from_ref(tx), registry)
             .expect("decrypt")
             .balances
             .get_balance(*mint)
@@ -321,10 +322,9 @@ pub(crate) fn deposit_fixture() -> DepositFixture {
 }
 
 /// An in-memory indexer over `txs`. A tag query serves the transactions
-/// with an output or a message so tagged, one per page, so callers follow
-/// the cursor; every page also repeats the previous page's transaction, the
-/// way overlapping pages do. A nullifier query serves the transactions that
-/// spent any of the nullifiers, in one page.
+/// with an output or a message so tagged, grouped by Solana transaction, one
+/// group per page, so callers follow the cursor. A nullifier query serves
+/// the transactions that spent any of the nullifiers, in one page.
 pub(crate) struct FixtureIndexer {
     pub(crate) txs: Vec<ShieldedTransaction>,
 }
@@ -333,8 +333,9 @@ impl Rpc for FixtureIndexer {
     fn get_shielded_transactions_by_tags(
         &self,
         tags: Vec<[u8; 32]>,
-        cursor: Option<Vec<u8>>,
+        cursor: Option<PaginationToken>,
         _limit: Option<u32>,
+        _filters: HistoryFilters,
         _config: Option<IndexerRpcConfig>,
     ) -> Result<GetShieldedTransactionsByTagsResponse, ClientError> {
         let matching: Vec<&ShieldedTransaction> = self
@@ -351,36 +352,30 @@ impl Rpc for FixtureIndexer {
             })
             .collect();
         let page = cursor
-            .as_deref()
-            .and_then(<[u8]>::first)
-            .map_or(0, |&page| usize::from(page));
-        let transactions = matching
-            .get(page.saturating_sub(1)..=page)
-            .unwrap_or_default()
-            .iter()
-            .map(|tx| (*tx).clone())
-            .collect();
-        let next_cursor = u8::try_from(page + 1)
-            .ok()
-            .filter(|&next| usize::from(next) < matching.len())
-            .map(|next| vec![next]);
+            .and_then(|token| usize::try_from(token.slot()).ok())
+            .unwrap_or(0);
+        let groups = group_events(matching);
+        let data = groups.get(page).cloned().into_iter().collect();
+        let next = page + 1;
+        let pagination_token =
+            (next < groups.len()).then(|| PaginationToken::new(next as u64, Signature::default()));
         Ok(GetShieldedTransactionsByTagsResponse {
             context: Context {
                 block_time: 0,
                 slot: 0,
             },
             output_tree_id: Some(FIXTURE_TREE_ID),
-            transactions,
-            next_cursor,
-            scanned_through: None,
+            data,
+            pagination_token,
         })
     }
 
     fn get_shielded_transactions_by_nullifiers(
         &self,
         nullifiers: Vec<[u8; 32]>,
-        _cursor: Option<Vec<u8>>,
+        _cursor: Option<PaginationToken>,
         _limit: Option<u32>,
+        _filters: HistoryFilters,
         _config: Option<IndexerRpcConfig>,
     ) -> Result<GetShieldedTransactionsByNullifiersResponse, ClientError> {
         Ok(GetShieldedTransactionsByNullifiersResponse {
@@ -389,14 +384,32 @@ impl Rpc for FixtureIndexer {
                 slot: 0,
             },
             output_tree_id: Some(FIXTURE_TREE_ID),
-            transactions: self
-                .txs
-                .iter()
-                .filter(|tx| tx.nullifiers.iter().any(|n| nullifiers.contains(n)))
-                .cloned()
-                .collect(),
-            next_cursor: None,
-            scanned_through: None,
+            data: group_events(
+                self.txs
+                    .iter()
+                    .filter(|tx| tx.nullifiers.iter().any(|n| nullifiers.contains(n)))
+                    .collect(),
+            ),
+            pagination_token: None,
         })
     }
+}
+
+/// Groups consecutive events of one Solana transaction, the way the indexer
+/// serves them.
+fn group_events(
+    txs: Vec<&ShieldedTransaction>,
+) -> Vec<TransactionEvents<ShieldedTransaction, Signature>> {
+    let mut groups: Vec<TransactionEvents<ShieldedTransaction, Signature>> = Vec::new();
+    for tx in txs {
+        match groups.last_mut() {
+            Some(group) if group.signature == tx.tx_signature => group.events.push(tx.clone()),
+            _ => groups.push(TransactionEvents {
+                slot: tx.slot,
+                signature: tx.tx_signature,
+                events: vec![tx.clone()],
+            }),
+        }
+    }
+    groups
 }

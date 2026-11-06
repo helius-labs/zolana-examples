@@ -1,7 +1,6 @@
 use crate::shared::*;
-use dvp_program::{circuits::CreateDvp, verifier::create_dvp::VERIFYINGKEY};
+use dvp_program::verifier::create_dvp::VERIFYINGKEY;
 use dvp_sdk::{instructions::create_dvp::CreateDvpDerivation, proof::CircuitId};
-use zolana_program::ZkProgram;
 
 const CIRCUIT: CircuitId = CircuitId::CreateDvp;
 
@@ -71,10 +70,10 @@ fn create_rejects_invalid_trade_terms() {
 fn create_rejects_wrong_commitments_and_seed() {
     // 1. Tamper one constraint at a time.
     let mutations: [fn(&mut CreateDvp); 6] = [
-        |inputs| inputs.public.creator_identity = fe(99),
-        |inputs| inputs.public.dvp_id = fe(99),
-        |inputs| inputs.private.tx_context.blinding_seed = fe(99),
-        |inputs| inputs.private.terms.blinding = fe(99),
+        |inputs| inputs.public.creator_identity = field(99),
+        |inputs| inputs.public.dvp_id = field(99),
+        |inputs| inputs.private.tx_context.blinding_seed = field(99),
+        |inputs| inputs.private.terms.blinding = field(99),
         |inputs| inputs.private.terms.earliest_settlement_timestamp = u64::MAX,
         |inputs| {
             inputs.private.terms.has_earliest_settlement = false;
@@ -92,8 +91,21 @@ fn create_rejects_wrong_commitments_and_seed() {
 fn create_rejects_non_pda_address_owners() {
     // 1. Replace the program owner with an ordinary private wallet.
     let mut inputs = create_inputs(&sample_terms());
-    inputs.public.dvp_owner = destination(91);
+    inputs.private.dvp_address = inputs.address(destination(91));
+    inputs.public.dvp_owner = owner_hash(&destination(91));
     // 2. Check the address reservation rejects it.
+    assert_invalid(CIRCUIT, &inputs);
+}
+
+#[test]
+fn create_rejects_a_dvp_address_outside_the_public_owner() {
+    // 1. Supply another PDA's address under the original public owner hash.
+    let mut inputs = create_inputs(&sample_terms());
+    let other = spr_program::ProgramOwner::new(solana_address::Address::new_from_array([9; 32]))
+        .address(destination(91).viewing_pubkey)
+        .unwrap();
+    inputs.private.dvp_address = inputs.address(other);
+    // 2. Check the private address must match the owner the program binds.
     assert_invalid(CIRCUIT, &inputs);
 }
 
@@ -105,11 +117,11 @@ fn create_proof_rejects_changed_state_owner_tree_data_and_blinding() {
     let finalized = inputs
         .create_finalized_transaction(&destination(91), terms.creator)
         .unwrap();
-    let proof = dvp_sdk::proof::prove(CIRCUIT, &inputs).unwrap();
+    let proof = dvp_sdk::proof::prove(CIRCUIT, &inputs.proof_inputs()).unwrap();
     let public = dvp_program::verifier::create_dvp::PublicInputs {
-        creator_identity: inputs.public.creator_identity,
-        dvp_id: inputs.public.dvp_id,
-        dvp_owner: inputs.public.dvp_owner.owner_hash().unwrap(),
+        creator_identity: field_bytes(inputs.public.creator_identity),
+        dvp_id: field_bytes(inputs.public.dvp_id),
+        dvp_owner: field_bytes(inputs.public.dvp_owner),
     };
     let address = finalized.first_nullifier().unwrap();
     // 2. Recompute the SPP commitment after changing each state field.
@@ -123,7 +135,7 @@ fn create_proof_rejects_changed_state_owner_tree_data_and_blinding() {
             3 => output.blinding = fe(99),
             _ => unreachable!(),
         }
-        let private_hash = zolana_program::PrivateTxHash {
+        let private_hash = spr_program::PrivateTxHash {
             input_hashes: &[[0; 32]],
             output_hashes: &[output.hash(tree).unwrap(), [0; 32]],
             address_nullifiers: Some(&[address]),
@@ -131,17 +143,35 @@ fn create_proof_rejects_changed_state_owner_tree_data_and_blinding() {
         }
         .hash()
         .unwrap();
-        assert!(dvp_program::verifier::create_dvp::verify(&proof, &public, &private_hash).is_err());
+        assert!(verify(&proof, &public, &private_hash).is_err());
     }
     // 3. Check a different public owner cannot use the proof.
     let wrong_owner = dvp_program::verifier::create_dvp::PublicInputs {
         dvp_owner: destination(91).owner_hash().unwrap(),
         ..public
     };
-    assert!(dvp_program::verifier::create_dvp::verify(
+    assert!(verify(
         &proof,
         &wrong_owner,
         &finalized.padding_independent_private_tx_hash().unwrap()
     )
     .is_err());
+}
+
+fn verify(
+    proof: &spr_program::CompressedProof,
+    public: &dvp_program::verifier::create_dvp::PublicInputs,
+    private_tx_hash: &[u8; 32],
+) -> Result<(), spr_program::verifier::VerifyError> {
+    dvp_program::verifier::create_dvp::Verifier {
+        proof,
+        public_inputs: dvp_program::verifier::create_dvp::PublicInputs {
+            creator_identity: public.creator_identity,
+            dvp_id: public.dvp_id,
+            dvp_owner: public.dvp_owner,
+        },
+        private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
 }

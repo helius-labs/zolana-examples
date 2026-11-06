@@ -1,17 +1,28 @@
 use anyhow::{ensure, Result};
-use zolana_client::ZolanaIndexer;
-use zolana_interface::instruction::instruction_data::transact::TransactIxData;
-use zolana_program::ProgramOwner;
-use zolana_transaction::instructions::transact::SppProofInputs;
+use spr_client::SprIndexer;
+use spr_interface::instruction::instruction_data::transact::TransactIxData;
+use spr_program::{Field, ProgramOwner};
+use spr_transaction::instructions::transact::SppProofInputs;
+
+use spr_hasher::primitives::solana_owner_identity;
 
 use crate::err;
+
+pub(crate) fn field(bytes: [u8; 32]) -> Result<Field> {
+    spr_program::from_bytes(&bytes).map_err(err)
+}
+
+/// A Solana address's owner identity, as a proof input.
+pub(crate) fn identity(address: &solana_address::Address) -> Result<Field> {
+    field(solana_owner_identity(address.as_array()).map_err(err)?)
+}
 
 /// Proves a transaction whose real inputs are all owned by the DvP PDA under
 /// the zero nullifier secret (padding inputs carry their own) through
 /// `indexer`, which serves their Merkle proofs, and checks that the SPP
 /// proof covers `private_tx_hash`, the transaction the DvP proof covers.
 pub(crate) fn prove_pda_transact(
-    indexer: &ZolanaIndexer,
+    indexer: &SprIndexer,
     spp_proof_inputs: SppProofInputs,
     private_tx_hash: &[u8; 32],
 ) -> Result<TransactIxData> {

@@ -4,24 +4,22 @@ import {
   bytes32,
   bytes33,
   initializePoseidon,
-  P256PublicKey,
-  P256_PUBLIC_KEY_LENGTH,
+  X25519PublicKey,
   ShieldedKeypair,
   SigningKey,
-} from "@heliuslabs/zolana/keypair";
+} from "@heliuslabs/spr/keypair";
 import {
   AssetRegistry,
   ConfidentialTransfer,
   decodeConfidential,
   decodeOutputData,
-  ProgramOwner,
   ProofInputUtxo,
   SOL_MINT,
   Utxo,
-  toProgramWalletUtxo,
-} from "@heliuslabs/zolana/transaction";
-import { getTreeAddress } from "@heliuslabs/zolana/addresses";
-import { PROGRAM_ID } from "../src/terms.js";
+} from "@heliuslabs/spr/transaction";
+import { getTreeAddress } from "@heliuslabs/spr/addresses";
+import { PROGRAM_ID, VIEWING_PUBLIC_KEY_LENGTH } from "../src/terms.js";
+import { ProgramOwner, toProgramWalletUtxo } from "@heliuslabs/spr/program";
 
 test("the seller recovers its deposit using its transaction viewing key", async () => {
   // 1. Create the seller, settlement authority, and DvP owner.
@@ -64,13 +62,13 @@ test("the seller recovers its deposit using its transaction viewing key", async 
     try {
       assert.ok(senderTxKey.publicKey().equals(inputs.externalData.txViewingPublicKey));
       const encrypted = decodeOutputData(published.data).body;
-      const recipientKey = P256PublicKey.fromBytes(
-        bytes33(encrypted.subarray(0, P256_PUBLIC_KEY_LENGTH)),
+      const recipientKey = X25519PublicKey.fromBytes(
+        bytes33(encrypted.subarray(0, VIEWING_PUBLIC_KEY_LENGTH)),
       );
       const plaintext = decodeConfidential(
         senderTxKey.decryptSlotEphemeral(
           recipientKey,
-          encrypted.subarray(P256_PUBLIC_KEY_LENGTH),
+          encrypted.subarray(VIEWING_PUBLIC_KEY_LENGTH),
           inputs.externalData.salt,
           outputIndex,
         ),
