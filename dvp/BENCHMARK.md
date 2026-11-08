@@ -1,6 +1,6 @@
 # Private DvP -- CU Benchmark
 
-1. Measure the five DvP instructions under Mollusk using the shielded-pool program built from Zolana 78db640c6 and the Xark-backed SDK. Each DvP handler verifies its generated program proof and invokes SPP directly. Cancellation and rejection share process_abort_dvp.
+1. Measure the five DvP instructions under Mollusk using the shielded-pool program built from Zolana af9d32923 and the Xark-backed SDK. Each DvP handler verifies its generated program proof and invokes SPP directly. Cancellation and rejection share process_abort_dvp.
 
 2. Record SPP and program proving times, consumed compute units, and serialized v1 transaction sizes. Create/reclaim use 1x2 with compact output padding; settle uses 3x4; cancel/reject use 3x2 with real optional deposits before random input padding.
 
@@ -26,13 +26,13 @@ Regenerate with `cargo test --release --locked -p dvp-test --test bench_cu -- --
 
 | Function                 |   Total CU |     Net CU |
 | ------------------------ | ---------- | ---------- |
-| `process_abort_dvp`      |    257,426 |    257,426 |
-| `process_cancel_dvp_ix`  |    257,455 |         29 |
+| `process_abort_dvp`      |    254,109 |    254,109 |
+| `process_cancel_dvp_ix`  |    254,138 |         29 |
 
 **Proving Time**
 | SPP proof | DvP circuit proof | Total   |
 | --------- | ----------------- | ------- |
-|    150 ms |           1650 ms | 1801 ms |
+|    146 ms |           1592 ms | 1739 ms |
 
 **Transaction Size**
 | Instruction Data | Accounts | v1 Tx      |
@@ -43,21 +43,21 @@ Regenerate with `cargo test --release --locked -p dvp-test --test bench_cu -- --
 
 | Circuit     | Constraints | Proving key | Verifying key | Proof time |
 | ----------- | ----------- | ----------- | ------------- | ---------- |
-|  create_dvp |       13645 |     2.70 MB |         296 B |    1143 ms |
-| reclaim_dvp |       14676 |     2.86 MB |         296 B |    1177 ms |
-|  settle_dvp |       23209 |     4.70 MB |         296 B |    1921 ms |
-|   abort_dvp |       19522 |     4.14 MB |         296 B |    1650 ms |
+|  create_dvp |       13515 |     2.68 MB |         296 B |    1093 ms |
+| reclaim_dvp |       14546 |     2.84 MB |         296 B |    1150 ms |
+|  settle_dvp |       23004 |     4.67 MB |         296 B |    1893 ms |
+|   abort_dvp |       19392 |     4.12 MB |         296 B |    1592 ms |
 
 ## 3. Create Dvp
 
 | Function                 |   Total CU |     Net CU |
 | ------------------------ | ---------- | ---------- |
-| `process_create_dvp_ix`  |    244,846 |    244,846 |
+| `process_create_dvp_ix`  |    244,075 |    244,075 |
 
 **Proving Time**
 | SPP proof | DvP circuit proof | Total   |
 | --------- | ----------------- | ------- |
-|     58 ms |           1143 ms | 1201 ms |
+|     58 ms |           1093 ms | 1152 ms |
 
 **Transaction Size**
 | Instruction Data | Accounts | v1 Tx      |
@@ -68,12 +68,12 @@ Regenerate with `cargo test --release --locked -p dvp-test --test bench_cu -- --
 
 | Function                 |   Total CU |     Net CU |
 | ------------------------ | ---------- | ---------- |
-| `process_reclaim_dvp_ix` |    245,557 |    245,557 |
+| `process_reclaim_dvp_ix` |    248,927 |    248,927 |
 
 **Proving Time**
 | SPP proof | DvP circuit proof | Total   |
 | --------- | ----------------- | ------- |
-|     58 ms |           1177 ms | 1235 ms |
+|     60 ms |           1150 ms | 1210 ms |
 
 **Transaction Size**
 | Instruction Data | Accounts | v1 Tx      |
@@ -84,13 +84,13 @@ Regenerate with `cargo test --release --locked -p dvp-test --test bench_cu -- --
 
 | Function                 |   Total CU |     Net CU |
 | ------------------------ | ---------- | ---------- |
-| `process_abort_dvp`      |    255,735 |    255,735 |
-| `process_reject_dvp_ix`  |    255,764 |         29 |
+| `process_abort_dvp`      |    252,735 |    252,735 |
+| `process_reject_dvp_ix`  |    252,764 |         29 |
 
 **Proving Time**
 | SPP proof | DvP circuit proof | Total   |
 | --------- | ----------------- | ------- |
-|    145 ms |           1625 ms | 1770 ms |
+|    143 ms |           1566 ms | 1709 ms |
 
 **Transaction Size**
 | Instruction Data | Accounts | v1 Tx      |
@@ -101,12 +101,12 @@ Regenerate with `cargo test --release --locked -p dvp-test --test bench_cu -- --
 
 | Function                 |   Total CU |     Net CU |
 | ------------------------ | ---------- | ---------- |
-| `process_settle_dvp_ix`  |    257,095 |    257,095 |
+| `process_settle_dvp_ix`  |    257,093 |    257,093 |
 
 **Proving Time**
 | SPP proof | DvP circuit proof | Total   |
 | --------- | ----------------- | ------- |
-|    165 ms |           1921 ms | 2087 ms |
+|    151 ms |           1893 ms | 2044 ms |
 
 **Transaction Size**
 | Instruction Data | Accounts | v1 Tx      |

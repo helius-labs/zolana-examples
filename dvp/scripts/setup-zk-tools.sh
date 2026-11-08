@@ -3,8 +3,8 @@
 set -euo pipefail
 
 dvp=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-zolana_revision=78db640c6e0a9cc0a81874146fc850bbe44210d5
-xark_revision=ad7baad990cb949227ad7d6046e4cfbe3806d357
+zolana_revision=af9d32923c047e17c7a5b2985c92492ae18bfa2e
+xark_revision=aec8530d4526a082daed68ca2dd9c21d47a86f26
 
 checkout() {
     local repository=$1 revision=$2 directory=$3
