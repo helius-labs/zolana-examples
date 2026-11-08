@@ -1695,6 +1695,7 @@ dependencies = [
  "spr-interface",
  "spr-keypair",
  "spr-merkle-tree",
+ "spr-program",
  "spr-program-test",
  "spr-test-utils",
  "spr-transaction",
