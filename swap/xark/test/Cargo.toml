@@ -1,0 +1,45 @@
+[package]
+name = "swap-test"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+autotests = false
+
+[dependencies]
+anyhow = { workspace = true }
+swap-program = { path = "../program", features = ["circuits"] }
+swap-sdk = { path = "../sdk" }
+solana-address = { workspace = true }
+solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-signature = { workspace = true }
+solana-signer = { workspace = true }
+spr-client = { workspace = true, features = ["reqwest", "solana-rpc"] }
+spr-interface = { workspace = true }
+spr-keypair = { workspace = true }
+spr-program-test = { workspace = true, features = ["localnet"] }
+spr-test-utils = { workspace = true }
+spr-transaction = { workspace = true }
+spr-user-registry-interface = { workspace = true, features = ["solana"] }
+
+[dev-dependencies]
+num-bigint = { workspace = true }
+spr-hasher = { workspace = true }
+spr-merkle-tree = { workspace = true }
+spr-tree = { workspace = true }
+mollusk-svm = { workspace = true }
+light-program-profiler = { workspace = true, features = ["mollusk"] }
+solana-account = { workspace = true }
+
+[[test]]
+name = "bench_cu"
+path = "tests/bench_cu.rs"
+
+[[test]]
+name = "swap"
+path = "tests/swap.rs"
+
+[[test]]
+name = "cancel"
+path = "tests/cancel.rs"

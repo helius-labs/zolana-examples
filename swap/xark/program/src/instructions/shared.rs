@@ -1,0 +1,56 @@
+use light_program_profiler::profile;
+use pinocchio::{
+    cpi::{Seed, Signer},
+    error::ProgramError,
+    AccountView, Address, ProgramResult,
+};
+use spr_program::cpi::{SppTransactAccounts, TransactAccountsError};
+
+use crate::error::SwapError;
+
+#[inline(always)]
+pub fn check_within_window(now: i64, expiry_unix_ts: u64) -> ProgramResult {
+    if now >= 0 && (now as u64) <= expiry_unix_ts {
+        Ok(())
+    } else {
+        Err(SwapError::Expired.into())
+    }
+}
+
+#[inline(always)]
+pub fn check_after_window(now: i64, expiry_unix_ts: u64) -> ProgramResult {
+    if now >= 0 && (now as u64) > expiry_unix_ts {
+        Ok(())
+    } else {
+        Err(SwapError::NotYetExpired.into())
+    }
+}
+
+/// Invokes SPP `transact` with `spp_accounts`, signed by the order-authority
+/// PDA, which must be among them.
+#[inline(never)]
+#[profile]
+pub fn cpi_spp_transact_signed(
+    spp_accounts: &[AccountView],
+    transact_bytes: &[u8],
+) -> ProgramResult {
+    let (order_authority, bump) =
+        Address::find_program_address(&[crate::ORDER_AUTHORITY_PDA_SEED], &crate::ID);
+    let signer_pdas = [&order_authority];
+    let spp =
+        SppTransactAccounts::new(spp_accounts, &signer_pdas).map_err(transact_accounts_error)?;
+    let bump = [bump];
+    let seeds = [
+        Seed::from(crate::ORDER_AUTHORITY_PDA_SEED),
+        Seed::from(&bump),
+    ];
+    spp.invoke::<16>(transact_bytes, &[Signer::from(&seeds)])
+}
+
+fn transact_accounts_error(error: TransactAccountsError) -> ProgramError {
+    match error {
+        TransactAccountsError::InvalidSppProgram => SwapError::InvalidShieldedPoolProgram.into(),
+        TransactAccountsError::MissingPdaSigner { .. } => SwapError::MissingOrderAuthority.into(),
+        TransactAccountsError::NotEnoughAccounts => ProgramError::NotEnoughAccountKeys,
+    }
+}

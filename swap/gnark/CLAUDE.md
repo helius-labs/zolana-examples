@@ -16,8 +16,8 @@ instructions, and circuits.
   for the prover, circuit constants, and the key-generation binary. Takes
   prepared proof inputs and proves; hashing and domain logic belong in the sdk.
 - `sdk`: client library. State definitions, instruction data builders, proof
-  input builders, utxo data definitions and hashing, discovery, encryption
-  codecs, and the prover client. Owns all transformation between domain types
+  input builders, utxo data definitions and hashing, discovery, and the
+  prover client. Owns all transformation between domain types
   and proof inputs. Per-circuit prove/verify tests live here.
 - `test`: localnet end-to-end tests and CU benchmarks.
 

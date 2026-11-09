@@ -1,0 +1,40 @@
+[package]
+name = "timelock-escrow-test"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+autotests = false
+
+[dependencies]
+anyhow = { workspace = true }
+timelock-escrow-program = { path = "../program", features = ["circuits"] }
+solana-signature = { workspace = true }
+
+[dev-dependencies]
+timelock-escrow-sdk = { path = "../sdk" }
+light-program-profiler = { workspace = true, features = ["mollusk"] }
+mollusk-svm = { workspace = true }
+num-bigint = { workspace = true }
+solana-account = { workspace = true }
+solana-address = { workspace = true }
+solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
+solana-signer = { workspace = true }
+spr-client = { workspace = true, features = ["reqwest", "solana-rpc"] }
+spr-hasher = { workspace = true }
+spr-interface = { workspace = true }
+spr-keypair = { workspace = true }
+spr-merkle-tree = { workspace = true }
+spr-program = { workspace = true }
+spr-program-test = { workspace = true, features = ["localnet"] }
+spr-test-utils = { workspace = true }
+spr-transaction = { workspace = true }
+spr-tree = { workspace = true }
+
+[[test]]
+name = "escrow"
+path = "tests/escrow.rs"
+
+[[test]]
+name = "bench_cu"
+path = "tests/bench_cu.rs"

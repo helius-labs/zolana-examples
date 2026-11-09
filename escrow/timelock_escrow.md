@@ -221,21 +221,24 @@ struct WithdrawIxData {
 The timelock escrow program runs two circuits, each with its own verifying key, distinct from the
 SPP value proof inside `transact`. Each circuit takes the SPP transaction's UTXO hash preimages as
 private inputs (the escrow UTXO input or output, the change/source output), enforces the escrow
-rules below, and commits the transaction via `private_tx_hash`: `escrow` exposes it as the public
-input itself, `withdraw` hashes it with its public values into a single public input. SPP proves
+rules below, and commits the transaction via `private_tx_hash`: each proof has a single public
+input, which commits `private_tx_hash` for `escrow` and `private_tx_hash` with its public values
+for `withdraw`; how that input is encoded is up to the implementation. SPP proves
 the UTXOs are in the tree and conserves value; the escrow circuits rely on that rather than proving
 membership themselves. Both circuits use standard Groth16 without lookup commitments. Concrete shape
 parameters (input/output slot counts) are fixed once and benchmarked, and must match the SPP
-`transact` shapes the instructions use. The circuits are small and proven in-process through a
-gnark→Rust FFI binding; the SPP transfer proof still comes from the existing SPP prover.
+`transact` shapes the instructions use. The circuits are small and proven in-process by the
+client (each implementation's README says how); the SPP transfer proof still comes from the
+existing SPP prover.
 
 ### Escrow circuit
 
 Proves the escrow UTXO output commits the escrow terms. Matches the 1-in/2-out transact (source
-UTXO in; change + escrow UTXO out), padded to the SPP `(2, 2)` proving shape.
+UTXO in; change + escrow UTXO out), padded to an SPP proving shape that fits it (each
+implementation's `BENCHMARK.md` names the shape).
 
-- **Public inputs:** `private_tx_hash` only; the program feeds it to the verifier straight from
-  `TransactIxData`.
+- **Public inputs:** `private_tx_hash` only, with no other public value; the program feeds it to
+  the verifier straight from `TransactIxData`.
 - **Private inputs:** the escrow terms (`owner_hash`, `unlock`) and the escrow UTXO and change
   output UTXO hash preimages. The circuit does not constrain the escrow UTXO owner value (SPP
   enforces it is the escrow-authority PDA at spend time).
@@ -244,8 +247,8 @@ UTXO in; change + escrow UTXO out), padded to the SPP `(2, 2)` proving shape.
     covers `[source_input, 0]`, the output hash chain covers `[change, escrow_utxo]`, and the
     address hash chain is the zero chain, each folding only its nonzero entries (see
     [private_tx_hash](../../docs/spec.md#spp-proof---solana-privacy-zk-proof)).
-    The source input hash is supplied directly, not recomputed by the circuit; the change slot
-    contributes nothing when the change amount is 0.
+    The circuit does not constrain the source input's owner (SPP authorizes that spend). A
+    zero-amount change output is still a real UTXO whose hash enters the output chain.
   - The escrow UTXO output committed in `private_tx_hash` has `data_hash = Poseidon(escrow terms)`,
     `ring_program_id = 0` and `ring_data_hash = 0` (the [default, non-ring](../../docs/spec.md#default-ring)
     UTXO variant), and a nonzero amount, so the public SPP escrow UTXO output commits the terms.
@@ -259,8 +262,9 @@ transact (escrow UTXO in; source-to-owner out), proved at the SPP `(1, 2)` shape
 padding second output that the private transaction hash does not see. The program enforces `now > unlock` against the
 Clock; the circuit only reveals `unlock` and checks it equals the committed term.
 
-- **Public inputs:** `Poseidon(private_tx_hash, unlock, owner_pk_field)`, where `owner_pk_field` is
-  `hash_bytes` of the creator signer's pubkey, fed by the program.
+- **Public inputs:** one Poseidon hash of `private_tx_hash`, `unlock` and `owner_pk_field` (the
+  input order is up to the implementation), where `owner_pk_field` is `hash_bytes` of the creator
+  signer's pubkey, fed by the program.
 - **Private inputs:** the escrow UTXO hash preimage (incl. `utxo_data` = escrow terms, `amount`,
   `escrow_utxo_blinding`), the `source_output` hash preimage, and the creator's `(owner_pk_field,
   nullifier_pk)`, the preimage of the committed `owner_hash`. The escrow UTXO owner is the

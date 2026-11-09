@@ -331,8 +331,10 @@ their public values into a single public input. SPP proves
 the UTXOs are in the tree and conserves value; the swap circuits rely on that rather than proving
 membership themselves. All three are standard Groth16. Concrete shape parameters (input/output slot counts) are fixed once and
 benchmarked, and must match the SPP `transact` shapes the instructions use. The circuits are small
-and proven in-process through a gnark→Rust FFI binding; the SPP transfer proof
-still comes from the existing SPP prover.
+and proven in-process, through a gnark→Rust FFI binding or through Xark; the SPP transfer proof
+still comes from the existing SPP prover. The public-input hashes below are the gnark
+implementation's; the Xark implementation folds the same values as
+`Poseidon(values..., private_tx_hash)` (see the [README](README.md#implementations)).
 
 ### Make circuit
 

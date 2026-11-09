@@ -7,3 +7,5 @@ rust-client/BUGS.md
 rust-client/test-ledger/
 rust-client/.surfpool/
 build/
+escrow/gnark/Cargo.lock
+swap/gnark/*/Cargo.lock
