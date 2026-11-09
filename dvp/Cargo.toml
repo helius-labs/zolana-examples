@@ -8,19 +8,19 @@ edition = "2021"
 
 # SDK and prover sources use pinned Git revisions.
 [workspace.dependencies]
-xark = { git = "https://github.com/ananas-block/xark", rev = "aec8530d4526a082daed68ca2dd9c21d47a86f26" }
-xark-groth16 = { git = "https://github.com/ananas-block/xark", rev = "aec8530d4526a082daed68ca2dd9c21d47a86f26" }
-spr-account-checks = { git = "https://github.com/helius-labs/zolana", rev = "af9d32923c047e17c7a5b2985c92492ae18bfa2e", default-features = false }
-spr-client = { git = "https://github.com/helius-labs/zolana", rev = "af9d32923c047e17c7a5b2985c92492ae18bfa2e" }
-spr-hasher = { git = "https://github.com/helius-labs/zolana", rev = "af9d32923c047e17c7a5b2985c92492ae18bfa2e", default-features = false }
-spr-interface = { git = "https://github.com/helius-labs/zolana", rev = "af9d32923c047e17c7a5b2985c92492ae18bfa2e" }
-spr-keypair = { git = "https://github.com/helius-labs/zolana", rev = "af9d32923c047e17c7a5b2985c92492ae18bfa2e" }
-spr-merkle-tree = { git = "https://github.com/helius-labs/zolana", rev = "af9d32923c047e17c7a5b2985c92492ae18bfa2e" }
-spr-program = { git = "https://github.com/helius-labs/zolana", rev = "af9d32923c047e17c7a5b2985c92492ae18bfa2e" }
-spr-program-test = { git = "https://github.com/helius-labs/zolana", rev = "af9d32923c047e17c7a5b2985c92492ae18bfa2e" }
-spr-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "af9d32923c047e17c7a5b2985c92492ae18bfa2e" }
-spr-transaction = { git = "https://github.com/helius-labs/zolana", rev = "af9d32923c047e17c7a5b2985c92492ae18bfa2e" }
-spr-tree = { git = "https://github.com/helius-labs/zolana", rev = "af9d32923c047e17c7a5b2985c92492ae18bfa2e" }
+xark = { git = "https://github.com/ananas-block/xark", rev = "cccbf88c527259620c441c1118014c749ecd582b" }
+xark-groth16 = { git = "https://github.com/ananas-block/xark", rev = "cccbf88c527259620c441c1118014c749ecd582b" }
+spr-account-checks = { git = "https://github.com/helius-labs/zolana", rev = "28d0fc23cea695aa6b676d3718ea056fe8f3b971", default-features = false }
+spr-client = { git = "https://github.com/helius-labs/zolana", rev = "28d0fc23cea695aa6b676d3718ea056fe8f3b971" }
+spr-hasher = { git = "https://github.com/helius-labs/zolana", rev = "28d0fc23cea695aa6b676d3718ea056fe8f3b971", default-features = false }
+spr-interface = { git = "https://github.com/helius-labs/zolana", rev = "28d0fc23cea695aa6b676d3718ea056fe8f3b971" }
+spr-keypair = { git = "https://github.com/helius-labs/zolana", rev = "28d0fc23cea695aa6b676d3718ea056fe8f3b971" }
+spr-merkle-tree = { git = "https://github.com/helius-labs/zolana", rev = "28d0fc23cea695aa6b676d3718ea056fe8f3b971" }
+spr-program = { git = "https://github.com/helius-labs/zolana", rev = "28d0fc23cea695aa6b676d3718ea056fe8f3b971" }
+spr-program-test = { git = "https://github.com/helius-labs/zolana", rev = "28d0fc23cea695aa6b676d3718ea056fe8f3b971" }
+spr-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "28d0fc23cea695aa6b676d3718ea056fe8f3b971" }
+spr-transaction = { git = "https://github.com/helius-labs/zolana", rev = "28d0fc23cea695aa6b676d3718ea056fe8f3b971" }
+spr-tree = { git = "https://github.com/helius-labs/zolana", rev = "28d0fc23cea695aa6b676d3718ea056fe8f3b971" }
 
 groth16-solana = { version = "0.3.1", features = ["bsb22"] }
 light-program-profiler = { git = "https://github.com/Lightprotocol/light-program-profiler", rev = "db49f3c801996a80e1cb7e4e92b13a694e962b65" }

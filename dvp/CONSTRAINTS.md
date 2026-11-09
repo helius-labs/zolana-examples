@@ -1,6 +1,6 @@
 # DvP constraint profile
 
-Profiled with Xark `aec8530`, Zolana `af9d32923`, and the circuits in this
+Profiled with Xark `cccbf88`, Zolana `28d0fc23c`, and the circuits in this
 commit. All four profiled bytecode files match the checked circuit artifacts.
 
 `xark profile` reports compiler R1CS rows. The proof benchmark counts the row
