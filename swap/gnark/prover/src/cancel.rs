@@ -57,7 +57,7 @@ mod tests {
     use spr_gnark_ffi_prover::utxo_proof_input_keys;
 
     use super::*;
-    use crate::{order_terms::expected_order_terms_witness_keys, TAKE_MODE_DERIVED};
+    use crate::order_terms::expected_order_terms_witness_keys;
 
     fn sample() -> CancelProofInputs {
         CancelProofInputs {
@@ -70,7 +70,6 @@ mod tests {
                 maker_viewing_pk: [5; 33],
                 expiry: 9,
                 taker_pk_fe: [6; 32],
-                take_mode: TAKE_MODE_DERIVED,
             },
             maker_owner_pk_field: [7; 32],
             maker_nullifier_pk: [8; 32],

@@ -22,7 +22,7 @@ use spr_client::{
 };
 use spr_hasher::Poseidon;
 use spr_interface::{
-    instruction::instruction_data::transact::{OwnerTag, TransactIxData, TransactOutput},
+    instruction::instruction_data::transact::TransactIxData,
     state::{
         default_tree_fees, discriminator::TREE_ACCOUNT_DISCRIMINATOR, nullifier_tree_params,
         tree_account_size, STATE_HEIGHT,
@@ -42,16 +42,14 @@ use swap_sdk::{
         cancel::{Cancel, CancelProofInputParams},
         make::{Make, MakeProofInputParams, OrderMarker, SppTxHashes},
         take::{take_blinding_seed, Take, TakeProofInputParams},
-        take_verifiable_encryption::{
-            TakeVerifiableEncryption, TakeVerifiableEncryptionProofInputParams,
-        },
     },
     prover::SwapProverClient,
     shared::input_sum,
     state::{OrderTerms, OrderUtxo},
 };
 
-const PROFILING_SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../../target/swap-bench");
+const PROFILING_SBF_DIR: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../../../target/swap-bench");
 const OUTPUT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../BENCHMARK.md");
 fn to_mollusk_pubkey(key: &Pubkey) -> Pubkey {
     Pubkey::new_from_array(key.to_bytes())
@@ -313,7 +311,7 @@ fn bench_cu_swap() {
     let mut bench = CuBenchmark::new(ReadmeConfig {
         title: "Confidential Swap -- CU Benchmark".into(),
         description:
-            "Compute unit profiling for the confidential swap make/take/take_verifiable_encryption/cancel \
+            "Compute unit profiling for the confidential swap make/take/cancel \
              instructions, replayed under mollusk. The shielded-pool tree account is built directly (the \
              program's `create_tree` init plus the input utxo hashes appended), and each \
              instruction hashes its public input, verifies its own Groth16 proof, then CPIs SPP \
@@ -334,14 +332,10 @@ fn bench_cu_swap() {
     PROVER.preload(CircuitId::Make).expect("preload make keys");
     PROVER.preload(CircuitId::Take).expect("preload take keys");
     PROVER
-        .preload(CircuitId::TakeVerifiableEncryption)
-        .expect("preload take_verifiable_encryption keys");
-    PROVER
         .preload(CircuitId::Cancel)
         .expect("preload cancel keys");
 
     bench_make(&mut mollusk, &spp_id, &mut bench);
-    bench_take_derived(&mut mollusk, &spp_id, &mut bench);
     bench_take(&mut mollusk, &spp_id, &mut bench);
     bench_cancel(&mut mollusk, &spp_id, &mut bench);
 
@@ -376,7 +370,6 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
         destination: maker.shielded_address().expect("maker address"),
         taker: Address::new_from_array(taker.signing_pubkey().as_ed25519().expect("taker pubkey")),
         expiry: EXPIRY,
-        take_mode: swap_prover::TAKE_MODE_VERIFIABLE,
     };
     let mut order_utxo = OrderUtxo {
         terms,
@@ -528,7 +521,7 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     bench.add_table("make", tx_size_table(&ix, &payer.pubkey()));
 }
 
-fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
+fn bench_take(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     const SOURCE_AMOUNT: u64 = 400_000;
     const DESTINATION_AMOUNT: u64 = 250;
     const EXPIRY: u64 = 1_900_000_000;
@@ -547,7 +540,6 @@ fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenc
         destination: maker_address,
         taker: Address::new_from_array(taker.signing_pubkey().as_ed25519().expect("taker pubkey")),
         expiry: EXPIRY,
-        take_mode: swap_prover::TAKE_MODE_DERIVED,
     };
     let order_utxo = OrderUtxo {
         terms,
@@ -706,205 +698,6 @@ fn bench_take_derived(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenc
     bench.add_table("take", tx_size_table(&ix, &taker_payer.pubkey()));
 }
 
-fn bench_take(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
-    const SOURCE_AMOUNT: u64 = 400_000;
-    const DESTINATION_AMOUNT: u64 = 250;
-    const EXPIRY: u64 = 1_900_000_000;
-
-    let tree = spr_interface::pda::tree(BENCH_TREE_ID);
-    let taker_payer = Keypair::new();
-    let taker = keypair_from_payer(&taker_payer);
-    let taker_address = taker.shielded_address().expect("taker address");
-    let maker =
-        ShieldedKeypair::from_keypair(&Keypair::new_from_array([0x51; 32])).expect("maker keypair");
-    let maker_address = maker.shielded_address().expect("maker address");
-
-    let terms = OrderTerms {
-        destination_mint: SOL_MINT,
-        destination_amount: DESTINATION_AMOUNT,
-        destination: maker_address,
-        taker: Address::new_from_array(taker.signing_pubkey().as_ed25519().expect("taker pubkey")),
-        expiry: EXPIRY,
-        take_mode: swap_prover::TAKE_MODE_VERIFIABLE,
-    };
-    let order_utxo = OrderUtxo {
-        terms,
-        blinding: random_blinding(),
-        source_mint: spr_transaction::Mint::SOL,
-        source_amount: SOURCE_AMOUNT,
-        destination_asset_id: SOL_ASSET_ID,
-    };
-
-    let taker_in_blinding = random_blinding();
-    let destination_output_blinding = random_blinding();
-    let source_output_blinding = random_blinding();
-
-    let taker_in = order_utxo.destination_output(taker_address, taker_in_blinding);
-    let source_output = order_utxo.source_output(taker_address, source_output_blinding);
-    let destination_output =
-        order_utxo.destination_output(maker_address, destination_output_blinding);
-    let order_input_utxo = order_utxo
-        .to_input_utxo(BENCH_TREE_ID, 0)
-        .expect("order input_utxo");
-    let taker_utxo = Utxo {
-        owner: taker.signing_pubkey(),
-        asset: spr_transaction::Mint::SOL,
-        amount: DESTINATION_AMOUNT,
-        blinding: taker_in_blinding,
-        ring_program_id: None,
-        data: Data::default(),
-    };
-    let taker_input_utxo: SppProofInputUtxo = spr_test_utils::utxo::wallet(
-        taker_utxo,
-        &taker.nullifier_key,
-        BENCH_TREE_ID,
-        1,
-        None,
-        None,
-    )
-    .expect("indexed input")
-    .into();
-
-    let payer_address = Address::new_from_array(taker_payer.pubkey().to_bytes());
-    let destination_view_tag = maker_address
-        .signing_pubkey
-        .confidential_view_tag()
-        .expect("maker view tag");
-    let input_utxos = vec![order_input_utxo, taker_input_utxo];
-    let mut transaction_outputs = vec![source_output, destination_output];
-    let blinding_seed = prepare_output_blindings(&input_utxos, &mut transaction_outputs)
-        .expect("derive verifiable take output blindings");
-    let [source_output, destination_output]: [_; 2] = transaction_outputs
-        .try_into()
-        .expect("take transaction has two outputs");
-    let destination_ciphertext = order_utxo
-        .destination_ciphertext(&destination_output)
-        .expect("destination ciphertext");
-    let transaction_viewing_key =
-        get_transaction_viewing_key(&taker, &input_utxos).expect("take transaction viewing key");
-
-    let mut encoded = encrypt_transaction_data(
-        std::slice::from_ref(&source_output),
-        &transaction_viewing_key,
-        BENCH_TREE_ID,
-    )
-    .expect("encode take source slot");
-    let destination_utxo_hash = destination_output
-        .hash(BENCH_TREE_ID)
-        .expect("take output hash");
-    encoded.outputs.push(TransactOutput {
-        utxo_hash: destination_utxo_hash,
-        owner_tag: OwnerTag::Inline(destination_view_tag),
-        data: Some(destination_ciphertext),
-    });
-    encoded.resolved_owner_tags.push(destination_view_tag);
-    encoded.output_utxos.push(destination_output.clone());
-
-    let mut external_data = ExternalData::new(
-        *transaction_viewing_key.pubkey().as_bytes(),
-        encoded.salt,
-        encoded.outputs,
-        encoded.resolved_owner_tags,
-        vec![],
-    );
-    external_data.expiry_unix_ts = order_utxo.terms.expiry;
-    let spp_proof_inputs = SppProofInputs {
-        input_utxos,
-        output_utxos: encoded.output_utxos,
-        external_data,
-        payer: payer_address,
-        blinding_seed,
-        output_tree_id: BENCH_TREE_ID,
-        cache_accounts: Default::default(),
-    };
-
-    let commitments = spp_proof_inputs
-        .input_utxo_hashes()
-        .expect("input commitments");
-    let leaves: Vec<[u8; 32]> = commitments.iter().map(|input| input.utxo_hash).collect();
-    let (tree_account, utxo_root, nullifier_root, root_index) = build_tree_fixture(&tree, &leaves);
-    let state_tree = local_state_tree(&leaves);
-    assert_eq!(state_tree.root(), utxo_root, "state root gate");
-    let nf_tree = nullifier_tree();
-    assert_eq!(nf_tree.root(), nullifier_root, "nullifier root gate");
-    let spend_proofs = build_spend_proofs(
-        &tree,
-        &state_tree,
-        &nf_tree,
-        &commitments,
-        utxo_root,
-        nullifier_root,
-        root_index,
-    );
-
-    let take_proof_inputs = TakeVerifiableEncryptionProofInputParams {
-        order_utxo,
-        taker_in,
-        source_output,
-        destination_output,
-        private_tx_blinding: spp_proof_inputs
-            .private_tx_blinding()
-            .expect("private tx blinding"),
-        input_tree_id: BENCH_TREE_ID,
-        output_tree_id: BENCH_TREE_ID,
-    };
-
-    let prover = ProverClient::local();
-    let swap_prover_client = SwapProverClient::new();
-    let (transact, spp_dur) = prove_transact_timed(
-        spp_proof_inputs,
-        &spend_proofs,
-        &prover,
-        &[
-            &spr_keypair::NullifierKey::from_secret([0; 31]),
-            &taker.nullifier_key,
-        ],
-    );
-    let swap_prove_start = Instant::now();
-    let take_proof = swap_prover_client
-        .prove_take_verifiable_encryption(
-            &take_proof_inputs
-                .to_proof_inputs()
-                .expect("take proof inputs"),
-        )
-        .expect("swap take prove");
-    let swap_dur = swap_prove_start.elapsed();
-
-    let ix = TakeVerifiableEncryption {
-        payer: taker_payer.pubkey(),
-        tree,
-        take_proof: take_proof
-            .try_into()
-            .expect("tve proof carries a BSB22 commitment"),
-        spp_proof: transact,
-    }
-    .instruction()
-    .expect("take_verifiable_encryption instruction");
-
-    let fixtures = vec![
-        (tree, tree_account),
-        (taker_payer.pubkey(), system_owned_account(100_000_000_000)),
-    ];
-    let accounts = assemble_accounts(&ix, spp_id, &fixtures);
-    let mollusk_ix = to_mollusk_instruction(&ix);
-    mollusk.process_and_validate_instruction(&mollusk_ix, &accounts, &[Check::success()]);
-
-    let entries = take_profiling_entries();
-    assert!(
-        !entries.is_empty(),
-        "no profiling entries for 'take_verifiable_encryption'"
-    );
-    bench.add_from_entries("take_verifiable_encryption", entries);
-    bench.add_table(
-        "take_verifiable_encryption",
-        proving_time_table(spp_dur, swap_dur),
-    );
-    bench.add_table(
-        "take_verifiable_encryption",
-        tx_size_table(&ix, &taker_payer.pubkey()),
-    );
-}
-
 fn bench_cancel(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     const SOURCE_AMOUNT: u64 = 400_000;
     const ORDER_EXPIRY: u64 = 1_000_000;
@@ -926,7 +719,6 @@ fn bench_cancel(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark)
         destination: maker_address,
         taker: Address::new_from_array(taker.signing_pubkey().as_ed25519().expect("taker pubkey")),
         expiry: ORDER_EXPIRY,
-        take_mode: swap_prover::TAKE_MODE_VERIFIABLE,
     };
     let order_utxo = OrderUtxo {
         terms,

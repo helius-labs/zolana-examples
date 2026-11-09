@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use solana_address::Address;
 use spr_hasher::primitives::{hash_bytes, solana_owner_identity};
 use spr_keypair::{
@@ -29,8 +29,6 @@ pub struct OrderTerms {
     pub taker: Address,
 
     pub expiry: u64,
-    // With or without verifiable encryption.
-    pub take_mode: u64,
 }
 
 #[derive(SchemaWrite, SchemaRead, Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,7 +37,6 @@ pub struct PlainTextData {
     pub destination_amount: u64,
     pub expiry: u64,
     pub taker: Address,
-    pub take_mode: u64,
 }
 
 /// The order UTXO's two representations: the output minted at create time and
@@ -66,7 +63,6 @@ impl OrderTerms {
     // 3. which shielded pubkey the swap settlement will go to
     // 4. the order expiry
     // 5. the taker allowed to take
-    // 6. the take_mode
     pub fn data_hash(&self) -> Result<[u8; 32]> {
         OrderTermsProofInput::try_from(self)?.data_hash()
     }
@@ -84,7 +80,6 @@ impl TryFrom<&OrderTerms> for OrderTermsProofInput {
             maker_viewing_pk: *terms.destination.viewing_pubkey.as_bytes(),
             expiry: terms.expiry,
             taker_pk_fe: terms.taker.data_hash()?,
-            take_mode: terms.take_mode,
         })
     }
 }
@@ -104,26 +99,22 @@ impl DataHash for OrderTermsProofInput {
             &maker_address,
             &u64_right_align(self.expiry),
             &self.taker_pk_fe,
-            &u64_right_align(self.take_mode),
         ])
         .map_err(err)
     }
 }
 
-// All instructions: the taker pubkey as the `taker_pk_fe` terms field. The
-// take_verifiable_encryption circuit asserts
-// `TakerIn.Owner == Poseidon(TakerPkFe, TakerNullifierPk)`
-// (`prover/circuits/take_verifiable_encryption/take.go:27-28`), and the taker's
-// UTXO owner is `Poseidon(owner_proof_input_hash(pk), nullifier_pk)`, so this
-// must be the algorithm-tagged Solana identity, not the bare `hash_bytes`.
+// All instructions: the taker pubkey as the `taker_pk_fe` terms field. A
+// taker's UTXO owner is `Poseidon(owner_proof_input_hash(pk), nullifier_pk)`,
+// so this is the same algorithm-tagged Solana identity, not the bare
+// `hash_bytes`.
 impl DataHash for Address {
     fn data_hash(&self) -> Result<[u8; 32]> {
         solana_owner_identity(self.as_array()).map_err(err)
     }
 }
 
-// make mints to the synthetic order owner; take,
-// take_verifiable_encryption, and cancel spend from it.
+// make mints to the synthetic order owner; take and cancel spend from it.
 impl OrderUtxo {
     fn pda_owner() -> PublicKey {
         PublicKey::from_ed25519(crate::order_authority_pda().as_array())
@@ -144,7 +135,6 @@ impl OrderTerms {
             destination_amount: self.destination_amount,
             expiry: self.expiry,
             taker: self.taker,
-            take_mode: self.take_mode,
         }
     }
 }
@@ -190,7 +180,7 @@ impl OrderUtxo {
     }
 }
 
-// take, take_verifiable_encryption, cancel: spend the order utxo and pay out the
+// take, cancel: spend the order utxo and pay out the
 // source funds (to the taker on take, back to the maker on cancel).
 impl OrderUtxo {
     /// The order input spend, committed under the tree with the raw id
@@ -243,7 +233,7 @@ impl OrderUtxo {
     }
 }
 
-// take, take_verifiable_encryption: pay out the maker's destination funds.
+// take: pay out the maker's destination funds.
 impl OrderUtxo {
     pub fn destination_output(
         &self,
@@ -267,67 +257,10 @@ impl OrderUtxo {
         &self,
         first_nullifier: &[u8; 32],
     ) -> Result<SppProofOutputUtxo> {
-        if self.terms.take_mode != swap_prover::TAKE_MODE_DERIVED {
-            bail!("order does not use derived settlement");
-        }
         use spr_transaction::utxo::{derive_output_blinding_seed, derive_transact_output_blinding};
         let blinding_seed = crate::instructions::take::take_blinding_seed(&self.blinding)?;
         let seed = derive_output_blinding_seed(first_nullifier, &blinding_seed).map_err(err)?;
         let blinding = derive_transact_output_blinding(first_nullifier, &seed, 1).map_err(err)?;
         Ok(self.destination_output(self.terms.destination, blinding))
-    }
-}
-
-// take_verifiable_encryption: the maker-readable ciphertext of the destination
-// payout; the proof checks it against the payout output.
-impl OrderUtxo {
-    pub fn destination_ciphertext(
-        &self,
-        destination_output: &SppProofOutputUtxo,
-    ) -> Result<Vec<u8>> {
-        Ok(
-            crate::instructions::take_verifiable_encryption::destination_ciphertext_with_hash(
-                &self.blinding,
-                &self.terms.destination_mint,
-                self.terms.destination_amount,
-                &destination_output.blinding,
-            )?
-            .0
-            .to_vec(),
-        )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use spr_keypair::ViewingKey;
-    use swap_prover::{TAKE_MODE_DERIVED, TAKE_MODE_VERIFIABLE};
-
-    use super::*;
-
-    fn sample_viewing_pk(seed: u8) -> X25519Pubkey {
-        ViewingKey::from_bytes(&[seed; 32]).pubkey()
-    }
-
-    fn sample_terms(take_mode: u64) -> OrderTermsProofInput {
-        OrderTermsProofInput {
-            destination_asset: hash_bytes(&[2u8; 32]).expect("destination asset"),
-            destination_amount: 250,
-            maker_owner_hash: [7u8; 32],
-            maker_viewing_pk: *sample_viewing_pk(9).as_bytes(),
-            expiry: 1_700_000_000,
-            taker_pk_fe: [11u8; 32],
-            take_mode,
-        }
-    }
-
-    #[test]
-    fn data_hash_binds_take_mode() {
-        let derived = sample_terms(TAKE_MODE_DERIVED).data_hash().unwrap();
-        let verifiable = sample_terms(TAKE_MODE_VERIFIABLE).data_hash().unwrap();
-        assert_ne!(
-            derived, verifiable,
-            "order dataHash must distinguish the authorized take instruction, so an order created for one take cannot be settled by the other"
-        );
     }
 }

@@ -54,7 +54,7 @@ instructions, and circuits.
 ## Dependencies
 
 - program: `pinocchio` (+`cpi`), `spr-interface`, `spr-account-checks`,
-  `spr-hasher` (+`poseidon`), `groth16-solana` (+`bsb22`) for verification,
+  `spr-hasher` (+`poseidon`), `groth16-solana` for verification,
   `wincode`/`borsh` for instruction data, `thiserror` +
   `solana-program-error` for errors. Never sdk crates.
 - prover: `spr-gnark-ffi-prover` for the FFI, key loading, proof compression and

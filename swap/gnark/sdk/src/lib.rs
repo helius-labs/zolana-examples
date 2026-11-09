@@ -10,9 +10,6 @@ pub use swap_program::{
         cancel::{CancelIxData, CancelProof},
         make::{MakeIxData, MakeProof, MarkerData},
         take::{TakeIxData, TakeProof},
-        take_verifiable_encryption::{
-            TakeVerifiableEncryptionIxData, TakeVerifiableEncryptionProof,
-        },
     },
     tag, ORDER_AUTHORITY_PDA_SEED,
 };

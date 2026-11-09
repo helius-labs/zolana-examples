@@ -29,8 +29,8 @@
 
 ## Documentation
 
-CI runs all five Rust and TypeScript client examples, the swap (take, cancel,
-and verifiable encryption), and timelock escrow flows. Rust dependencies, the
+CI runs all five Rust and TypeScript client examples, the swap (take and
+cancel), and timelock escrow flows. Rust dependencies, the
 CLI, prover, and the shielded-pool program use the Rust SDK `0.8.0` release.
 Published Rust SDK crates come from crates.io. The unpublished `spr-test-utils`
 helpers and source builds use release commit

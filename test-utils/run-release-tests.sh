@@ -63,7 +63,7 @@ CARGO_TARGET_DIR="$repo_dir/escrow/gnark/target" cargo build-sbf \
     --manifest-path escrow/gnark/program/Cargo.toml --tools-version v1.54 -- --features bpf-entrypoint
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_dir/target/integration}"
 
-for circuit in make take cancel take_verifiable_encryption; do
+for circuit in make take cancel; do
     cargo run --manifest-path swap/gnark/prover/Cargo.toml --bin swap-prover-setup -- \
         "$circuit" "$repo_dir/swap/gnark/build/gnark/$circuit" --insecure-test-keys
 done
@@ -74,7 +74,7 @@ done
 
 # Each suite starts its own validator and indexer and shares the pinned prover.
 cargo test --manifest-path swap/gnark/test/Cargo.toml \
-    --test swap --test cancel --test take_verifiable_encryption -- --nocapture --test-threads=1
+    --test swap --test cancel -- --nocapture --test-threads=1
 cargo test --manifest-path escrow/gnark/Cargo.toml -p timelock-escrow-test \
     --test escrow -- --nocapture --test-threads=1
 cargo test --manifest-path rust-client/Cargo.toml --test client_localnet --locked \

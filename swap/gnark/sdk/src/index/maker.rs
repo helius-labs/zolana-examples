@@ -94,7 +94,6 @@ fn maker_order_candidate(
                 destination: maker_address,
                 taker: order_data.taker,
                 expiry: order_data.expiry,
-                take_mode: order_data.take_mode,
             },
             blinding: plaintext.blinding,
             source_mint,

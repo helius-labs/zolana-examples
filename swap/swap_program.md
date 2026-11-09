@@ -36,9 +36,9 @@ sequenceDiagram
     Note over Maker: maker can decrypt the order UTXO slot via the tx viewing key it holds
 
     Note over Taker: 2a. Take, before expiry (Taker holds the order UTXO hash preimage)
-    Taker->>Swap: take_verifiable_encryption (take proof + SPP transact)
+    Taker->>Swap: take (take proof + SPP transact)
     Swap->>SPP: CPI transact: order UTXO + Taker destination UTXO -> source UTXO to Taker + destination UTXO to maker
-    Note over SPP: destination ciphertext checked by the take proof, decryptable via the order UTXO blinding; order UTXO consumed
+    Note over SPP: destination blinding derived from the order UTXO blinding and the first nullifier; order UTXO consumed
 
     Note over Maker: 2b. Cancel, after expiry
     Maker->>Swap: cancel (maker-signed, cancel proof + SPP transact)
@@ -55,12 +55,10 @@ sequenceDiagram
 - [Instructions](#instructions)
   - [make](#make)
   - [take](#take)
-  - [take_verifiable_encryption](#take_verifiable_encryption)
   - [cancel](#cancel)
 - [Circuits](#circuits)
   - [Make circuit](#make-circuit)
   - [Take circuit](#take-circuit)
-  - [Take verifiable encryption circuit](#take-verifiable-encryption-circuit)
   - [Cancel circuit](#cancel-circuit)
 
 ## Glossary
@@ -75,9 +73,9 @@ Types used in this document. Shared SPP types are defined in [spec.md](../../doc
 | `order UTXO` | — | The SPP [UTXO](../../docs/spec.md#utxo) holding the source funds: `asset = source_asset_id`, `amount = source_amount`, `owner = order-authority PDA` (seeds `[b"order_authority"]`), nullifier secret `= 0`, `utxo_data = order terms`. Spendable only by the swap program. See [Order Terms](#order-terms). |
 | `marker message` | — | The SPP `transact` message (`view_tag`, `data`) `make` appends as the taker's discovery tag: `view_tag` is the taker's confidential view tag, `data` a plaintext [`MarkerData`](#make) the program writes. Committed by the SPP proof through the transact's external-data hash; the `view_tag` is unenforced: a wrong tag only means the taker does not index the trade. |
 | `MarkerData` | Borsh | `{ order_utxo_hash: [u8;32], maker_pubkey: [u8;32] }`, the plaintext `make` writes into the transact's single marker message. `order_utxo_hash` locates the order UTXO slot; `maker_pubkey` is the `make` signer's Solana pubkey, which the taker resolves to the maker's registered shielded address via the user registry. See [make](#make). |
-| `Order terms` | — | The fields committed in the order UTXO's `utxo_data` (record tag `0x02`), hashed into the order UTXO `utxo_hash` via `data_hash`: `destination_asset_id`, `destination_amount`, `maker_address`, `expiry`, `taker_pk_fe`, `take_mode`. See [Order Terms](#order-terms). |
+| `Order terms` | — | The fields committed in the order UTXO's `utxo_data` (record tag `0x02`), hashed into the order UTXO `utxo_hash` via `data_hash`: `destination_asset_id`, `destination_amount`, `maker_address`, `expiry`, `taker_pk_fe`. See [Order Terms](#order-terms). |
 | `private_tx_hash` | `[u8; 32]` | Commitment to the SPP `transact` a swap proof authorizes: the link between a swap proof and the SPP transaction. See [spec.md](../../docs/spec.md#zk-program-interface). |
-| `MakeProof` / `TakeProof` / `CancelProof` / `TakeVerifiableEncryptionProof` | `[u8; 128]` / `[u8; 192]` | Groth16 proofs verified by the swap program, each committing the transaction via `private_tx_hash`. `MakeProof`, `TakeProof`, and `CancelProof` are standard Groth16, 128 B; `TakeVerifiableEncryptionProof` adds a BSB22 commitment + PoK for its encryption check and is 192 B (verified with `new_with_commitment`). |
+| `MakeProof` / `TakeProof` / `CancelProof` | `[u8; 128]` | Standard Groth16 proofs verified by the swap program, each committing the transaction via `private_tx_hash`. |
 | `TransactIxData` | — | SPP `transact` instruction data: the SPP proof, input nullifiers, output UTXO hashes, ciphertexts, and routing. See [spec.md](../../docs/spec.md#transact). |
 
 ## Privacy Model
@@ -91,8 +89,8 @@ ring; the swap program does not try to hide which action ran.
   `source_asset_id` and `destination_asset_id` at resolve (`asset_id`s are SPP public inputs); the
   order UTXO hash at
   make; the order `expiry`, revealed at resolve so the program can check it against the Clock; each
-  transaction's SPP output UTXO hashes and ciphertexts; the taker's identity on `take` and the
-  taker's on `take_verifiable_encryption`, since each signs its transaction as fee payer.
+  transaction's SPP output UTXO hashes and ciphertexts; the fee payer's identity on `take`, since it
+  signs the transaction.
 - **Private:** `price`, `source_amount`, `destination_amount`, and the aggregate volume per asset.
   These live only inside confidential UTXOs and the order UTXO `utxo_data`.
   The taker's identity stays private at make and on cancel, which the maker signs.
@@ -120,16 +118,10 @@ order_terms = (
     destination_amount,     // private; price = destination_amount / source_amount is implicit and private
     maker_address,           // the maker's CompressedShieldedAddress, resolved by the taker from the user registry: receives destination on take and source on cancel
     expiry,                 // unix seconds; revealed at resolve and checked against the Clock by the program
-    taker_pk_fe,     // the designated taker; enforced only by take_verifiable_encryption
-    take_mode,       // which take instruction may settle this order UTXO: 0 = take (derived), 1 = take_verifiable_encryption
+    taker_pk_fe,     // the designated taker; committed, not checked by any swap circuit
 )
 data_hash = Poseidon(order_terms)        // enters the order UTXO utxo_hash directly
 ```
-
-`take_mode` selects the take instruction that can settle the order UTXO: each take circuit reconstructs
-`data_hash` with its own hardcoded `take_mode`, so settling with the wrong take yields a mismatched
-order UTXO hash and the proof fails. `cancel` takes `take_mode` as an unconstrained witness and refunds
-either kind.
 
 `source_asset_id`, `source_amount`, and `owner = order-authority PDA` are the order UTXO's own
 SPP fields, already committed in `utxo_hash`. The order UTXO's owner is the swap order-authority PDA
@@ -150,9 +142,9 @@ slot via the transaction viewing key it holds. The taker resolves `maker_address
 from the user registry via the marker's `maker_pubkey`, the `make`
 signer, and verifies the resolution by recomputing the order UTXO `utxo_hash`. Moving the order UTXO also
 requires the program: SPP spends a PDA-owned UTXO only when the swap program
-produces the order-authority signer via `invoke_signed`, which it does only through `take` or
-`take_verifiable_encryption` (constrained to the committed payout) or `cancel` (after expiry,
-maker-signed, to `maker_address`). The swap
+produces the order-authority signer via `invoke_signed`, which it does only through `take`
+(constrained to the committed payout) or `cancel` (after expiry, maker-signed, to
+`maker_address`). The swap
 circuits leave the order UTXO owner a free witness; SPP enforces the PDA ownership at spend time, when
 the order UTXO input's owner must match the order-authority signer. The program derives the PDA via
 `find_program_address`, checks it is present among the forwarded SPP accounts, and flips it to a
@@ -162,15 +154,15 @@ prefix and the input-tree and nullifier runs; it is a bare address and signs onl
 
 `maker_address` is the committed destination for both outcomes: take pays the destination output
 there, cancel returns the source output there. Either way the maker recovers the bought output from
-the order UTXO blinding it already holds: `take_verifiable_encryption` proves a ciphertext keyed from
-it, and `take` derives the blinding seed from the order blinding and reconstructs the payout using the first published nullifier.
+the order UTXO blinding it already holds: `take` derives the payout blinding seed from the order
+blinding, and the maker reconstructs the payout using the first published nullifier.
 Cancel requires the maker: it signs the cancel transaction, and the cancel
 proof checks `hash_bytes` of the signer's pubkey against the order's
 `maker_owner_hash`. The refund can only land at `maker_address`.
 
 `expiry` is a unix-seconds value the proof reveals as a public input and the swap program checks
-against the Clock sysvar: `take` and `take_verifiable_encryption` require `now <= expiry`, `cancel`
-requires `now > expiry`. The instructions source the revealed `expiry` differently. Both takes reuse the transact's own
+against the Clock sysvar: `take` requires `now <= expiry`, `cancel`
+requires `now > expiry`. The instructions source the revealed `expiry` differently. `take` reuses the transact's own
 `transact.expiry_unix_ts` field as the order expiry, whereas `cancel` takes the order expiry as a
 separate `order_expiry` instruction-data field distinct from `transact.expiry_unix_ts` (the SPP
 relayer deadline).
@@ -183,8 +175,7 @@ shift the window.
 |---|-------------|-----|-------------|---------------|-------------------|----------------|
 | 1 | [make](#make) | 2 | Verify the make proof and CPI SPP `transact` to lock the source funds into the order UTXO (swap `utxo_data`) and write the taker's marker message. | — | SPP trees (CPI) | Maker signs (fee payer) |
 | 2 | [take](#take) | 3 | Verify the take proof (standard Groth16) and CPI SPP `transact`: spend the order UTXO + a matching destination UTXO, pay destination to the maker (blinding derived from the order UTXO blinding, standard output ciphertext) and source to the taker. | order_authority | SPP trees (CPI) | Any fee payer signs; the order UTXO spend is authorized by the program's order-authority PDA signer; the maker payout is constrained to the committed `maker_address` |
-| 3 | [take_verifiable_encryption](#take_verifiable_encryption) | 5 | Verify the take proof and CPI SPP `transact`: spend the order UTXO + the taker's destination UTXO, pay destination (with a proof-checked ciphertext) to the maker and source to the taker. | order_authority | SPP trees (CPI) | Taker signs (fee payer); the order UTXO spend is authorized by the program's order-authority PDA signer; the circuit checks the taker-side input's owner against the committed `taker_pk_fe` |
-| 4 | [cancel](#cancel) | 4 | Verify the cancel proof and CPI SPP `transact`: after expiry, spend the order UTXO back to `maker_address`. | order_authority | SPP trees (CPI) | Maker signs; the proof checks the signer against the committed `maker_owner_hash`; the program's order-authority PDA authorizes the order UTXO spend |
+| 3 | [cancel](#cancel) | 4 | Verify the cancel proof and CPI SPP `transact`: after expiry, spend the order UTXO back to `maker_address`. | order_authority | SPP trees (CPI) | Maker signs; the proof checks the signer against the committed `maker_owner_hash`; the program's order-authority PDA authorizes the order UTXO spend |
 
 ---
 
@@ -245,66 +236,27 @@ struct MakeIxData {
 
 ### take
 
-A taker settles the order before expiry with the derived-blinding proof. The swap program verifies
-the [take proof](#take-circuit) (standard Groth16, no commitment), then CPIs SPP
-[`transact`](../../docs/spec.md#transact). Shape and payout match
-[`take_verifiable_encryption`](#take_verifiable_encryption): 2-in/2-out, the order UTXO + a
-`destination_amount` `destination_asset_id` UTXO in, source to that input's owner and destination to
-`maker_address` out. The difference is recovery and authorization: the proof fixes the destination
-blinding to `Poseidon(order_utxo_blinding, DOMAIN)`, so the maker reconstructs and spends the bought
-output from the
-order UTXO blinding and order terms alone, and that output includes an ordinary recipient ciphertext for
-wallet discovery rather than a verifiable one. The circuit checks only the payout and the blinding
-derivation, so any holder of the order UTXO hash preimage and a matching destination UTXO may
-take; the maker payout still flows only to the committed `maker_address`, and the order UTXO's
-`take_mode` forbids settling a `take_verifiable_encryption` order UTXO this way.
-Expiry is read from `transact.expiry_unix_ts` and checked `now <= expiry`, as in
-`take_verifiable_encryption`.
-
-**Accounts**
-
-Identical to [`take_verifiable_encryption`](#take_verifiable_encryption), except any fee payer may
-sign: authorization rests on the order-authority PDA signer alone.
-
-**Instruction data**
-
-```rust
-struct TakeIxData {
-    /// The take proof; verified with new (standard Groth16, no commitment).
-    proof: TakeProof,
-    /// SPP transact (2-in/2-out): order UTXO + destination UTXO -> source to the taker,
-    /// destination to the maker.
-    transact: TransactIxData,
-}
-```
-
----
-
-### take_verifiable_encryption
-
-The taker takes the order before expiry. The swap program verifies the
-[take proof](#take-verifiable-encryption-circuit), then CPIs SPP [`transact`](../../docs/spec.md#transact). The
-transact is 2-in/2-out: the order UTXO and the taker's exact `destination_amount`
-`destination_asset_id` UTXO in; `source_amount` `source_asset_id` to the taker and
-`destination_amount` `destination_asset_id` to `maker_address` out. The destination is the last
-output; the program hashes its ciphertext into the public input. The swap conserves value per
-asset; the taker's profit is the spread already priced
-into `destination_amount`. The destination output's ciphertext is checked by the take proof and
-keyed from the order UTXO blinding, so the maker can decrypt and spend the bought funds; the taker's
-source output is sender-encrypted. The taker
-holds the order UTXO hash preimage (recovered from the order UTXO ciphertext) and its own destination UTXO
-secret, so it produces both proofs; the circuit checks the taker-side input's owner against the
-committed `taker_pk_fe`, and SPP requires that owner to sign as the fee payer, so only the designated taker
-can take. The swap program supplies the order-authority PDA signer for the order UTXO spend, reads
-the order `expiry` from the transact's own `expiry_unix_ts` field and checks it against the Clock
-sysvar (`now <= expiry`); the take proof takes that same value as a public input.
+A taker settles the order before expiry. The swap program verifies the
+[take proof](#take-circuit) (standard Groth16), then CPIs SPP
+[`transact`](../../docs/spec.md#transact). The transact is 2-in/2-out: the order UTXO and a
+`destination_amount` `destination_asset_id` UTXO in; `source_amount` `source_asset_id` to that
+input's owner and `destination_amount` `destination_asset_id` to `maker_address` out. The swap
+conserves value per asset; the taker's profit is the spread already priced into
+`destination_amount`. The proof fixes the destination blinding to SPP's output blinding derivation
+under `Poseidon("SWTX", order_utxo_blinding)` and the first published nullifier, so the maker
+reconstructs and spends the bought output from the order UTXO blinding and order terms alone; that
+output carries an ordinary recipient ciphertext for wallet discovery. The circuit checks only the
+payout and the blinding derivation, so any holder of the order UTXO hash preimage (the maker and the
+taker) and a matching destination UTXO may take; the maker payout still flows only to the committed
+`maker_address`. The swap program supplies the order-authority PDA signer for the order UTXO spend,
+reads the order `expiry` from the transact's own `expiry_unix_ts` field and checks it against the
+Clock sysvar (`now <= expiry`); the take proof takes that same value as a public input.
 
 **Accounts**
 
 1. `taker` — fee payer; signer, writable. Consumed by the program; everything after it is forwarded
    verbatim to the SPP `transact` CPI. `now` is read from the Clock sysvar via syscall.
-2. `payer` — the SPP fee payer (the taker again); signer, writable. SPP checks the taker-side
-   input's owner against this signer.
+2. `payer` — the SPP fee payer (the taker again); signer, writable.
 3. `tree_accounts` — SPP trees the transact touches; writable.
 4. `order_authority` — order-authority PDA (seeds `[b"order_authority"]`); read-only, non-signer.
    The program flips it to a signer inside the SPP CPI to authorize the order UTXO spend (see
@@ -314,11 +266,11 @@ sysvar (`now <= expiry`); the take proof takes that same value as a public input
 **Instruction data**
 
 ```rust
-struct TakeVerifiableEncryptionIxData {
-    /// The take proof; verified with new_with_commitment (BSB22 commitment + PoK).
-    proof: TakeVerifiableEncryptionProof,
-    /// SPP transact (2-in/2-out): order UTXO + taker destination UTXO -> source to taker,
-    /// destination to maker (last output).
+struct TakeIxData {
+    /// The take proof; verified by the swap program (standard Groth16).
+    proof: TakeProof,
+    /// SPP transact (2-in/2-out): order UTXO + destination UTXO -> source to the taker,
+    /// destination to the maker.
     transact: TransactIxData,
 }
 ```
@@ -371,14 +323,13 @@ struct CancelIxData {
 
 ## Circuits
 
-The swap program runs four circuits, each with its own verifying key, distinct from the SPP value
+The swap program runs three circuits, each with its own verifying key, distinct from the SPP value
 proof inside `transact`. Each circuit witnesses the SPP transaction's UTXO hash preimages (the order UTXO
 input, the outputs), enforces the order rules below, and commits the transaction via
 `private_tx_hash`: `make` exposes it as the public input itself, the other circuits hash it with
 their public values into a single public input. SPP proves
 the UTXOs are in the tree and conserves value; the swap circuits rely on that rather than proving
-membership themselves. `make`, `take`, and `cancel` are standard Groth16; `take_verifiable_encryption` adds a BSB22 commitment + PoK for its
-encryption check. Concrete shape parameters (input/output slot counts) are fixed once and
+membership themselves. All three are standard Groth16. Concrete shape parameters (input/output slot counts) are fixed once and
 benchmarked, and must match the SPP `transact` shapes the instructions use. The circuits are small
 and proven in-process through a gnark→Rust FFI binding; the SPP transfer proof
 still comes from the existing SPP prover.
@@ -392,7 +343,7 @@ is committed by the SPP proof through the external-data hash, which the make pro
 - **Public inputs:** `private_tx_hash` only; the program feeds
   it to the verifier straight from `TransactIxData`.
 - **Private inputs:** the order terms (`destination_asset`, `destination_amount`, the maker's
-  owner hash and viewing pubkey, `expiry`, `taker_pk_fe`, `take_mode`) and the fully witnessed
+  owner hash and viewing pubkey, `expiry`, `taker_pk_fe`) and the fully witnessed
   order UTXO and change output UTXOs. The order UTXO owner is a free witness
   (the order-authority PDA, which SPP enforces at spend time).
 - **Constraints:**
@@ -405,11 +356,11 @@ is committed by the SPP proof through the external-data hash, which the make pro
     public SPP order UTXO output commits the terms.
   - The change output is constrained to the order UTXO's asset and to `maker_owner_hash`, with empty
     data.
-  - `destination_amount > 0` (64-bit range-checked); `take_mode` is boolean.
+  - `destination_amount > 0` (64-bit range-checked).
 
 ### Take circuit
 
-Standard Groth16, no commitment. Pays the destination output to the maker and checks the payout
+Standard Groth16. Pays the destination output to the maker and checks the payout
 against the committed terms, matching the 2-in/2-out transact (order UTXO + destination UTXO in;
 source + destination-to-maker out). The program enforces `now <= expiry` against the Clock;
 the circuit only reveals `expiry` and checks it equals the committed term.
@@ -420,8 +371,7 @@ the circuit only reveals `expiry` and checks it equals the committed term.
   `order_utxo_blinding`), the maker's compressed viewing pubkey (feeding `maker_address`), the taker's
   destination-side input UTXO, and the two output UTXO hash preimages.
 - **Constraints:**
-  - The public `expiry` equals the committed order `expiry`; the order UTXO `data_hash` uses the `take`
-    constant for `take_mode`, so only a `take`-mode order UTXO reconstructs.
+  - The public `expiry` equals the committed order `expiry`.
   - The destination-side input is `(destination_asset_id, destination_amount)`; the outputs
     committed in `private_tx_hash` are `destination_output == (destination_asset_id,
     destination_amount, maker_owner_hash)` and `source_output == (source_asset_id, source_amount)`
@@ -433,38 +383,6 @@ the circuit only reveals `expiry` and checks it equals the committed term.
     The maker reconstructs its payout from the order opening and that nullifier,
     even if the taker omits or corrupts every settlement ciphertext.
   - `destination_amount > 0` (64-bit range-checked); the order UTXO amount is nonzero.
-
-### Take verifiable encryption circuit
-
-Authorizes the designated taker to take, proves the destination-output ciphertext, and checks the
-payout against the committed terms. Matches the 2-in/2-out transact (order UTXO + taker destination
-UTXO in; source-to-taker + destination-to-maker out). The program
-enforces `now <= expiry` against the Clock; the circuit only reveals `expiry` and checks it equals
-the committed term.
-
-- **Public inputs:** `private_tx_hash`, `expiry`, and the `ciphertext_hash` (the Poseidon hash of the
-  destination-output ciphertext; the program recomputes it from the transact's
-  last output ciphertext and hashes all three into the single verifier input
-  `Poseidon(private_tx_hash, expiry, ciphertext_hash)`).
-- **Private inputs:** the take circuit's core (the order UTXO hash preimage incl. `utxo_data` =
-  order terms, `source_amount`, `order_utxo_blinding`; the taker's destination-side input; the hash
-  preimages of the two output UTXOs) plus the taker's nullifier pubkey. The order UTXO
-  owner is the order-authority PDA constant and the preimage includes the `order_utxo_blinding`.
-- **Constraints:**
-  - The taker-side input's owner equals `Poseidon(taker_pk_fe, taker_nullifier_pk)`; SPP requires
-    that owner to sign as the fee payer, so the spent input belongs to the committed taker. The
-    public `expiry` equals the committed order `expiry`; the order UTXO `data_hash` uses the
-    `take_verifiable_encryption` constant for `take_mode`.
-  - The outputs committed in `private_tx_hash` are `destination_output == (destination_asset_id,
-    destination_amount, maker_owner_hash)` and `source_output == (source_asset_id, source_amount)`
-    owned by the taker-side input's owner.
-  - The `destination_output` ciphertext is AES-256-CTR over `destination_amount ||
-    destination_asset || destination blinding`, key and nonce Poseidon-KDF-derived from
-    `Poseidon(order_utxo_blinding, KDF_DOMAIN)`, integrity via `ciphertext_hash`; this reuses the SPP
-    [merge-proof](../../docs/spec.md#merge-proof---merge-zk-proof) symmetric scheme, the source of
-    the BSB22 commitment. Holders of the order UTXO hash preimage, the maker and the taker, can
-    decrypt. The taker's `source_output` uses ordinary
-    sender encryption.
 
 ### Cancel circuit
 
@@ -482,8 +400,7 @@ circuit only reveals `expiry` and checks it equals the committed term.
   order-authority PDA constant and the order UTXO preimage
   includes the `order_utxo_blinding`.
 - **Constraints:**
-  - The public `expiry` equals the committed order `expiry`; `take_mode` is an unconstrained
-    witness, so either order UTXO kind refunds.
+  - The public `expiry` equals the committed order `expiry`.
   - `Poseidon(maker_owner_pk_field, maker_nullifier_pk)` equals the committed `maker_owner_hash`,
     so the proof verifies only with the maker signer the program supplies.
   - The output committed in `private_tx_hash` is `source_output == (source_asset_id, source_amount,

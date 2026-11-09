@@ -14,9 +14,6 @@ use swap_program::{
         cancel::{CancelIxData, CancelProof},
         make::{MakeIxData, MakeProof},
         take::{TakeIxData, TakeProof},
-        take_verifiable_encryption::{
-            TakeVerifiableEncryptionIxData, TakeVerifiableEncryptionProof,
-        },
     },
     tag, ORDER_AUTHORITY_PDA_SEED,
 };
@@ -28,7 +25,6 @@ pub enum Wrapper {
     Make,
     Take,
     Cancel,
-    TakeVerifiableEncryption,
 }
 
 impl Wrapper {
@@ -37,7 +33,6 @@ impl Wrapper {
             Self::Make => tag::MAKE,
             Self::Take => tag::TAKE,
             Self::Cancel => tag::CANCEL,
-            Self::TakeVerifiableEncryption => tag::TAKE_VERIFIABLE_ENCRYPTION,
         }
     }
 
@@ -144,16 +139,6 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
                 proof_c: [12; 32],
             },
             order_expiry: 0,
-            transact,
-        }),
-        Wrapper::TakeVerifiableEncryption => wincode::serialize(&TakeVerifiableEncryptionIxData {
-            proof: TakeVerifiableEncryptionProof {
-                proof_a: [10; 32],
-                proof_b: [11; 64],
-                proof_c: [12; 32],
-                commitment: [13; 32],
-                commitment_pok: [14; 32],
-            },
             transact,
         }),
     }

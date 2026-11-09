@@ -17,7 +17,7 @@ use swap_program::{
     },
     verifying_keys::take::VERIFYINGKEY,
 };
-use swap_prover::{CircuitId, TakeProofInputs, PROVER, TAKE_MODE_DERIVED};
+use swap_prover::{CircuitId, TakeProofInputs, PROVER};
 use swap_sdk::{
     instructions::take::{take_blinding_seed, TakeProofInputParams},
     state::{OrderTerms, OrderUtxo},
@@ -67,7 +67,6 @@ fn sample_params() -> TakeProofInputParams {
             destination: maker,
             taker: taker.solana_address().unwrap(),
             expiry: 1_700_000_000,
-            take_mode: TAKE_MODE_DERIVED,
         },
         blinding: fe(7),
         source_mint: spr_transaction::Mint::new(Address::new_from_array([1; 32]), 3),
@@ -159,7 +158,7 @@ fn program_vk_has_no_commitment() {
     assert_eq!(VERIFYINGKEY.nr_pubinputs, 1);
     assert!(
         VERIFYINGKEY.vk_commitment.is_none(),
-        "derived take circuit is standard Groth16: no BSB22 commitment"
+        "take circuit is standard Groth16: no BSB22 commitment"
     );
     assert_eq!(
         VERIFYINGKEY.vk_ic.len(),
@@ -178,10 +177,6 @@ fn take_prove_verify() {
 
     let proof_a_zero = proof.proof_a.iter().all(|byte| *byte == 0);
     assert!(!proof_a_zero, "proof_a must not be all zero");
-    assert!(
-        proof.commitment.is_none(),
-        "derived take proof must not carry a BSB22 commitment"
-    );
 
     assert!(
         verify_with_vk(
@@ -207,7 +202,6 @@ fn take_prove_verify() {
             a: &proof.proof_a,
             b: &proof.proof_b,
             c: &proof.proof_c,
-            commitment: None,
         },
         public_input_hash,
         &VERIFYINGKEY,

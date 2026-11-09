@@ -6,11 +6,6 @@ import (
 	"zolana/gnarksdk"
 )
 
-const TakeModeDerived uint64 = 0
-const TakeModeVerifiable uint64 = 1
-
-const TakeEncKdfDomain uint64 = 0x5357_4150_5441_4b45
-
 type OrderTerms struct {
 	DestinationAsset  frontend.Variable
 	DestinationAmount frontend.Variable
@@ -18,13 +13,11 @@ type OrderTerms struct {
 	MakerViewingPk    [33]frontend.Variable
 	Expiry            frontend.Variable
 	TakerPkFe         frontend.Variable
-	TakeMode          frontend.Variable
 }
 
 func (o OrderTerms) Check(api frontend.API) {
 	api.AssertIsDifferent(o.DestinationAmount, 0)
 	api.ToBinary(o.DestinationAmount, 64)
-	api.AssertIsBoolean(o.TakeMode)
 }
 
 func (o OrderTerms) MakerAddressFE(api frontend.API) frontend.Variable {
@@ -40,6 +33,5 @@ func (o OrderTerms) DataHash(api frontend.API, makerAddressFe frontend.Variable)
 		makerAddressFe,
 		o.Expiry,
 		o.TakerPkFe,
-		o.TakeMode,
 	)
 }

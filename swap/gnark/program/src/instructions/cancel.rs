@@ -82,7 +82,6 @@ pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
             a: &proof.proof_a,
             b: &proof.proof_b,
             c: &proof.proof_c,
-            commitment: None,
         },
         CancelPublicInput {
             private_tx_hash: &transact.private_tx_hash,

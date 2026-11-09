@@ -17,7 +17,6 @@ type Circuit struct {
 }
 
 func (c *Circuit) Define(api frontend.API) error {
-	api.AssertIsEqual(c.Core.Order.TakeMode, orderterms.TakeModeDerived)
 	// Both parties hold the order opening. Binding the root seed and the published
 	// first nullifier makes every payout recoverable without the taker's ciphertext.
 	blindingSeed := gnarksdk.Poseidon(api, blindingSeedDomain, c.Core.OrderUtxo.Blinding)

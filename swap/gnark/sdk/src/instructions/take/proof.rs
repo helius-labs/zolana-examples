@@ -7,7 +7,7 @@ use spr_transaction::{
     },
 };
 use swap_program::instructions::take::TakePublicInput;
-use swap_prover::{OrderTermsProofInput, TakeProofInputs, TAKE_MODE_DERIVED};
+use swap_prover::{OrderTermsProofInput, TakeProofInputs};
 
 use super::take_blinding_seed;
 use crate::{err, shared::check_output_utxo, state::OrderUtxo};
@@ -52,9 +52,6 @@ impl TakeProofInputParams {
         )?;
         if destination_owner != terms.destination {
             bail!("destination output owner does not match the order destination");
-        }
-        if terms.take_mode != TAKE_MODE_DERIVED {
-            bail!("order take_mode does not authorize the derived take");
         }
         let order = OrderTermsProofInput::try_from(terms)?;
         let order_output = self

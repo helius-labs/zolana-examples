@@ -15,7 +15,7 @@ use swap_program::{
     },
     verifying_keys::make::VERIFYINGKEY,
 };
-use swap_prover::{CircuitId, MakeProofInputs, OrderTermsProofInput, PROVER, TAKE_MODE_DERIVED};
+use swap_prover::{CircuitId, MakeProofInputs, OrderTermsProofInput, PROVER};
 use swap_sdk::state::DataHash;
 
 mod shared;
@@ -60,7 +60,6 @@ fn sample_order() -> OrderTermsProofInput {
         maker_viewing_pk,
         expiry: 1_700_000_000,
         taker_pk_fe: fe(123),
-        take_mode: TAKE_MODE_DERIVED,
     }
 }
 
@@ -185,7 +184,6 @@ fn make_prove_verify() {
             a: &proof.proof_a,
             b: &proof.proof_b,
             c: &proof.proof_c,
-            commitment: None,
         },
         inputs.private_tx_hash,
         &VERIFYINGKEY,

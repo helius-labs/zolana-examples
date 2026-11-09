@@ -29,14 +29,14 @@ use swap_sdk::{
 
 const EXPIRY: u64 = 2_000_000_000;
 
-// Confidential SOL<->SPL swap on the shielded pool -- make then derived take --
+// Confidential SOL<->SPL swap on the shielded pool -- make then take --
 // driven against a real localnet (validator + Photon indexer + prover) that
 // `setup()` starts.
 //
 // The maker orders an SPL token and wants SOL; the taker pays SOL and receives the
-// SPL. Destination is SOL, so the derived take rail applies; the SPL source stays
-// in shielded UTXOs (the SPP transact is asset-generic for a purely-shielded
-// spend, and the make/take flows denominate change in the order asset).
+// SPL. The SPL source stays in shielded UTXOs (the SPP transact is
+// asset-generic for a purely-shielded spend, and the make/take flows
+// denominate change in the order asset).
 //
 // Flow:
 //   1. Fund (in setup): maker shields 1.0 SPL, taker shields 0.25 SOL; each wallet
@@ -44,7 +44,7 @@ const EXPIRY: u64 = 2_000_000_000;
 //   2. Make: maker spends its 1.0 SPL UTXO -> order UTXO 0.4 SPL (taker-owned, held
 //      under the order-authority PDA), marker (0-value taker-owned discovery
 //      note), change 0.6 SPL (back to maker). ZK make proof, v0 tx via ALT.
-//   3. Take (derived): taker spends the order UTXO (0.4 SPL) + its own 0.25 SOL UTXO ->
+//   3. Take: taker spends the order UTXO (0.4 SPL) + its own 0.25 SOL UTXO ->
 //      source_output 0.4 SPL (to taker), destination_output 0.25 SOL (to maker).
 //      ZK take proof, v0 tx.
 //   4. Assert both take outputs are indexed.
@@ -79,7 +79,6 @@ fn make_and_take_swap_inline() -> Result<()> {
             destination: maker.keypair.shielded_address()?,
             taker: taker_authorization_address,
             expiry: EXPIRY,
-            take_mode: swap_prover::TAKE_MODE_DERIVED,
         };
 
         let maker_address = maker.keypair.shielded_address()?;

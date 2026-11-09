@@ -51,7 +51,6 @@ pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
             a: &proof.proof_a,
             b: &proof.proof_b,
             c: &proof.proof_c,
-            commitment: None,
         },
         transact.private_tx_hash,
         &make::VERIFYINGKEY,

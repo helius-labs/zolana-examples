@@ -8,7 +8,6 @@ use spr_transaction::{
     utxo::{SppProofInputUtxo, Utxo},
     AssetRegistry, Data, ShieldedTransaction, SOL_ASSET_ID, SOL_MINT,
 };
-use swap_prover::TAKE_MODE_DERIVED;
 
 use crate::{
     instructions::make::OrderMarker,
@@ -83,7 +82,6 @@ pub(crate) fn order_fixture() -> OrderFixture {
             .solana_address()
             .expect("taker solana address"),
         expiry: 2_000_000_000,
-        take_mode: TAKE_MODE_DERIVED,
     };
     let mut order_utxo = OrderUtxo {
         terms,

@@ -72,7 +72,6 @@ fn make_and_cancel_swap_inline() -> Result<()> {
             destination: maker.keypair.shielded_address()?,
             taker: taker_authorization_address,
             expiry: EXPIRY,
-            take_mode: swap_prover::TAKE_MODE_DERIVED,
         };
 
         let maker_address = maker.keypair.shielded_address()?;

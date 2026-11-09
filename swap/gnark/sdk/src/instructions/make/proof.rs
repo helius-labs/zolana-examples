@@ -89,7 +89,6 @@ mod tests {
     use solana_keypair::Keypair;
     use spr_keypair::shielded::ShieldedKeypair;
     use spr_transaction::SOL_MINT;
-    use swap_prover::TAKE_MODE_DERIVED;
 
     use super::*;
     use crate::state::{OrderTerms, OrderUtxo};
@@ -117,7 +116,6 @@ mod tests {
                 destination,
                 taker: Address::default(),
                 expiry: 1_700_000_000,
-                take_mode: TAKE_MODE_DERIVED,
             },
             blinding: crate::shared::test_blinding(11),
             source_mint: spr_transaction::Mint::SOL,

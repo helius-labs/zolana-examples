@@ -1,8 +1,5 @@
 use anyhow::Result;
-use swap_prover::{
-    CancelProofInputs, MakeProofInputs, OrderProof, TakeProofInputs,
-    TakeVerifiableEncryptionProofInputs,
-};
+use swap_prover::{CancelProofInputs, MakeProofInputs, OrderProof, TakeProofInputs};
 
 use crate::err;
 
@@ -23,13 +20,6 @@ impl SwapProverClient {
     }
 
     pub fn prove_cancel(&self, inputs: &CancelProofInputs) -> Result<OrderProof> {
-        inputs.prove().map_err(err)
-    }
-
-    pub fn prove_take_verifiable_encryption(
-        &self,
-        inputs: &TakeVerifiableEncryptionProofInputs,
-    ) -> Result<OrderProof> {
         inputs.prove().map_err(err)
     }
 }

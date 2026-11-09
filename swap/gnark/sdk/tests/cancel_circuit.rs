@@ -15,7 +15,7 @@ use swap_program::{
     },
     verifying_keys::cancel::VERIFYINGKEY,
 };
-use swap_prover::{CancelProofInputs, CircuitId, OrderTermsProofInput, PROVER, TAKE_MODE_DERIVED};
+use swap_prover::{CancelProofInputs, CircuitId, OrderTermsProofInput, PROVER};
 use swap_sdk::state::DataHash;
 
 mod shared;
@@ -69,7 +69,6 @@ fn build_inputs(source_output_owner: [u8; 32]) -> CancelProofInputs {
         maker_viewing_pk,
         expiry: 1_700_000_000,
         taker_pk_fe: fe(123),
-        take_mode: TAKE_MODE_DERIVED,
     };
     let source_mint = Address::new_from_array([1u8; 32]);
     let order_utxo = ProofInputUtxo::new(
@@ -198,7 +197,6 @@ fn cancel_prove_verify() {
             a: &proof.proof_a,
             b: &proof.proof_b,
             c: &proof.proof_c,
-            commitment: None,
         },
         public_input_hash,
         &VERIFYINGKEY,

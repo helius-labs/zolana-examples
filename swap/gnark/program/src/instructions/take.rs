@@ -64,7 +64,6 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
             a: &proof.proof_a,
             b: &proof.proof_b,
             c: &proof.proof_c,
-            commitment: None,
         },
         TakePublicInput {
             private_tx_hash: &transact.private_tx_hash,

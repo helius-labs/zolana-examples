@@ -10,13 +10,10 @@ use spr_interface::{
     N_PUBLIC_SLOTS,
 };
 use spr_program::instruction::Transact;
-use swap_sdk::{
-    instructions::{take::Take, take_verifiable_encryption::TakeVerifiableEncryption},
-    order_authority_pda, TakeProof, TakeVerifiableEncryptionProof,
-};
+use swap_sdk::{instructions::take::Take, order_authority_pda, TakeProof};
 
 #[test]
-fn both_take_rails_forward_the_order_and_paying_taker_as_owner_signers() {
+fn take_forwards_the_order_and_paying_taker_as_owner_signers() {
     let payer = Address::new_unique();
     let tree = Address::new_unique();
     let order_authority = order_authority_pda();
@@ -65,10 +62,10 @@ fn both_take_rails_forward_the_order_and_paying_taker_as_owner_signers() {
             account.is_signer = false;
         }
     }
-    let derived = Take {
+    let instruction = Take {
         payer,
         tree,
-        spp_proof: data.clone(),
+        spp_proof: data,
         take_proof: TakeProof {
             proof_a: [0; 32],
             proof_b: [0; 64],
@@ -76,26 +73,10 @@ fn both_take_rails_forward_the_order_and_paying_taker_as_owner_signers() {
         },
     }
     .instruction()
-    .expect("derived take");
-    let verifiable = TakeVerifiableEncryption {
-        payer,
-        tree,
-        spp_proof: data,
-        take_proof: TakeVerifiableEncryptionProof {
-            proof_a: [0; 32],
-            proof_b: [0; 64],
-            proof_c: [0; 32],
-            commitment: [0; 32],
-            commitment_pok: [0; 32],
-        },
-    }
-    .instruction()
-    .expect("verifiable take");
-    for instruction in [derived, verifiable] {
-        assert_eq!(
-            instruction.accounts.first(),
-            Some(&AccountMeta::new(payer, true))
-        );
-        assert_eq!(instruction.accounts.get(1..), Some(expected.as_slice()));
-    }
+    .expect("take");
+    assert_eq!(
+        instruction.accounts.first(),
+        Some(&AccountMeta::new(payer, true))
+    );
+    assert_eq!(instruction.accounts.get(1..), Some(expected.as_slice()));
 }
