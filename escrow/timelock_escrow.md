@@ -237,8 +237,8 @@ Proves the escrow UTXO output commits the escrow terms. Matches the 1-in/2-out t
 UTXO in; change + escrow UTXO out), padded to an SPP proving shape that fits it (each
 implementation's `BENCHMARK.md` names the shape).
 
-- **Public inputs:** `private_tx_hash` only, with no other public value; the program feeds it to
-  the verifier straight from `TransactIxData`.
+- **Public inputs:** `private_tx_hash` only, with no other public value; the program takes it
+  from `TransactIxData`. How it encodes into the proof's public input is implementation-defined.
 - **Private inputs:** the escrow terms (`owner_hash`, `unlock`) and the escrow UTXO and change
   output UTXO hash preimages. The circuit does not constrain the escrow UTXO owner value (SPP
   enforces it is the escrow-authority PDA at spend time).

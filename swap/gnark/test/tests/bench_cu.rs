@@ -1,13 +1,41 @@
+//! CU and proving benchmark of the swap make, take and cancel instructions.
+//! It writes `../BENCHMARK.md` (see `test-utils/compare-benchmarks.py` for
+//! the gnark/Xark comparison). From `swap/gnark`:
+//!
+//! 1. Generate the circuit keys into `build/gnark/<circuit>` with
+//!    `cargo run --release --manifest-path prover/Cargo.toml --bin swap-prover-setup --
+//!    <circuit> build/gnark/<circuit> --insecure-test-keys`.
+//! 2. Build the profiling program:
+//!    `cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54
+//!    --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program`.
+//! 3. Build the SDK 0.8.0 shielded-pool program into the same directory:
+//!    `cargo build-sbf --manifest-path <zolana>/programs/shielded-pool/Cargo.toml
+//!    --tools-version v1.54 --sbf-out-dir target/bench -- --features bpf-entrypoint`.
+//! 4. Point `ZOLANA_CLI_BIN` and `ZOLANA_PROVER_BIN` at the SDK revision's `zolana`
+//!    CLI and prover server (`ZOLANA_PROVER_URL` moves its port), then run
+//!    `cargo test --release --manifest-path test/Cargo.toml --test bench_cu --
+//!    --ignored --nocapture`.
+//!
+//! The swap circuit proofs come from the in-process gnark prover with the
+//! keys in `build/gnark`. Each cold key load runs in a child process of the
+//! bench (`key_load_probe`).
+#[path = "../../../../test-utils/bench_report.rs"]
+mod bench_report;
+#[path = "../../../../test-utils/gnark_circuit_size.rs"]
+mod gnark_circuit_size;
+
 use spr_test_utils::utxo::{
     encrypt_transaction_data, get_transaction_viewing_key, prepare_output_blindings,
 };
 use spr_transaction::utxo::SppProofInputUtxo;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use light_program_profiler::{
-    mollusk::{register_profiling_syscalls, take_profiling_entries},
-    report::{CuBenchmark, ReadmeConfig, SectionTable},
+use bench_report::{
+    cold_key_load, proof_bytes, time_key_load, warm_median, CircuitRow, Implementation,
+    InstructionRow, Report,
 };
+use gnark_circuit_size::circuit_size;
+use light_program_profiler::mollusk::{register_profiling_syscalls, take_profiling_entries};
 use mollusk_svm::{result::Check, Mollusk};
 use num_bigint::BigUint;
 use solana_account::Account;
@@ -20,6 +48,7 @@ use spr_client::{
     transaction_size, ComputeBudgetConfig, MerkleContext, MerkleProof, NonInclusionProof,
     ProverClient, ProverExt, SpendProof, NULLIFIER_TREE_HEIGHT, STATE_TREE_HEIGHT,
 };
+use spr_gnark_ffi_prover::Circuit;
 use spr_hasher::Poseidon;
 use spr_interface::{
     instruction::instruction_data::transact::TransactIxData,
@@ -36,7 +65,7 @@ use spr_transaction::{
     Data, Utxo, SOL_ASSET_ID, SOL_MINT,
 };
 use spr_tree::TreeAccount;
-use swap_prover::{CircuitId, PROVER};
+use swap_prover::{CircuitId, OrderProof, PROVER};
 use swap_sdk::{
     instructions::{
         cancel::{Cancel, CancelProofInputParams},
@@ -48,9 +77,10 @@ use swap_sdk::{
     state::{OrderTerms, OrderUtxo},
 };
 
-const PROFILING_SBF_DIR: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../../../target/swap-bench");
+/// Holds the profiling `swap_program.so` and a plain `shielded_pool_program.so`.
+const BENCH_SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/bench");
 const OUTPUT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../BENCHMARK.md");
+
 fn to_mollusk_pubkey(key: &Pubkey) -> Pubkey {
     Pubkey::new_from_array(key.to_bytes())
 }
@@ -89,6 +119,8 @@ fn system_owned_account(lamports: u64) -> Account {
 /// Raw id of the fixture tree. `build_tree_fixture` initializes the account with
 /// this id, and every UTXO commitment folds it in.
 const BENCH_TREE_ID: u16 = 0;
+/// The runtime slot, after the slots `build_tree_fixture` appends leaves at.
+const BENCH_SLOT: u64 = 1_000;
 
 fn build_tree_fixture(tree: &Pubkey, leaves: &[[u8; 32]]) -> (Account, [u8; 32], [u8; 32], u16) {
     let mut tree_account_bytes = vec![0u8; tree_account_size()];
@@ -237,112 +269,172 @@ fn prove_transact_timed(
     keys: &[&spr_keypair::NullifierKey],
 ) -> (TransactIxData, Duration) {
     let dummy_proofs = spr_test_utils::utxo::dummy_proofs(&proof_inputs);
-    prover
-        .prove_transact(
-            proof_inputs.clone(),
-            spend_proofs,
-            &dummy_proofs,
-            &spr_test_utils::utxo::ProofKeys(keys),
-        )
-        .expect("warm prove transact");
-    let start = Instant::now();
-    let transact = prover
-        .prove_transact(
-            proof_inputs,
-            spend_proofs,
-            &dummy_proofs,
-            &spr_test_utils::utxo::ProofKeys(keys),
-        )
-        .expect("prove transact");
-    (transact, start.elapsed())
-}
-
-fn proving_time_table(spp: Duration, swap: Duration) -> SectionTable {
-    SectionTable {
-        title: "Proving Time".into(),
-        headers: vec![
-            "SPP transfer proof".into(),
-            "Swap circuit proof".into(),
-            "Total".into(),
-        ],
-        rows: vec![vec![
-            format!("{} ms", spp.as_millis()),
-            format!("{} ms", swap.as_millis()),
-            format!("{} ms", (spp + swap).as_millis()),
-        ]],
-    }
+    warm_median(|| {
+        prover
+            .prove_transact(
+                proof_inputs.clone(),
+                spend_proofs,
+                &dummy_proofs,
+                &spr_test_utils::utxo::ProofKeys(keys),
+            )
+            .expect("prove transact")
+    })
 }
 
 /// The version 1 transaction this instruction is sent as. Its compute ceilings
 /// live in the message header.
-fn tx_size_table(ix: &Instruction, payer: &Pubkey) -> SectionTable {
-    let v1 = transaction_size(
+fn v1_transaction_bytes(ix: &Instruction, payer: &Pubkey) -> u64 {
+    let bytes = transaction_size(
         payer,
         std::slice::from_ref(ix),
         ComputeBudgetConfig::new(1_400_000),
     )
     .expect("measure v1 transaction")
     .bytes;
+    u64::try_from(bytes).expect("fits u64")
+}
 
-    SectionTable {
-        title: "Transaction Size".into(),
-        headers: vec!["Instruction Data".into(), "Accounts".into(), "v1 Tx".into()],
-        rows: vec![vec![
-            format!("{} bytes", ix.data.len()),
-            ix.accounts.len().to_string(),
-            format!("{} bytes", v1),
-        ]],
+/// The cold key loads of every circuit, each load in a fresh child process,
+/// run before anything is loaded into this process.
+struct KeyLoads(Vec<(CircuitId, Duration, Vec<String>)>);
+
+impl KeyLoads {
+    fn measure() -> Self {
+        Self(
+            CircuitId::ALL
+                .iter()
+                .map(|circuit| {
+                    let (median, outputs) = cold_key_load(circuit.name());
+                    (*circuit, median, outputs)
+                })
+                .collect(),
+        )
+    }
+
+    /// Measure `circuit`: its cold key load, its warm proof time with the
+    /// keys preloaded into the in-process prover, and its sizes. `prove`
+    /// proves the instruction's inputs once; the last proof is returned for
+    /// the instruction.
+    fn measure_circuit(
+        &self,
+        circuit: CircuitId,
+        prove: impl FnMut() -> OrderProof,
+    ) -> (OrderProof, CircuitRow) {
+        let (_, key_load, outputs) = self
+            .0
+            .iter()
+            .find(|(loaded, _, _)| *loaded == circuit)
+            .expect("key load of every circuit");
+        let keys_dir = PROVER.keys_dir(circuit);
+        let vk = std::fs::read(keys_dir.join("vk.bin")).expect("read verifying key");
+        let size = circuit_size(circuit.name(), outputs, &vk);
+        let (proof, warm_proof) = warm_median(prove);
+        let row = CircuitRow {
+            name: circuit.name().into(),
+            constraints: size.constraints,
+            public_inputs: size.public_inputs,
+            proving_key_bytes: std::fs::metadata(keys_dir.join("pk.bin"))
+                .expect("proving key")
+                .len(),
+            verifying_key_bytes: u64::try_from(vk.len()).expect("fits u64"),
+            proof_bytes: proof_bytes(&proof.proof_a, &proof.proof_b, &proof.proof_c),
+            key_load: *key_load,
+            warm_proof,
+        };
+        (proof, row)
     }
 }
 
+/// Replays `ix` under mollusk and collects its profile and sizes.
+#[allow(clippy::too_many_arguments)]
+fn replay(
+    mollusk: &mut Mollusk,
+    spp_id: &Pubkey,
+    name: &str,
+    circuit: CircuitRow,
+    ix: &Instruction,
+    payer: &Pubkey,
+    fixtures: &[(Pubkey, Account)],
+    warm_spp_proof: Duration,
+) -> (CircuitRow, InstructionRow) {
+    let accounts = assemble_accounts(ix, spp_id, fixtures);
+    let mollusk_ix = to_mollusk_instruction(ix);
+    mollusk.process_and_validate_instruction(&mollusk_ix, &accounts, &[Check::success()]);
+    let entries = take_profiling_entries();
+    assert!(!entries.is_empty(), "no profiling entries for '{name}'");
+    let instruction = InstructionRow {
+        name: name.into(),
+        circuit: circuit.name.clone(),
+        entries,
+        warm_spp_proof,
+        instruction_data_bytes: u64::try_from(ix.data.len()).expect("fits u64"),
+        accounts: u64::try_from(ix.accounts.len()).expect("fits u64"),
+        v1_tx_bytes: v1_transaction_bytes(ix, payer),
+    };
+    (circuit, instruction)
+}
+
+/// The child-process half of the cold key load: one preload of the circuit
+/// `cold_key_load` names (compile the constraint system, read the proving key).
 #[test]
-#[ignore = "CU benchmark; slow, needs SBF binaries + prover. Run via just bench-swap"]
+#[ignore = "child process of bench_cu_swap"]
+fn key_load_probe() {
+    time_key_load(|name| {
+        let circuit = *CircuitId::ALL
+            .iter()
+            .find(|circuit| circuit.name() == name)
+            .expect("known circuit");
+        PROVER.preload(circuit).expect("preload circuit keys");
+    });
+}
+
+#[test]
+#[ignore = "CU and proving benchmark; needs the SBF builds in target/bench and an SPP prover"]
 fn bench_cu_swap() {
-    std::env::set_var("SBF_OUT_DIR", PROFILING_SBF_DIR);
+    std::env::set_var("SBF_OUT_DIR", BENCH_SBF_DIR);
 
     let swap_id = Pubkey::new_from_array(*swap_program::ID.as_array());
     let spp_id = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
 
     let mut mollusk = Mollusk::default();
+    // Keep the runtime slot after every fixture append: SPP refuses a tree
+    // whose last update is ahead of the clock.
+    mollusk.warp_to_slot(BENCH_SLOT);
     register_profiling_syscalls(&mut mollusk);
     mollusk.add_program(&swap_id, "swap_program");
     mollusk.add_program(&spp_id, "shielded_pool_program");
 
-    let mut bench = CuBenchmark::new(ReadmeConfig {
-        title: "Confidential Swap -- CU Benchmark".into(),
-        description:
-            "Compute unit profiling for the confidential swap make/take/cancel \
-             instructions, replayed under mollusk. The shielded-pool tree account is built directly (the \
-             program's `create_tree` init plus the input utxo hashes appended), and each \
-             instruction hashes its public input, verifies its own Groth16 proof, then CPIs SPP \
-             `transact` (the `cpi_spp_transact*` row). Only the swap program is profiled; the \
-             shielded-pool program is built plain, so the CU its CPI consumes is charged to the \
-             `cpi_spp_transact*` row as a black box and its internal functions do not appear \
-             here. Each instruction section also records its proving times (SPP transfer proof \
-             plus swap circuit proof) and the serialized size of the version 1 transaction these \
-             instructions are sent as, which states its compute ceilings in the message header and \
-             may run to 4096 bytes."
-                .into(),
-        output_path: OUTPUT_PATH.into(),
-        regenerate_command: Some("just bench-swap".into()),
-        ..Default::default()
-    });
+    // Cold key loads first, each in a fresh child process.
+    let key_loads = KeyLoads::measure();
 
+    // Warm provers: the SPP server is up and every circuit's keys are loaded
+    // in process before anything is timed.
     spr_test_utils::prover::spawn_workspace_prover(spr_client::IndexerRequirement::Optional);
-    PROVER.preload(CircuitId::Make).expect("preload make keys");
-    PROVER.preload(CircuitId::Take).expect("preload take keys");
-    PROVER
-        .preload(CircuitId::Cancel)
-        .expect("preload cancel keys");
+    for circuit in CircuitId::ALL {
+        PROVER.preload(*circuit).expect("preload circuit keys");
+    }
 
-    bench_make(&mut mollusk, &spp_id, &mut bench);
-    bench_take(&mut mollusk, &spp_id, &mut bench);
-    bench_cancel(&mut mollusk, &spp_id, &mut bench);
-
-    bench.generate().expect("write BENCHMARK.md");
+    let (circuits, instructions) = [
+        bench_make(&mut mollusk, &spp_id, &key_loads),
+        bench_take(&mut mollusk, &spp_id, &key_loads),
+        bench_cancel(&mut mollusk, &spp_id, &key_loads),
+    ]
+    .into_iter()
+    .unzip();
+    Report {
+        example: "Confidential Swap",
+        implementation: Implementation::Gnark,
+        circuits,
+        instructions,
+    }
+    .write(OUTPUT_PATH);
 }
 
-fn bench_make(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
+fn bench_make(
+    mollusk: &mut Mollusk,
+    spp_id: &Pubkey,
+    key_loads: &KeyLoads,
+) -> (CircuitRow, InstructionRow) {
     const INPUT_AMOUNT: u64 = 1_000_000;
     const SOURCE_AMOUNT: u64 = 400_000;
     const EXPIRY: u64 = 1_900_000_000;
@@ -351,9 +443,12 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     let payer = Keypair::new();
     let maker = keypair_from_payer(&payer);
 
+    // As in the localnet flow, the source is deposited to the order-authority
+    // PDA, so the program signs the make transaction alone.
+    let order_nullifier_key = spr_keypair::NullifierKey::from_secret([0; 31]);
     let input_blinding = random_blinding();
     let input_utxo = Utxo {
-        owner: maker.signing_pubkey(),
+        owner: spr_keypair::PublicKey::from_ed25519(swap_sdk::order_authority_pda().as_array()),
         asset: spr_transaction::Mint::SOL,
         amount: INPUT_AMOUNT,
         blinding: input_blinding,
@@ -368,7 +463,9 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
         destination_mint: Address::new_from_array([7u8; 32]),
         destination_amount: 250,
         destination: maker.shielded_address().expect("maker address"),
-        taker: Address::new_from_array(taker.signing_pubkey().as_ed25519().expect("taker pubkey")),
+        taker: Some(Address::new_from_array(
+            taker.signing_pubkey().as_ed25519().expect("taker pubkey"),
+        )),
         expiry: EXPIRY,
     };
     let mut order_utxo = OrderUtxo {
@@ -385,7 +482,7 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
     let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
     let input_utxo: SppProofInputUtxo = spr_test_utils::utxo::wallet(
         input_utxo,
-        &maker.nullifier_key,
+        &order_nullifier_key,
         BENCH_TREE_ID,
         0,
         None,
@@ -485,17 +582,16 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
         spp_proof_inputs,
         &spend_proofs,
         &prover,
-        &[&maker.nullifier_key],
+        &[&order_nullifier_key],
     );
-    let swap_prove_start = Instant::now();
-    let make_proof = swap_prover_client
-        .prove_make(
-            &make_proof_inputs
-                .to_proof_inputs()
-                .expect("make proof inputs"),
-        )
-        .expect("swap make prove");
-    let swap_dur = swap_prove_start.elapsed();
+    let make_inputs = make_proof_inputs
+        .to_proof_inputs()
+        .expect("make proof inputs");
+    let (make_proof, circuit) = key_loads.measure_circuit(CircuitId::Make, || {
+        swap_prover_client
+            .prove_make(&make_inputs)
+            .expect("swap make prove")
+    });
 
     let ix = Make {
         payer: payer.pubkey(),
@@ -510,18 +606,23 @@ fn bench_make(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
         (tree, tree_account),
         (payer.pubkey(), system_owned_account(100_000_000_000)),
     ];
-    let accounts = assemble_accounts(&ix, spp_id, &fixtures);
-    let mollusk_ix = to_mollusk_instruction(&ix);
-    mollusk.process_and_validate_instruction(&mollusk_ix, &accounts, &[Check::success()]);
-
-    let entries = take_profiling_entries();
-    assert!(!entries.is_empty(), "no profiling entries for 'make'");
-    bench.add_from_entries("make", entries);
-    bench.add_table("make", proving_time_table(spp_dur, swap_dur));
-    bench.add_table("make", tx_size_table(&ix, &payer.pubkey()));
+    replay(
+        mollusk,
+        spp_id,
+        "make",
+        circuit,
+        &ix,
+        &payer.pubkey(),
+        &fixtures,
+        spp_dur,
+    )
 }
 
-fn bench_take(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
+fn bench_take(
+    mollusk: &mut Mollusk,
+    spp_id: &Pubkey,
+    key_loads: &KeyLoads,
+) -> (CircuitRow, InstructionRow) {
     const SOURCE_AMOUNT: u64 = 400_000;
     const DESTINATION_AMOUNT: u64 = 250;
     const EXPIRY: u64 = 1_900_000_000;
@@ -538,7 +639,9 @@ fn bench_take(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
         destination_mint: SOL_MINT,
         destination_amount: DESTINATION_AMOUNT,
         destination: maker_address,
-        taker: Address::new_from_array(taker.signing_pubkey().as_ed25519().expect("taker pubkey")),
+        taker: Some(Address::new_from_array(
+            taker.signing_pubkey().as_ed25519().expect("taker pubkey"),
+        )),
         expiry: EXPIRY,
     };
     let order_utxo = OrderUtxo {
@@ -664,15 +767,14 @@ fn bench_take(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
             &taker.nullifier_key,
         ],
     );
-    let swap_prove_start = Instant::now();
-    let take_proof = swap_prover_client
-        .prove_take(
-            &take_proof_inputs
-                .to_proof_inputs()
-                .expect("take proof inputs"),
-        )
-        .expect("swap take prove");
-    let swap_dur = swap_prove_start.elapsed();
+    let take_inputs = take_proof_inputs
+        .to_proof_inputs()
+        .expect("take proof inputs");
+    let (take_proof, circuit) = key_loads.measure_circuit(CircuitId::Take, || {
+        swap_prover_client
+            .prove_take(&take_inputs)
+            .expect("swap take prove")
+    });
 
     let ix = Take {
         payer: taker_payer.pubkey(),
@@ -687,18 +789,23 @@ fn bench_take(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
         (tree, tree_account),
         (taker_payer.pubkey(), system_owned_account(100_000_000_000)),
     ];
-    let accounts = assemble_accounts(&ix, spp_id, &fixtures);
-    let mollusk_ix = to_mollusk_instruction(&ix);
-    mollusk.process_and_validate_instruction(&mollusk_ix, &accounts, &[Check::success()]);
-
-    let entries = take_profiling_entries();
-    assert!(!entries.is_empty(), "no profiling entries for 'take'");
-    bench.add_from_entries("take", entries);
-    bench.add_table("take", proving_time_table(spp_dur, swap_dur));
-    bench.add_table("take", tx_size_table(&ix, &taker_payer.pubkey()));
+    replay(
+        mollusk,
+        spp_id,
+        "take",
+        circuit,
+        &ix,
+        &taker_payer.pubkey(),
+        &fixtures,
+        spp_dur,
+    )
 }
 
-fn bench_cancel(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark) {
+fn bench_cancel(
+    mollusk: &mut Mollusk,
+    spp_id: &Pubkey,
+    key_loads: &KeyLoads,
+) -> (CircuitRow, InstructionRow) {
     const SOURCE_AMOUNT: u64 = 400_000;
     const ORDER_EXPIRY: u64 = 1_000_000;
     const SPP_RELAYER_DEADLINE: u64 = u64::MAX;
@@ -717,7 +824,9 @@ fn bench_cancel(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark)
         destination_mint: Address::new_from_array([7u8; 32]),
         destination_amount: 250,
         destination: maker_address,
-        taker: Address::new_from_array(taker.signing_pubkey().as_ed25519().expect("taker pubkey")),
+        taker: Some(Address::new_from_array(
+            taker.signing_pubkey().as_ed25519().expect("taker pubkey"),
+        )),
         expiry: ORDER_EXPIRY,
     };
     let order_utxo = OrderUtxo {
@@ -815,15 +924,14 @@ fn bench_cancel(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark)
         &prover,
         &[&spr_keypair::NullifierKey::from_secret([0; 31])],
     );
-    let swap_prove_start = Instant::now();
-    let cancel_proof = swap_prover_client
-        .prove_cancel(
-            &cancel_proof_inputs
-                .to_proof_inputs()
-                .expect("cancel proof inputs"),
-        )
-        .expect("swap cancel prove");
-    let swap_dur = swap_prove_start.elapsed();
+    let cancel_inputs = cancel_proof_inputs
+        .to_proof_inputs()
+        .expect("cancel proof inputs");
+    let (cancel_proof, circuit) = key_loads.measure_circuit(CircuitId::Cancel, || {
+        swap_prover_client
+            .prove_cancel(&cancel_inputs)
+            .expect("swap cancel prove")
+    });
 
     let maker_signer = Pubkey::new_from_array(
         maker_address
@@ -848,13 +956,14 @@ fn bench_cancel(mollusk: &mut Mollusk, spp_id: &Pubkey, bench: &mut CuBenchmark)
         (tree, tree_account),
         (maker_payer.pubkey(), system_owned_account(100_000_000_000)),
     ];
-    let accounts = assemble_accounts(&ix, spp_id, &fixtures);
-    let mollusk_ix = to_mollusk_instruction(&ix);
-    mollusk.process_and_validate_instruction(&mollusk_ix, &accounts, &[Check::success()]);
-
-    let entries = take_profiling_entries();
-    assert!(!entries.is_empty(), "no profiling entries for 'cancel'");
-    bench.add_from_entries("cancel", entries);
-    bench.add_table("cancel", proving_time_table(spp_dur, swap_dur));
-    bench.add_table("cancel", tx_size_table(&ix, &maker_payer.pubkey()));
+    replay(
+        mollusk,
+        spp_id,
+        "cancel",
+        circuit,
+        &ix,
+        &maker_payer.pubkey(),
+        &fixtures,
+        spp_dur,
+    )
 }

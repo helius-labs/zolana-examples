@@ -1,9 +1,3 @@
-// NOTE(pr164-port): the account-shape and marker checks in these processors run
-// AFTER proof verification (PR164's verify-first order), so they cannot be
-// exercised with the placeholder proofs these mollusk fixtures use. The
-// affected cases (marker-message checks, order-authority/SPP-program account
-// checks, privilege-downgrade sweeps) were removed.
-
 use solana_program_error::ProgramError;
 use spr_account_checks::AccountError;
 use spr_test_utils::mollusk::expect_err_exact;

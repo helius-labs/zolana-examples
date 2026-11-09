@@ -14,15 +14,61 @@ model, escrow terms, instructions, and circuits.
 ## Implementations
 
 - [`gnark/`](gnark/) — circuits written in Go with gnark, proved in process
-  through `spr-gnark-ffi-prover`. CU numbers are in
-  [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md).
+  through `spr-gnark-ffi-prover`.
 - [`xark/`](xark/) — circuits written in Rust and compiled with Xark through
-  Zolana's `ZkProgram` derives, proved in process by the Xark prover. CU numbers
-  are in [`xark/BENCHMARK.md`](xark/BENCHMARK.md). See [xark](#xark) below.
+  Zolana's `ZkProgram` derives, proved in process by the Xark prover. See
+  [xark](#xark) below.
 
 Both implement the same instructions, tags, instruction data, errors and escrow
 terms. They are separate Cargo workspaces with their own program IDs and share
 no code.
+
+## Benchmark
+
+Both implementations measure the same things the same way and write them in
+the same format, so their files compare line by line. No file is edited by
+hand:
+
+- [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and
+  [`xark/BENCHMARK.md`](xark/BENCHMARK.md) are written by each
+  implementation's `bench_cu` test: circuit sizes, constraint counts, key
+  loads and warm proving times, then per instruction the compute units
+  (whole instruction, proof verification, SPP CPI), warm circuit and SPP
+  proving times and the v1 transaction size.
+- [`BENCHMARK.md`](BENCHMARK.md) puts the two side by side with the delta,
+  written by `test-utils/compare-benchmarks.py` from the two files.
+
+Each bench profiles its program under Mollusk, so build the profiling program
+into `target/bench` first; a validator does not register the profiler
+syscall. Both read the shielded-pool program from
+`SHIELDED_POOL_PROGRAM_PATH` and use the prover at `ZOLANA_PROVER_URL`, or
+start one with `ZOLANA_CLI_BIN`. Each needs the shielded-pool program and
+prover of its own SDK: the xark ones from `xark/scripts/build-localnet.sh`,
+the gnark ones built from Zolana `6aba4a7` as in
+`test-utils/run-release-tests.sh`. From `escrow/xark/`, with the circuit
+artifacts compiled (see [Build](#build)):
+
+```bash
+cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 --sbf-out-dir target/bench -- --locked --features bpf-entrypoint,profile-program
+cargo test --release --manifest-path test/Cargo.toml --test bench_cu -- --ignored --nocapture
+```
+
+From `escrow/gnark/`, with the circuit keys generated into `build/gnark`:
+
+```bash
+for circuit in escrow withdraw; do
+    cargo run --release --manifest-path prover/Cargo.toml --bin timelock-escrow-prover-setup -- \
+        "$circuit" "$PWD/build/gnark/$circuit" --insecure-test-keys
+done
+CARGO_TARGET_DIR=target cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program
+cargo test --release --manifest-path test/Cargo.toml --test bench_cu -- --ignored --nocapture
+```
+
+Then, from the repository root:
+
+```bash
+python3 test-utils/compare-benchmarks.py escrow
+```
 
 ## xark
 
@@ -124,17 +170,4 @@ The prover downloads missing SPP keys to `ZOLANA_PROVER_KEYS_DIR`, or
 eval "$(scripts/build-localnet.sh | sed 's/^/export /')"
 mkdir -p ~/.config/zolana/proving-keys
 cargo test --release --locked -p timelock-escrow-test --test escrow
-```
-
-### Benchmark
-
-The benchmark profiles both instructions under Mollusk and writes
-[`xark/BENCHMARK.md`](xark/BENCHMARK.md). It reads the SPP binary from
-`SHIELDED_POOL_PROGRAM_PATH` and uses the prover at `ZOLANA_PROVER_URL`, or
-starts one with `ZOLANA_CLI_BIN`. Keep its profiled program in `target/bench`,
-because a validator does not register the profiler syscall.
-
-```bash
-cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program
-cargo test --release --locked -p timelock-escrow-test --test bench_cu -- --ignored --nocapture
 ```

@@ -28,6 +28,7 @@ spr-transaction = { workspace = true }
 # byte-compatible, so this must stay pinned to match the runtime.
 bincode = "1.3"
 num-bigint = { workspace = true }
+spr-gnark-ffi-prover = { workspace = true }
 spr-hasher = { workspace = true }
 spr-merkle-tree = { workspace = true }
 spr-program = { workspace = true }

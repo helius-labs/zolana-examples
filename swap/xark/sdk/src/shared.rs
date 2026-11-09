@@ -1,12 +1,11 @@
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use solana_address::Address;
-use spr_keypair::ShieldedAddress;
-use spr_program::{from_bytes, Field};
-use spr_transaction::{
-    instructions::transact::SppProofOutputUtxo,
-    utxo::{ProofInputUtxo, SppProofInputUtxo},
-};
-use swap_program::circuits;
+use spr_client::{ProofAuthority, SprIndexer, TransferInput};
+use spr_hasher::primitives::solana_owner_identity;
+use spr_interface::instruction::instruction_data::transact::TransactIxData;
+use spr_keypair::ShieldedKeypair;
+use spr_program::{Field, ProgramOwner};
+use spr_transaction::instructions::transact::SppProofInputs;
 
 use crate::err;
 
@@ -16,63 +15,63 @@ use crate::err;
 /// use the localnet's single default tree, whose raw id is 0.
 pub const INDEXED_TREE_ID: u16 = 0;
 
-/// A 32-byte hash, identity or blinding as a proof input.
-pub(crate) fn field(bytes: &[u8; 32]) -> Result<Field> {
-    from_bytes(bytes).map_err(err)
+pub(crate) fn field(bytes: [u8; 32]) -> Result<Field> {
+    spr_program::from_bytes(&bytes).map_err(err)
 }
 
-/// A UTXO hash preimage as the swap circuits take it.
-pub(crate) fn circuit_utxo(utxo: &ProofInputUtxo) -> Result<circuits::ProofInputUtxo> {
-    Ok(circuits::ProofInputUtxo {
-        domain: field(&utxo.domain)?,
-        tree_id: field(&utxo.tree_id)?,
-        owner_hash: field(&utxo.owner_hash)?,
-        asset: field(&utxo.asset)?,
-        amount: field(&utxo.amount)?,
-        blinding: field(&utxo.blinding)?,
-        data_hash: field(&utxo.data_hash)?,
-        ring_data_hash: field(&utxo.ring_data_hash)?,
-        ring_program_id: field(&utxo.ring_program_id)?,
-    })
+/// A Solana address's owner identity, `hash_bytes` of its tagged pubkey: the
+/// value the program computes from a signer and an order's `taker_pk_fe`.
+pub fn identity(address: &Address) -> Result<[u8; 32]> {
+    solana_owner_identity(address.as_array()).map_err(err)
 }
 
-pub fn input_sum(inputs: &[SppProofInputUtxo], asset: &Address) -> i128 {
-    inputs
-        .iter()
-        .filter(|input_utxo| &input_utxo.utxo.asset.asset == asset)
-        .map(|input_utxo| i128::from(input_utxo.utxo.amount))
-        .sum()
+/// Proves an SPP transaction through `indexer`, which serves the Merkle
+/// proofs, completing the inputs with `authority`, and checks that the SPP
+/// proof covers the transaction the swap proof covers.
+pub(crate) fn prove_transact(
+    indexer: &SprIndexer,
+    spp_proof_inputs: SppProofInputs,
+    authority: &dyn ProofAuthority,
+) -> Result<TransactIxData> {
+    let private_tx_hash = spp_proof_inputs
+        .padding_independent_private_tx_hash()
+        .map_err(err)?;
+    let spp = indexer
+        .prove_transact(spp_proof_inputs, authority)
+        .map_err(err)?;
+    ensure!(
+        spp.private_tx_hash == private_tx_hash,
+        "the SPP proof and the swap proof cover different transactions"
+    );
+    Ok(spp)
+}
+
+/// The take's proof authority: the order UTXO is owned by the order-authority
+/// PDA under the zero nullifier key, the taker input by the taker.
+pub struct TakeAuthority<'a>(pub &'a ShieldedKeypair);
+
+impl ProofAuthority for TakeAuthority<'_> {
+    fn complete_inputs(&self, inputs: &mut [TransferInput]) -> Result<(), spr_client::ClientError> {
+        for input in inputs.iter_mut() {
+            if input.nullifier_secret.is_some() {
+                continue;
+            }
+            let input = core::slice::from_mut(input);
+            // The zero key refuses an input whose nullifier it does not derive.
+            if ProgramOwner::nullifier_key()
+                .complete_inputs(input)
+                .is_err()
+            {
+                self.0.complete_inputs(input)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
-pub(crate) fn test_blinding(byte: u8) -> spr_transaction::utxo::Blinding {
+pub(crate) fn test_blinding(byte: u8) -> [u8; 32] {
     let mut blinding = [byte; 32];
     blinding[0] = 0;
     blinding
-}
-
-pub(crate) fn check_output_utxo(
-    label: &str,
-    output: &SppProofOutputUtxo,
-    mint: &Address,
-    amount: u64,
-) -> Result<ShieldedAddress> {
-    let owner = output
-        .owner_address
-        .ok_or_else(|| err(format!("{label} owner address missing")))?;
-    if &output.asset.asset != mint {
-        return Err(err(format!("{label} asset mismatch")));
-    }
-    if output.amount != amount {
-        return Err(err(format!("{label} amount mismatch")));
-    }
-    if output.data_hash.is_some()
-        || output.ring_data_hash.is_some()
-        || output.ring_program_id.is_some()
-    {
-        return Err(err(format!(
-            "{label} must not carry data or ring commitments"
-        )));
-    }
-    Ok(owner)
 }

@@ -35,6 +35,22 @@ pub struct MakeIxData {
 
 const ORDER_OUTPUT_INDEX: usize = 1;
 
+/// Verifies the make proof. Its only public input is the SPP private tx hash,
+/// so there is no public-input hashing.
+#[inline(never)]
+#[profile]
+pub fn verify_make_proof(proof: &MakeProof, private_tx_hash: [u8; 32]) -> ProgramResult {
+    verify_groth16(
+        CompressedGroth16Proof {
+            a: &proof.proof_a,
+            b: &proof.proof_b,
+            c: &proof.proof_c,
+        },
+        private_tx_hash,
+        &make::VERIFYINGKEY,
+    )
+}
+
 #[inline(never)]
 #[profile]
 pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -46,15 +62,7 @@ pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
         mut transact,
     } = wincode::deserialize_exact(data).map_err(|_| SwapError::InvalidInstructionData)?;
 
-    verify_groth16(
-        CompressedGroth16Proof {
-            a: &proof.proof_a,
-            b: &proof.proof_b,
-            c: &proof.proof_c,
-        },
-        transact.private_tx_hash,
-        &make::VERIFYINGKEY,
-    )?;
+    verify_make_proof(&proof, transact.private_tx_hash)?;
     let order_utxo_hash = transact
         .outputs
         .get(ORDER_OUTPUT_INDEX)

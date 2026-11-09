@@ -85,7 +85,6 @@ impl MakeProofInputParams {
 
 #[cfg(test)]
 mod tests {
-    use solana_address::Address;
     use solana_keypair::Keypair;
     use spr_keypair::shielded::ShieldedKeypair;
     use spr_transaction::SOL_MINT;
@@ -114,7 +113,7 @@ mod tests {
                 destination_mint: SOL_MINT,
                 destination_amount: 250_000,
                 destination,
-                taker: Address::default(),
+                taker: None,
                 expiry: 1_700_000_000,
             },
             blinding: crate::shared::test_blinding(11),

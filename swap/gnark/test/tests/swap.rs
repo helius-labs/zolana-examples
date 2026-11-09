@@ -77,7 +77,7 @@ fn make_and_take_swap_inline() -> Result<()> {
             destination_amount: DESTINATION_AMOUNT,
             // The swap settlement goes to the maker's shielded address.
             destination: maker.keypair.shielded_address()?,
-            taker: taker_authorization_address,
+            taker: Some(taker_authorization_address),
             expiry: EXPIRY,
         };
 

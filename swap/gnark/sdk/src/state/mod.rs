@@ -1,3 +1,3 @@
 pub mod order;
 
-pub use order::{DataHash, OrderTerms, OrderUtxo, PlainTextData};
+pub use order::{taker_pk_fe, DataHash, OrderTerms, OrderUtxo, PlainTextData};

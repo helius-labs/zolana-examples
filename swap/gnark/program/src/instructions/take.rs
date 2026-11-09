@@ -47,6 +47,21 @@ impl TakePublicInput<'_> {
     }
 }
 
+/// Verifies the take proof against the Poseidon hash of its public inputs.
+#[inline(never)]
+#[profile]
+pub fn verify_take_proof(proof: &TakeProof, public_input: TakePublicInput) -> ProgramResult {
+    verify_groth16(
+        CompressedGroth16Proof {
+            a: &proof.proof_a,
+            b: &proof.proof_b,
+            c: &proof.proof_c,
+        },
+        public_input.hash()?,
+        &crate::verifying_keys::take::VERIFYINGKEY,
+    )
+}
+
 #[inline(never)]
 #[profile]
 pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -59,12 +74,8 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
     let clock = Clock::get()?;
     check_within_window(clock.unix_timestamp, transact.expiry_unix_ts)?;
 
-    verify_groth16(
-        CompressedGroth16Proof {
-            a: &proof.proof_a,
-            b: &proof.proof_b,
-            c: &proof.proof_c,
-        },
+    verify_take_proof(
+        &proof,
         TakePublicInput {
             private_tx_hash: &transact.private_tx_hash,
             expiry: transact.expiry_unix_ts,
@@ -73,9 +84,7 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
                 .first()
                 .ok_or(SwapError::InvalidInstructionData)?
                 .nullifier_hash,
-        }
-        .hash()?,
-        &crate::verifying_keys::take::VERIFYINGKEY,
+        },
     )?;
 
     let transact_bytes = transact

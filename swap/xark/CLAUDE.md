@@ -4,7 +4,8 @@ A ZK program example: a Pinocchio program that verifies a Groth16 proof of its
 rules and CPIs SPP `transact`; it stores no state and owns no accounts.
 [`../swap_program.md`](../swap_program.md) is the source of truth for the
 privacy model, instructions and circuits, shared with the gnark
-implementation in `../gnark/`. Build and test commands are in
+implementation in `../gnark/`. Build and test commands, and how this
+implementation's circuits and public inputs are formed, are in
 [`../README.md`](../README.md).
 
 ## What Goes Where
@@ -14,28 +15,36 @@ implementation in `../gnark/`. Build and test commands are in
   (`src/instructions/`), the generated verifiers (`src/verifier/`), tags,
   errors and instruction data. No separate interface or prover crate; the sdk
   re-exports from here.
-- `sdk`: client library. Order state, instruction builders, proof input
-  builders (`to_proof_inputs()` returns the circuit struct), discovery, and
+- `sdk`: client library. Order state (`state/order.rs`), transaction builders
+  (`instructions/<ix>/transaction.rs`: `<Ix>TransactionParams::build`, then
+  `<Ix>Transaction::prove`), instruction builders, discovery (`index/`), and
   `proof.rs`, which loads the checksum-pinned Xark artifacts and proves.
   Circuit tests live in `sdk/tests/` (one `circuits` test binary).
-- `test`: localnet end-to-end tests and the mollusk CU benchmark that writes
+- `test`: localnet end-to-end tests and the mollusk benchmark that writes
   `BENCHMARK.md`.
 
 ## Patterns
 
-- Circuits use `#[input]`, `#[derive(ZkProgram)]` with
-  `#[zk_program(raw_client)]` and `#[derive(PublicInputs)]`. They witness
-  every UTXO hash preimage of the SPP transaction and recompute its private
-  transaction hash, a 1:1 port of the gnark circuits. `execute` returns a
-  `Commitment` whose public hash is `Poseidon(public fields..., private_tx_hash)`;
-  the generated verifier recomputes it on chain.
+- Circuits use the spr program SDK's circuit API: `#[input]`,
+  `#[derive(ZkProgram)]`, `#[derive(ClientInputs)]` private inputs with a
+  `TxContext`, `#[derive(PublicInputs)]` public inputs, and `execute` returning
+  the `CheckedTransaction` of a `ConfidentialTransaction`. Never hash UTXOs, the
+  private transaction hash or output blindings by hand; the SDK does.
+- `OrderTerms` is the order UTXO's state (`DataUtxo<OrderTerms>`): manual
+  `DataHash` (the order terms hash) and `EncryptionCodec` (the payload the
+  taker and maker decode).
+- Transaction builders fill the generated `<Ix>Client` and call `prepare`.
+  make and cancel use a random blinding seed; take sets
+  `blinding_seed: Some(take_blinding_seed(order blinding))`, which the circuit
+  enforces, so the maker derives its payout from the order opening.
 - The program is gated with `not(feature = "build-circuits")` and `not(xark)`:
   `zolana zk compile` builds the circuits without the instructions and the
   verifiers they call.
-- Instructions: decode, check the Clock window, verify with
-  `verifier::<circuit>::Verifier`, then CPI SPP with the order-authority PDA
-  flipped to a signer. `VerifyError::PublicInputs` maps to `HashingFailed`,
-  `VerifyError::Proof` to `ProofVerificationFailed`.
+- Instructions: decode, check the Clock window, verify in
+  `verify_<ix>_proof` (profiled) with `verifier::<circuit>::Verifier`, then
+  CPI SPP with the order-authority PDA flipped to a signer.
+  `VerifyError::PublicInputs` maps to `HashingFailed`, `VerifyError::Proof`
+  to `ProofVerificationFailed`.
 - Never index slices with `[i]`; use `.get()`.
 
 ## Key Artifacts
@@ -45,3 +54,5 @@ implementation in `../gnark/`. Build and test commands are in
   deterministic test keys, UNSAFE for production.
 - `program/src/verifier/*.rs`: generated, committed verifiers; never edit by
   hand. After a circuit change, regenerate them and the checksums together.
+- `target/deploy/swap_program.so`: the mollusk program tests load it, so
+  rebuild it with `cargo build-sbf` after a program change.

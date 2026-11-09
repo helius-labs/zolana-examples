@@ -3,38 +3,30 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Result};
 use borsh::BorshDeserialize;
 use solana_address::Address;
-use solana_pubkey::Pubkey;
 use spr_client::{user_registry::resolve_registered_address, Rpc};
-use spr_keypair::{ShieldedAddress, ShieldedKeypair, X25519Pubkey};
+use spr_keypair::{ShieldedAddress, ShieldedKeypair};
 use spr_transaction::{
-    serialization::confidential::Confidential, utxo::Blinding, AssetRegistry, DecodeCx,
-    ShieldedTransaction, UtxoSerialization,
+    serialization::confidential::Confidential, AssetRegistry, DecodeCx, ShieldedTransaction,
+    UtxoSerialization,
 };
 
 use super::{
     poll::{collect_tagged, index_until},
-    scan::{parse_order_data, resolve_mint, unified_slots},
+    scan::{parse_order_terms, resolve_mint, unified_slots},
 };
-use crate::{
-    err,
-    shared::INDEXED_TREE_ID,
-    state::{OrderTerms, OrderUtxo, PlainTextData},
-    MarkerData,
-};
+use crate::{err, shared::INDEXED_TREE_ID, state::OrderUtxo, MarkerData};
 
 #[derive(Debug)]
 pub struct TakerOrder {
     pub order_utxo: OrderUtxo,
-    pub maker_pubkey: Pubkey,
+    pub maker_pubkey: Address,
 }
 
+/// An order decrypted from a make transaction, before the maker it names is
+/// checked against the user registry.
 pub struct TakerOrderCandidate {
-    pub source_amount: u64,
-    pub source_mint: spr_transaction::Mint,
-    pub destination_mint: Address,
-    pub order_utxo_blinding: Blinding,
-    pub order_data: PlainTextData,
-    pub maker_pubkey: Pubkey,
+    pub order_utxo: OrderUtxo,
+    pub maker_pubkey: Address,
     pub order_utxo_hash: [u8; 32],
 }
 
@@ -62,48 +54,32 @@ pub fn scan_taker(
         bail!("marker without a unified order ciphertext in the same transaction");
     };
     let cx = DecodeCx::for_slot(&keypair.viewing_key, tx, slot_index);
-    let order_utxo_plaintext = Confidential::decode(&body, &cx).map_err(err)?;
-    let order_data = parse_order_data(&order_utxo_plaintext.data.records)?;
+    let plaintext = Confidential::decode(&body, &cx).map_err(err)?;
     Ok(Some(TakerOrderCandidate {
-        source_amount: order_utxo_plaintext.amount,
-        source_mint: resolve_mint(registry, order_utxo_plaintext.asset_id)?,
-        destination_mint: resolve_mint(registry, order_data.destination_asset_id)?.asset,
-        order_utxo_blinding: order_utxo_plaintext.blinding,
-        order_data,
-        maker_pubkey: Pubkey::new_from_array(marker.maker_pubkey),
+        order_utxo: OrderUtxo {
+            terms: parse_order_terms(&plaintext.data.records, registry)?,
+            blinding: plaintext.blinding,
+            source_mint: resolve_mint(registry, plaintext.asset_id)?,
+            source_amount: plaintext.amount,
+        },
+        maker_pubkey: Address::new_from_array(marker.maker_pubkey),
         order_utxo_hash: marker.order_utxo_hash,
     }))
 }
 
 impl TakerOrderCandidate {
-    pub fn into_order(
-        self,
-        destination: ShieldedAddress,
-        taker_viewing_pubkey: X25519Pubkey,
-    ) -> Result<TakerOrder> {
-        let terms = OrderTerms {
-            destination_mint: self.destination_mint,
-            destination_amount: self.order_data.destination_amount,
-            destination,
-            taker: self.order_data.taker,
-            expiry: self.order_data.expiry,
-        };
-        let order_utxo = OrderUtxo {
-            terms,
-            blinding: self.order_utxo_blinding,
-            source_mint: self.source_mint,
-            source_amount: self.source_amount,
-            destination_asset_id: self.order_data.destination_asset_id,
-        };
-        let order_utxo_hash = order_utxo
-            .output_utxo(taker_viewing_pubkey)?
-            .hash(INDEXED_TREE_ID)
-            .map_err(err)?;
-        if order_utxo_hash != self.order_utxo_hash {
+    /// Accepts the order if the maker it names is `registered_maker`, the
+    /// address the user registry holds for the marker's maker pubkey, and the
+    /// decrypted opening recomputes the order UTXO hash the marker names.
+    pub fn into_order(self, registered_maker: ShieldedAddress) -> Result<TakerOrder> {
+        if self.order_utxo.terms.maker != registered_maker {
+            bail!("the order names a maker other than the registered marker signer");
+        }
+        if self.order_utxo.hash(INDEXED_TREE_ID)? != self.order_utxo_hash {
             bail!("reconstructed order utxo hash does not match the committed leaf");
         }
         Ok(TakerOrder {
-            order_utxo,
+            order_utxo: self.order_utxo,
             maker_pubkey: self.maker_pubkey,
         })
     }
@@ -116,17 +92,13 @@ pub fn index_taker<I: Rpc, R: Rpc>(
     rpc: &R,
     timeout: Duration,
 ) -> Result<Vec<TakerOrder>> {
-    let taker_viewing_pubkey = keypair.viewing_pubkey();
     index_until(timeout, "taker orders", || {
         collect_tagged(keypair, indexer, |tx| {
             let Some(candidate) = scan_taker(tx, keypair, registry)? else {
                 return Ok(None);
             };
-            let maker_resolved_address =
-                resolve_registered_address(rpc, candidate.maker_pubkey).map_err(err)?;
-            candidate
-                .into_order(maker_resolved_address.address, taker_viewing_pubkey)
-                .map(Some)
+            let maker = resolve_registered_address(rpc, candidate.maker_pubkey).map_err(err)?;
+            candidate.into_order(maker.address).map(Some)
         })
     })
 }
@@ -144,12 +116,7 @@ mod tests {
         let candidate = scan_taker(&fixture.tx, &fixture.taker_keypair, &fixture.registry)
             .expect("scan")
             .expect("order candidate");
-        let order = candidate
-            .into_order(
-                fixture.maker_address,
-                fixture.taker_keypair.viewing_pubkey(),
-            )
-            .expect("order");
+        let order = candidate.into_order(fixture.maker_address).expect("order");
         assert_eq!(
             (order.order_utxo, order.maker_pubkey),
             (fixture.order_utxo, fixture.maker_pubkey)
@@ -167,8 +134,21 @@ mod tests {
             .shielded_address()
             .expect("taker address");
         let error = candidate
-            .into_order(taker_address, fixture.taker_keypair.viewing_pubkey())
-            .expect_err("wrong maker address must fail the hash check");
+            .into_order(taker_address)
+            .expect_err("a maker other than the registered one must fail");
+        assert!(error.to_string().contains("other than the registered"));
+    }
+
+    #[test]
+    fn into_order_rejects_a_wrong_order_utxo_hash() {
+        let fixture = order_fixture();
+        let mut candidate = scan_taker(&fixture.tx, &fixture.taker_keypair, &fixture.registry)
+            .expect("scan")
+            .expect("order candidate");
+        candidate.order_utxo.source_amount += 1;
+        let error = candidate
+            .into_order(fixture.maker_address)
+            .expect_err("another opening must fail the hash check");
         assert!(error
             .to_string()
             .contains("does not match the committed leaf"));

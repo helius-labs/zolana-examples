@@ -29,6 +29,7 @@ spr-keypair = { workspace = true }
 spr-transaction = { workspace = true }
 
 [dev-dependencies]
+groth16-solana = { workspace = true }
 spr-test-utils = { workspace = true }
 solana-keypair = { workspace = true }
 solana-signature = { workspace = true }

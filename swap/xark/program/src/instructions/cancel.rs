@@ -59,17 +59,12 @@ pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
     check_after_window(clock.unix_timestamp, order_expiry)?;
 
     // 4. Verify the cancel proof.
-    cancel::Verifier {
-        proof: &proof,
-        public_inputs: cancel::PublicInputs {
-            expiry: order_expiry,
-            maker_owner_pk_field,
-        },
-        private_tx_hash: &transact.private_tx_hash,
-        transfers: &[],
-    }
-    .verify()
-    .map_err(SwapError::from)?;
+    verify_cancel_proof(
+        &proof,
+        order_expiry,
+        maker_owner_pk_field,
+        &transact.private_tx_hash,
+    )?;
 
     // 5. Invoke SPP with the order-authority PDA signer.
     let transact_bytes = transact
@@ -77,4 +72,27 @@ pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
         .map_err(|_| SwapError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
     cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+}
+
+/// Hashes the cancel proof's public inputs and verifies the proof.
+#[inline(never)]
+#[profile]
+fn verify_cancel_proof(
+    proof: &CancelProof,
+    expiry: u64,
+    maker_owner_pk_field: [u8; 32],
+    private_tx_hash: &[u8; 32],
+) -> ProgramResult {
+    cancel::Verifier {
+        proof,
+        public_inputs: cancel::PublicInputs {
+            expiry,
+            maker_owner_pk_field,
+        },
+        private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
+    .map_err(SwapError::from)?;
+    Ok(())
 }

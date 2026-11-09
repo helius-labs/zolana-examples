@@ -1,5 +1,5 @@
 mod instruction;
-mod proof;
+mod transaction;
 
 pub use instruction::Cancel;
-pub use proof::CancelProofInputParams;
+pub use transaction::{CancelTransaction, CancelTransactionParams, SOURCE_OUTPUT_SLOT};

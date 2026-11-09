@@ -1,5 +1,7 @@
-//! CU benchmark of the timelock escrow escrow/withdraw instructions, replayed
-//! under mollusk.
+//! Benchmark of the timelock escrow escrow/withdraw instructions in the shared
+//! benchmark format (`bench_report`): CU replayed under mollusk, warm proving
+//! times, key loads, circuit sizes and transaction sizes. It writes
+//! `BENCHMARK.md`; never edit that file by hand.
 //!
 //! The profiled program calls a profiler syscall that a validator does not
 //! register, so it is built into its own directory, never `target/deploy`
@@ -7,10 +9,10 @@
 //!
 //! ```sh
 //! cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 \
-//!     --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program
+//!     --sbf-out-dir target/bench -- --locked --features bpf-entrypoint,profile-program
 //! SHIELDED_POOL_PROGRAM_PATH=/path/to/shielded_pool_program.so \
 //! ZOLANA_CLI_BIN=/path/to/zolana \
-//!     cargo test --release --locked -p timelock-escrow-test --test bench_cu -- --ignored --nocapture
+//!     cargo test --release --manifest-path test/Cargo.toml --test bench_cu -- --ignored --nocapture
 //! ```
 //!
 //! - The shielded pool program is read from `SHIELDED_POOL_PROGRAM_PATH`,
@@ -20,22 +22,27 @@
 //!   starts one with the keys in `ZOLANA_PROVER_KEYS_DIR`, else
 //!   `~/.config/zolana/proving-keys`.
 //! - The escrow circuit proofs come from the program prover with the keys in
-//!   `target/zk/timelock-escrow-program`.
+//!   `target/zk/timelock-escrow-program`. Each cold key load runs in a child
+//!   process of the bench (`key_load_probe`).
 //!
 //! The SPP tree account is built directly: the program's tree init, then the
 //! input UTXO hashes appended. The SPP proofs prove against local copies of
 //! the state tree and the (empty) nullifier tree, whose roots the tree
 //! account holds.
+#[path = "../../../../test-utils/bench_report.rs"]
+mod bench_report;
+
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
-use light_program_profiler::{
-    mollusk::{register_profiling_syscalls, take_profiling_entries},
-    report::{CuBenchmark, ReadmeConfig, SectionTable},
+use bench_report::{
+    cold_key_load, proof_bytes, time_key_load, warm_median, CircuitRow, Implementation,
+    InstructionRow, Report,
 };
+use light_program_profiler::mollusk::{register_profiling_syscalls, take_profiling_entries};
 use mollusk_svm::{program::loader_keys::LOADER_V3, result::Check, Mollusk};
 use num_bigint::BigUint;
 use solana_account::Account;
@@ -58,7 +65,7 @@ use spr_interface::{
 };
 use spr_keypair::{random_blinding, NullifierKey, ShieldedKeypair};
 use spr_merkle_tree::{indexed::IndexedMerkleTree, MerkleTree};
-use spr_program::ProgramProofInputs;
+use spr_program::{proof::compressed_proof, CompressedProof, ProgramProofInputs};
 use spr_test_utils::{transact::nullifier_tree, utxo::dummy_proofs};
 use spr_transaction::{instructions::transact::SppProofInputs, Mint, SppProofOutputUtxo};
 use spr_tree::TreeAccount;
@@ -89,10 +96,10 @@ const LOCK_AMOUNT: u64 = 400_000;
 const UNLOCK_TIMESTAMP: u64 = 1_000_000;
 
 #[test]
-#[ignore = "CU benchmark; slow, needs the profiling SBF build and a prover. See the module docs"]
+#[ignore = "benchmark; slow, needs the profiling SBF build and a prover. See the module docs"]
 /// 1. Configure the program runtime.
 /// 2. Start the prover and check the program keys.
-/// 3. Measure both instructions and write the report.
+/// 3. Measure both instructions and both circuits, and write the report.
 fn bench_cu_escrow() {
     // 1. Configure the program runtime.
     env::set_var("SBF_OUT_DIR", PROFILING_SBF_DIR);
@@ -109,16 +116,6 @@ fn bench_cu_escrow() {
     mollusk.add_program(&escrow_id, "timelock_escrow_program");
     mollusk.add_program_with_loader_and_elf(&spp_id, &LOADER_V3, &shielded_pool_elf());
 
-    let report = CuBenchmark::new(ReadmeConfig {
-        title: "Timelock Escrow (Xark) -- CU Benchmark".into(),
-        description: "1. Measure the timelock escrow escrow/withdraw instructions under Mollusk using the shielded-pool program built from Zolana af9d32923 and the Xark-backed SDK. Each instruction verifies its generated program proof, then CPIs SPP `transact` (the `cpi_spp_transact_signed` row). Only the timelock escrow program is profiled; the shielded-pool program is built plain, so the CU its CPI consumes is charged to the `cpi_spp_transact_signed` row as a black box.\n\n2. Record SPP and escrow circuit proving times, consumed compute units, and serialized v1 transaction sizes. Escrow uses 1x2 (change and escrow UTXO); withdraw uses 1x2 with compact output padding.\n\n3. Report compiled circuit constraints, checksummed Xark proving-key and verifying-key sizes. Proof times are warm, in the release profile. An escrow circuit proof time is the median of five Xark proofs after one warm-up proof, from one checked circuit copy. An SPP proof time is one sample after one warm-up proof on the running prover server. Build the profiling program first with cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program.".into(),
-        output_path: OUTPUT_PATH.into(),
-        regenerate_command: Some(
-            "cargo test --release --locked -p timelock-escrow-test --test bench_cu -- --ignored --nocapture".into(),
-        ),
-        ..Default::default()
-    });
-
     // 2. Start the prover and check the program keys.
     start_prover();
     for circuit in CircuitId::ALL {
@@ -129,16 +126,20 @@ fn bench_cu_escrow() {
         mollusk,
         tree: spr_interface::pda::tree(BENCH_TREE_ID),
         prover: ProverClient::local(),
-        report,
-        circuit_proof_times: Vec::new(),
+        circuits: Vec::new(),
+        instructions: Vec::new(),
     };
-    // 3. Measure both instructions and write the report.
+    // 3. Measure both instructions and both circuits, and write the report.
     bench_escrow(&mut bench);
     bench_withdraw(&mut bench);
-    let circuits = circuits_table(&bench.circuit_proof_times);
-    bench.report.add_table("circuits", circuits);
 
-    bench.report.generate().expect("write BENCHMARK.md");
+    Report {
+        example: "Timelock Escrow",
+        implementation: Implementation::Xark,
+        circuits: bench.circuits,
+        instructions: bench.instructions,
+    }
+    .write(OUTPUT_PATH);
 }
 
 fn system_owned_account(lamports: u64) -> Account {
@@ -276,8 +277,8 @@ fn assemble_accounts(ix: &Instruction, fixtures: &[(Address, Account)]) -> Vec<(
         })
         .collect()
 }
-
-/// Prove the PDA transaction against fixture trees after warming the prover.
+/// Prove the PDA transaction against fixture trees: one warm-up proof, then
+/// the median time of the timed proofs on the running prover server.
 fn prove_spp(bench: &Bench, proof_inputs: SppProofInputs) -> (Account, TransactIxData, Duration) {
     let private_tx_hash = proof_inputs
         .padding_independent_private_tx_hash()
@@ -285,40 +286,69 @@ fn prove_spp(bench: &Bench, proof_inputs: SppProofInputs) -> (Account, TransactI
     let (tree_account, spend_proofs) = spend_fixture(&bench.tree, &proof_inputs);
     let dummies = dummy_proofs(&proof_inputs);
     let key = NullifierKey::from_secret([0; 31]);
-    bench
-        .prover
-        .prove_transact(proof_inputs.clone(), &spend_proofs, &dummies, &key)
-        .expect("warm prove transact");
-    let start = Instant::now();
-    let transact = bench
-        .prover
-        .prove_transact(proof_inputs, &spend_proofs, &dummies, &key)
-        .expect("prove transact");
-    let elapsed = start.elapsed();
+    let prove = || {
+        bench
+            .prover
+            .prove_transact(proof_inputs.clone(), &spend_proofs, &dummies, &key)
+            .expect("prove transact")
+    };
+    let (transact, warm) = warm_median(prove);
     assert_eq!(transact.private_tx_hash, private_tx_hash);
-    (tree_account, transact, elapsed)
+    (tree_account, transact, warm)
 }
 
-/// Warm escrow circuit proofs sampled per instruction.
-const WARM_PROOF_SAMPLES: usize = 5;
-
-/// Median time of `WARM_PROOF_SAMPLES` Xark proofs after one warm-up proof,
-/// all from one checked circuit copy.
-fn warm_proof_time(circuit: CircuitId, inputs: &ProgramProofInputs) -> Duration {
+/// Measure `circuit` on `inputs`: its cold key loads, its warm proof time
+/// from one loaded checked circuit copy, and its sizes. The last proof,
+/// checked against the verifying key, is returned for the instruction.
+fn measure_circuit(
+    circuit: CircuitId,
+    inputs: &ProgramProofInputs,
+) -> (CompressedProof, CircuitRow) {
+    let (key_load, _) = cold_key_load(circuit.name());
     let (_private, loaded) = proof::checked_circuit(circuit).expect("checked circuit");
-    loaded.prove(inputs.clone()).expect("warm-up circuit proof");
-    let mut samples: Vec<Duration> = (0..WARM_PROOF_SAMPLES)
-        .map(|_| {
-            let start = Instant::now();
-            loaded.prove(inputs.clone()).expect("circuit proof");
-            start.elapsed()
-        })
-        .collect();
-    samples.sort_unstable();
-    samples
-        .get(WARM_PROOF_SAMPLES / 2)
-        .copied()
-        .expect("warm proof samples")
+    let (proven, warm_proof) = warm_median(|| loaded.prove(inputs.clone()).expect("circuit proof"));
+    let proof = compressed_proof(&proven.proof).expect("compressed proof");
+    let verifying_key = proof::verifying_key(circuit).expect("verifying key");
+    let public_hash = spr_program::from_decimal(
+        inputs
+            .encoded()
+            .get("public_hash")
+            .expect("public hash input"),
+    )
+    .expect("public hash");
+    spr_program::verifier::verify_groth16(
+        &proof,
+        spr_program::to_bytes(&public_hash),
+        &verifying_key.as_key(),
+    )
+    .expect("valid circuit proof");
+    let keys_dir = proof::keys_dir().join(circuit.name());
+    let row = CircuitRow {
+        name: circuit.name().into(),
+        constraints: u64::try_from(proof::constraint_count(circuit).expect("constraint count"))
+            .expect("fits u64"),
+        public_inputs: u64::try_from(verifying_key.as_key().nr_pubinputs).expect("fits u64"),
+        proving_key_bytes: file_size(&keys_dir.join("pk.bin")),
+        verifying_key_bytes: file_size(&keys_dir.join("vk.bin")),
+        proof_bytes: proof_bytes(&proof.a, &proof.b, &proof.c),
+        key_load,
+        warm_proof,
+    };
+    (proof, row)
+}
+
+/// The child-process half of the cold key load: one load of the checked
+/// bytecode and proving key of the circuit `cold_key_load` names.
+#[test]
+#[ignore = "child process of bench_cu_escrow"]
+fn key_load_probe() {
+    time_key_load(|name| {
+        let circuit = CircuitId::ALL
+            .into_iter()
+            .find(|circuit| circuit.name() == name)
+            .expect("known circuit");
+        proof::checked_circuit(circuit).expect("load checked circuit")
+    });
 }
 
 /// Start the shared prover using the configured keys directory.
@@ -343,77 +373,16 @@ fn shielded_pool_elf() -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }
 
-fn proving_time_table(spp: Duration, circuit: Duration) -> SectionTable {
-    SectionTable {
-        title: "Proving Time".into(),
-        headers: vec![
-            "Warm SPP proof".into(),
-            "Warm escrow circuit proof".into(),
-            "Total".into(),
-        ],
-        rows: vec![vec![
-            format!("{} ms", spp.as_millis()),
-            format!("{} ms", circuit.as_millis()),
-            format!("{} ms", (spp + circuit).as_millis()),
-        ]],
-    }
-}
-
 fn file_size(path: &Path) -> u64 {
     fs::metadata(path)
         .unwrap_or_else(|e| panic!("stat {}: {e}", path.display()))
         .len()
 }
 
-/// Bytes in decimal units: `716 B`, `1.33 MB`.
-fn format_size(bytes: u64) -> String {
-    if bytes < 1_000_000 {
-        format!("{bytes} B")
-    } else {
-        format!("{:.2} MB", bytes as f64 / 1_000_000.0)
-    }
-}
-
-/// Each circuit's constraint count, key sizes and warm proof time.
-fn circuits_table(proof_times: &[(CircuitId, Duration)]) -> SectionTable {
-    let rows = CircuitId::ALL
-        .iter()
-        .map(|&circuit| {
-            let name = circuit.name();
-            let count = proof::constraint_count(circuit)
-                .expect("constraint count")
-                .to_string();
-            let keys_dir = proof::keys_dir();
-            let proof_time = proof_times
-                .iter()
-                .find(|(proven, _)| *proven == circuit)
-                .map(|(_, elapsed)| elapsed)
-                .unwrap_or_else(|| panic!("no proof time for {name}"));
-            vec![
-                name.into(),
-                count,
-                format_size(file_size(&keys_dir.join(name).join("pk.bin"))),
-                format_size(file_size(&keys_dir.join(name).join("vk.bin"))),
-                format!("{} ms", proof_time.as_millis()),
-            ]
-        })
-        .collect();
-    SectionTable {
-        title: String::new(),
-        headers: vec![
-            "Circuit".into(),
-            "Constraints".into(),
-            "Proving key".into(),
-            "Verifying key".into(),
-            "Warm proof time".into(),
-        ],
-        rows,
-    }
-}
-
-/// The version 1 transaction this instruction is sent as. Its compute
-/// ceilings live in the message header. Panics if it exceeds 4096 bytes.
-fn tx_size_table(ix: &Instruction, payer: &Address) -> SectionTable {
+/// The serialized size of the version 1 transaction this instruction is sent
+/// as. Its compute ceilings live in the message header. Panics if it exceeds
+/// 4096 bytes.
+fn v1_tx_bytes(ix: &Instruction, payer: &Address) -> u64 {
     let v1 = transaction_size(
         payer,
         std::slice::from_ref(ix),
@@ -425,16 +394,7 @@ fn tx_size_table(ix: &Instruction, payer: &Address) -> SectionTable {
         v1 <= V1_TX_LIMIT,
         "v1 transaction of {v1} bytes exceeds {V1_TX_LIMIT}"
     );
-
-    SectionTable {
-        title: "Transaction Size".into(),
-        headers: vec!["Instruction Data".into(), "Accounts".into(), "v1 Tx".into()],
-        rows: vec![vec![
-            format!("{} bytes", ix.data.len()),
-            ix.accounts.len().to_string(),
-            format!("{} bytes", v1),
-        ]],
-    }
+    u64::try_from(v1).expect("fits u64")
 }
 
 /// A creator whose Solana key pays the transactions.
@@ -450,26 +410,25 @@ fn terms(creator: &ShieldedKeypair) -> EscrowTerms {
         unlock_timestamp: UNLOCK_TIMESTAMP,
     }
 }
-
 struct Bench {
     mollusk: Mollusk,
     tree: Address,
     prover: ProverClient,
-    report: CuBenchmark,
-    /// The warm circuit proof time of each circuit.
-    circuit_proof_times: Vec<(CircuitId, Duration)>,
+    circuits: Vec<CircuitRow>,
+    instructions: Vec<InstructionRow>,
 }
 
 impl Bench {
-    /// Check the instruction fits its budget and record its measurements.
+    /// Check the instruction succeeds within its budget and record its
+    /// measurements and its circuit's.
     fn record(
         &mut self,
         name: &str,
-        circuit: CircuitId,
+        circuit: CircuitRow,
         ix: &Instruction,
         payer: &Address,
         tree_account: Account,
-        (spp, circuit_dur): (Duration, Duration),
+        warm_spp_proof: Duration,
     ) {
         let fixtures = vec![
             (self.tree, tree_account),
@@ -480,11 +439,16 @@ impl Bench {
             .process_and_validate_instruction(ix, &accounts, &[Check::success()]);
         let entries = take_profiling_entries();
         assert!(!entries.is_empty(), "no profiling entries for '{name}'");
-        self.report.add_from_entries(name, entries);
-        self.report
-            .add_table(name, proving_time_table(spp, circuit_dur));
-        self.report.add_table(name, tx_size_table(ix, payer));
-        self.circuit_proof_times.push((circuit, circuit_dur));
+        self.instructions.push(InstructionRow {
+            name: name.into(),
+            circuit: circuit.name.clone(),
+            entries,
+            warm_spp_proof,
+            instruction_data_bytes: u64::try_from(ix.data.len()).expect("fits u64"),
+            accounts: u64::try_from(ix.accounts.len()).expect("fits u64"),
+            v1_tx_bytes: v1_tx_bytes(ix, payer),
+        });
+        self.circuits.push(circuit);
     }
 }
 
@@ -518,9 +482,7 @@ fn bench_escrow(bench: &mut Bench) {
     .build(&creator)
     .expect("build escrow");
     let (tree_account, spp_proof, spp_dur) = prove_spp(bench, transaction.spp_proof_inputs.clone());
-    let circuit_dur = warm_proof_time(CircuitId::Escrow, &transaction.proof_inputs);
-    let escrow_proof =
-        proof::prove(CircuitId::Escrow, &transaction.proof_inputs).expect("escrow prove");
+    let (escrow_proof, circuit) = measure_circuit(CircuitId::Escrow, &transaction.proof_inputs);
 
     let ix = Escrow {
         payer: payer.pubkey(),
@@ -533,11 +495,11 @@ fn bench_escrow(bench: &mut Bench) {
 
     bench.record(
         "escrow",
-        CircuitId::Escrow,
+        circuit,
         &ix,
         &payer.pubkey(),
         tree_account,
-        (spp_dur, circuit_dur),
+        spp_dur,
     );
 }
 
@@ -558,9 +520,7 @@ fn bench_withdraw(bench: &mut Bench) {
     .build(&creator)
     .expect("build withdraw");
     let (tree_account, spp_proof, spp_dur) = prove_spp(bench, transaction.spp_proof_inputs.clone());
-    let circuit_dur = warm_proof_time(CircuitId::Withdraw, &transaction.proof_inputs);
-    let withdraw_proof =
-        proof::prove(CircuitId::Withdraw, &transaction.proof_inputs).expect("withdraw prove");
+    let (withdraw_proof, circuit) = measure_circuit(CircuitId::Withdraw, &transaction.proof_inputs);
 
     let ix = Withdraw {
         creator: payer.pubkey(),
@@ -575,10 +535,10 @@ fn bench_withdraw(bench: &mut Bench) {
 
     bench.record(
         "withdraw",
-        CircuitId::Withdraw,
+        circuit,
         &ix,
         &payer.pubkey(),
         tree_account,
-        (spp_dur, circuit_dur),
+        spp_dur,
     );
 }

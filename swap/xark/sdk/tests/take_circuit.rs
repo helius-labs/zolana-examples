@@ -1,107 +1,25 @@
-use solana_address::Address;
-use spr_keypair::ShieldedKeypair;
-use spr_program::{to_bytes, CompressedProof};
-use spr_test_utils::utxo::assign_output_blindings;
-use spr_transaction::utxo::{
-    derive_output_blinding_seed, derive_private_tx_blinding, derive_transact_output_blinding,
-};
-use swap_program::{
-    circuits::Take,
-    verifier::take::{PublicInputs, Verifier, VERIFYINGKEY},
-};
+use crate::shared::*;
+use spr_program::CompressedProof;
+use swap_program::verifier::take::{PublicInputs, Verifier, VERIFYINGKEY};
 use swap_sdk::{
-    instructions::take::{take_blinding_seed, TakeProofInputParams},
+    instructions::take::{take_blinding_seed, TakeTransactionParams, DESTINATION_OUTPUT_SLOT},
     proof::CircuitId,
-    prover::SwapProverClient,
-    state::{OrderTerms, OrderUtxo},
 };
 
-use crate::shared::{assert_invalid, fe, field, private_tx_hash, INPUT_TREE_ID, OUTPUT_TREE_ID};
+const CIRCUIT: CircuitId = CircuitId::Take;
 
-fn sample_params() -> TakeProofInputParams {
-    let maker = ShieldedKeypair::new_ed25519()
-        .unwrap()
-        .shielded_address()
-        .unwrap();
-    let taker = ShieldedKeypair::new_ed25519()
-        .unwrap()
-        .shielded_address()
-        .unwrap();
-    let order_utxo = OrderUtxo {
-        terms: OrderTerms {
-            destination_mint: Address::new_from_array([2; 32]),
-            destination_amount: 250,
-            destination: maker,
-            taker: taker.solana_address().unwrap(),
-            expiry: 1_700_000_000,
-        },
-        blinding: fe(7),
-        source_mint: spr_transaction::Mint::new(Address::new_from_array([1; 32]), 3),
-        source_amount: 1_000,
-        destination_asset_id: 2,
-    };
-    let first_nullifier = order_utxo
-        .to_input_utxo(INPUT_TREE_ID, 0)
-        .unwrap()
-        .nullifier();
-    let blinding_seed = take_blinding_seed(&order_utxo.blinding).unwrap();
-    let seed = derive_output_blinding_seed(&first_nullifier, &blinding_seed).unwrap();
-    let mut outputs = [
-        order_utxo.source_output(taker, fe(0)),
-        order_utxo.destination_output(maker, fe(0)),
-    ];
-    assign_output_blindings(&mut outputs, &first_nullifier, &seed).unwrap();
-    let [source_output, destination_output] = outputs;
-    TakeProofInputParams {
-        taker_in: order_utxo.destination_output(taker, fe(13)),
-        order_utxo,
-        source_output,
-        destination_output,
-        private_tx_blinding: derive_private_tx_blinding(&first_nullifier, &blinding_seed).unwrap(),
-        input_tree_id: INPUT_TREE_ID,
-        output_tree_id: OUTPUT_TREE_ID,
-    }
-}
-
-fn sample_inputs() -> Take {
-    sample_params().to_proof_inputs().unwrap()
-}
-
-/// Recompute the private transaction hash after a mutation, so a negative
-/// fails on the mutated constraint rather than on a stale hash.
-fn refresh_hash(take: &mut Take) {
-    let private = &take.private;
-    take.private.private_tx_hash = private_tx_hash(
-        &[Some(&private.order_utxo), Some(&private.taker_in)],
-        &[&private.source_output, &private.destination_output],
-        &private.private_tx_blinding,
-    );
-}
-
-/// The program's verifier with the public inputs it reads from the
-/// transact: its expiry, first nullifier and private transaction hash.
-fn verify(
-    proof: &CompressedProof,
-    expiry: u64,
-    first_nullifier: [u8; 32],
-    private_tx_hash: [u8; 32],
-) -> bool {
-    Verifier {
-        proof,
-        public_inputs: PublicInputs {
-            expiry,
-            first_nullifier,
-        },
-        private_tx_hash: &private_tx_hash,
-        transfers: &[],
-    }
-    .verify()
-    .is_ok()
+/// A take of an order designated to `taker` (or open with `designated:
+/// false`), sent by `taker`.
+fn inputs(designated: bool) -> Take {
+    let taker = keypair();
+    let order = order_utxo(terms(&keypair(), designated.then(|| identity_of(&taker))));
+    take_inputs(&order, taker)
 }
 
 #[test]
 fn program_vk_has_one_public_input() {
     assert_eq!(VERIFYINGKEY.nr_pubinputs, 1);
+    assert!(VERIFYINGKEY.vk_commitment.is_none());
     assert_eq!(
         VERIFYINGKEY.vk_ic.len(),
         2,
@@ -110,115 +28,185 @@ fn program_vk_has_one_public_input() {
 }
 
 #[test]
-fn take_prove_verify_and_bind_public_inputs() {
-    // 1. Prove a take.
-    let take = sample_inputs();
-    let proof = SwapProverClient::new().prove_take(&take).expect("prove");
-    assert!(proof.a.iter().any(|byte| *byte != 0));
+fn designated_take_proves_and_binds_public_inputs() {
+    // 1. Check the source goes to the taker and the destination to the maker.
+    let inputs = inputs(true);
+    let finalized = inputs.create_finalized_transaction().unwrap();
+    let terms = &inputs.program.private.terms;
+    let outputs = finalized.output_utxos();
+    let source = outputs.first().unwrap();
+    let destination = outputs.get(DESTINATION_OUTPUT_SLOT).unwrap();
+    assert_eq!(
+        (
+            source.owner_address,
+            source.asset,
+            source.amount,
+            destination.asset,
+            destination.amount,
+        ),
+        (
+            Some(inputs.sender_address()),
+            source_mint(),
+            SOURCE_AMOUNT,
+            destination_mint(),
+            DESTINATION_AMOUNT,
+        )
+    );
+    assert_eq!(
+        spr_program::to_bytes(&terms.maker.owner().hash().unwrap()),
+        destination.owner_address.unwrap().owner_hash().unwrap()
+    );
 
-    // 2. The committed verifier accepts the transact's values.
-    let expiry = take.public.expiry;
-    let first_nullifier = to_bytes(&take.public.first_nullifier);
-    let tx_hash = to_bytes(&take.private.private_tx_hash);
-    assert!(verify(&proof, expiry, first_nullifier, tx_hash));
+    // 2. Prove, and verify with the program's verifier from the transact's
+    // expiry, first nullifier and private transaction hash.
+    let (_, proof) = prove_and_verify(CIRCUIT, &inputs, &VERIFYINGKEY);
+    let private_tx_hash = finalized.padding_independent_private_tx_hash().unwrap();
+    let first_nullifier = finalized.first_nullifier().unwrap();
+    assert_eq!(
+        first_nullifier,
+        field_bytes(inputs.program.public.first_nullifier)
+    );
+    assert!(verify(&proof, EXPIRY, first_nullifier, &private_tx_hash));
 
-    // 3. It rejects another expiry, first nullifier or transaction.
-    let mut tampered = tx_hash;
+    // 3. Another expiry, first nullifier or transaction fails.
+    let mut tampered = private_tx_hash;
     tampered[31] ^= 0x01;
-    assert!(!verify(&proof, expiry + 1, first_nullifier, tx_hash));
-    assert!(!verify(&proof, expiry, fe(17), tx_hash));
-    assert!(!verify(&proof, expiry, first_nullifier, tampered));
+    assert!(!verify(
+        &proof,
+        EXPIRY + 1,
+        first_nullifier,
+        &private_tx_hash
+    ));
+    assert!(!verify(&proof, EXPIRY, fe(17), &private_tx_hash));
+    assert!(!verify(&proof, EXPIRY, first_nullifier, &tampered));
 }
 
 #[test]
-fn take_rejects_unrecoverable_payouts_and_transaction_blinding() {
-    for attack in 0..4 {
-        let mut take = sample_inputs();
-        let first_nullifier = to_bytes(&take.public.first_nullifier);
-        match attack {
-            0 => take.private.destination_output.blinding = field(&fe(29)),
-            1 => take.private.source_output.blinding = field(&fe(29)),
-            2 => take.private.private_tx_blinding = field(&fe(29)),
-            _ => {
-                // A self-consistent derivation under a seed other than the
-                // order's.
-                let blinding_seed = fe(29);
-                let seed = derive_output_blinding_seed(&first_nullifier, &blinding_seed).unwrap();
-                take.private.private_tx_blinding =
-                    field(&derive_private_tx_blinding(&first_nullifier, &blinding_seed).unwrap());
-                for (index, output) in [
-                    &mut take.private.source_output,
-                    &mut take.private.destination_output,
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    output.blinding = field(
-                        &derive_transact_output_blinding(&first_nullifier, &seed, index as u32)
-                            .unwrap(),
-                    );
-                }
-            }
-        }
-        refresh_hash(&mut take);
-        assert_invalid(CircuitId::Take, &take, || take.execute());
+fn open_order_is_taken_by_an_arbitrary_taker() {
+    // `taker_pk_fe == 0` accepts any taker input owner.
+    let inputs = inputs(false);
+    assert_eq!(inputs.program.private.terms.taker_pk_fe, field(0));
+    prove_and_verify(CIRCUIT, &inputs, &VERIFYINGKEY);
+}
+
+#[test]
+fn designated_order_rejects_another_taker() {
+    // 1. Designate one taker and take with another.
+    let order = order_utxo(terms(&keypair(), Some(identity_of(&keypair()))));
+    let inputs = take_inputs(&order, keypair());
+    // 2. Native execution and the compiled circuit both refuse it.
+    assert_invalid(CIRCUIT, &inputs);
+    // 3. The SDK refuses to build it.
+    let taker = inputs.sender;
+    let error = TakeTransactionParams {
+        order_utxo: order,
+        order_leaf_index: ORDER_LEAF_INDEX,
+        taker_input: wallet_utxo(&taker, destination_mint(), DESTINATION_AMOUNT),
+        payer: solana_address::Address::default(),
+        tree_id: INPUT_TREE_ID,
+    }
+    .build(&taker)
+    .err()
+    .expect("another taker must be refused");
+    assert!(error.to_string().contains("designates another taker"));
+}
+
+#[test]
+fn take_rejects_an_unrecoverable_blinding_seed_and_first_nullifier() {
+    // A seed other than the order's, or a first nullifier other than the
+    // published one, would hide the maker payout from the order opening.
+    let mutations: [fn(&mut Take); 3] = [
+        |inputs| inputs.program.private.tx_context = context(&fe(29)),
+        |inputs| inputs.program.public.first_nullifier = field(17),
+        |inputs| inputs.program.private.order_utxo.blinding = field(29),
+    ];
+    for mutate in mutations {
+        let mut inputs = inputs(true);
+        mutate(&mut inputs);
+        assert_invalid(CIRCUIT, &inputs);
     }
 }
 
 #[test]
-fn take_rejects_wrong_payouts_and_terms() {
-    // Tamper one payout, taker input or terms constraint at a time.
-    let mutations: [fn(&mut Take); 9] = [
-        |take| take.public.expiry += 1,
-        |take| take.private.order.destination_amount = 0,
-        |take| take.private.taker_in.amount = field(&fe(1)),
-        |take| take.private.taker_in.asset = field(&fe(1)),
-        |take| take.private.source_output.owner_hash = field(&fe(1)),
-        |take| take.private.source_output.amount = field(&fe(1)),
-        |take| take.private.destination_output.owner_hash = field(&fe(1)),
-        |take| take.private.destination_output.asset = field(&fe(1)),
-        |take| take.private.order_utxo.data_hash = field(&fe(1)),
+fn take_rejects_wrong_terms_and_taker_input() {
+    // Tamper one terms, order UTXO or taker input constraint at a time.
+    let mutations: [fn(&mut Take); 7] = [
+        |inputs| inputs.program.public.expiry = EXPIRY + 1,
+        |inputs| inputs.program.private.terms.destination_amount = 0,
+        |inputs| inputs.program.private.terms.destination_amount = DESTINATION_AMOUNT - 1,
+        |inputs| inputs.program.private.terms.destination_mint = [9; 32],
+        |inputs| {
+            let other = keypair().shielded_address().unwrap();
+            inputs.program.private.terms.maker = inputs.address(other);
+        },
+        |inputs| inputs.program.private.order_utxo.data_hash = field(99),
+        |inputs| inputs.program.private.taker_in.amount = DESTINATION_AMOUNT + 1,
     ];
     for mutate in mutations {
-        let mut take = sample_inputs();
-        mutate(&mut take);
-        refresh_hash(&mut take);
-        assert_invalid(CircuitId::Take, &take, || take.execute());
+        let mut inputs = inputs(true);
+        mutate(&mut inputs);
+        assert_invalid(CIRCUIT, &inputs);
     }
 }
 
 #[test]
 fn maker_recovers_payout_without_settlement_ciphertext() {
-    let params = sample_params();
-    let take = params.to_proof_inputs().unwrap();
-    let first_nullifier = to_bytes(&take.public.first_nullifier);
-    let destination_hash = to_bytes(&take.private.destination_output.hash().unwrap());
-    let recovered = params
-        .order_utxo
-        .derived_destination_output(&first_nullifier)
+    // 1. Build the take through the SDK.
+    let taker = keypair();
+    let order = order_utxo(terms(&keypair(), Some(identity_of(&taker))));
+    let transaction = TakeTransactionParams {
+        order_utxo: order.clone(),
+        order_leaf_index: ORDER_LEAF_INDEX,
+        taker_input: wallet_utxo(&taker, destination_mint(), DESTINATION_AMOUNT),
+        payer: solana_address::Address::default(),
+        tree_id: INPUT_TREE_ID,
+    }
+    .build(&taker)
+    .unwrap();
+    assert_eq!(
+        transaction.spp_proof_inputs.external_data.expiry_unix_ts,
+        EXPIRY
+    );
+
+    // 2. The maker derives the payout from the order opening and the first
+    // nullifier alone.
+    let payout = transaction
+        .spp_proof_inputs
+        .external_data
+        .outputs
+        .get(DESTINATION_OUTPUT_SLOT)
+        .unwrap()
+        .utxo_hash;
+    let recovered = order
+        .derived_destination_output(&transaction.first_nullifier)
         .unwrap();
-    assert_eq!(recovered.hash(OUTPUT_TREE_ID).unwrap(), destination_hash);
-    let wrong_first = params
-        .order_utxo
-        .derived_destination_output(&fe(17))
-        .unwrap();
-    assert_ne!(wrong_first.hash(OUTPUT_TREE_ID).unwrap(), destination_hash);
+    assert_eq!(recovered.hash(INPUT_TREE_ID).unwrap(), payout);
+    assert_eq!(recovered.blinding, transaction.destination_output_blinding);
+    assert_eq!(
+        take_blinding_seed(&order.blinding).unwrap(),
+        transaction.spp_proof_inputs.blinding_seed
+    );
+
+    // 3. Another first nullifier derives another payout.
+    let wrong = order.derived_destination_output(&fe(17)).unwrap();
+    assert_ne!(wrong.hash(INPUT_TREE_ID).unwrap(), payout);
 }
 
-#[test]
-fn sdk_rejects_a_taker_selected_blinding_seed_or_payout() {
-    let mut params = sample_params();
-    params.destination_output.blinding = fe(29);
-    assert!(params
-        .to_proof_inputs()
-        .unwrap_err()
-        .to_string()
-        .contains("output 1 blinding"));
-    let mut params = sample_params();
-    params.private_tx_blinding = fe(29);
-    assert!(params
-        .to_proof_inputs()
-        .unwrap_err()
-        .to_string()
-        .contains("blinding seed"));
+fn verify(
+    proof: &CompressedProof,
+    expiry: u64,
+    first_nullifier: [u8; 32],
+    private_tx_hash: &[u8; 32],
+) -> bool {
+    Verifier {
+        proof,
+        public_inputs: PublicInputs {
+            expiry,
+            first_nullifier,
+        },
+        private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
+    .is_ok()
 }

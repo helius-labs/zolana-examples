@@ -4,7 +4,7 @@ use groth16_solana::{
     vk::gnark::{parse_gnark_vk_bytes, Groth16VerifyingkeyOwned},
 };
 use solana_address::Address;
-use spr_keypair::ShieldedKeypair;
+use spr_keypair::{ShieldedAddress, ShieldedKeypair};
 use spr_test_utils::utxo::assign_output_blindings;
 use spr_transaction::{
     instructions::transact::PrivateTxHash,
@@ -20,7 +20,7 @@ use swap_program::{
 use swap_prover::{CircuitId, TakeProofInputs, PROVER};
 use swap_sdk::{
     instructions::take::{take_blinding_seed, TakeProofInputParams},
-    state::{OrderTerms, OrderUtxo},
+    state::{taker_pk_fe, OrderTerms, OrderUtxo},
 };
 
 fn build_dir() -> std::path::PathBuf {
@@ -51,21 +51,23 @@ fn fe(byte: u8) -> [u8; 32] {
 const INPUT_TREE_ID: u16 = 3;
 const OUTPUT_TREE_ID: u16 = 7;
 
-fn sample_params() -> TakeProofInputParams {
-    let maker = ShieldedKeypair::new_ed25519()
+fn new_address() -> ShieldedAddress {
+    ShieldedKeypair::new_ed25519()
         .unwrap()
         .shielded_address()
-        .unwrap();
-    let taker = ShieldedKeypair::new_ed25519()
         .unwrap()
-        .shielded_address()
-        .unwrap();
+}
+
+/// A take by `taker` of an order that designates `designated_taker`, or is
+/// open to any taker when it is `None`.
+fn params_for(taker: ShieldedAddress, designated_taker: Option<Address>) -> TakeProofInputParams {
+    let maker = new_address();
     let order_utxo = OrderUtxo {
         terms: OrderTerms {
             destination_mint: Address::new_from_array([2; 32]),
             destination_amount: 250,
             destination: maker,
-            taker: taker.solana_address().unwrap(),
+            taker: designated_taker,
             expiry: 1_700_000_000,
         },
         blinding: fe(7),
@@ -94,6 +96,12 @@ fn sample_params() -> TakeProofInputParams {
         input_tree_id: INPUT_TREE_ID,
         output_tree_id: OUTPUT_TREE_ID,
     }
+}
+
+/// A take by the taker the order designates.
+fn sample_params() -> TakeProofInputParams {
+    let taker = new_address();
+    params_for(taker, Some(taker.solana_address().unwrap()))
 }
 
 fn sample_inputs() -> TakeProofInputs {
@@ -167,12 +175,10 @@ fn program_vk_has_no_commitment() {
     );
 }
 
-#[test]
-fn take_prove_verify() {
+fn assert_proves_and_verifies(inputs: &TakeProofInputs) {
     ensure_keys();
     let vk = generated_vk();
 
-    let inputs = sample_inputs();
     let proof = inputs.prove().expect("prove failed");
 
     let proof_a_zero = proof.proof_a.iter().all(|byte| *byte == 0);
@@ -207,6 +213,74 @@ fn take_prove_verify() {
         &VERIFYINGKEY,
     )
     .expect("program take verify must accept a valid proof");
+}
+
+#[test]
+fn take_prove_verify() {
+    assert_proves_and_verifies(&sample_inputs());
+}
+
+#[test]
+fn open_order_take_by_any_taker_proves_and_verifies() {
+    let inputs = params_for(new_address(), None).to_proof_inputs().unwrap();
+    assert_eq!(inputs.order.taker_pk_fe, [0; 32]);
+    assert_proves_and_verifies(&inputs);
+}
+
+#[test]
+fn designated_taker_proves_and_verifies() {
+    let taker = new_address();
+    let designated = taker.solana_address().unwrap();
+    let inputs = params_for(taker, Some(designated))
+        .to_proof_inputs()
+        .unwrap();
+    assert_eq!(
+        inputs.order.taker_pk_fe,
+        taker_pk_fe(Some(&designated)).unwrap()
+    );
+    assert_ne!(inputs.order.taker_pk_fe, [0; 32]);
+    assert_eq!(inputs.taker_nullifier_pk, taker.nullifier_pubkey);
+    assert_proves_and_verifies(&inputs);
+}
+
+#[test]
+fn designated_order_rejects_a_different_taker() {
+    ensure_keys();
+    let good = sample_inputs();
+    good.prove().expect("positive control");
+
+    // Another taker pays and receives the source funds. Only the taker input
+    // owner, the source output owner and the nullifier pubkey change, so the
+    // designated-taker constraint is the only one the witness breaks.
+    let other = new_address();
+    let other_owner_hash = other.owner_hash().unwrap();
+    let mut inputs = good.clone();
+    inputs.taker_in.owner_hash = other_owner_hash;
+    inputs.source_output.owner_hash = other_owner_hash;
+    inputs.taker_nullifier_pk = other.nullifier_pubkey;
+    refresh_hashes(&mut inputs);
+    assert!(
+        inputs.prove().is_err(),
+        "a taker other than the designated one must not prove"
+    );
+
+    // The designated taker's owner hash with another nullifier pubkey is not a
+    // valid opening either.
+    let mut inputs = good.clone();
+    inputs.taker_nullifier_pk = other.nullifier_pubkey;
+    assert!(
+        inputs.prove().is_err(),
+        "the nullifier pubkey must open the designated taker's owner hash"
+    );
+}
+
+#[test]
+fn sdk_rejects_a_take_by_a_non_designated_taker() {
+    let designated = new_address().solana_address().unwrap();
+    let error = params_for(new_address(), Some(designated))
+        .to_proof_inputs()
+        .unwrap_err();
+    assert!(error.to_string().contains("designated taker"));
 }
 
 #[test]

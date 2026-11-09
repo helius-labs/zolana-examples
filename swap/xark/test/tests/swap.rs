@@ -1,53 +1,41 @@
-use spr_test_utils::utxo::{
-    encrypt_transaction_data, get_transaction_viewing_key, prepare_output_blindings,
-};
-use spr_transaction::utxo::SppProofInputUtxo;
 mod shared;
 
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use shared::{send, setup, TestEnv, DESTINATION_AMOUNT, SOURCE_AMOUNT};
-use spr_client::user_registry::ensure_registered;
-use spr_client::Rpc;
-use spr_keypair::random_blinding;
-use spr_test_utils::wallet::Filter;
-use spr_transaction::{
-    instructions::transact::{ExternalData, SppProofInputs, SppProofOutputUtxo},
-    SOL_ASSET_ID, SOL_MINT,
-};
+use spr_client::{user_registry::ensure_registered, Rpc};
+use spr_test_utils::{test_validator_asserts::wait_for_merkle_proof, wallet::Filter};
+use spr_transaction::{Mint, SOL_MINT};
 use swap_sdk::{
     index::index_taker,
     instructions::{
-        make::{Make, MakeProofInputParams, OrderMarker, SppTxHashes},
-        take::{take_blinding_seed, Take, TakeProofInputParams},
+        make::MakeTransactionParams,
+        take::{TakeTransactionParams, DESTINATION_OUTPUT_SLOT, SOURCE_OUTPUT_SLOT},
     },
-    prover::SwapProverClient,
-    shared::input_sum,
-    state::{OrderTerms, OrderUtxo},
+    shared::identity,
+    state::OrderTerms,
 };
 
 const EXPIRY: u64 = 2_000_000_000;
 
-// Confidential SOL<->SPL swap on the shielded pool -- make then take --
+// Confidential SPL<->SOL swap on the shielded pool -- make then take --
 // driven against a real localnet (validator + Photon indexer + prover) that
 // `setup()` starts.
 //
-// The maker orders an SPL token and wants SOL; the taker pays SOL and receives the
-// SPL. The SPL source stays in shielded UTXOs (the SPP transact is
-// asset-generic for a purely-shielded spend, and the make/take flows
-// denominate change in the order asset).
-//
 // Flow:
-//   1. Fund (in setup): maker shields 1.0 SPL, taker shields 0.25 SOL; each wallet
-//      syncs from the indexer to discover and decrypt its own note.
-//   2. Make: maker spends its 1.0 SPL UTXO -> order UTXO 0.4 SPL (taker-owned, held
-//      under the order-authority PDA), marker (0-value taker-owned discovery
-//      note), change 0.6 SPL (back to maker). ZK make proof, v0 tx via ALT.
-//   3. Take: taker spends the order UTXO (0.4 SPL) + its own 0.25 SOL UTXO ->
-//      source_output 0.4 SPL (to taker), destination_output 0.25 SOL (to maker).
-//      ZK take proof, v0 tx.
-//   4. Assert both take outputs are indexed.
+//   1. Fund (in setup): 1.0 SPL is shielded to the order authority, the taker
+//      shields 0.25 SOL.
+//   2. Make: the program spends the 1.0 SPL UTXO -> change 0.6 SPL (to the
+//      maker) + order UTXO 0.4 SPL (owned by the order-authority PDA,
+//      designated to the taker and encrypted to it), plus the taker's marker.
+//   3. Discover: the taker finds the marker, decrypts the order and checks the
+//      maker it names against the user registry.
+//   4. Take: the taker spends the order UTXO + its 0.25 SOL UTXO -> source
+//      0.4 SPL (to the taker) + destination 0.25 SOL (to the maker). The
+//      taker withholds the maker payout ciphertext; the maker still derives
+//      the payout from the order opening and the first nullifier.
+//   5. Assert both take outputs are indexed.
 //
 // Net: maker 1.0 SPL -> 0.6 SPL + 0.25 SOL; taker 0.25 SOL -> 0.4 SPL.
 #[test]
@@ -59,285 +47,104 @@ fn make_and_take_swap_inline() -> Result<()> {
         taker,
         spl_mint,
     } = setup(2)?;
-    let swap_prover_client = SwapProverClient::new();
-    {
-        ensure_registered(localnet.client.rpc(), &maker.keypair, &maker.keypair)
-            .map_err(|e| anyhow!("register maker: {e:?}"))?;
+    let client = &localnet.client;
+    let maker_address = maker.keypair.shielded_address()?;
+    let maker_pubkey = maker_address.solana_address()?;
+    let taker_address = taker.keypair.shielded_address()?;
+    let taker_pubkey = taker_address.solana_address()?;
+    ensure_registered(client.rpc(), &maker.keypair, &maker.keypair)
+        .map_err(|e| anyhow!("register maker: {e:?}"))?;
 
-        // 1. Set order terms.
-        let taker_address = taker.keypair.shielded_address()?;
-        // The taker's ed25519 authorization identity: the take's taker input UTXO
-        // owner must match the order-committed taker.
-        let taker_authorization_address = taker_address
-            .solana_address()
-            .map_err(|e| anyhow!("taker solana address: {e:?}"))?;
-
-        let terms = OrderTerms {
-            destination_mint: SOL_MINT,
-            destination_amount: DESTINATION_AMOUNT,
-            // The swap settlement goes to the maker's shielded address.
-            destination: maker.keypair.shielded_address()?,
-            taker: taker_authorization_address,
-            expiry: EXPIRY,
-        };
-
-        let maker_address = maker.keypair.shielded_address()?;
-        let mut order_utxo = OrderUtxo {
-            terms,
-            blinding: random_blinding(),
-            source_mint: maker.registry.mint(&spl_mint)?,
-            source_amount: SOURCE_AMOUNT,
-            destination_asset_id: SOL_ASSET_ID,
-        };
-        let order_output_utxo = order_utxo.output_utxo(taker_address.viewing_pubkey)?;
-
-        // 2. Select input utxos.
-        let input_utxos = vec![maker_input, SppProofInputUtxo::dummy(localnet.tree_id)?];
-
-        // 3. create output utxos.
-        let order_utxo_asset = order_output_utxo.asset;
-
-        let leftover =
-            input_sum(&input_utxos, &order_utxo_asset.asset) - i128::from(order_output_utxo.amount);
-        let change_amount = u64::try_from(leftover)
-            .map_err(|_| anyhow!("insufficient order balance: {leftover}"))?;
-        let change = SppProofOutputUtxo::new(order_utxo_asset, change_amount, maker_address)?;
-        let mut transaction_outputs = vec![change, order_output_utxo];
-        let blinding_seed = prepare_output_blindings(&input_utxos, &mut transaction_outputs)?;
-        let [change, order_output_utxo]: [_; 2] = transaction_outputs
-            .try_into()
-            .map_err(|_| anyhow!("make transaction must have two outputs"))?;
-        order_utxo.blinding = order_output_utxo.blinding;
-
-        let order_utxo_hash = order_output_utxo
-            .hash(localnet.tree_id)
-            .map_err(|e| anyhow!("order output hash: {e:?}"))?;
-
-        // 4. Encrypt output utxos.
-
-        let transaction_viewing_key = get_transaction_viewing_key(&maker.keypair, &input_utxos)
-            .map_err(|e| anyhow!("transaction viewing key: {e:?}"))?;
-
-        let encoded_transaction_data = encrypt_transaction_data(
-            &[change.clone(), order_output_utxo],
-            &transaction_viewing_key,
-            localnet.tree_id,
-        )?;
-
-        let marker_message = OrderMarker {
-            order_utxo_hash,
-            maker_pubkey: maker_address.solana_address()?,
-            taker_address,
-        }
-        .message()?;
-        let external_data = ExternalData::new(
-            *transaction_viewing_key.pubkey().as_bytes(),
-            encoded_transaction_data.salt,
-            encoded_transaction_data.outputs,
-            encoded_transaction_data.resolved_owner_tags,
-            vec![marker_message],
-        );
-        let spp_proof_inputs = SppProofInputs {
-            input_utxos,
-            output_utxos: encoded_transaction_data.output_utxos,
-            external_data,
-            payer: maker_address.solana_address()?,
-            blinding_seed,
-            output_tree_id: localnet.tree_id,
-            cache_accounts: Default::default(),
-        };
-
-        let spp_tx_hashes = SppTxHashes::new(&spp_proof_inputs)?;
-        // 5. create spp proof.
-        let spp_proof = localnet
-            .client
-            .indexer()
-            .prove_transact(
-                spp_proof_inputs,
-                &spr_keypair::NullifierKey::from_secret([0; 31]),
-            )
-            .map_err(|e| anyhow!("make transact proof: {e:?}"))?;
-
-        let make_proof_inputs = MakeProofInputParams {
-            order_utxo,
-            change,
-            spp_tx_hashes,
-        };
-
-        let make_proof = swap_prover_client
-            .prove_make(&make_proof_inputs.to_proof_inputs()?)
-            .map_err(|e| anyhow!("make proof: {e:?}"))?;
-
-        let make_ix = Make {
-            payer: maker_address.solana_address()?,
-            tree: localnet.tree,
-            make_proof,
-            spp_proof,
-        }
-        .instruction()?;
-
-        let make_signature = send(localnet.client.rpc(), &maker.keypair, make_ix)?;
-        localnet
-            .client
-            .confirm_private_transaction_sync(make_signature)
-            .map_err(|e| anyhow!("confirm make indexed: {e:?}"))?;
+    // 1. Make an order designated to the taker.
+    let terms = OrderTerms {
+        destination_mint: Mint::SOL,
+        destination_amount: DESTINATION_AMOUNT,
+        maker: maker_address,
+        expiry: EXPIRY,
+        taker: Some(identity(&taker_pubkey)?),
+    };
+    assert_eq!(maker_input.utxo.asset, maker.registry.mint(&spl_mint)?);
+    let make_ix = MakeTransactionParams {
+        terms,
+        source_amount: SOURCE_AMOUNT,
+        source: maker_input,
+        taker_address,
+        payer: maker_pubkey,
+        tree_id: localnet.tree_id,
     }
+    .build(&maker.keypair)?
+    .prove(client.indexer(), localnet.tree)?
+    .instruction()?;
+    let make_signature = send(client.rpc(), &maker.keypair, make_ix)?;
+    client
+        .confirm_private_transaction_sync(make_signature)
+        .map_err(|e| anyhow!("confirm make indexed: {e:?}"))?;
 
-    {
-        let taker_address = taker.keypair.shielded_address()?;
-        let order = index_taker(
-            &taker.keypair,
-            &taker.registry,
-            localnet.client.indexer(),
-            localnet.client.rpc(),
-            Duration::from_secs(60),
-        )?
-        .pop()
-        .ok_or_else(|| anyhow!("no swap order discovered"))?;
-        let order_utxo = order.order_utxo;
-        let terms = order_utxo.terms.clone();
+    // 2. Discover the order from the taker's side.
+    let order = index_taker(
+        &taker.keypair,
+        &taker.registry,
+        client.indexer(),
+        client.rpc(),
+        Duration::from_secs(60),
+    )?
+    .pop()
+    .ok_or_else(|| anyhow!("no swap order discovered"))?;
+    assert_eq!(order.maker_pubkey, maker_pubkey);
+    let order_utxo = order.order_utxo;
 
-        let taker_input_utxo = taker
-            .balance(
-                terms.destination_mint,
-                Some(Filter::MinAmount(terms.destination_amount)),
-            )?
-            .utxos
-            .first()
-            .cloned()
-            .ok_or_else(|| {
-                anyhow!(
-                    "no spendable utxo of {} >= {}",
-                    terms.destination_mint,
-                    terms.destination_amount
-                )
-            })?;
-        let taker_in = order_utxo.destination_output(taker_address, taker_input_utxo.utxo.blinding);
-        let source_output = order_utxo.source_output(taker_address, random_blinding());
-        let destination_output =
-            order_utxo.destination_output(terms.destination, random_blinding());
-        let order_hash = order_utxo
-            .output_utxo(taker_address.viewing_pubkey)?
-            .hash(localnet.tree_id)?;
-        let order_state = spr_test_utils::test_validator_asserts::wait_for_merkle_proof(
-            localnet.client.indexer(),
+    // 3. Take with the taker's SOL note.
+    let taker_input = taker
+        .balance(SOL_MINT, Some(Filter::MinAmount(DESTINATION_AMOUNT)))?
+        .utxos
+        .first()
+        .cloned()
+        .ok_or_else(|| anyhow!("no spendable SOL note of {DESTINATION_AMOUNT}"))?;
+    let order_state = wait_for_merkle_proof(
+        client.indexer(),
+        localnet.tree,
+        order_utxo.hash(localnet.tree_id)?,
+    );
+    let mut take_transaction = TakeTransactionParams {
+        order_utxo: order_utxo.clone(),
+        order_leaf_index: order_state.leaf_index,
+        taker_input,
+        payer: taker_pubkey,
+        tree_id: localnet.tree_id,
+    }
+    .build(&taker.keypair)?;
+
+    // 4. Withhold the maker payout ciphertext; the maker derives the payout
+    // from the order opening and the published first nullifier.
+    let outputs = &mut take_transaction.spp_proof_inputs.external_data.outputs;
+    let source_output_hash = outputs
+        .get(SOURCE_OUTPUT_SLOT)
+        .ok_or_else(|| anyhow!("missing source output"))?
+        .utxo_hash;
+    let payout = outputs
+        .get_mut(DESTINATION_OUTPUT_SLOT)
+        .ok_or_else(|| anyhow!("missing maker payout"))?;
+    payout.data = None;
+    let destination_output_hash = payout.utxo_hash;
+    let recovered = order_utxo.derived_destination_output(&take_transaction.first_nullifier)?;
+    assert_eq!(recovered.hash(localnet.tree_id)?, destination_output_hash);
+
+    let take_ix = take_transaction
+        .prove(client.indexer(), localnet.tree, &taker.keypair)?
+        .instruction()?;
+    let take_signature = send(client.rpc(), &taker.keypair, take_ix)?;
+    client
+        .confirm_private_transaction_sync(take_signature)
+        .map_err(|e| anyhow!("confirm take indexed: {e:?}"))?;
+
+    // 5. Both take outputs are indexed.
+    client
+        .indexer()
+        .get_merkle_proofs(
             localnet.tree,
-            order_hash,
-        );
-        let order_input_utxo = order_utxo
-            .to_input_utxo(localnet.tree_id, order_state.leaf_index)
-            .map_err(|e| anyhow!("order input_utxo: {e:?}"))?;
-        let taker_input_utxo = SppProofInputUtxo::from(taker_input_utxo);
-        let inputs = vec![order_input_utxo, taker_input_utxo];
-        let mut transaction_outputs = vec![source_output, destination_output];
-        let blinding_seed = take_blinding_seed(&order_utxo.blinding)?;
-        let first_nullifier = inputs
-            .first()
-            .ok_or_else(|| anyhow!("missing order input"))?
-            .nullifier();
-        let seed = spr_transaction::derive_output_blinding_seed(&first_nullifier, &blinding_seed)?;
-        spr_test_utils::utxo::assign_output_blindings(
-            &mut transaction_outputs,
-            &first_nullifier,
-            &seed,
-        )?;
-        let [source_output, destination_output]: [_; 2] = transaction_outputs
-            .try_into()
-            .map_err(|_| anyhow!("take transaction must have two outputs"))?;
-        let source_output_hash = source_output
-            .hash(localnet.tree_id)
-            .map_err(|e| anyhow!("source output hash: {e:?}"))?;
-        let destination_output_hash = destination_output
-            .hash(localnet.tree_id)
-            .map_err(|e| anyhow!("destination output hash: {e:?}"))?;
-
-        let transaction_viewing_key = get_transaction_viewing_key(&taker.keypair, &inputs)
-            .map_err(|e| anyhow!("transaction viewing key: {e:?}"))?;
-
-        let mut encoded = encrypt_transaction_data(
-            &[source_output.clone(), destination_output.clone()],
-            &transaction_viewing_key,
-            localnet.tree_id,
-        )?;
-
-        // Recovery must work even when the taker withholds the maker payload.
-        encoded
-            .outputs
-            .get_mut(1)
-            .ok_or_else(|| anyhow!("missing maker payout"))?
-            .data = None;
-        let recovered = order_utxo.derived_destination_output(&first_nullifier)?;
-        assert_eq!(recovered.hash(localnet.tree_id)?, destination_output_hash);
-
-        let mut external_data = ExternalData::new(
-            *transaction_viewing_key.pubkey().as_bytes(),
-            encoded.salt,
-            encoded.outputs,
-            encoded.resolved_owner_tags,
-            vec![],
-        );
-        external_data.expiry_unix_ts = terms.expiry;
-        let take_spp_proof_inputs = SppProofInputs {
-            input_utxos: inputs,
-            output_utxos: encoded.output_utxos,
-            external_data,
-            payer: taker_address.solana_address()?,
-            blinding_seed,
-            output_tree_id: localnet.tree_id,
-            cache_accounts: Default::default(),
-        };
-
-        let take_proof_inputs = TakeProofInputParams {
-            order_utxo,
-            taker_in,
-            source_output,
-            destination_output,
-            private_tx_blinding: take_spp_proof_inputs
-                .private_tx_blinding()
-                .map_err(|e| anyhow!("take private tx blinding: {e:?}"))?,
-            input_tree_id: localnet.tree_id,
-            output_tree_id: localnet.tree_id,
-        };
-
-        let spp_proof = localnet
-            .client
-            .indexer()
-            .prove_transact(
-                take_spp_proof_inputs,
-                &spr_test_utils::utxo::ProofKeys(&[
-                    &spr_keypair::NullifierKey::from_secret([0; 31]),
-                    &taker.keypair.nullifier_key,
-                ]),
-            )
-            .map_err(|e| anyhow!("take transact proof: {e:?}"))?;
-
-        let take_proof = swap_prover_client
-            .prove_take(&take_proof_inputs.to_proof_inputs()?)
-            .map_err(|e| anyhow!("take proof: {e:?}"))?;
-
-        let take_ix = Take {
-            payer: taker_address.solana_address()?,
-            tree: localnet.tree,
-            take_proof,
-            spp_proof,
-        }
-        .instruction()?;
-
-        let take_signature = send(localnet.client.rpc(), &taker.keypair, take_ix)?;
-        localnet
-            .client
-            .confirm_private_transaction_sync(take_signature)
-            .map_err(|e| anyhow!("confirm take indexed: {e:?}"))?;
-
-        localnet
-            .client
-            .indexer()
-            .get_merkle_proofs(
-                localnet.tree,
-                vec![source_output_hash, destination_output_hash],
-                None,
-            )
-            .map_err(|e| anyhow!("take outputs index: {e}"))?;
-    }
+            vec![source_output_hash, destination_output_hash],
+            None,
+        )
+        .map_err(|e| anyhow!("take outputs index: {e}"))?;
     Ok(())
 }

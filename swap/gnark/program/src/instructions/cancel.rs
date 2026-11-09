@@ -55,6 +55,21 @@ impl CancelPublicInput<'_> {
     }
 }
 
+/// Verifies the cancel proof against the Poseidon hash of its public inputs.
+#[inline(never)]
+#[profile]
+pub fn verify_cancel_proof(proof: &CancelProof, public_input: CancelPublicInput) -> ProgramResult {
+    verify_groth16(
+        CompressedGroth16Proof {
+            a: &proof.proof_a,
+            b: &proof.proof_b,
+            c: &proof.proof_c,
+        },
+        public_input.hash()?,
+        &crate::verifying_keys::cancel::VERIFYINGKEY,
+    )
+}
+
 #[inline(never)]
 #[profile]
 pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -77,19 +92,13 @@ pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
     let clock = Clock::get()?;
     check_after_window(clock.unix_timestamp, order_expiry)?;
 
-    verify_groth16(
-        CompressedGroth16Proof {
-            a: &proof.proof_a,
-            b: &proof.proof_b,
-            c: &proof.proof_c,
-        },
+    verify_cancel_proof(
+        &proof,
         CancelPublicInput {
             private_tx_hash: &transact.private_tx_hash,
             expiry: order_expiry,
             maker_owner_pk_field: &maker_owner_pk_field,
-        }
-        .hash()?,
-        &crate::verifying_keys::cancel::VERIFYINGKEY,
+        },
     )?;
 
     let transact_bytes = transact

@@ -15,15 +15,20 @@ pub struct TakeProofInputs {
     pub taker_in: ProofInputUtxo,
     pub source_output: ProofInputUtxo,
     pub destination_output: ProofInputUtxo,
+    /// The taker input owner's nullifier pubkey; with `order.taker_pk_fe` it is
+    /// the preimage of the taker input owner hash when the order designates a
+    /// taker.
+    pub taker_nullifier_pk: [u8; 32],
     pub private_tx_blinding: [u8; 32],
 }
 
 impl TakeProofInputs {
     fn witness(&self) -> ProofInputMap {
-        let scalars: [(&str, [u8; 32]); 4] = [
+        let scalars: [(&str, [u8; 32]); 5] = [
             ("Public_PublicInputHash", self.public_input_hash),
             ("Public_PrivateTxHash", self.private_tx_hash),
             ("Public_FirstNullifier", self.first_nullifier),
+            ("Core_TakerNullifierPk", self.taker_nullifier_pk),
             ("Core_PrivateTxBlinding", self.private_tx_blinding),
         ];
         let mut map = HashMap::new();
@@ -81,6 +86,7 @@ mod tests {
             taker_in: ProofInputUtxo::default(),
             source_output: ProofInputUtxo::default(),
             destination_output: ProofInputUtxo::default(),
+            taker_nullifier_pk: [11; 32],
             private_tx_blinding: [8; 32],
         }
     }
@@ -94,6 +100,7 @@ mod tests {
             "Public_PublicInputHash".to_string(),
             "Public_PrivateTxHash".to_string(),
             "Public_FirstNullifier".to_string(),
+            "Core_TakerNullifierPk".to_string(),
             "Core_PrivateTxBlinding".to_string(),
         ];
         expected.extend(expected_order_terms_witness_keys("Core_Order"));

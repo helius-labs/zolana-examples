@@ -27,8 +27,8 @@ check_pins() {
     local repository=$1 revision=$2 file
     shift 2
     for file in "$@"; do
-        if grep -F "$repository" "$file" | grep -F 'rev = ' | grep -vqF "$revision"; then
-            echo "$file pins $repository to a revision other than $revision" >&2
+        if grep -F "$repository" "$file" | grep -F "git =" | grep -vqE "rev *= *\"$revision\""; then
+            echo "$file references $repository without pinning rev = \"$revision\"" >&2
             exit 1
         fi
     done

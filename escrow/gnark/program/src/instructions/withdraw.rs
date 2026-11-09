@@ -78,6 +78,31 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
     let clock = Clock::get()?;
     check_after_window(clock.unix_timestamp, unlock_timestamp)?;
 
+    verify_withdraw_proof(
+        &proof,
+        unlock_timestamp,
+        &owner_pk_field,
+        &transact.private_tx_hash,
+    )?;
+
+    let transact_bytes = transact
+        .serialize()
+        .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
+    let spp_accounts = iter.remaining()?;
+    cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+}
+
+/// Verifies the withdraw proof against the escrow's `unlock` timestamp, the
+/// creator's owner identity and the transaction's `private_tx_hash`: the
+/// public-input hash, then the Groth16 verification.
+#[inline(never)]
+#[profile]
+pub fn verify_withdraw_proof(
+    proof: &WithdrawProof,
+    unlock: u64,
+    owner_pk_field: &[u8; 32],
+    private_tx_hash: &[u8; 32],
+) -> ProgramResult {
     verify_groth16(
         CompressedGroth16Proof {
             a: &proof.proof_a,
@@ -86,17 +111,11 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
             commitment: None,
         },
         WithdrawPublicInput {
-            private_tx_hash: &transact.private_tx_hash,
-            unlock: unlock_timestamp,
-            owner_pk_field: &owner_pk_field,
+            private_tx_hash,
+            unlock,
+            owner_pk_field,
         }
         .hash()?,
         &crate::verifying_keys::withdraw::VERIFYINGKEY,
-    )?;
-
-    let transact_bytes = transact
-        .serialize()
-        .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
-    let spp_accounts = iter.remaining()?;
-    cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    )
 }

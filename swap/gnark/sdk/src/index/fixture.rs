@@ -78,9 +78,11 @@ pub(crate) fn order_fixture() -> OrderFixture {
         destination_mint: SOL_MINT,
         destination_amount: 250_000,
         destination: maker_address,
-        taker: taker_address
-            .solana_address()
-            .expect("taker solana address"),
+        taker: Some(
+            taker_address
+                .solana_address()
+                .expect("taker solana address"),
+        ),
         expiry: 2_000_000_000,
     };
     let mut order_utxo = OrderUtxo {

@@ -6,11 +6,13 @@ on:
     paths:
       - "escrow/xark/**"
       - "escrow/timelock_escrow.md"
+      - "test-utils/bench_report.rs"
       - ".github/workflows/escrow-xark.yml"
   pull_request:
     paths:
       - "escrow/xark/**"
       - "escrow/timelock_escrow.md"
+      - "test-utils/bench_report.rs"
       - ".github/workflows/escrow-xark.yml"
   workflow_dispatch:
 

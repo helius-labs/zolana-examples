@@ -1,111 +1,13 @@
-use solana_address::Address;
-use spr_hasher::primitives::hash_bytes;
-use spr_keypair::{hash::poseidon, ViewingKey};
-use spr_program::{to_bytes, CompressedProof, Field};
-use spr_transaction::utxo::ProofInputUtxo;
-use swap_program::{
-    circuits::{Cancel, CancelPrivateInputs, CancelPublicInputs, OrderTerms},
-    verifier::cancel::{PublicInputs, Verifier, VERIFYINGKEY},
-};
-use swap_sdk::{proof::CircuitId, prover::SwapProverClient};
+use crate::shared::*;
+use swap_program::verifier::cancel::{PublicInputs, Verifier, VERIFYINGKEY};
+use swap_sdk::{instructions::cancel::SOURCE_OUTPUT_SLOT, proof::CircuitId};
 
-use crate::shared::{
-    assert_invalid, circuit_utxo, fe, field, order_utxo_owner_hash, private_tx_hash, INPUT_TREE_ID,
-    OUTPUT_TREE_ID,
-};
-
-const MAKER_OWNER_PK_FIELD: u8 = 71;
-const MAKER_NULLIFIER_PK: u8 = 88;
-
-fn maker_owner_hash() -> [u8; 32] {
-    poseidon(&[&fe(MAKER_OWNER_PK_FIELD), &fe(MAKER_NULLIFIER_PK)]).expect("owner hash")
-}
-
-/// A cancel refunding the order to `source_output_owner`.
-fn build_inputs(source_output_owner: [u8; 32]) -> Cancel {
-    let order = OrderTerms {
-        destination_asset: field(&hash_bytes(&[2u8; 32]).expect("destination asset")),
-        destination_amount: 250,
-        maker_owner_hash: field(&maker_owner_hash()),
-        maker_viewing_pk: *ViewingKey::new().pubkey().as_bytes(),
-        expiry: 1_700_000_000,
-        taker_pk_fe: field(&fe(123)),
-    };
-    let source_mint = Address::new_from_array([1u8; 32]);
-    let order_utxo = ProofInputUtxo::new(
-        order_utxo_owner_hash(&fe(42)),
-        &source_mint,
-        1_000,
-        &fe(7),
-        INPUT_TREE_ID,
-    )
-    .expect("order utxo")
-    .with_data_hash(to_bytes(&order.data_hash().expect("order data hash")));
-    let source_output = ProofInputUtxo::new(
-        source_output_owner,
-        &source_mint,
-        1_000,
-        &fe(11),
-        OUTPUT_TREE_ID,
-    )
-    .expect("source output utxo");
-    let mut cancel = Cancel {
-        public: CancelPublicInputs {
-            expiry: order.expiry,
-            maker_owner_pk_field: field(&fe(MAKER_OWNER_PK_FIELD)),
-        },
-        private: CancelPrivateInputs {
-            private_tx_hash: Field::zero(),
-            order,
-            order_utxo: circuit_utxo(&order_utxo),
-            source_output: circuit_utxo(&source_output),
-            maker_nullifier_pk: field(&fe(MAKER_NULLIFIER_PK)),
-            private_tx_blinding: field(&fe(21)),
-        },
-    };
-    refresh_hash(&mut cancel);
-    cancel
-}
-
-fn sample_inputs() -> Cancel {
-    build_inputs(maker_owner_hash())
-}
-
-/// Recompute the private transaction hash after a mutation. The compact
-/// padding output does not enter it.
-fn refresh_hash(cancel: &mut Cancel) {
-    let private = &cancel.private;
-    cancel.private.private_tx_hash = private_tx_hash(
-        &[Some(&private.order_utxo)],
-        &[&private.source_output],
-        &private.private_tx_blinding,
-    );
-}
-
-/// The program's verifier with the order expiry, the signer identity and the
-/// transact's private transaction hash.
-fn verify(
-    proof: &CompressedProof,
-    expiry: u64,
-    maker_owner_pk_field: [u8; 32],
-    private_tx_hash: [u8; 32],
-) -> bool {
-    Verifier {
-        proof,
-        public_inputs: PublicInputs {
-            expiry,
-            maker_owner_pk_field,
-        },
-        private_tx_hash: &private_tx_hash,
-        transfers: &[],
-    }
-    .verify()
-    .is_ok()
-}
+const CIRCUIT: CircuitId = CircuitId::Cancel;
 
 #[test]
 fn program_vk_has_one_public_input() {
     assert_eq!(VERIFYINGKEY.nr_pubinputs, 1);
+    assert!(VERIFYINGKEY.vk_commitment.is_none());
     assert_eq!(
         VERIFYINGKEY.vk_ic.len(),
         2,
@@ -115,52 +17,83 @@ fn program_vk_has_one_public_input() {
 
 #[test]
 fn cancel_prove_verify_and_bind_public_inputs() {
-    // 1. Prove a cancel.
-    let cancel = sample_inputs();
-    let proof = SwapProverClient::new()
-        .prove_cancel(&cancel)
-        .expect("prove");
-    assert!(proof.a.iter().any(|byte| *byte != 0));
+    // 1. Check the whole order returns to the maker, with compact output
+    // padding.
+    let inputs = cancel_inputs();
+    let finalized = inputs.create_finalized_transaction().unwrap();
+    let refund = finalized.output_utxos().get(SOURCE_OUTPUT_SLOT).unwrap();
+    assert_eq!(
+        (
+            refund.owner_address,
+            refund.asset,
+            refund.amount,
+            refund.data_hash,
+            finalized.output_utxos().last().unwrap().compact,
+        ),
+        (
+            Some(inputs.sender_address()),
+            source_mint(),
+            SOURCE_AMOUNT,
+            None,
+            true
+        )
+    );
 
-    // 2. The committed verifier accepts the instruction's values.
-    let expiry = cancel.public.expiry;
-    let maker = fe(MAKER_OWNER_PK_FIELD);
-    let tx_hash = to_bytes(&cancel.private.private_tx_hash);
-    assert!(verify(&proof, expiry, maker, tx_hash));
+    // 2. Prove, and verify with the program's verifier from the order expiry
+    // and the maker signer.
+    let (_, proof) = prove_and_verify(CIRCUIT, &inputs, &VERIFYINGKEY);
+    let private_tx_hash = finalized.padding_independent_private_tx_hash().unwrap();
+    let signer = identity_of(&inputs.sender);
+    assert!(verify(&proof, EXPIRY, signer, &private_tx_hash));
 
-    // 3. It rejects another expiry, signer or transaction.
-    let mut tampered = tx_hash;
+    // 3. Another expiry, signer or transaction fails.
+    let mut tampered = private_tx_hash;
     tampered[31] ^= 0x01;
-    assert!(!verify(&proof, expiry - 1, maker, tx_hash));
-    assert!(!verify(&proof, expiry, fe(72), tx_hash));
-    assert!(!verify(&proof, expiry, maker, tampered));
+    assert!(!verify(&proof, EXPIRY + 1, signer, &private_tx_hash));
+    assert!(!verify(
+        &proof,
+        EXPIRY,
+        identity_of(&keypair()),
+        &private_tx_hash
+    ));
+    assert!(!verify(&proof, EXPIRY, signer, &tampered));
 }
 
 #[test]
-fn cancel_rejects_wrong_source_output_owner() {
-    let mut wrong_owner = maker_owner_hash();
-    if let Some(last) = wrong_owner.last_mut() {
-        *last ^= 0x01;
-    }
-    let cancel = build_inputs(wrong_owner);
-    assert_invalid(CircuitId::Cancel, &cancel, || cancel.execute());
-}
-
-#[test]
-fn cancel_rejects_wrong_signer_expiry_and_refund() {
-    // Tamper one signer, expiry or refund constraint at a time.
-    let mutations: [fn(&mut Cancel); 6] = [
-        |cancel| cancel.public.maker_owner_pk_field = field(&fe(72)),
-        |cancel| cancel.private.maker_nullifier_pk = field(&fe(89)),
-        |cancel| cancel.public.expiry -= 1,
-        |cancel| cancel.private.source_output.amount = field(&fe(1)),
-        |cancel| cancel.private.source_output.asset = field(&fe(1)),
-        |cancel| cancel.private.order_utxo.data_hash = field(&fe(1)),
+fn cancel_rejects_wrong_signer_expiry_maker_and_order() {
+    // Tamper one signer, expiry, refund owner or order constraint at a time.
+    let mutations: [fn(&mut Cancel); 5] = [
+        |inputs| inputs.program.public.expiry = EXPIRY + 1,
+        |inputs| inputs.program.public.maker_owner_pk_field = field(89),
+        |inputs| {
+            let other = keypair().shielded_address().unwrap();
+            inputs.program.private.terms.maker = inputs.address(other);
+        },
+        |inputs| inputs.program.private.order_utxo.data_hash = field(99),
+        |inputs| inputs.program.private.order_utxo.amount = 0,
     ];
     for mutate in mutations {
-        let mut cancel = sample_inputs();
-        mutate(&mut cancel);
-        refresh_hash(&mut cancel);
-        assert_invalid(CircuitId::Cancel, &cancel, || cancel.execute());
+        let mut inputs = cancel_inputs();
+        mutate(&mut inputs);
+        assert_invalid(CIRCUIT, &inputs);
     }
+}
+
+fn verify(
+    proof: &spr_program::CompressedProof,
+    expiry: u64,
+    maker_owner_pk_field: [u8; 32],
+    private_tx_hash: &[u8; 32],
+) -> bool {
+    Verifier {
+        proof,
+        public_inputs: PublicInputs {
+            expiry,
+            maker_owner_pk_field,
+        },
+        private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
+    .is_ok()
 }

@@ -42,14 +42,7 @@ pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
     } = wincode::deserialize_exact(data).map_err(|_| SwapError::InvalidInstructionData)?;
 
     // 3. Verify the make proof against the transaction.
-    make::Verifier {
-        proof: &proof,
-        public_inputs: make::PublicInputs {},
-        private_tx_hash: &transact.private_tx_hash,
-        transfers: &[],
-    }
-    .verify()
-    .map_err(SwapError::from)?;
+    verify_make_proof(&proof, &transact.private_tx_hash)?;
 
     // 4. Write the marker message.
     let order_utxo_hash = transact
@@ -75,4 +68,19 @@ pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
     // 5. Invoke SPP with the order-authority PDA signer.
     let spp_accounts = iter.remaining()?;
     cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+}
+
+/// Hashes the make proof's public inputs and verifies the proof.
+#[inline(never)]
+#[profile]
+fn verify_make_proof(proof: &MakeProof, private_tx_hash: &[u8; 32]) -> ProgramResult {
+    make::Verifier {
+        proof,
+        public_inputs: make::PublicInputs {},
+        private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
+    .map_err(SwapError::from)?;
+    Ok(())
 }

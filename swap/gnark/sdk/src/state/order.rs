@@ -26,7 +26,9 @@ pub struct OrderTerms {
     pub destination_amount: u64,
 
     pub destination: ShieldedAddress,
-    pub taker: Address,
+    /// The designated taker's Solana pubkey, or `None` for an order any
+    /// holder of the order opening may take.
+    pub taker: Option<Address>,
 
     pub expiry: u64,
 }
@@ -36,7 +38,7 @@ pub struct PlainTextData {
     pub destination_asset_id: u64,
     pub destination_amount: u64,
     pub expiry: u64,
-    pub taker: Address,
+    pub taker: Option<Address>,
 }
 
 /// The order UTXO's two representations: the output minted at create time and
@@ -62,7 +64,7 @@ impl OrderTerms {
     // 2. how many tokens of the mint we want to swap into
     // 3. which shielded pubkey the swap settlement will go to
     // 4. the order expiry
-    // 5. the taker allowed to take
+    // 5. the taker allowed to take, or zero for any taker
     pub fn data_hash(&self) -> Result<[u8; 32]> {
         OrderTermsProofInput::try_from(self)?.data_hash()
     }
@@ -79,7 +81,7 @@ impl TryFrom<&OrderTerms> for OrderTermsProofInput {
             maker_owner_hash: terms.destination.owner_hash().map_err(err)?,
             maker_viewing_pk: *terms.destination.viewing_pubkey.as_bytes(),
             expiry: terms.expiry,
-            taker_pk_fe: terms.taker.data_hash()?,
+            taker_pk_fe: taker_pk_fe(terms.taker.as_ref())?,
         })
     }
 }
@@ -107,11 +109,18 @@ impl DataHash for OrderTermsProofInput {
 // All instructions: the taker pubkey as the `taker_pk_fe` terms field. A
 // taker's UTXO owner is `Poseidon(owner_proof_input_hash(pk), nullifier_pk)`,
 // so this is the same algorithm-tagged Solana identity, not the bare
-// `hash_bytes`.
+// `hash_bytes`. The take circuit admits only that owner when the field is
+// nonzero.
 impl DataHash for Address {
     fn data_hash(&self) -> Result<[u8; 32]> {
         solana_owner_identity(self.as_array()).map_err(err)
     }
+}
+
+/// The `taker_pk_fe` terms field: zero for an open order, otherwise the
+/// designated taker's Solana owner identity.
+pub fn taker_pk_fe(taker: Option<&Address>) -> Result<[u8; 32]> {
+    taker.map_or(Ok([0; 32]), DataHash::data_hash)
 }
 
 // make mints to the synthetic order owner; take and cancel spend from it.

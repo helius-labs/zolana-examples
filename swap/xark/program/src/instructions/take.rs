@@ -47,17 +47,12 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
         .first()
         .ok_or(SwapError::InvalidInstructionData)?
         .nullifier_hash;
-    take::Verifier {
-        proof: &proof,
-        public_inputs: take::PublicInputs {
-            expiry: transact.expiry_unix_ts,
-            first_nullifier,
-        },
-        private_tx_hash: &transact.private_tx_hash,
-        transfers: &[],
-    }
-    .verify()
-    .map_err(SwapError::from)?;
+    verify_take_proof(
+        &proof,
+        transact.expiry_unix_ts,
+        first_nullifier,
+        &transact.private_tx_hash,
+    )?;
 
     // 5. Invoke SPP with the order-authority PDA signer.
     let transact_bytes = transact
@@ -65,4 +60,27 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
         .map_err(|_| SwapError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
     cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+}
+
+/// Hashes the take proof's public inputs and verifies the proof.
+#[inline(never)]
+#[profile]
+fn verify_take_proof(
+    proof: &TakeProof,
+    expiry: u64,
+    first_nullifier: [u8; 32],
+    private_tx_hash: &[u8; 32],
+) -> ProgramResult {
+    take::Verifier {
+        proof,
+        public_inputs: take::PublicInputs {
+            expiry,
+            first_nullifier,
+        },
+        private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
+    .map_err(SwapError::from)?;
+    Ok(())
 }

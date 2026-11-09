@@ -35,16 +35,7 @@ pub fn process_escrow_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
     let EscrowIxData { proof, transact } = wincode::deserialize_exact(data)
         .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
 
-    verify_groth16(
-        CompressedGroth16Proof {
-            a: &proof.proof_a,
-            b: &proof.proof_b,
-            c: &proof.proof_c,
-            commitment: None,
-        },
-        transact.private_tx_hash,
-        &escrow::VERIFYINGKEY,
-    )?;
+    verify_escrow_proof(&proof, &transact.private_tx_hash)?;
 
     let transact_bytes = transact
         .serialize()
@@ -52,4 +43,21 @@ pub fn process_escrow_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
 
     let spp_accounts = iter.remaining()?;
     cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+}
+
+/// Verifies the escrow proof against the transaction's `private_tx_hash`,
+/// the circuit's single public input, with the Groth16 verification.
+#[inline(never)]
+#[profile]
+pub fn verify_escrow_proof(proof: &EscrowProof, private_tx_hash: &[u8; 32]) -> ProgramResult {
+    verify_groth16(
+        CompressedGroth16Proof {
+            a: &proof.proof_a,
+            b: &proof.proof_b,
+            c: &proof.proof_c,
+            commitment: None,
+        },
+        *private_tx_hash,
+        &escrow::VERIFYINGKEY,
+    )
 }

@@ -41,7 +41,7 @@ instructions, and circuits.
   build their hashes, the private tx hash and the blinding checks from
   `zolana/gnarksdk` (`sdk-libs/gnark-sdk`); `circuits/go.mod` replaces it and
   `github.com/helius-labs/zolana/prover/server` with their directories. Go tooling in `circuits/` needs the
-  bridge replace too: `just example-circuits-go vet ./...`.
+  bridge replace too.
 - sdk: one directory per instruction with `instruction.rs` (builder struct
   with a consuming `instruction()` method, not free functions) and
   `proof.rs` (a params struct with `to_proof_inputs()` doing validation and
@@ -71,7 +71,9 @@ instructions, and circuits.
 
 - `build/gnark/<circuit>/{pk,vk}.bin`: generated proving/verifying keys,
   pinned by checksum. They are insecure deterministic test keys, UNSAFE for
-  production: `just ensure-swap-keys` generates them locally, and
-  `just regen-swap-keys` rewrites the committed verifying keys and checksums.
+  production: `swap-prover-setup <circuit> build/gnark/<circuit>
+  --insecure-test-keys` generates them, and adding `--rust-vk
+  program/src/verifying_keys/<circuit>.rs` rewrites the committed verifying
+  key; update `swap-keys.CHECKSUM` with `shasum -a 256` afterwards.
 - `program/src/verifying_keys/`: committed Rust vk constants; must match the
   generated keys.

@@ -1,97 +1,330 @@
-use std::panic::{catch_unwind, AssertUnwindSafe};
-
-use spr_hasher::primitives::solana_owner_identity;
-use spr_keypair::{constants::BLINDING_LEN, hash::poseidon, NullifierKey};
+use solana_address::Address;
+use solana_keypair::Keypair;
+use spr_keypair::{ShieldedAddress, ShieldedKeypair};
 use spr_program::{
-    checked, from_bytes, to_bytes, xark::Input, CircuitError, Field, ProgramProofInputs,
+    circuit::CheckedTransaction, to_bytes, ClientInputs, Field, InputRecords, ProgramProofInputs,
+    ProgramTransaction, TxContext,
 };
-use spr_transaction::instructions::transact::PrivateTxHash;
-use swap_program::circuits::{Commitment, ProofInputUtxo};
-use swap_sdk::proof::{checked_circuit, CircuitId};
+use spr_transaction::{
+    instructions::transact::FinalizedTransaction, Data, Mint, SppProofOutputUtxo, Utxo, WalletUtxo,
+};
+use std::ops::{Deref, DerefMut};
+use swap_program::circuits as circuit;
+use swap_sdk::{
+    instructions::take::take_blinding_seed,
+    order_authority,
+    proof::CircuitId,
+    shared::identity,
+    state::{OrderTerms, OrderUtxo},
+};
 
-/// Nonzero, different trees catch dropped or swapped ids in the commitments.
+/// The tree the spent UTXOs are in. Non-zero, and different from the output
+/// tree, so a swapped or dropped tree id changes the commitments the proof
+/// binds.
 pub const INPUT_TREE_ID: u16 = 3;
 pub const OUTPUT_TREE_ID: u16 = 7;
+pub const EXPIRY: u64 = 1_700_000_000;
+pub const SOURCE_AMOUNT: u64 = 1_000;
+pub const DESTINATION_AMOUNT: u64 = 250;
+pub const ORDER_LEAF_INDEX: u64 = 5;
 
-pub fn fe(byte: u8) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    out[31] = byte;
-    out
+pub trait Execute: spr_program::xark::Input {
+    fn execute(&self) -> Result<CheckedTransaction, spr_program::CircuitError>;
 }
 
-pub fn field(bytes: &[u8; 32]) -> Field {
-    from_bytes(bytes).expect("field element")
+macro_rules! program {
+    ($($name:ident),*) => {$(
+        impl Execute for circuit::$name {
+            fn execute(&self) -> Result<CheckedTransaction, spr_program::CircuitError> {
+                circuit::$name::execute(self)
+            }
+        }
+        pub type $name = Fixture<circuit::$name>;
+    )*};
+}
+program!(Make, Take, Cancel);
+
+/// A program's inputs and the native records they were converted from.
+pub struct Fixture<P> {
+    pub program: P,
+    records: InputRecords,
+    /// The transaction's sender: the maker for make and cancel, the taker
+    /// for take.
+    pub sender: ShieldedKeypair,
 }
 
-/// The order authority is a PDA, so its identity carries the Solana owner tag
-/// like the program's `PdaOwner` derivation.
-pub fn order_utxo_owner_hash(order_authority: &[u8; 32]) -> [u8; 32] {
-    let pk_field = solana_owner_identity(order_authority).expect("order authority field");
-    let nullifier_pk = NullifierKey::from_secret([0u8; BLINDING_LEN])
-        .pubkey()
-        .expect("zero-secret nullifier pubkey");
-    poseidon(&[&pk_field, &nullifier_pk]).expect("order utxo owner hash")
-}
-
-/// A UTXO hash preimage as the swap circuits take it.
-pub fn circuit_utxo(utxo: &spr_transaction::utxo::ProofInputUtxo) -> ProofInputUtxo {
-    ProofInputUtxo {
-        domain: field(&utxo.domain),
-        tree_id: field(&utxo.tree_id),
-        owner_hash: field(&utxo.owner_hash),
-        asset: field(&utxo.asset),
-        amount: field(&utxo.amount),
-        blinding: field(&utxo.blinding),
-        data_hash: field(&utxo.data_hash),
-        ring_data_hash: field(&utxo.ring_data_hash),
-        ring_program_id: field(&utxo.ring_program_id),
+impl<P> Deref for Fixture<P> {
+    type Target = P;
+    fn deref(&self) -> &P {
+        &self.program
     }
 }
 
-fn utxo_hash(utxo: &ProofInputUtxo) -> [u8; 32] {
-    to_bytes(&utxo.hash().expect("utxo hash"))
+impl<P> DerefMut for Fixture<P> {
+    fn deref_mut(&mut self) -> &mut P {
+        &mut self.program
+    }
 }
 
-/// SPP's private transaction hash over circuit UTXOs; `None` is a padding
-/// slot.
-pub fn private_tx_hash(
-    inputs: &[Option<&ProofInputUtxo>],
-    outputs: &[&ProofInputUtxo],
-    blinding: &Field,
-) -> Field {
-    let inputs: Vec<[u8; 32]> = inputs
-        .iter()
-        .map(|input| input.map_or([0u8; 32], utxo_hash))
-        .collect();
-    let outputs: Vec<[u8; 32]> = outputs.iter().map(|output| utxo_hash(output)).collect();
-    field(
-        &PrivateTxHash::new(&inputs, &outputs, &to_bytes(blinding))
-            .hash()
-            .expect("private tx hash"),
+impl<P: Execute> Fixture<P> {
+    pub fn sender_address(&self) -> ShieldedAddress {
+        self.sender.shielded_address().unwrap()
+    }
+
+    pub fn create_program_transaction(&self) -> anyhow::Result<ProgramTransaction> {
+        Ok(self.records.create_program_transaction(
+            &self.program,
+            self.execute()?,
+            &self.sender_address(),
+            Address::default(),
+        )?)
+    }
+
+    pub fn create_finalized_transaction(&self) -> anyhow::Result<FinalizedTransaction> {
+        Ok(self.create_program_transaction()?.finalized)
+    }
+
+    /// Converts `address` as a circuit input and records its viewing key.
+    pub fn address(&mut self, address: ShieldedAddress) -> spr_program::ShieldedAddress {
+        self.records.address(&address).unwrap()
+    }
+
+    /// Converts `terms` as a circuit input and records their addresses and
+    /// mint.
+    pub fn terms(&mut self, terms: &OrderTerms) -> circuit::OrderTerms {
+        circuit::OrderTerms::from_client(terms.circuit_terms().unwrap(), &mut self.records).unwrap()
+    }
+}
+
+pub fn keypair() -> ShieldedKeypair {
+    ShieldedKeypair::from_keypair(&Keypair::new()).unwrap()
+}
+
+pub fn source_mint() -> Mint {
+    Mint::new(Address::new_from_array([3; 32]), 2)
+}
+
+pub fn destination_mint() -> Mint {
+    Mint::new(Address::new_from_array([4; 32]), 3)
+}
+
+pub fn fe(value: u8) -> [u8; 32] {
+    let mut bytes = [0; 32];
+    bytes[31] = value;
+    bytes
+}
+
+pub fn field(value: u8) -> Field {
+    Field::from(value)
+}
+
+pub fn field_bytes(value: Field) -> [u8; 32] {
+    to_bytes(&value)
+}
+
+pub fn context(seed: &[u8; 32]) -> TxContext {
+    InputRecords::context(seed, Some(OUTPUT_TREE_ID)).unwrap()
+}
+
+/// The owner identity of a keypair's Solana address.
+pub fn identity_of(keypair: &ShieldedKeypair) -> [u8; 32] {
+    identity(
+        &keypair
+            .shielded_address()
+            .unwrap()
+            .solana_address()
+            .unwrap(),
     )
+    .unwrap()
 }
 
-/// The native circuit and the compiled circuit both reject `program`. The
-/// compiled check fails inside `execute`, before the outer public-hash check.
-pub fn assert_invalid<P: Input>(
+pub fn terms(maker: &ShieldedKeypair, taker: Option<[u8; 32]>) -> OrderTerms {
+    OrderTerms {
+        destination_mint: destination_mint(),
+        destination_amount: DESTINATION_AMOUNT,
+        maker: maker.shielded_address().unwrap(),
+        expiry: EXPIRY,
+        taker,
+    }
+}
+
+pub fn order_utxo(terms: OrderTerms) -> OrderUtxo {
+    OrderUtxo {
+        terms,
+        blinding: fe(7),
+        source_mint: source_mint(),
+        source_amount: SOURCE_AMOUNT,
+    }
+}
+
+/// `amount` of `mint` owned by `owner`, at leaf 6 of [`INPUT_TREE_ID`].
+pub fn wallet_utxo(owner: &ShieldedKeypair, mint: Mint, amount: u64) -> WalletUtxo {
+    spr_test_utils::utxo::wallet(
+        Utxo {
+            owner: owner.signing_pubkey(),
+            asset: mint,
+            amount,
+            blinding: fe(13),
+            ring_program_id: None,
+            data: Data::default(),
+        },
+        &owner.nullifier_key,
+        INPUT_TREE_ID,
+        6,
+        None,
+        None,
+    )
+    .unwrap()
+}
+
+/// A make locking `source_amount` of a `source_amount + change_amount` source
+/// owned by the order authority, designated to and encrypted for `taker`.
+pub fn make_inputs(source_amount: u64, change_amount: u64) -> Make {
+    let maker = keypair();
+    let taker = keypair();
+    let terms = terms(&maker, Some(identity_of(&taker)));
+    let order_address = order_authority().address(taker.viewing_pubkey()).unwrap();
+    let source = order_authority()
+        .input(
+            &SppProofOutputUtxo {
+                asset: source_mint(),
+                amount: source_amount + change_amount,
+                blinding: fe(5),
+                owner_address: Some(order_address),
+                ..Default::default()
+            },
+            OUTPUT_TREE_ID,
+            0,
+        )
+        .unwrap();
+    let mut fixture = Fixture {
+        program: circuit::Make {
+            private: circuit::MakePrivateInputs {
+                tx_context: context(&fe(41)),
+                terms: circuit::OrderTerms::default(),
+                source_amount,
+                source: spr_program::circuit::Utxo::dummy(),
+                order_address: spr_program::ShieldedAddress::default(),
+            },
+            public: circuit::MakePublicInputs {},
+        },
+        records: InputRecords::new(),
+        sender: maker,
+    };
+    fixture.program.private.terms = fixture.terms(&terms);
+    fixture.program.private.source = fixture.records.utxo(&source).unwrap();
+    fixture.program.private.order_address = fixture.address(order_address);
+    fixture
+}
+
+/// A take of the order of [`order_utxo`] at [`ORDER_LEAF_INDEX`] by `taker`,
+/// with the order's `taker` identity and the take blinding seed.
+pub fn take_inputs(order: &OrderUtxo, taker: ShieldedKeypair) -> Take {
+    let order_input = order
+        .to_input_utxo(INPUT_TREE_ID, ORDER_LEAF_INDEX)
+        .unwrap();
+    let taker_input = wallet_utxo(&taker, destination_mint(), DESTINATION_AMOUNT);
+    let mut fixture = Fixture {
+        program: circuit::Take {
+            private: circuit::TakePrivateInputs {
+                tx_context: context(&take_blinding_seed(&order.blinding).unwrap()),
+                terms: circuit::OrderTerms::default(),
+                order_utxo: spr_program::circuit::Utxo::dummy(),
+                taker_in: spr_program::circuit::Utxo::dummy(),
+            },
+            public: circuit::TakePublicInputs {
+                expiry: order.terms.expiry,
+                first_nullifier: spr_program::from_bytes(&order_input.nullifier).unwrap(),
+            },
+        },
+        records: InputRecords::new(),
+        sender: taker,
+    };
+    fixture.program.private.terms = fixture.terms(&order.terms);
+    fixture.program.private.order_utxo = fixture.records.utxo(&order_input).unwrap();
+    fixture.program.private.taker_in = fixture.records.utxo(&taker_input).unwrap();
+    fixture
+}
+
+/// A cancel of an order of `maker` at [`ORDER_LEAF_INDEX`].
+pub fn cancel_inputs() -> Cancel {
+    let maker = keypair();
+    let order = order_utxo(terms(&maker, None));
+    let order_input = order
+        .to_input_utxo(INPUT_TREE_ID, ORDER_LEAF_INDEX)
+        .unwrap();
+    let maker_owner_pk_field = spr_program::from_bytes(&identity_of(&maker)).unwrap();
+    let mut fixture = Fixture {
+        program: circuit::Cancel {
+            private: circuit::CancelPrivateInputs {
+                tx_context: context(&fe(43)),
+                terms: circuit::OrderTerms::default(),
+                order_utxo: spr_program::circuit::Utxo::dummy(),
+            },
+            public: circuit::CancelPublicInputs {
+                expiry: EXPIRY,
+                maker_owner_pk_field,
+            },
+        },
+        records: InputRecords::new(),
+        sender: maker,
+    };
+    fixture.program.private.terms = fixture.terms(&order.terms);
+    fixture.program.private.order_utxo = fixture.records.utxo(&order_input).unwrap();
+    fixture
+}
+
+/// Proves `inputs` with the checked circuit, verifies the proof against `vk`
+/// with the transaction's public hash, and checks a tampered public hash
+/// fails. Returns the program transaction and the proof.
+pub fn prove_and_verify<P: Execute>(
     id: CircuitId,
-    program: &P,
-    execute: impl FnOnce() -> Result<Commitment, CircuitError>,
-) {
-    let native = catch_unwind(AssertUnwindSafe(|| checked(execute)));
+    inputs: &Fixture<P>,
+    vk: &groth16_solana::groth16::Groth16Verifyingkey,
+) -> (ProgramTransaction, spr_program::CompressedProof) {
+    let tx = inputs.create_program_transaction().unwrap();
+    let (_private, circuit) = swap_sdk::proof::checked_circuit(id).unwrap();
+    circuit.check_constrained(tx.proof_inputs.clone()).unwrap();
+    let proof = swap_sdk::proof::prove(id, &tx.proof_inputs).unwrap();
+    assert!(
+        proof.a.iter().any(|&byte| byte != 0),
+        "proof_a must not be all zero"
+    );
+    let a = groth16_solana::decompression::decompress_g1(&proof.a).unwrap();
+    let b = groth16_solana::decompression::decompress_g2(&proof.b).unwrap();
+    let c = groth16_solana::decompression::decompress_g1(&proof.c).unwrap();
+    groth16_solana::groth16::Groth16Verifier::new(&a, &b, &c, &[tx.public_hash], vk)
+        .unwrap()
+        .verify()
+        .unwrap();
+    let mut tampered = tx.public_hash;
+    tampered[31] ^= 1;
+    assert!(
+        groth16_solana::groth16::Groth16Verifier::new(&a, &b, &c, &[tampered], vk)
+            .unwrap()
+            .verify()
+            .is_err(),
+        "verification must fail for a tampered public input"
+    );
+    (tx, proof)
+}
+
+/// Checks that both the native execution and the compiled circuit refuse
+/// `inputs`.
+pub fn assert_invalid<P: Execute>(id: CircuitId, inputs: &Fixture<P>) {
+    let native = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        spr_program::checked(|| inputs.execute())
+    }));
     assert!(
         !matches!(native, Ok(Ok(_))),
         "the native circuit accepted invalid inputs"
     );
-    let (_private, circuit) = checked_circuit(id).expect("checked circuit");
+    let (_private, circuit) = swap_sdk::proof::checked_circuit(id).unwrap();
     let error = circuit
-        .check(ProgramProofInputs::new(program, Field::zero()))
+        .check(ProgramProofInputs::new(&inputs.program, Field::zero()))
         .expect_err("the compiled circuit must reject invalid inputs");
-    // A constraint inside `execute` names it as the failing function, or as
-    // the entry line that calls it when the constraint is inlined there.
-    let error = error.to_string();
     assert!(
-        error.contains("in execute") || error.contains("program.execute()"),
+        error.to_string().contains("program.execute()"),
         "expected the program's constraint to fail before the outer public-hash check: {error}"
     );
 }

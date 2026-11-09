@@ -1,5 +1,5 @@
 mod instruction;
-mod proof;
+mod transaction;
 
 pub use instruction::{Make, OrderMarker};
-pub use proof::{MakeProofInputParams, SppTxHashes};
+pub use transaction::{MakeTransaction, MakeTransactionParams, CHANGE_SLOT, ORDER_SLOT};

@@ -70,7 +70,7 @@ fn make_and_cancel_swap_inline() -> Result<()> {
             destination_mint: SOL_MINT,
             destination_amount: DESTINATION_AMOUNT,
             destination: maker.keypair.shielded_address()?,
-            taker: taker_authorization_address,
+            taker: Some(taker_authorization_address),
             expiry: EXPIRY,
         };
 

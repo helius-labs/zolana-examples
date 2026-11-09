@@ -1,32 +1,31 @@
 use spr_program::{
-    circuit::PublicInputs, input, poseidon, require_eq, CircuitError, Field, ZkProgram,
+    circuit::{
+        CheckedTransaction, ConfidentialTransaction, PublicInputs, TokenUtxos, Utxo, UtxoTrait,
+    },
+    input, require_eq, CircuitError, ClientInputs, Field, TxContext, ZkProgram,
 };
 
 use super::{
-    shared::{check_private_tx_hash, check_transaction_blindings, Commitment},
-    OrderTerms, ProofInputUtxo,
+    shared::{assert_blinding_seed, spend_order},
+    OrderTerms,
 };
 
 #[input]
 #[derive(ZkProgram)]
-#[zk_program(raw_client)]
 pub struct Take {
     pub private: TakePrivateInputs,
     pub public: TakePublicInputs,
 }
 
 #[input]
+#[derive(ClientInputs)]
 pub struct TakePrivateInputs {
-    pub private_tx_hash: Field,
-    pub order: OrderTerms,
-    pub order_utxo: ProofInputUtxo,
-    /// The taker's destination-side input.
-    pub taker_in: ProofInputUtxo,
-    /// Output slot 0: the source funds to the taker.
-    pub source_output: ProofInputUtxo,
-    /// Output slot 1: the destination funds to the maker.
-    pub destination_output: ProofInputUtxo,
-    pub private_tx_blinding: Field,
+    pub tx_context: TxContext,
+    pub terms: OrderTerms,
+    /// The order UTXO, which commits `terms`.
+    pub order_utxo: Utxo,
+    /// The taker's destination-side input. Its owner receives the source.
+    pub taker_in: Utxo,
 }
 
 #[input]
@@ -40,69 +39,66 @@ pub struct TakePublicInputs {
 }
 
 impl Take {
-    /// 1. Check the blinding seed and the transaction blindings.
+    /// 1. Check the blinding seed derives from the order opening.
     /// 2. Check the order terms and the public expiry.
-    /// 3. Check the order UTXO input commits the terms.
-    /// 4. Check the taker input pays the destination amount.
-    /// 5. Check the source output pays the order to the taker.
-    /// 6. Check the destination output pays the maker.
+    /// 3. Spend the order UTXO, which commits the terms.
+    /// 4. Spend the taker input of the destination asset and check the
+    ///    designated taker.
+    /// 5. Create the source output to the taker and the destination output to
+    ///    the maker.
+    /// 6. Pay the whole order to the taker and exactly `destination_amount` to
+    ///    the maker.
     /// 7. Check the transaction: inputs `[order UTXO, taker input]`, outputs
     ///    `[source, destination]`.
-    pub fn execute(&self) -> Result<Commitment, CircuitError> {
+    /// 8. Check the first nullifier the output blindings derive from is the
+    ///    published one.
+    pub fn execute(&self) -> Result<CheckedTransaction, CircuitError> {
         let private = &self.private;
         let public = &self.public;
-        let order = &private.order;
-        let order_utxo = &private.order_utxo;
-        let taker_in = &private.taker_in;
-        let source = &private.source_output;
-        let destination = &private.destination_output;
+        let terms = &private.terms;
 
-        // 1. Both parties hold the order opening. Binding the seed and the
-        // published first nullifier makes every payout recoverable without
-        // the taker's ciphertext.
-        let blinding_seed = poseidon(&[
-            Field::from(crate::TAKE_BLINDING_DOMAIN),
-            order_utxo.blinding,
-        ])?;
-        check_transaction_blindings(
-            public.first_nullifier,
-            blinding_seed,
-            private.private_tx_blinding,
-            &[source.blinding, destination.blinding],
+        // 1. Both parties hold the order opening. With the published first
+        // nullifier, the seed makes every payout recoverable without the
+        // taker's ciphertext.
+        assert_blinding_seed(
+            &private.tx_context,
+            crate::TAKE_BLINDING_DOMAIN,
+            &private.order_utxo.blinding,
         )?;
 
         // 2. Check the order terms and the public expiry.
-        order.check();
-        require_eq(public.expiry, order.expiry);
+        terms.assert_valid();
+        require_eq(public.expiry, terms.expiry);
 
-        // 3. Check the order UTXO input commits the terms.
-        let order_utxo_hash = order.check_order_utxo(order_utxo)?;
+        // 3. Spend the order UTXO, which commits the terms.
+        let mut order = spend_order(&private.order_utxo, terms)?;
 
-        // 4. Check the taker input pays the destination amount.
-        let destination_amount = Field::from(order.destination_amount);
-        taker_in.assert_plain();
-        require_eq(taker_in.asset, order.destination_asset);
-        require_eq(taker_in.amount, destination_amount);
+        // 4. Spend the taker input and check the designated taker.
+        let mut taker_in = TokenUtxos::new_mut(core::array::from_ref(&private.taker_in))?.close();
+        require_eq(taker_in.asset(), terms.destination_mint);
+        let taker = taker_in.owner();
+        terms.assert_taker(&taker)?;
 
-        // 5. Check the source output pays the order to the taker.
-        source.assert_plain();
-        require_eq(source.asset, order_utxo.asset);
-        require_eq(source.amount, order_utxo.amount);
-        require_eq(source.owner_hash, taker_in.owner_hash);
+        // 5. Create the source and destination outputs.
+        let mut source_output = TokenUtxos::new_init(&taker, &order.asset());
+        let mut destination_output =
+            TokenUtxos::new_init(terms.maker.owner(), &terms.destination_mint);
 
-        // 6. Check the destination output pays the maker.
-        destination.assert_plain();
-        require_eq(destination.asset, order.destination_asset);
-        require_eq(destination.amount, destination_amount);
-        require_eq(destination.owner_hash, order.maker_owner_hash);
+        // 6. The closed taker input must end at zero, so it holds exactly the
+        // destination amount.
+        order.transfer_all(&mut source_output)?;
+        taker_in.transfer(&mut destination_output, &terms.destination_amount)?;
 
         // 7. Check the transaction.
-        check_private_tx_hash(
-            &[order_utxo_hash, taker_in.hash()?],
-            &[source.hash()?, destination.hash()?],
-            private.private_tx_blinding,
-            private.private_tx_hash,
-        )?;
-        Ok(Commitment(public.hash(&private.private_tx_hash)?))
+        let checked = ConfidentialTransaction::new(&private.tx_context, public)
+            .with(order)
+            .with(taker_in)
+            .with(source_output)
+            .with(destination_output)
+            .check()?;
+
+        // 8. Check the published first nullifier.
+        require_eq(checked.first_nullifier, public.first_nullifier);
+        Ok(checked)
     }
 }

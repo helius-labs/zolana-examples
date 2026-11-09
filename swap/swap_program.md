@@ -6,7 +6,9 @@ funds it is selling as a shielded UTXO in the Solana Privacy Program (SPP). The 
 made with the make transaction, encrypted so only the taker and the maker can read its private terms.
 
 The taker takes the order before it expires, receiving the maker's funds and paying the agreed amount
-in return; if the taker declines, the maker reclaims the order UTXO after expiry.
+in return; if the taker declines, the maker reclaims the order UTXO after expiry. The maker either
+designates the taker in the order, so that no one else can settle it, or leaves the order open to
+anyone who holds its opening.
 
 The taker learns the order and may decline to take it, but it cannot take the locked funds: the
 program alone can move the order UTXO, and only by settling the committed order or refunding the maker
@@ -93,7 +95,9 @@ ring; the swap program does not try to hide which action ran.
   signs the transaction.
 - **Private:** `price`, `source_amount`, `destination_amount`, and the aggregate volume per asset.
   These live only inside confidential UTXOs and the order UTXO `utxo_data`.
-  The taker's identity stays private at make and on cancel, which the maker signs.
+  The taker's identity stays private at make and on cancel, which the maker signs. Whether an
+  order designates a taker, and which one, is private: `taker_pk_fe` is an order term inside
+  `utxo_data`.
 - **Unlinkable:** SPP hides the link between a created UTXO and its later spend, so an observer
   cannot pair a make with its take or cancel.
 
@@ -118,10 +122,17 @@ order_terms = (
     destination_amount,     // private; price = destination_amount / source_amount is implicit and private
     maker_address,           // the maker's CompressedShieldedAddress, resolved by the taker from the user registry: receives destination on take and source on cancel
     expiry,                 // unix seconds; revealed at resolve and checked against the Clock by the program
-    taker_pk_fe,     // the designated taker; committed, not checked by any swap circuit
+    taker_pk_fe,            // the designated taker's owner pk field, or 0 for an open order; checked by the take circuit
 )
-data_hash = Poseidon(order_terms)        // enters the order UTXO utxo_hash directly
+data_hash = Poseidon(order_terms)        // gnark: enters the order UTXO utxo_hash directly; Xark: wrapped as Poseidon(DATA, data_hash), see the README
 ```
+
+`taker_pk_fe` selects who may take. `0` makes an open order: any holder of the order UTXO hash
+preimage with a matching destination UTXO may take it. A nonzero value designates the taker: it is
+`hash_bytes` of the taker's Solana pubkey, the same owner pk field encoding as the cancel circuit's
+`maker_owner_pk_field`, and only the taker whose destination-side input UTXO owner hash equals
+`Poseidon(taker_pk_fe, taker_nullifier_pk)` may take. The take proof witnesses `taker_nullifier_pk`
+privately. The value is committed like every other term, so neither party can change it after make.
 
 `source_asset_id`, `source_amount`, and `owner = order-authority PDA` are the order UTXO's own
 SPP fields, already committed in `utxo_hash`. The order UTXO's owner is the swap order-authority PDA
@@ -190,7 +201,8 @@ with the PDA owner, makes SPP spend it only through a swap circuit). The transac
 message tagged to the taker.
 
 The order UTXO output's recipient ciphertext (`TransferRecipientPlaintext { asset_id, amount, blinding,
-ring_program_id, data }`, with `data` = the order terms other than `maker_address`) is encrypted to
+ring_program_id, data }`, with `data` = the order terms other than `maker_address`; the Xark
+implementation's `data` also carries `maker_address`) is encrypted to
 the taker's viewing pubkey, so the taker recovers the private order terms and the order UTXO `blinding`;
 the maker can decrypt the same slot via the transaction viewing key it holds. Those two parties are
 exactly who can decrypt the order. The taker resolves `maker_address`
@@ -245,10 +257,11 @@ conserves value per asset; the taker's profit is the spread already priced into
 `destination_amount`. The proof fixes the destination blinding to SPP's output blinding derivation
 under `Poseidon("SWTX", order_utxo_blinding)` and the first published nullifier, so the maker
 reconstructs and spends the bought output from the order UTXO blinding and order terms alone; that
-output carries an ordinary recipient ciphertext for wallet discovery. The circuit checks only the
-payout and the blinding derivation, so any holder of the order UTXO hash preimage (the maker and the
-taker) and a matching destination UTXO may take; the maker payout still flows only to the committed
-`maker_address`. The swap program supplies the order-authority PDA signer for the order UTXO spend,
+output carries an ordinary recipient ciphertext for wallet discovery. The circuit checks the payout,
+the blinding derivation and the committed `taker_pk_fe`: on an open order (`taker_pk_fe = 0`) any
+holder of the order UTXO hash preimage (the maker and the taker) and a matching destination UTXO may
+take, while on a designated order the destination-side input must belong to the designated taker.
+Either way the maker payout flows only to the committed `maker_address`. The swap program supplies the order-authority PDA signer for the order UTXO spend,
 reads the order `expiry` from the transact's own `expiry_unix_ts` field and checks it against the
 Clock sysvar (`now <= expiry`); the take proof takes that same value as a public input.
 
@@ -334,7 +347,9 @@ benchmarked, and must match the SPP `transact` shapes the instructions use. The 
 and proven in-process, through a gnark→Rust FFI binding or through Xark; the SPP transfer proof
 still comes from the existing SPP prover. The public-input hashes below are the gnark
 implementation's; the Xark implementation folds the same values as
-`Poseidon(values..., private_tx_hash)` (see the [README](README.md#implementations)).
+`Poseidon(values..., private_tx_hash)`, and its circuits build the transaction with the program
+SDK's UTXO and transaction operations, which derive the same blindings and `private_tx_hash` (see
+the [README](README.md#circuits)).
 
 ### Make circuit
 
@@ -371,9 +386,14 @@ the circuit only reveals `expiry` and checks it equals the committed term.
   `first_nullifier` from the first SPP input, so it cannot be substituted by the prover.
 - **Private inputs:** the order UTXO hash preimage (order terms, `source_amount`,
   `order_utxo_blinding`), the maker's compressed viewing pubkey (feeding `maker_address`), the taker's
-  destination-side input UTXO, and the two output UTXO hash preimages.
+  destination-side input UTXO, the taker's `taker_nullifier_pk`, and the two output UTXO hash
+  preimages.
 - **Constraints:**
   - The public `expiry` equals the committed order `expiry`.
+  - If the committed `taker_pk_fe` is nonzero, the destination-side input's owner hash equals
+    `Poseidon(taker_pk_fe, taker_nullifier_pk)`; if it is `0`, the input owner is unconstrained. One
+    constraint expresses both cases: `taker_pk_fe * (owner_hash - Poseidon(taker_pk_fe,
+    taker_nullifier_pk)) = 0`.
   - The destination-side input is `(destination_asset_id, destination_amount)`; the outputs
     committed in `private_tx_hash` are `destination_output == (destination_asset_id,
     destination_amount, maker_owner_hash)` and `source_output == (source_asset_id, source_amount)`

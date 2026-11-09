@@ -33,14 +33,7 @@ pub fn process_escrow_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
         .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
 
     // 3. Verify the escrow proof against the transaction's `private_tx_hash`.
-    escrow::Verifier {
-        proof: &proof,
-        public_inputs: escrow::PublicInputs {},
-        private_tx_hash: &transact.private_tx_hash,
-        transfers: &[],
-    }
-    .verify()
-    .map_err(TimelockEscrowError::from)?;
+    verify_escrow_proof(&proof, &transact.private_tx_hash)?;
 
     // 4. Invoke SPP with the escrow-authority PDA signer.
     let transact_bytes = transact
@@ -48,4 +41,20 @@ pub fn process_escrow_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
         .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
     cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+}
+
+/// Verifies the escrow proof against the transaction's `private_tx_hash`:
+/// the public-input hash, then the Groth16 verification.
+#[inline(never)]
+#[profile]
+pub fn verify_escrow_proof(proof: &EscrowProof, private_tx_hash: &[u8; 32]) -> ProgramResult {
+    escrow::Verifier {
+        proof,
+        public_inputs: escrow::PublicInputs {},
+        private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
+    .map_err(TimelockEscrowError::from)?;
+    Ok(())
 }

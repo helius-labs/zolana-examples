@@ -1,97 +1,16 @@
-use solana_address::Address;
-use spr_hasher::primitives::hash_bytes;
-use spr_keypair::ViewingKey;
-use spr_program::{to_bytes, Field};
-use spr_transaction::{instructions::transact::PrivateTxHash, utxo::ProofInputUtxo};
-use swap_program::{
-    circuits::{Make, MakePrivateInputs, MakePublicInputs, OrderTerms},
-    verifier::make::{PublicInputs, Verifier, VERIFYINGKEY},
-};
-use swap_sdk::{proof::CircuitId, prover::SwapProverClient};
-
-use crate::shared::{
-    assert_invalid, circuit_utxo, fe, field, order_utxo_owner_hash, OUTPUT_TREE_ID,
+use crate::shared::*;
+use swap_program::verifier::make::{PublicInputs, Verifier, VERIFYINGKEY};
+use swap_sdk::{
+    instructions::make::{CHANGE_SLOT, ORDER_SLOT},
+    proof::CircuitId,
 };
 
-fn sample_order(destination_amount: u64) -> OrderTerms {
-    OrderTerms {
-        destination_asset: field(&hash_bytes(&[2u8; 32]).expect("destination asset")),
-        destination_amount,
-        maker_owner_hash: field(&fe(99)),
-        maker_viewing_pk: *ViewingKey::new().pubkey().as_bytes(),
-        expiry: 1_700_000_000,
-        taker_pk_fe: field(&fe(123)),
-    }
-}
-
-/// A make of `order` with a change output of `change_amount`. Both outputs
-/// land in the output tree.
-fn build_inputs(order: OrderTerms, change_amount: u64) -> Make {
-    let source_mint = Address::new_from_array([1u8; 32]);
-    let order_utxo = ProofInputUtxo::new(
-        order_utxo_owner_hash(&fe(42)),
-        &source_mint,
-        1_000,
-        &fe(7),
-        OUTPUT_TREE_ID,
-    )
-    .expect("order utxo")
-    .with_data_hash(to_bytes(&order.data_hash().expect("order data hash")));
-    let change = ProofInputUtxo::new(
-        to_bytes(&order.maker_owner_hash),
-        &source_mint,
-        change_amount,
-        &fe(6),
-        OUTPUT_TREE_ID,
-    )
-    .expect("change utxo");
-    let mut make = Make {
-        private: MakePrivateInputs {
-            private_tx_hash: Field::zero(),
-            order,
-            order_utxo: circuit_utxo(&order_utxo),
-            change: circuit_utxo(&change),
-            source_input_hash: field(&fe(5)),
-            private_tx_blinding: field(&fe(21)),
-        },
-        public: MakePublicInputs {},
-    };
-    refresh_hash(&mut make);
-    make
-}
-
-/// Recompute the private transaction hash after a mutation, so a negative
-/// fails on the mutated constraint rather than on a stale hash.
-fn refresh_hash(make: &mut Make) {
-    let private = &make.private;
-    let hash = PrivateTxHash::new(
-        &[to_bytes(&private.source_input_hash), [0u8; 32]],
-        &[
-            to_bytes(&private.change.hash().expect("change hash")),
-            to_bytes(&private.order_utxo.hash().expect("order hash")),
-        ],
-        &to_bytes(&private.private_tx_blinding),
-    )
-    .hash()
-    .expect("private tx hash");
-    make.private.private_tx_hash = field(&hash);
-}
-
-fn verify(make: &Make, proof: &spr_program::CompressedProof, private_tx_hash: [u8; 32]) -> bool {
-    Verifier {
-        proof,
-        public_inputs: PublicInputs {},
-        private_tx_hash: &private_tx_hash,
-        transfers: &[],
-    }
-    .verify()
-    .is_ok()
-        && make.private.private_tx_hash == field(&private_tx_hash)
-}
+const CIRCUIT: CircuitId = CircuitId::Make;
 
 #[test]
 fn program_vk_has_one_public_input() {
     assert_eq!(VERIFYINGKEY.nr_pubinputs, 1);
+    assert!(VERIFYINGKEY.vk_commitment.is_none());
     assert_eq!(
         VERIFYINGKEY.vk_ic.len(),
         2,
@@ -101,65 +20,81 @@ fn program_vk_has_one_public_input() {
 
 #[test]
 fn make_prove_verify() {
-    // 1. Prove a make with a nonzero change.
-    let make = build_inputs(sample_order(250), 750);
-    let proof = SwapProverClient::new().prove_make(&make).expect("prove");
-    assert!(proof.a.iter().any(|byte| *byte != 0));
+    // 1. Check the change returns to the maker and the order UTXO commits the
+    // terms with their payload.
+    let inputs = make_inputs(SOURCE_AMOUNT, 750);
+    let finalized = inputs.create_finalized_transaction().unwrap();
+    let outputs = finalized.output_utxos();
+    let change = outputs.get(CHANGE_SLOT).unwrap();
+    let order = outputs.get(ORDER_SLOT).unwrap();
+    let terms = &inputs.program.private.terms;
+    assert_eq!(
+        (
+            change.owner_address,
+            change.asset,
+            change.amount,
+            change.data_hash
+        ),
+        (Some(inputs.sender_address()), source_mint(), 750, None)
+    );
+    let terms_hash = spr_program::circuit::DataHash::hash(terms).unwrap();
+    assert_eq!(
+        (
+            order.owner_address.unwrap().owner_hash().unwrap(),
+            order.asset,
+            order.amount,
+            order.data_hash,
+        ),
+        (
+            swap_sdk::order_authority().owner_hash().unwrap(),
+            source_mint(),
+            SOURCE_AMOUNT,
+            Some(spr_program::hasher::data_hash(&field_bytes(terms_hash)).unwrap()),
+        )
+    );
 
-    // 2. The committed verifier accepts it for the transaction it commits and
-    // rejects any other transaction.
-    let private_tx_hash = to_bytes(&make.private.private_tx_hash);
-    assert!(verify(&make, &proof, private_tx_hash));
+    // 2. Prove, and verify with the program's verifier for the transaction it
+    // commits; any other transaction fails.
+    let (_, proof) = prove_and_verify(CIRCUIT, &inputs, &VERIFYINGKEY);
+    let private_tx_hash = finalized.padding_independent_private_tx_hash().unwrap();
+    assert!(verify(&proof, &private_tx_hash));
     let mut tampered = private_tx_hash;
     tampered[31] ^= 0x01;
-    assert!(Verifier {
-        proof: &proof,
-        public_inputs: PublicInputs {},
-        private_tx_hash: &tampered,
-        transfers: &[],
-    }
-    .verify()
-    .is_err());
+    assert!(!verify(&proof, &tampered));
 }
 
 #[test]
 fn make_zero_change_proves() {
-    // A zero-value change output is a real output: its hash enters
-    // private_tx_hash, matching SPP.
-    let make = build_inputs(sample_order(250), 0);
-    let proof = SwapProverClient::new().prove_make(&make).expect("prove");
-    assert!(verify(
-        &make,
-        &proof,
-        to_bytes(&make.private.private_tx_hash)
-    ));
+    // A zero change is still a real output before the order UTXO.
+    let inputs = make_inputs(SOURCE_AMOUNT, 0);
+    let finalized = inputs.create_finalized_transaction().unwrap();
+    let change = finalized.output_utxos().get(CHANGE_SLOT).unwrap();
+    assert_eq!((change.amount, change.compact), (0, false));
+    prove_and_verify(CIRCUIT, &inputs, &VERIFYINGKEY);
 }
 
 #[test]
 fn make_rejects_invalid_orders() {
-    // 1. A zero destination amount.
-    let make = build_inputs(sample_order(0), 750);
-    assert_invalid(CircuitId::Make, &make, || make.execute());
-
-    // 2. Tamper one order UTXO or change constraint at a time.
-    let mutations: [fn(&mut Make); 7] = [
-        |make| make.private.order.expiry += 1,
-        |make| make.private.order_utxo.amount = Field::zero(),
-        |make| make.private.order_utxo.ring_program_id = field(&fe(1)),
-        |make| make.private.change.asset = field(&fe(9)),
-        |make| make.private.change.owner_hash = field(&fe(98)),
-        |make| make.private.change.data_hash = field(&fe(1)),
-        |make| make.private.order_utxo.domain = field(&fe(1)),
+    // A zero order or destination amount, or an order beyond the source.
+    let mutations: [fn(&mut Make); 3] = [
+        |inputs| inputs.program.private.terms.destination_amount = 0,
+        |inputs| inputs.program.private.source_amount = 0,
+        |inputs| inputs.program.private.source_amount = SOURCE_AMOUNT + 751,
     ];
     for mutate in mutations {
-        let mut make = build_inputs(sample_order(250), 750);
-        mutate(&mut make);
-        refresh_hash(&mut make);
-        assert_invalid(CircuitId::Make, &make, || make.execute());
+        let mut inputs = make_inputs(SOURCE_AMOUNT, 750);
+        mutate(&mut inputs);
+        assert_invalid(CIRCUIT, &inputs);
     }
+}
 
-    // 3. A private transaction hash for another transaction.
-    let mut make = build_inputs(sample_order(250), 750);
-    make.private.private_tx_hash = field(&fe(17));
-    assert_invalid(CircuitId::Make, &make, || make.execute());
+fn verify(proof: &spr_program::CompressedProof, private_tx_hash: &[u8; 32]) -> bool {
+    Verifier {
+        proof,
+        public_inputs: PublicInputs {},
+        private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
+    .is_ok()
 }

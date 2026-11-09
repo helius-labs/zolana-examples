@@ -5,7 +5,7 @@ use spr_transaction::{
     ShieldedTransaction, SOL_ASSET_ID,
 };
 
-use crate::{err, state::PlainTextData};
+use crate::{err, state::OrderTerms};
 
 pub(crate) fn resolve_mint(
     registry: &AssetRegistry,
@@ -38,13 +38,17 @@ pub(crate) fn unified_slots(
     })
 }
 
-pub(crate) fn parse_order_data(records: &[DataRecord]) -> Result<PlainTextData> {
-    let order_bytes = records
+/// The order terms an order UTXO's decrypted `utxo_data` record carries.
+pub(crate) fn parse_order_terms(
+    records: &[DataRecord],
+    registry: &AssetRegistry,
+) -> Result<OrderTerms> {
+    let payload = records
         .iter()
         .find_map(|record| match record {
             DataRecord::UtxoData(bytes) => Some(bytes.as_slice()),
             _ => None,
         })
         .ok_or_else(|| anyhow!("order plaintext carries no utxo data record"))?;
-    PlainTextData::deserialize(order_bytes)
+    OrderTerms::from_payload(payload, registry)
 }

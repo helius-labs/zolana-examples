@@ -55,6 +55,9 @@ type Core struct {
 	SourceOutput      gnarksdk.Utxo
 	DestinationOutput gnarksdk.Utxo
 
+	// The taker's nullifier pubkey: with the order's TakerPkFe it forms the
+	// preimage of TakerIn.Owner when the order designates a taker.
+	TakerNullifierPk  frontend.Variable
 	PrivateTxBlinding frontend.Variable
 }
 
@@ -85,10 +88,18 @@ func (f Core) checkOrderInputUtxo(api frontend.API, makerAddressFe frontend.Vari
 
 func (f Core) checkTakerInputUtxo(api frontend.API) frontend.Variable {
 	f.TakerIn.AssertDefaultRing(api)
+	f.assertDesignatedTaker(api)
 	api.AssertIsEqual(f.TakerIn.DataHash, 0)
 	api.AssertIsEqual(f.TakerIn.Asset, f.Order.DestinationAsset)
 	api.AssertIsEqual(f.TakerIn.Amount, f.Order.DestinationAmount)
 	return f.TakerIn.Hash(api)
+}
+
+// A zero TakerPkFe leaves the order open to any taker. A nonzero TakerPkFe
+// admits only the taker whose owner hash is Poseidon(TakerPkFe, TakerNullifierPk).
+func (f Core) assertDesignatedTaker(api frontend.API) {
+	designatedOwnerHash := gnarksdk.Poseidon(api, f.Order.TakerPkFe, f.TakerNullifierPk)
+	api.AssertIsEqual(api.Mul(f.Order.TakerPkFe, api.Sub(f.TakerIn.Owner, designatedOwnerHash)), 0)
 }
 
 func (f Core) checkSourceOutputUtxo(api frontend.API) frontend.Variable {

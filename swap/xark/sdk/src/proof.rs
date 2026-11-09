@@ -1,18 +1,13 @@
-//! Loads checksum-pinned Xark artifacts and proves the swap circuits.
+//! Loads checksum-pinned Xark artifacts and converts proofs to the Solana ABI.
 use std::path::PathBuf;
 
 use anyhow::{ensure, Context, Result};
 use sha2::{Digest, Sha256};
 use spr_program::{
-    checked,
     proof::{compressed_proof, SolanaVerifyingKey},
-    xark::Input,
-    CircuitError, CompressedProof, ProgramProofInputs,
+    CompressedProof, ProgramProofInputs,
 };
-use swap_program::circuits::Commitment;
 use xark_groth16::PkSource;
-
-use crate::err;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CircuitId {
@@ -101,31 +96,23 @@ pub fn checked_circuit(id: CircuitId) -> Result<(tempfile::TempDir, xark::prover
     Ok((private, circuit))
 }
 
-pub fn verifying_key(id: CircuitId) -> Result<SolanaVerifyingKey> {
-    SolanaVerifyingKey::from_xark(&checked_artifact(id, "vk.bin")?).map_err(anyhow::Error::msg)
-}
-
-/// Runs `execute` natively, which fails on an unsatisfied constraint, then
-/// proves `program` and checks the proof against the verifying key.
-pub fn prove<P: Input>(
-    id: CircuitId,
-    program: &P,
-    execute: impl FnOnce() -> Result<Commitment, CircuitError>,
-) -> Result<CompressedProof> {
-    let commitment = checked(execute).map_err(err)?;
-    let public_hash = *commitment.public_hash();
-    let inputs = ProgramProofInputs::new(program, public_hash);
+/// Proves `inputs` with the checked circuit and checks the proof against the
+/// checked verifying key before returning it.
+pub fn prove(id: CircuitId, inputs: &ProgramProofInputs) -> Result<CompressedProof> {
     let key = verifying_key(id)?;
     let (_private, circuit) = checked_circuit(id)?;
-    let proven = circuit.prove(inputs)?;
+    let proven = circuit.prove(inputs.clone())?;
     let proof = compressed_proof(&proven.proof).map_err(anyhow::Error::msg)?;
-    spr_program::verifier::verify_groth16(
-        &proof,
-        spr_program::to_bytes(&public_hash),
-        &key.as_key(),
-    )
-    .map_err(|error| anyhow::anyhow!("invalid swap proof: {error:?}"))?;
+    let encoded = inputs.encoded();
+    let hash = encoded.get("public_hash").context("missing public hash")?;
+    let hash = spr_program::from_decimal(hash)?;
+    spr_program::verifier::verify_groth16(&proof, spr_program::to_bytes(&hash), &key.as_key())
+        .map_err(|error| anyhow::anyhow!("invalid swap proof: {error:?}"))?;
     Ok(proof)
+}
+
+pub fn verifying_key(id: CircuitId) -> Result<SolanaVerifyingKey> {
+    SolanaVerifyingKey::from_xark(&checked_artifact(id, "vk.bin")?).map_err(anyhow::Error::msg)
 }
 
 /// The constraint count of a circuit's checked artifacts.

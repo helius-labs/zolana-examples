@@ -61,17 +61,12 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
     check_after_window(clock.unix_timestamp, unlock_timestamp)?;
 
     // 4. Verify the withdraw proof.
-    withdraw::Verifier {
-        proof: &proof,
-        public_inputs: withdraw::PublicInputs {
-            unlock: unlock_timestamp,
-            owner_pk_field,
-        },
-        private_tx_hash: &transact.private_tx_hash,
-        transfers: &[],
-    }
-    .verify()
-    .map_err(TimelockEscrowError::from)?;
+    verify_withdraw_proof(
+        &proof,
+        unlock_timestamp,
+        owner_pk_field,
+        &transact.private_tx_hash,
+    )?;
 
     // 5. Invoke SPP with the escrow-authority PDA signer.
     let transact_bytes = transact
@@ -79,4 +74,29 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
         .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
     cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+}
+
+/// Verifies the withdraw proof against the escrow's `unlock` timestamp, the
+/// creator's owner identity and the transaction's `private_tx_hash`: the
+/// public-input hash, then the Groth16 verification.
+#[inline(never)]
+#[profile]
+pub fn verify_withdraw_proof(
+    proof: &WithdrawProof,
+    unlock: u64,
+    owner_pk_field: [u8; 32],
+    private_tx_hash: &[u8; 32],
+) -> ProgramResult {
+    withdraw::Verifier {
+        proof,
+        public_inputs: withdraw::PublicInputs {
+            unlock,
+            owner_pk_field,
+        },
+        private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
+    .map_err(TimelockEscrowError::from)?;
+    Ok(())
 }

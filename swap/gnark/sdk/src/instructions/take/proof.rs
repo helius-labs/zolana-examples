@@ -53,6 +53,12 @@ impl TakeProofInputParams {
         if destination_owner != terms.destination {
             bail!("destination output owner does not match the order destination");
         }
+        if let Some(designated) = terms.taker {
+            let taker_signer = taker.solana_address().map_err(err)?;
+            if taker_signer != designated {
+                bail!("taker input owner is not the order's designated taker");
+            }
+        }
         let order = OrderTermsProofInput::try_from(terms)?;
         let order_output = self
             .order_utxo
@@ -116,6 +122,7 @@ impl TakeProofInputParams {
             taker_in,
             source_output,
             destination_output,
+            taker_nullifier_pk: taker.nullifier_pubkey,
             private_tx_blinding: self.private_tx_blinding,
         })
     }

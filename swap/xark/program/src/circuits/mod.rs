@@ -1,13 +1,12 @@
-//! The swap circuits: Rust that runs natively on the client to check the
-//! witness, and compiles through Xark for proving. Each circuit witnesses the
-//! SPP transaction's UTXO hash preimages and recomputes its private
-//! transaction hash, like the gnark implementation.
+//! The swap circuits: Rust that runs natively on the client to build the SPP
+//! transaction, and compiles through Xark for proving.
 mod cancel;
 mod make;
 mod shared;
 mod take;
+mod terms;
 
-pub use cancel::{Cancel, CancelPrivateInputs, CancelPublicInputs};
-pub use make::{Make, MakePrivateInputs, MakePublicInputs};
-pub use shared::{Commitment, OrderTerms, ProofInputUtxo};
-pub use take::{Take, TakePrivateInputs, TakePublicInputs};
+pub use cancel::*;
+pub use make::*;
+pub use take::*;
+pub use terms::*;

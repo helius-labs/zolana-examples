@@ -29,8 +29,12 @@
 
 ## Documentation
 
-CI runs all five Rust and TypeScript client examples, the swap (take and
-cancel), and timelock escrow flows. Rust dependencies, the
+CI runs all five Rust and TypeScript client examples and the swap (take and
+cancel) and timelock escrow flows of both implementations: the gnark ones in
+the `examples` workflow and the Xark ones in `swap-xark` and `escrow-xark`.
+The Xark implementations pin their own Zolana and Xark revisions; see
+[`swap/README.md`](swap/README.md) and [`escrow/README.md`](escrow/README.md).
+For the gnark implementations and the clients, Rust dependencies, the
 CLI, prover, and the shielded-pool program use the Rust SDK `0.8.0` release.
 Published Rust SDK crates come from crates.io. The unpublished `spr-test-utils`
 helpers and source builds use release commit

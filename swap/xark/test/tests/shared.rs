@@ -13,7 +13,7 @@ use spr_program_test::{
 };
 use spr_test_utils::test_validator_asserts::wait_for_indexed_utxo;
 use spr_test_utils::wallet::{sync_wallet, Deposit, DepositParams, Wallet};
-use spr_transaction::{utxo::SppProofInputUtxo, utxo::Utxo, AssetRegistry, Data, SOL_MINT};
+use spr_transaction::{utxo::Utxo, AssetRegistry, Data, WalletUtxo, SOL_MINT};
 use spr_user_registry_interface::user_registry_program_id;
 
 use std::{
@@ -37,7 +37,8 @@ pub struct TestEnv {
     /// validator, so it lives as long as the test.
     pub localnet: FixtureLocalnet,
     pub maker: TestWallet,
-    pub maker_input: SppProofInputUtxo,
+    /// The order-authority-owned SPL UTXO the make spends.
+    pub maker_input: WalletUtxo,
     pub taker: TestWallet,
     pub spl_mint: Address,
 }
@@ -160,7 +161,7 @@ pub fn setup(test: u16) -> Result<TestEnv> {
         .output_slot
         .proofless_output()
         .ok_or_else(|| anyhow!("indexed maker deposit is not a proofless UTXO"))?;
-    let maker_input: SppProofInputUtxo = spr_test_utils::utxo::wallet(
+    let maker_input = spr_test_utils::utxo::wallet(
         Utxo {
             owner: order_authority_address.signing_pubkey,
             asset: assets.mint(&spl_mint)?,
@@ -174,8 +175,7 @@ pub fn setup(test: u16) -> Result<TestEnv> {
         indexed_deposit.output_slot.output_context.leaf_index,
         None,
         None,
-    )?
-    .into();
+    )?;
     assert_eq!(
         (maker_input.utxo.asset.asset, maker_input.utxo.amount),
         (spl_mint, MAKER_SHIELD_SPL)
