@@ -1,4 +1,4 @@
-# Examples for private Solana rings
+# Examples for Solana Privacy Rings
 
 ### [Rust client](rust-client/README.md)
 
