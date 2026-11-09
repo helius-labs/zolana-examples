@@ -31,6 +31,7 @@ impl OrderMarker {
 }
 
 pub struct Make {
+    /// The maker: fee payer, marker signer and owner of the spent source.
     pub payer: Pubkey,
     pub tree: Pubkey,
     pub make_proof: MakeProof,
@@ -68,6 +69,10 @@ impl Make {
             AccountMeta::new(tree, false),
         ];
         accounts.extend(nullifier_pdas);
+        // The owner signers: the maker for the source it spends, then the
+        // order authority for the data-bearing order output, which the
+        // program signs for during the CPI.
+        accounts.push(AccountMeta::new_readonly(payer, true));
         accounts.push(AccountMeta::new_readonly(order_authority_pda(), false));
         let mut instruction_data = vec![tag::MAKE];
         instruction_data.extend_from_slice(&serialized_ix);

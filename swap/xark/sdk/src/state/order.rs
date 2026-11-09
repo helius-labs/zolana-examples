@@ -1,10 +1,10 @@
-use anyhow::{bail, Result};
-use spr_keypair::{PublicKey, ShieldedAddress, X25519Pubkey};
-use spr_program::{circuit::DataHash, ClientInputs, EncryptionCodec, InputRecords};
+use anyhow::{ensure, Result};
+use spr_keypair::{ShieldedAddress, X25519Pubkey};
+use spr_program::{circuit::DataHash, ClientInputs, DataUtxo, EncryptionCodec, InputRecords};
 use spr_transaction::{AssetRegistry, Mint, SppProofOutputUtxo, WalletUtxo};
 use swap_program::circuits::{self, OrderTermsClient};
 
-use crate::{err, order_authority, shared::field};
+use crate::{err, order_authority};
 
 /// The order terms: what the maker buys, where the payout goes, until when the
 /// order can be taken and by whom.
@@ -13,7 +13,8 @@ pub struct OrderTerms {
     pub destination_mint: Mint,
     pub destination_amount: u64,
     /// The maker's shielded address: receives the destination on take and the
-    /// source on cancel; its Solana key signs the cancel.
+    /// source on cancel; its Solana key signs the cancel. The order UTXO
+    /// commits its owner; the viewing key only encrypts the maker payout.
     pub maker: ShieldedAddress,
     /// Unix seconds.
     pub expiry: u64,
@@ -29,50 +30,47 @@ impl OrderTerms {
         Ok(OrderTermsClient {
             destination_mint: self.destination_mint,
             destination_amount: self.destination_amount,
-            maker: self.maker,
+            maker: *InputRecords::new()
+                .address(&self.maker)
+                .map_err(err)?
+                .owner(),
             expiry: self.expiry,
-            taker_pk_fe: field(self.taker.unwrap_or_default())?,
+            taker_pk_fe: self.taker.unwrap_or_default(),
         })
     }
 
-    /// The order UTXO's state, which the circuits hash and encode.
+    /// The order UTXO's state, which the SDK hashes and encodes.
     pub fn state(&self) -> Result<circuits::OrderTerms> {
         circuits::OrderTerms::from_client(self.circuit_terms()?, &mut InputRecords::new())
             .map_err(err)
     }
 
-    /// `Poseidon(DATA, Poseidon(order terms))`, the order UTXO's data hash.
-    pub fn data_hash(&self) -> Result<[u8; 32]> {
-        let terms_hash = DataHash::hash(&self.state()?).map_err(err)?;
-        spr_program::hasher::data_hash(&spr_program::to_bytes(&terms_hash)).map_err(err)
-    }
-
-    /// The order UTXO's encrypted payload.
-    pub fn payload(&self) -> Result<Vec<u8>> {
-        self.state()?.serialize_for_encryption().map_err(err)
-    }
-
-    /// Decodes an order UTXO's payload, resolving the destination mint's asset
-    /// id in `registry`. The maker's signing key decodes as an ed25519 key.
-    pub fn from_payload(payload: &[u8], registry: &AssetRegistry) -> Result<Self> {
-        let state = circuits::OrderTerms::deserialize_after_decryption(payload).map_err(err)?;
-        let (_, key, nullifier_pubkey) = state.maker.owner().preimage();
+    /// The terms of a decoded order UTXO state whose maker is `maker`, with
+    /// the destination mint's asset id resolved in `registry`.
+    pub fn from_state(
+        state: &circuits::OrderTerms,
+        maker: ShieldedAddress,
+        registry: &AssetRegistry,
+    ) -> Result<Self> {
         let terms = Self {
             destination_mint: resolve_mint(registry, &state.destination_mint)?,
             destination_amount: state.destination_amount,
-            maker: ShieldedAddress {
-                signing_pubkey: PublicKey::from_ed25519(&key),
-                nullifier_pubkey,
-                viewing_pubkey: X25519Pubkey::from_bytes(*state.maker.viewing_pubkey())
-                    .map_err(err)?,
-            },
+            maker,
             expiry: state.expiry,
-            taker: Some(spr_program::to_bytes(&state.taker_pk_fe)).filter(|id| *id != [0; 32]),
+            taker: Some(state.taker_pk_fe).filter(|id| *id != [0; 32]),
         };
-        if terms.payload()? != payload {
-            bail!("the order payload does not decode to its terms");
-        }
+        ensure!(terms.state()? == *state, "the order names another maker");
         Ok(terms)
+    }
+
+    /// The order UTXO's encrypted `utxo_data`, the state's Borsh encoding,
+    /// and its data hash, `Poseidon(DATA, state hash)`, from one state.
+    fn utxo_data(&self) -> Result<(Vec<u8>, [u8; 32])> {
+        let state = self.state()?;
+        let terms_hash = DataHash::hash(&state).map_err(err)?;
+        let data_hash =
+            spr_program::hasher::data_hash(&spr_program::to_bytes(&terms_hash)).map_err(err)?;
+        Ok((state.serialize_for_encryption().map_err(err)?, data_hash))
     }
 }
 
@@ -102,9 +100,26 @@ pub struct OrderUtxo {
 }
 
 impl OrderUtxo {
+    /// The order of a decoded order UTXO whose maker is `maker`. The SDK's
+    /// decode ([`DataUtxo::try_from`]) has checked the state against the
+    /// UTXO's commitment.
+    pub fn from_data_utxo(
+        order: DataUtxo<circuits::OrderTerms>,
+        maker: ShieldedAddress,
+        registry: &AssetRegistry,
+    ) -> Result<Self> {
+        Ok(Self {
+            terms: OrderTerms::from_state(&order.data, maker, registry)?,
+            blinding: order.utxo.utxo.blinding,
+            source_mint: order.utxo.utxo.asset,
+            source_amount: order.utxo.utxo.amount,
+        })
+    }
+
     /// The order output. The owner's viewing key does not enter the
     /// commitment; make encrypts the output to the taker's.
     pub fn output_utxo(&self, viewing_pubkey: X25519Pubkey) -> Result<SppProofOutputUtxo> {
+        let (payload, data_hash) = self.terms.utxo_data()?;
         Ok(SppProofOutputUtxo {
             asset: self.source_mint,
             amount: self.source_amount,
@@ -112,7 +127,7 @@ impl OrderUtxo {
             owner_address: Some(order_authority().address(viewing_pubkey).map_err(err)?),
             ..Default::default()
         }
-        .with_utxo_data(self.terms.payload()?, self.terms.data_hash()?))
+        .with_utxo_data(payload, data_hash))
     }
 
     /// The order UTXO's commitment in tree `tree_id`.
@@ -188,27 +203,57 @@ mod tests {
         registry
     }
 
+    fn order(terms: OrderTerms) -> OrderUtxo {
+        OrderUtxo {
+            terms,
+            blinding: crate::shared::test_blinding(7),
+            source_mint: Mint::SOL,
+            source_amount: 400_000,
+        }
+    }
+
     #[test]
-    fn payload_round_trips_designated_and_open_terms() {
-        // 1. Encode and decode a designated and an open order.
+    fn order_utxo_decodes_designated_and_open_terms() {
+        // 1. Decode the order UTXO of a designated and an open order.
         for terms in [
             terms(Some([0, 5, 6, 7].repeat(8).try_into().unwrap())),
             terms(None),
         ] {
-            let payload = terms.payload().unwrap();
-            assert_eq!(payload.len(), circuits::PAYLOAD_LEN);
-            // 2. The decoded terms equal the encoded ones.
+            let order = order(terms);
+            let input = order.to_input_utxo(0, 3).unwrap();
+            // 2. The decoded order equals the encoded one.
             assert_eq!(
-                OrderTerms::from_payload(&payload, &registry()).unwrap(),
-                terms
+                OrderUtxo::from_data_utxo(
+                    DataUtxo::try_from(input).unwrap(),
+                    order.terms.maker,
+                    &registry()
+                )
+                .unwrap(),
+                order
             );
         }
     }
 
     #[test]
-    fn payload_with_trailing_bytes_is_refused() {
-        let mut payload = terms(None).payload().unwrap();
-        payload.push(0);
-        assert!(OrderTerms::from_payload(&payload, &registry()).is_err());
+    fn order_utxo_with_another_payload_is_refused() {
+        let order = order(terms(None));
+        let mut input = order.to_input_utxo(0, 3).unwrap();
+        let mut other = order.terms.clone();
+        other.destination_amount += 1;
+        input.utxo.data = SppProofOutputUtxo::default()
+            .with_utxo_data(other.utxo_data().unwrap().0, [0; 32])
+            .data;
+        assert!(DataUtxo::<circuits::OrderTerms>::try_from(input).is_err());
+    }
+
+    #[test]
+    fn order_of_another_maker_is_refused() {
+        let order = order(terms(None));
+        let decoded = DataUtxo::try_from(order.to_input_utxo(0, 3).unwrap()).unwrap();
+        let other = ShieldedKeypair::from_keypair(&Keypair::new_from_array([22u8; 32]))
+            .unwrap()
+            .shielded_address()
+            .unwrap();
+        assert!(OrderUtxo::from_data_utxo(decoded, other, &registry()).is_err());
     }
 }

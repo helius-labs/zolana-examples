@@ -68,3 +68,25 @@ fn truncated_instruction_data_is_rejected_exactly() {
         ProgramError::Custom(SwapError::InvalidInstructionData as u32),
     );
 }
+
+/// The take arguments parse, but the transact data that follows them does
+/// not: its last byte is dropped, then a byte is appended.
+#[test]
+fn malformed_transact_data_is_rejected_exactly() {
+    let (mollusk, _) = setup_mollusk();
+    for edit in [
+        |data: &mut Vec<u8>| {
+            data.pop();
+        },
+        |data: &mut Vec<u8>| data.push(0),
+    ] {
+        let (mut instruction, accounts) = fixture(Wrapper::Take);
+        edit(&mut instruction.data);
+        expect_err_exact(
+            &mollusk,
+            &instruction,
+            &accounts,
+            ProgramError::Custom(SwapError::InvalidInstructionData as u32),
+        );
+    }
+}

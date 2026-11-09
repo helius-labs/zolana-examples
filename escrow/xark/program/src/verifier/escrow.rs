@@ -1,14 +1,16 @@
 #[rustfmt::skip]
-use spr_program::{verifier::{groth16_solana, public_hash, verify_groth16, VerifyError}, transaction_hash, CompressedProof, PublicTransfer};
+use spr_program::{verifier::{groth16_solana, public_hash, verify_groth16, Field, VerifyError}, transaction_hash, CompressedProof, PublicTransfer};
 
 include!("escrow.vk.rs");
 
-pub struct PublicInputs {}
+pub struct PublicInputs {
+    pub owner_pk_field: [u8; 32],
+}
 
 #[rustfmt::skip]
 impl PublicInputs {
     pub fn hash(&self, transaction_hash: &[u8; 32]) -> Result<[u8; 32], VerifyError> {
-        public_hash(&[], transaction_hash)
+        public_hash(&[Field::Hash(&self.owner_pk_field)], transaction_hash)
     }
 }
 

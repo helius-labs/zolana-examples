@@ -74,17 +74,14 @@ fn withdraw_prove_verify() {
 }
 
 #[test]
-fn withdraw_rejects_wrong_unlock_signer_owner_and_escrow() {
-    // 1. Tamper the revealed unlock, the signer, the payout owner or the
+fn withdraw_rejects_wrong_unlock_signer_terms_and_escrow() {
+    // 1. Tamper the revealed unlock, the signer, the committed terms or the
     // escrow UTXO.
     let mutations: [fn(&mut Withdraw); 6] = [
         |inputs| inputs.program.public.unlock = UNLOCK + 1,
         |inputs| inputs.program.private.terms.unlock = UNLOCK + 1,
         |inputs| inputs.program.public.owner_pk_field = field(99),
-        |inputs| {
-            let other = creator().shielded_address().unwrap();
-            inputs.program.private.creator = inputs.address(other);
-        },
+        |inputs| inputs.program.private.terms.creator = terms(&creator()).creator,
         |inputs| inputs.program.private.escrow.data_hash = field(99),
         |inputs| inputs.program.private.escrow.amount = 0,
     ];

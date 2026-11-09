@@ -30,9 +30,13 @@ implementation's circuits and public inputs are formed, are in
   `TxContext`, `#[derive(PublicInputs)]` public inputs, and `execute` returning
   the `CheckedTransaction` of a `ConfidentialTransaction`. Never hash UTXOs, the
   private transaction hash or output blindings by hand; the SDK does.
-- `OrderTerms` is the order UTXO's state (`DataUtxo<OrderTerms>`): manual
-  `DataHash` (the order terms hash) and `EncryptionCodec` (the payload the
-  taker and maker decode).
+- `OrderTerms` is the order UTXO's state (`DataUtxo<OrderTerms>`) and derives
+  `UtxoState`: circuits set its fields, the SDK hashes and Borsh-encodes it,
+  and discovery decodes it with `DataUtxo::try_from`. Its fields use types
+  the derive encodes (`UtxoOwner`, `[u8; N]`, integers), not `Field` or
+  `ShieldedAddress`.
+- make spends a maker-owned source without `close()`: the SDK emits the
+  change to the source owner, who signs the transact as an owner signer.
 - Transaction builders fill the generated `<Ix>Client` and call `prepare`.
   make and cancel use a random blinding seed; take sets
   `blinding_seed: Some(take_blinding_seed(order blinding))`, which the circuit

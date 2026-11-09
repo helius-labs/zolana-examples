@@ -21,7 +21,7 @@ const EXPIRY: u64 = 1_000_000;
 // against the same localnet (validator + Photon indexer + prover) as swap.rs.
 //
 // Flow:
-//   1. Fund (in setup): 1.0 SPL is shielded to the order authority.
+//   1. Fund (in setup): 1.0 SPL is shielded to the maker.
 //   2. Make: as in swap.rs, but an open order (no designated taker) whose
 //      expiry is already in the past.
 //   3. Discover: the maker rediscovers the order opening from the indexer
@@ -61,10 +61,9 @@ fn make_and_cancel_swap_inline() -> Result<()> {
         source: maker_input,
         taker_address: taker.keypair.shielded_address()?,
         payer: maker_pubkey,
-        tree_id: localnet.tree_id,
     }
     .build(&maker.keypair)?
-    .prove(client.indexer(), localnet.tree)?
+    .prove(client.indexer(), localnet.tree, &maker.keypair)?
     .instruction()?;
     let make_signature = send(client.rpc(), &maker.keypair, make_ix)?;
     client

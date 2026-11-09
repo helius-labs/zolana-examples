@@ -15,38 +15,38 @@ Regenerate with `cargo test --release --manifest-path test/Cargo.toml --test ben
 
 | Circuit | Constraints | Public inputs | Proving key (bytes) | Verifying key (bytes) | Proof (bytes) | Key load (ms) | Warm proving time (ms) |
 | ------- | ----------- | ------------- | ------------------- | --------------------- | ------------- | ------------- | ---------------------- |
-| make | 9,377 | 1 | 2,020,286 | 296 | 128 | 128 | 223 |
-| take | 11,096 | 1 | 2,285,566 | 296 | 128 | 162 | 265 |
-| cancel | 6,778 | 1 | 1,346,302 | 296 | 128 | 99 | 164 |
+| make | 8,280 | 1 | 1,846,046 | 296 | 128 | 115 | 199 |
+| take | 11,406 | 1 | 2,335,166 | 296 | 128 | 157 | 252 |
+| cancel | 6,560 | 1 | 1,311,262 | 296 | 128 | 94 | 158 |
 
 ## Summary
 
 | Instruction | Constraints | Total CU | Verify CU | SPP CPI CU | Warm circuit proof (ms) | Warm SPP proof (ms) | Warm total proving (ms) | Instruction data (bytes) | Accounts | v1 tx (bytes) |
 | ----------- | ----------- | -------- | --------- | ---------- | ----------------------- | ------------------- | ----------------------- | ------------------------ | -------- | ------------- |
-| make | 9,377 | 240,731 | 94,054 | 143,736 | 223 | 63 | 286 | 957 | 8 | 1,307 |
-| take | 11,096 | 245,728 | 94,702 | 148,353 | 265 | 116 | 382 | 775 | 10 | 1,159 |
-| cancel | 6,778 | 240,636 | 94,702 | 142,792 | 164 | 61 | 226 | 593 | 9 | 944 |
+| make | 8,280 | 242,229 | 94,324 | 144,218 | 199 | 61 | 260 | 924 | 9 | 1,275 |
+| take | 11,406 | 244,932 | 94,702 | 149,093 | 252 | 102 | 354 | 775 | 10 | 1,159 |
+| cancel | 6,560 | 239,445 | 94,702 | 142,792 | 158 | 59 | 218 | 593 | 9 | 944 |
 
 ## Make
 
 | Function | Total CU | Net CU |
 | -------- | -------- | ------ |
-| `process_make_ix` | 240,731 | 2,941 |
-| `cpi_spp_transact_signed` | 143,736 | 143,736 |
-| `verify_make_proof` | 94,054 | 94,054 |
+| `process_make_ix` | 242,229 | 3,687 |
+| `cpi_spp_transact_signed` | 144,218 | 144,218 |
+| `verify_make_proof` | 94,324 | 94,324 |
 
 ## Take
 
 | Function | Total CU | Net CU |
 | -------- | -------- | ------ |
-| `process_take_ix` | 245,728 | 2,673 |
-| `cpi_spp_transact_signed` | 148,353 | 148,353 |
+| `process_take_ix` | 244,932 | 1,137 |
+| `cpi_spp_transact_signed` | 149,093 | 149,093 |
 | `verify_take_proof` | 94,702 | 94,702 |
 
 ## Cancel
 
 | Function | Total CU | Net CU |
 | -------- | -------- | ------ |
-| `process_cancel_ix` | 240,636 | 3,142 |
+| `process_cancel_ix` | 239,445 | 1,951 |
 | `cpi_spp_transact_signed` | 142,792 | 142,792 |
 | `verify_cancel_proof` | 94,702 | 94,702 |

@@ -2,7 +2,7 @@ use anyhow::{anyhow, ensure, Result};
 use solana_address::Address;
 use spr_client::SprIndexer;
 use spr_keypair::{ShieldedAddress, ShieldedKeypair};
-use spr_program::{ProgramOwner, ProgramProofInputs, TransactionOptions};
+use spr_program::{ProgramProofInputs, TransactionOptions};
 use spr_transaction::{instructions::transact::SppProofInputs, WalletUtxo};
 use swap_program::circuits::{MakeClient, MakePrivateInputsClient, MakePublicInputsClient};
 
@@ -10,7 +10,7 @@ use super::{Make, OrderMarker};
 use crate::{
     err, order_authority,
     proof::{self, CircuitId},
-    shared::prove_transact,
+    shared::{field, identity, prove_transact},
     state::{OrderTerms, OrderUtxo},
 };
 
@@ -24,16 +24,15 @@ pub struct MakeTransactionParams {
     pub terms: OrderTerms,
     /// The amount locked in the order UTXO; the rest of `source` is change.
     pub source_amount: u64,
-    /// The spent source UTXO. The transaction is signed by the program alone,
-    /// so it must be owned by the order-authority PDA, as a proofless deposit
-    /// to [`crate::order_authority`]'s address is.
+    /// The spent source UTXO, owned by the maker, who signs for it. The rest
+    /// of it returns to the maker as change. Its tree is the output tree.
     pub source: WalletUtxo,
     /// The taker the order output is encrypted to and the marker is tagged
     /// for. It may differ from `terms.taker`, the identity allowed to take.
     pub taker_address: ShieldedAddress,
+    /// The maker's Solana address, the fee payer and the signer the program
+    /// writes into the marker and checks against the source owner.
     pub payer: Address,
-    /// The output tree, which also holds `source`.
-    pub tree_id: u16,
 }
 
 pub struct MakeTransaction {
@@ -46,41 +45,50 @@ pub struct MakeTransaction {
 }
 
 impl MakeTransactionParams {
-    /// 1. Check the terms name the maker and the source sits in the output
-    ///    tree.
+    /// 1. Check the terms name the maker and the maker owns the source.
     /// 2. Build the program transaction.
     /// 3. Read the order UTXO and the change it created.
     /// 4. Encrypt the outputs and add the taker's marker message.
     pub fn build(self, maker: &ShieldedKeypair) -> Result<MakeTransaction> {
-        // 1. Check the terms name the maker and the source tree.
+        // 1. Check the terms name the maker and the maker owns the source.
         let sender = maker.shielded_address().map_err(err)?;
         ensure!(
             self.terms.maker == sender,
             "the order terms name another maker"
         );
         ensure!(
-            self.source.tree_id == self.tree_id,
-            "the source is in tree {}, not in the output tree {}",
-            self.source.tree_id,
-            self.tree_id
+            self.payer == sender.solana_address().map_err(err)?,
+            "the payer is not the maker's Solana address"
+        );
+        ensure!(
+            self.source.utxo.owner == maker.signing_pubkey(),
+            "the source is not owned by the maker"
         );
         let source_mint = self.source.utxo.asset;
+        let tree_id = self.source.tree_id;
 
-        // 2. Build the program transaction.
+        // 2. Build the program transaction. The circuit takes the maker from
+        // the source owner.
+        let terms = self.terms.circuit_terms()?;
         let transaction = MakeClient {
             private: MakePrivateInputsClient {
                 tx_context: TransactionOptions {
                     blinding_seed: None,
-                    output_tree_id: Some(self.tree_id),
+                    output_tree_id: Some(tree_id),
                 },
-                terms: self.terms.circuit_terms()?,
-                source_amount: self.source_amount,
                 source: self.source,
+                source_amount: self.source_amount,
+                destination_mint: terms.destination_mint,
+                destination_amount: terms.destination_amount,
+                expiry: terms.expiry,
+                taker_pk_fe: terms.taker_pk_fe,
                 order_address: order_authority()
                     .address(self.taker_address.viewing_pubkey)
                     .map_err(err)?,
             },
-            public: MakePublicInputsClient {},
+            public: MakePublicInputsClient {
+                maker_owner_pk_field: field(identity(&self.payer)?)?,
+            },
         }
         .prepare(&sender, self.payer)
         .map_err(err)?;
@@ -100,9 +108,9 @@ impl MakeTransactionParams {
             source_mint,
             source_amount: self.source_amount,
         };
-        let order_utxo_hash = order_output.hash(self.tree_id).map_err(err)?;
+        let order_utxo_hash = order_output.hash(tree_id).map_err(err)?;
         ensure!(
-            order_utxo.hash(self.tree_id)? == order_utxo_hash,
+            order_utxo.hash(tree_id)? == order_utxo_hash,
             "the order output does not commit the order terms"
         );
         let change_blinding = change.blinding;
@@ -132,17 +140,17 @@ impl MakeTransactionParams {
 }
 
 impl MakeTransaction {
-    /// 1. Prove the SPP transaction, whose real inputs the order-authority PDA
-    ///    owns.
+    /// 1. Prove the SPP transaction, whose real input the maker owns.
     /// 2. Prove the make circuit and build the instruction.
-    pub fn prove(self, indexer: &SprIndexer, tree: Address) -> Result<Make> {
+    pub fn prove(
+        self,
+        indexer: &SprIndexer,
+        tree: Address,
+        maker: &ShieldedKeypair,
+    ) -> Result<Make> {
         let payer = self.spp_proof_inputs.payer;
         // 1. Prove the SPP transaction.
-        let spp_proof = prove_transact(
-            indexer,
-            self.spp_proof_inputs,
-            &ProgramOwner::nullifier_key(),
-        )?;
+        let spp_proof = prove_transact(indexer, self.spp_proof_inputs, maker)?;
         // 2. Prove the make circuit and build the instruction.
         let make_proof = proof::prove(CircuitId::Make, &self.proof_inputs)?;
         Ok(Make {

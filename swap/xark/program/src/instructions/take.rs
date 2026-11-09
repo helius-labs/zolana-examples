@@ -9,12 +9,15 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     error::SwapError,
-    instructions::shared::{check_within_window, cpi_spp_transact_signed},
+    instructions::shared::{check_within_window, cpi_spp_transact_signed, IxData},
     verifier::take,
 };
 
 pub use spr_program::CompressedProof as TakeProof;
 
+/// The take instruction data as a client writes it. The program reads the
+/// proof, then the transact bytes in place ([`IxData`]), and forwards those
+/// bytes to SPP unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct TakeIxData {
     pub proof: TakeProof,
@@ -34,8 +37,11 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
     iter.next_signer_mut("payer")?;
 
     // 2. Decode the instruction.
-    let TakeIxData { proof, transact } =
-        wincode::deserialize_exact(data).map_err(|_| SwapError::InvalidInstructionData)?;
+    let IxData {
+        args: proof,
+        transact,
+        transact_bytes,
+    } = IxData::<TakeProof>::parse(data)?;
 
     // 3. Check `now <= expiry`.
     let clock = Clock::get()?;
@@ -51,15 +57,12 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
         &proof,
         transact.expiry_unix_ts,
         first_nullifier,
-        &transact.private_tx_hash,
+        transact.private_tx_hash,
     )?;
 
     // 5. Invoke SPP with the order-authority PDA signer.
-    let transact_bytes = transact
-        .serialize()
-        .map_err(|_| SwapError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
-    cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    cpi_spp_transact_signed(spp_accounts, transact_bytes)
 }
 
 /// Hashes the take proof's public inputs and verifies the proof.

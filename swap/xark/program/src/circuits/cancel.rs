@@ -34,29 +34,28 @@ pub struct CancelPublicInputs {
 }
 
 impl Cancel {
-    /// 1. Check the public expiry.
-    /// 2. Check the signer is the maker.
-    /// 3. Spend the order UTXO, which commits the terms.
+    /// 1. Spend the order UTXO, which commits the terms.
+    /// 2. Check the public expiry.
+    /// 3. Check the signer is the maker.
     /// 4. Refund the whole order to the maker.
     /// 5. Check the transaction: input `[order UTXO]`, output `[source]`.
     pub fn execute(&self) -> Result<CheckedTransaction, CircuitError> {
         let private = &self.private;
         let public = &self.public;
-        let terms = &private.terms;
 
-        // 1. Check the public expiry.
-        require_eq(public.expiry, terms.expiry);
+        // 1. Spend the order UTXO, which commits the terms.
+        let mut order = spend_order(&private.order_utxo, &private.terms)?;
 
-        // 2. The terms commit the maker's owner, whose signing key identity
+        // 2. Check the public expiry.
+        require_eq(public.expiry, order.expiry);
+
+        // 3. The terms commit the maker's owner, whose signing key identity
         // the program computes from the signer.
-        let maker = terms.maker.owner();
+        let maker = order.maker;
         require_eq(maker.key().identity()?, public.maker_owner_pk_field);
 
-        // 3. Spend the order UTXO, which commits the terms.
-        let mut order = spend_order(&private.order_utxo, terms)?;
-
         // 4. Refund the whole order to the maker.
-        let mut source_output = TokenUtxos::new_init(maker, &order.asset());
+        let mut source_output = TokenUtxos::new_init(&maker, &order.asset());
         order.transfer_all(&mut source_output)?;
 
         // 5. Check the transaction.

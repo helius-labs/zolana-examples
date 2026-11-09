@@ -4,16 +4,14 @@ use solana_instruction::Instruction;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use spr_client::{ComputeBudgetConfig, Rpc, SolanaRpc};
-use spr_keypair::{
-    constants::BLINDING_LEN, NullifierKey, PublicKey, ShieldedAddress, ShieldedKeypair, SigningKey,
-};
+use spr_keypair::{ShieldedKeypair, SigningKey};
 use spr_program_test::{
     fixture,
     localnet::{FixtureLocalnet, LocalnetPaths, LocalnetPorts},
 };
 use spr_test_utils::test_validator_asserts::wait_for_indexed_utxo;
-use spr_test_utils::wallet::{sync_wallet, Deposit, DepositParams, Wallet};
-use spr_transaction::{utxo::Utxo, AssetRegistry, Data, WalletUtxo, SOL_MINT};
+use spr_test_utils::wallet::{sync_wallet, Deposit, DepositParams, Filter, Wallet};
+use spr_transaction::{AssetRegistry, WalletUtxo, SOL_MINT};
 use spr_user_registry_interface::user_registry_program_id;
 
 use std::{
@@ -37,7 +35,7 @@ pub struct TestEnv {
     /// validator, so it lives as long as the test.
     pub localnet: FixtureLocalnet,
     pub maker: TestWallet,
-    /// The order-authority-owned SPL UTXO the make spends.
+    /// The maker's SPL UTXO the make spends.
     pub maker_input: WalletUtxo,
     pub taker: TestWallet,
     pub spl_mint: Address,
@@ -134,17 +132,15 @@ pub fn setup(test: u16) -> Result<TestEnv> {
     let taker_shielded_keypair =
         ShieldedKeypair::from_keypair(SigningKey::from_ed25519_bytes(&taker_seed))?;
 
-    // Fund the actors: shield the maker-funded SPL to the order authority so it
-    // can authorize the data-bearing order output, and shield the taker's SOL
-    // directly to the taker.
-    let order_nullifier_key = NullifierKey::from_secret([0u8; BLINDING_LEN]);
-    let order_authority_address = ShieldedAddress {
-        signing_pubkey: PublicKey::from_ed25519(swap_sdk::order_authority_pda().as_array()),
-        nullifier_pubkey: order_nullifier_key.pubkey()?,
-        viewing_pubkey: maker_shielded_keypair.viewing_pubkey(),
-    };
+    // Fund the actors: shield SPL to the maker and SOL to the taker.
+    let maker_address = maker_shielded_keypair
+        .shielded_address()
+        .map_err(|e| anyhow!("maker address: {e:?}"))?;
+    let taker_address = taker_shielded_keypair
+        .shielded_address()
+        .map_err(|e| anyhow!("taker address: {e:?}"))?;
     let maker_deposit = Deposit::new(DepositParams {
-        recipient: &order_authority_address,
+        recipient: &maker_address,
         asset: spl_mint,
         amount: MAKER_SHIELD_SPL,
         spl_token_account: Some(spl_funding),
@@ -153,35 +149,8 @@ pub fn setup(test: u16) -> Result<TestEnv> {
     })?;
     let maker_view_tag = maker_deposit.view_tag();
     let maker_signature = maker_deposit.send(&localnet.client, &payer, localnet.tree, &payer)?;
-    // The order authority is a PDA holding no viewing key, but a proofless
-    // deposit publishes its UTXO in the clear, so the depositor-chosen view tag
-    // reads it back from the indexer.
-    let indexed_deposit = wait_for_indexed_utxo(&localnet.client, maker_view_tag, maker_signature);
-    let maker_deposited = indexed_deposit
-        .output_slot
-        .proofless_output()
-        .ok_or_else(|| anyhow!("indexed maker deposit is not a proofless UTXO"))?;
-    let maker_input = spr_test_utils::utxo::wallet(
-        Utxo {
-            owner: order_authority_address.signing_pubkey,
-            asset: assets.mint(&spl_mint)?,
-            amount: maker_deposited.amount,
-            blinding: maker_deposited.blinding,
-            ring_program_id: None,
-            data: Data::default(),
-        },
-        &order_nullifier_key,
-        localnet.tree_id,
-        indexed_deposit.output_slot.output_context.leaf_index,
-        None,
-        None,
-    )?;
-    assert_eq!(
-        (maker_input.utxo.asset.asset, maker_input.utxo.amount),
-        (spl_mint, MAKER_SHIELD_SPL)
-    );
     let taker_deposit = Deposit::new(DepositParams {
-        recipient: &taker_shielded_keypair.shielded_address()?,
+        recipient: &taker_address,
         asset: SOL_MINT,
         amount: DESTINATION_AMOUNT,
         spl_token_account: None,
@@ -191,23 +160,28 @@ pub fn setup(test: u16) -> Result<TestEnv> {
     let taker_view_tag = taker_deposit.view_tag();
     let taker_signature = taker_deposit.send(&localnet.client, &payer, localnet.tree, &payer)?;
 
-    let maker_address = maker_shielded_keypair
-        .shielded_address()
-        .map_err(|e| anyhow!("maker address: {e:?}"))?;
-    let taker_address = taker_shielded_keypair
-        .shielded_address()
-        .map_err(|e| anyhow!("taker address: {e:?}"))?;
-
-    // The taker's deposit is wallet-owned, so discover it through the indexer
-    // once it is indexed. The maker-funded input is program-owned and retained
-    // explicitly above.
+    // Both deposits are wallet-owned, so discover them through the indexer
+    // once they are indexed.
+    wait_for_indexed_utxo(&localnet.client, maker_view_tag, maker_signature);
     wait_for_indexed_utxo(&localnet.client, taker_view_tag, taker_signature);
-    let maker_wallet =
+    let mut maker_wallet =
         Wallet::new(maker_address, assets.clone()).map_err(|e| anyhow!("maker wallet: {e:?}"))?;
     let mut taker_wallet =
         Wallet::new(taker_address, assets.clone()).map_err(|e| anyhow!("taker wallet: {e:?}"))?;
+    sync_wallet(&mut maker_wallet, &maker_shielded_keypair, &localnet.client)
+        .map_err(|e| anyhow!("sync maker deposit: {e:?}"))?;
     sync_wallet(&mut taker_wallet, &taker_shielded_keypair, &localnet.client)
         .map_err(|e| anyhow!("sync taker deposit: {e:?}"))?;
+    let maker_input = maker_wallet
+        .balance(spl_mint, Some(Filter::MinAmount(MAKER_SHIELD_SPL)))?
+        .utxos
+        .first()
+        .cloned()
+        .ok_or_else(|| anyhow!("no maker SPL note of {MAKER_SHIELD_SPL}"))?;
+    assert_eq!(
+        (maker_input.utxo.asset.asset, maker_input.utxo.amount),
+        (spl_mint, MAKER_SHIELD_SPL)
+    );
 
     let env = TestEnv {
         localnet,
@@ -222,11 +196,6 @@ pub fn setup(test: u16) -> Result<TestEnv> {
         },
         spl_mint,
     };
-
-    // Guard the fixture: the retained order-authority input the make flows
-    // spend must be exactly the note the maker deposit just funded.
-    debug_assert_eq!(env.maker_input.utxo.asset.asset, spl_mint);
-    debug_assert_eq!(env.maker_input.utxo.amount, MAKER_SHIELD_SPL);
     Ok(env)
 }
 

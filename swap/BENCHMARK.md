@@ -17,19 +17,19 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 
 | Circuit | Metric | gnark | Xark | Delta |
 | ------- | ------ | ----- | ---- | ----- |
-| make | Constraints | 3,438 | 9,377 | +5,939 (+172.7%) |
+| make | Constraints | 3,438 | 8,280 | +4,842 (+140.8%) |
 | make | Public inputs | 1 | 1 | 0 (0.0%) |
-| make | Proving key (bytes) | 656,499 | 2,020,286 | +1,363,787 (+207.7%) |
+| make | Proving key (bytes) | 656,499 | 1,846,046 | +1,189,547 (+181.2%) |
 | make | Verifying key (bytes) | 716 | 296 | -420 (-58.7%) |
 | make | Proof (bytes) | 128 | 128 | 0 (0.0%) |
-| take | Constraints | 7,262 | 11,096 | +3,834 (+52.8%) |
+| take | Constraints | 7,262 | 11,406 | +4,144 (+57.1%) |
 | take | Public inputs | 1 | 1 | 0 (0.0%) |
-| take | Proving key (bytes) | 1,364,053 | 2,285,566 | +921,513 (+67.6%) |
+| take | Proving key (bytes) | 1,364,053 | 2,335,166 | +971,113 (+71.2%) |
 | take | Verifying key (bytes) | 716 | 296 | -420 (-58.7%) |
 | take | Proof (bytes) | 128 | 128 | 0 (0.0%) |
-| cancel | Constraints | 3,630 | 6,778 | +3,148 (+86.7%) |
+| cancel | Constraints | 3,630 | 6,560 | +2,930 (+80.7%) |
 | cancel | Public inputs | 1 | 1 | 0 (0.0%) |
-| cancel | Proving key (bytes) | 684,339 | 1,346,302 | +661,963 (+96.7%) |
+| cancel | Proving key (bytes) | 684,339 | 1,311,262 | +626,923 (+91.6%) |
 | cancel | Verifying key (bytes) | 716 | 296 | -420 (-58.7%) |
 | cancel | Proof (bytes) | 128 | 128 | 0 (0.0%) |
 
@@ -37,32 +37,32 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 
 | Circuit | Metric | gnark | Xark | Delta |
 | ------- | ------ | ----- | ---- | ----- |
-| make | Key load (ms) | 47 | 128 | +81 (+172.3%) |
-| make | Warm proving time (ms) | 10 | 223 | +213 (+2130.0%) |
-| take | Key load (ms) | 81 | 162 | +81 (+100.0%) |
-| take | Warm proving time (ms) | 18 | 265 | +247 (+1372.2%) |
-| cancel | Key load (ms) | 49 | 99 | +50 (+102.0%) |
-| cancel | Warm proving time (ms) | 11 | 164 | +153 (+1390.9%) |
+| make | Key load (ms) | 45 | 115 | +70 (+155.6%) |
+| make | Warm proving time (ms) | 11 | 199 | +188 (+1709.1%) |
+| take | Key load (ms) | 76 | 157 | +81 (+106.6%) |
+| take | Warm proving time (ms) | 17 | 252 | +235 (+1382.4%) |
+| cancel | Key load (ms) | 45 | 94 | +49 (+108.9%) |
+| cancel | Warm proving time (ms) | 11 | 158 | +147 (+1336.4%) |
 
 ## Instruction circuit
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| make | Constraints | 3,438 | 9,377 | +5,939 (+172.7%) |
-| take | Constraints | 7,262 | 11,096 | +3,834 (+52.8%) |
-| cancel | Constraints | 3,630 | 6,778 | +3,148 (+86.7%) |
+| make | Constraints | 3,438 | 8,280 | +4,842 (+140.8%) |
+| take | Constraints | 7,262 | 11,406 | +4,144 (+57.1%) |
+| cancel | Constraints | 3,630 | 6,560 | +2,930 (+80.7%) |
 
 ## Compute units
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| make | Total CU | 244,240 | 240,731 | -3,509 (-1.4%) |
-| make | Verify CU | 93,312 | 94,054 | +742 (+0.8%) |
-| make | SPP CPI CU | 147,933 | 143,736 | -4,197 (-2.8%) |
-| take | Total CU | 247,101 | 245,728 | -1,373 (-0.6%) |
+| make | Total CU | 243,870 | 242,229 | -1,641 (-0.7%) |
+| make | Verify CU | 93,312 | 94,324 | +1,012 (+1.1%) |
+| make | SPP CPI CU | 147,563 | 144,218 | -3,345 (-2.3%) |
+| take | Total CU | 246,742 | 244,932 | -1,810 (-0.7%) |
 | take | Verify CU | 94,490 | 94,702 | +212 (+0.2%) |
-| take | SPP CPI CU | 149,922 | 148,353 | -1,569 (-1.0%) |
-| cancel | Total CU | 240,565 | 240,636 | +71 (+0.0%) |
+| take | SPP CPI CU | 149,563 | 149,093 | -470 (-0.3%) |
+| cancel | Total CU | 240,565 | 239,445 | -1,120 (-0.5%) |
 | cancel | Verify CU | 94,490 | 94,702 | +212 (+0.2%) |
 | cancel | SPP CPI CU | 142,906 | 142,792 | -114 (-0.1%) |
 
@@ -70,23 +70,23 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| make | Warm circuit proof (ms) | 10 | 223 | +213 (+2130.0%) |
-| make | Warm SPP proof (ms) | 105 | 63 | -42 (-40.0%) |
-| make | Warm total proving (ms) | 115 | 286 | +171 (+148.7%) |
-| take | Warm circuit proof (ms) | 18 | 265 | +247 (+1372.2%) |
-| take | Warm SPP proof (ms) | 102 | 116 | +14 (+13.7%) |
-| take | Warm total proving (ms) | 121 | 382 | +261 (+215.7%) |
-| cancel | Warm circuit proof (ms) | 11 | 164 | +153 (+1390.9%) |
-| cancel | Warm SPP proof (ms) | 61 | 61 | 0 (0.0%) |
-| cancel | Warm total proving (ms) | 73 | 226 | +153 (+209.6%) |
+| make | Warm circuit proof (ms) | 11 | 199 | +188 (+1709.1%) |
+| make | Warm SPP proof (ms) | 101 | 61 | -40 (-39.6%) |
+| make | Warm total proving (ms) | 112 | 260 | +148 (+132.1%) |
+| take | Warm circuit proof (ms) | 17 | 252 | +235 (+1382.4%) |
+| take | Warm SPP proof (ms) | 103 | 102 | -1 (-1.0%) |
+| take | Warm total proving (ms) | 120 | 354 | +234 (+195.0%) |
+| cancel | Warm circuit proof (ms) | 11 | 158 | +147 (+1336.4%) |
+| cancel | Warm SPP proof (ms) | 59 | 59 | 0 (0.0%) |
+| cancel | Warm total proving (ms) | 71 | 218 | +147 (+207.0%) |
 
 ## Transaction size
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| make | Instruction data (bytes) | 900 | 957 | +57 (+6.3%) |
-| make | Accounts | 9 | 8 | -1 (-11.1%) |
-| make | v1 tx (bytes) | 1,283 | 1,307 | +24 (+1.9%) |
+| make | Instruction data (bytes) | 900 | 924 | +24 (+2.7%) |
+| make | Accounts | 9 | 9 | 0 (0.0%) |
+| make | v1 tx (bytes) | 1,283 | 1,275 | -8 (-0.6%) |
 | take | Instruction data (bytes) | 806 | 775 | -31 (-3.8%) |
 | take | Accounts | 10 | 10 | 0 (0.0%) |
 | take | v1 tx (bytes) | 1,190 | 1,159 | -31 (-2.6%) |

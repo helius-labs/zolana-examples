@@ -85,6 +85,7 @@ impl TakeTransactionParams {
                 terms: terms.circuit_terms()?,
                 order_utxo: order_input,
                 taker_in: self.taker_input,
+                maker_address: terms.maker,
             },
             public: TakePublicInputsClient {
                 expiry: terms.expiry,

@@ -23,6 +23,17 @@ fn trailing_instruction_data_is_rejected_exactly() {
 }
 
 #[test]
+fn truncated_transact_data_is_rejected_exactly() {
+    // The proof parses, but the transact data after it lacks its last byte.
+    expect_escrow_err(
+        |instruction| {
+            instruction.data.pop();
+        },
+        TimelockEscrowError::InvalidInstructionData,
+    );
+}
+
+#[test]
 fn missing_creator_is_rejected_exactly() {
     expect_escrow_err(
         |instruction| instruction.accounts.clear(),

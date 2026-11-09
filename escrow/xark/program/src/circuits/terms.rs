@@ -1,20 +1,15 @@
-use spr_program::{input, poseidon, CircuitError, ClientInputs, Field};
+use borsh::{BorshDeserialize, BorshSerialize};
+use spr_program::{input, ClientInputs, UtxoOwner, UtxoState};
 
-/// The escrow terms the escrow UTXO commits as its data hash.
+/// The escrow terms: the escrow UTXO's state. The SDK hashes them into its
+/// data hash and encrypts them as its data.
 #[input]
-#[derive(ClientInputs)]
+#[derive(Default, PartialEq, Eq, BorshSerialize, BorshDeserialize, UtxoState, ClientInputs)]
 pub struct EscrowTerms {
-    /// The creator's shielded owner hash: receives the change at escrow and
-    /// the withdrawal at withdraw.
-    pub owner_hash: Field,
+    /// The creator: owns the spent source and the change at escrow, signs the
+    /// withdraw and receives the withdrawal.
+    pub creator: UtxoOwner,
     /// Unix seconds; revealed at withdraw and checked against the Clock by
     /// the program.
     pub unlock: u64,
-}
-
-impl EscrowTerms {
-    /// `Poseidon(owner_hash, unlock)`, the escrow UTXO's data hash.
-    pub fn data_hash(&self) -> Result<Field, CircuitError> {
-        poseidon(&[self.owner_hash, Field::from(self.unlock)])
-    }
 }

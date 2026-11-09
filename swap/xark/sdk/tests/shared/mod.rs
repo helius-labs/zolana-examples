@@ -5,9 +5,7 @@ use spr_program::{
     circuit::CheckedTransaction, to_bytes, ClientInputs, Field, InputRecords, ProgramProofInputs,
     ProgramTransaction, TxContext,
 };
-use spr_transaction::{
-    instructions::transact::FinalizedTransaction, Data, Mint, SppProofOutputUtxo, Utxo, WalletUtxo,
-};
+use spr_transaction::{instructions::transact::FinalizedTransaction, Data, Mint, Utxo, WalletUtxo};
 use std::ops::{Deref, DerefMut};
 use swap_program::circuits as circuit;
 use swap_sdk::{
@@ -89,8 +87,12 @@ impl<P: Execute> Fixture<P> {
         self.records.address(&address).unwrap()
     }
 
-    /// Converts `terms` as a circuit input and records their addresses and
-    /// mint.
+    /// Converts `mint` as a circuit input and records it.
+    pub fn asset(&mut self, mint: Mint) -> [u8; 32] {
+        self.records.asset(mint).unwrap()
+    }
+
+    /// Converts `terms` as a circuit input and records their mint.
     pub fn terms(&mut self, terms: &OrderTerms) -> circuit::OrderTerms {
         circuit::OrderTerms::from_client(terms.circuit_terms().unwrap(), &mut self.records).unwrap()
     }
@@ -178,43 +180,56 @@ pub fn wallet_utxo(owner: &ShieldedKeypair, mint: Mint, amount: u64) -> WalletUt
 }
 
 /// A make locking `source_amount` of a `source_amount + change_amount` source
-/// owned by the order authority, designated to and encrypted for `taker`.
+/// owned by the maker, designated to and encrypted for `taker`.
 pub fn make_inputs(source_amount: u64, change_amount: u64) -> Make {
     let maker = keypair();
     let taker = keypair();
-    let terms = terms(&maker, Some(identity_of(&taker)));
     let order_address = order_authority().address(taker.viewing_pubkey()).unwrap();
-    let source = order_authority()
-        .input(
-            &SppProofOutputUtxo {
-                asset: source_mint(),
-                amount: source_amount + change_amount,
-                blinding: fe(5),
-                owner_address: Some(order_address),
-                ..Default::default()
-            },
-            OUTPUT_TREE_ID,
-            0,
-        )
-        .unwrap();
+    let source = wallet_utxo(&maker, source_mint(), source_amount + change_amount);
+    let maker_owner_pk_field = spr_program::from_bytes(&identity_of(&maker)).unwrap();
     let mut fixture = Fixture {
         program: circuit::Make {
             private: circuit::MakePrivateInputs {
                 tx_context: context(&fe(41)),
-                terms: circuit::OrderTerms::default(),
-                source_amount,
                 source: spr_program::circuit::Utxo::dummy(),
+                source_amount,
+                destination_mint: [0; 32],
+                destination_amount: DESTINATION_AMOUNT,
+                expiry: EXPIRY,
+                taker_pk_fe: identity_of(&taker),
                 order_address: spr_program::ShieldedAddress::default(),
             },
-            public: circuit::MakePublicInputs {},
+            public: circuit::MakePublicInputs {
+                maker_owner_pk_field,
+            },
         },
         records: InputRecords::new(),
         sender: maker,
     };
-    fixture.program.private.terms = fixture.terms(&terms);
+    fixture.program.private.destination_mint = fixture.asset(destination_mint());
     fixture.program.private.source = fixture.records.utxo(&source).unwrap();
     fixture.program.private.order_address = fixture.address(order_address);
     fixture
+}
+
+/// The order terms a make of `inputs` commits: its terms with the source
+/// owner, the maker, as the maker.
+pub fn make_terms(inputs: &mut Make) -> circuit::OrderTerms {
+    let private = &inputs.program.private;
+    let (destination_mint, destination_amount, expiry, taker_pk_fe) = (
+        private.destination_mint,
+        private.destination_amount,
+        private.expiry,
+        private.taker_pk_fe,
+    );
+    let maker = *inputs.address(inputs.sender_address()).owner();
+    circuit::OrderTerms {
+        destination_mint,
+        destination_amount,
+        maker,
+        expiry,
+        taker_pk_fe,
+    }
 }
 
 /// A take of the order of [`order_utxo`] at [`ORDER_LEAF_INDEX`] by `taker`,
@@ -231,6 +246,7 @@ pub fn take_inputs(order: &OrderUtxo, taker: ShieldedKeypair) -> Take {
                 terms: circuit::OrderTerms::default(),
                 order_utxo: spr_program::circuit::Utxo::dummy(),
                 taker_in: spr_program::circuit::Utxo::dummy(),
+                maker_address: spr_program::ShieldedAddress::default(),
             },
             public: circuit::TakePublicInputs {
                 expiry: order.terms.expiry,
@@ -243,6 +259,7 @@ pub fn take_inputs(order: &OrderUtxo, taker: ShieldedKeypair) -> Take {
     fixture.program.private.terms = fixture.terms(&order.terms);
     fixture.program.private.order_utxo = fixture.records.utxo(&order_input).unwrap();
     fixture.program.private.taker_in = fixture.records.utxo(&taker_input).unwrap();
+    fixture.program.private.maker_address = fixture.address(order.terms.maker);
     fixture
 }
 

@@ -1,9 +1,8 @@
 use anyhow::{anyhow, ensure, Result};
 use solana_address::Address;
 use spr_client::SprIndexer;
-use spr_hasher::primitives::solana_owner_identity;
 use spr_keypair::ShieldedKeypair;
-use spr_program::{ProgramProofInputs, TransactionOptions};
+use spr_program::{InputRecords, ProgramOwner, ProgramProofInputs, TransactionOptions};
 use spr_transaction::instructions::transact::SppProofInputs;
 use timelock_escrow_program::circuits::{
     WithdrawClient, WithdrawPrivateInputsClient, WithdrawPublicInputsClient,
@@ -13,7 +12,7 @@ use super::Withdraw;
 use crate::{
     err,
     proof::{self, CircuitId},
-    shared::{field, prove_pda_transact},
+    shared::{owner_pk_field, prove_transact},
     state::EscrowUtxo,
 };
 
@@ -21,10 +20,10 @@ use crate::{
 pub const SOURCE_OUTPUT_SLOT: usize = 0;
 
 pub struct WithdrawTransactionParams {
-    pub escrow_utxo: EscrowUtxo,
-    /// The tree holding the escrow UTXO, which is also the output tree.
-    pub tree_id: u16,
-    pub leaf_index: u64,
+    /// The escrow UTXO with its decoded terms, from
+    /// [`crate::state::open_escrows`] or [`crate::state::escrow_utxo`]. Its
+    /// tree is also the output tree.
+    pub escrow: EscrowUtxo,
     pub payer: Address,
 }
 
@@ -44,31 +43,28 @@ impl WithdrawTransactionParams {
     pub fn build(self, creator: &ShieldedKeypair) -> Result<WithdrawTransaction> {
         // 1. Check the creator withdraws.
         let sender = creator.shielded_address().map_err(err)?;
-        let terms = &self.escrow_utxo.terms;
+        let terms = &self.escrow.data;
+        let creator_owner = *InputRecords::new().address(&sender).map_err(err)?.owner();
         ensure!(
-            terms.creator == sender,
+            terms.creator == creator_owner,
             "only the escrow creator can withdraw it"
         );
-        let creator_address = sender.solana_address().map_err(err)?;
-        let owner_pk_field =
-            field(solana_owner_identity(creator_address.as_array()).map_err(err)?)?;
+        let unlock_timestamp = terms.unlock;
+        let tree_id = self.escrow.utxo.tree_id;
 
         // 2. Build the program transaction.
         let transaction = WithdrawClient {
             private: WithdrawPrivateInputsClient {
                 tx_context: TransactionOptions {
                     blinding_seed: None,
-                    output_tree_id: Some(self.tree_id),
+                    output_tree_id: Some(tree_id),
                 },
-                terms: terms.circuit_terms()?,
-                escrow: self
-                    .escrow_utxo
-                    .to_input_utxo(self.tree_id, self.leaf_index)?,
-                creator: sender,
+                escrow: self.escrow.utxo,
+                terms: self.escrow.data.into(),
             },
             public: WithdrawPublicInputsClient {
-                unlock: terms.unlock_timestamp,
-                owner_pk_field,
+                unlock: unlock_timestamp,
+                owner_pk_field: owner_pk_field(creator)?,
             },
         }
         .prepare(&sender, self.payer)
@@ -86,8 +82,8 @@ impl WithdrawTransactionParams {
             .map_err(err)?;
         let spp_proof_inputs = finalized.encrypt_with_viewing_key(&key).map_err(err)?;
         Ok(WithdrawTransaction {
-            creator: creator_address,
-            unlock_timestamp: terms.unlock_timestamp,
+            creator: sender.solana_address().map_err(err)?,
+            unlock_timestamp,
             spp_proof_inputs,
             proof_inputs: transaction.proof_inputs,
             source_output_blinding,
@@ -96,12 +92,18 @@ impl WithdrawTransactionParams {
 }
 
 impl WithdrawTransaction {
-    /// 1. Prove the SPP transaction.
+    /// 1. Prove the SPP transaction, with the PDA's zero nullifier key for the
+    ///    escrow UTXO.
     /// 2. Prove the withdraw circuit and build the instruction.
     pub fn prove(self, indexer: &SprIndexer, tree: Address) -> Result<Withdraw> {
         let payer = self.spp_proof_inputs.payer;
-        // 1. Prove the SPP transaction.
-        let spp_proof = prove_pda_transact(indexer, self.spp_proof_inputs)?;
+        // 1. Prove the SPP transaction, with the PDA's zero nullifier key for
+        // the escrow UTXO.
+        let spp_proof = prove_transact(
+            indexer,
+            self.spp_proof_inputs,
+            &ProgramOwner::nullifier_key(),
+        )?;
         // 2. Prove the withdraw circuit and build the instruction.
         let withdraw_proof = proof::prove(CircuitId::Withdraw, &self.proof_inputs)?;
         Ok(Withdraw {

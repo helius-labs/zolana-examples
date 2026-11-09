@@ -63,7 +63,7 @@ use spr_keypair::{random_blinding, NullifierKey, ShieldedKeypair, SigningKey};
 use spr_merkle_tree::{indexed::IndexedMerkleTree, MerkleTree};
 use spr_program::{proof::compressed_proof, CompressedProof, ProgramOwner, ProgramProofInputs};
 use spr_transaction::{
-    instructions::transact::{SppProofInputs, SppProofOutputUtxo, BN254_MODULUS_DEC},
+    instructions::transact::{SppProofInputs, BN254_MODULUS_DEC},
     Data, Mint, Utxo, WalletUtxo,
 };
 use spr_tree::TreeAccount;
@@ -73,7 +73,6 @@ use swap_sdk::{
         make::{Make, MakeTransactionParams},
         take::{Take, TakeTransactionParams},
     },
-    order_authority,
     proof::{checked_circuit, constraint_count, keys_dir, verifying_key, CircuitId},
     shared::identity,
     state::{OrderTerms, OrderUtxo},
@@ -147,36 +146,17 @@ fn bench_make(
     let tree = spr_interface::pda::tree(BENCH_TREE_ID);
     let payer = Keypair::new();
     let maker = keypair_from_payer(&payer);
-    let maker_address = maker.shielded_address().expect("maker address");
     let taker = keypair_from_payer(&Keypair::new());
     let taker_address = taker.shielded_address().expect("taker address");
 
-    // Like the localnet flow, the maker funds the order from a note owned by
-    // the order authority.
-    let source = order_authority()
-        .input(
-            &SppProofOutputUtxo {
-                asset: Mint::SOL,
-                amount: 1_000_000,
-                blinding: random_blinding(),
-                owner_address: Some(
-                    order_authority()
-                        .address(maker_address.viewing_pubkey)
-                        .expect("order authority address"),
-                ),
-                ..Default::default()
-            },
-            BENCH_TREE_ID,
-            0,
-        )
-        .expect("source input");
+    // Like the localnet flow, the maker funds the order from its own note.
+    let source = wallet_utxo(&maker, 1_000_000, 0);
     let transaction = MakeTransactionParams {
         terms: terms(&maker, Some(&taker)),
         source_amount: SOURCE_AMOUNT,
         source,
         taker_address,
         payer: payer.pubkey(),
-        tree_id: BENCH_TREE_ID,
     }
     .build(&maker)
     .expect("make transaction");
@@ -186,7 +166,7 @@ fn bench_make(
         transaction.spp_proof_inputs,
         &spend_proofs,
         prover,
-        &[&ProgramOwner::nullifier_key()],
+        &[&maker.nullifier_key],
     );
     let (make_proof, circuit) = measure_circuit(CircuitId::Make, &transaction.proof_inputs);
     let ix = Make {

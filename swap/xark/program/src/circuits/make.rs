@@ -3,7 +3,8 @@ use spr_program::{
         CheckedTransaction, ConfidentialTransaction, DataUtxo, PublicInputs, TokenUtxos, Utxo,
         UtxoTrait,
     },
-    input, require, CircuitError, ClientInputs, ShieldedAddress, TxContext, ZkProgram,
+    input, require, require_eq, Asset, CircuitError, ClientInputs, Field, ShieldedAddress,
+    TxContext, ZkProgram,
 };
 
 use super::OrderTerms;
@@ -19,58 +20,62 @@ pub struct Make {
 #[derive(ClientInputs)]
 pub struct MakePrivateInputs {
     pub tx_context: TxContext,
-    pub terms: OrderTerms,
+    /// The maker's spent source UTXO. SPP authorizes the spend with the
+    /// maker's signature; its owner becomes the order's maker and receives
+    /// the change.
+    pub source: Utxo,
     /// The amount locked in the order UTXO.
     pub source_amount: u64,
-    /// The spent source UTXO. The circuit does not constrain its owner: SPP
-    /// authorizes the spend.
-    pub source: Utxo,
+    /// The order terms other than the maker; see [`OrderTerms`].
+    pub destination_mint: Asset,
+    pub destination_amount: u64,
+    pub expiry: u64,
+    pub taker_pk_fe: [u8; 32],
     /// The order UTXO's owner, the order-authority PDA with the taker's
     /// viewing key so the taker can decrypt the order. The circuit does not
     /// constrain it: SPP spends the order UTXO only with the PDA signature.
     pub order_address: ShieldedAddress,
 }
 
-/// The make proof has no public field: its public hash commits only the
-/// transaction (`private_tx_hash`).
 #[input]
 #[derive(PublicInputs)]
-pub struct MakePublicInputs {}
+pub struct MakePublicInputs {
+    /// `hash_bytes` of the maker signer's tagged pubkey, which the program
+    /// computes from the signer account.
+    pub maker_owner_pk_field: Field,
+}
 
 impl Make {
-    /// 1. Check the order terms and the locked amount.
-    /// 2. Spend the source UTXO.
-    /// 3. Create the change to the maker and the order UTXO, which commits the
-    ///    terms.
-    /// 4. Lock `source_amount`; the rest is change.
-    /// 5. Check the transaction: outputs `[change, order UTXO]`.
+    /// 1. Spend the source UTXO and check its owner is the maker signer.
+    /// 2. Create the order UTXO and lock `source_amount` in it; the rest of
+    ///    the source returns to its owner as change.
+    /// 3. Set and check the order terms; the source owner is the maker.
+    /// 4. Check the transaction: outputs `[change, order UTXO]`.
     pub fn execute(&self) -> Result<CheckedTransaction, CircuitError> {
         let private = &self.private;
 
-        // 1. Check the order terms and the locked amount.
-        private.terms.assert_valid();
+        // 1. Spend the source UTXO of the maker signer.
+        let mut tokens = TokenUtxos::new_mut(core::array::from_ref(&private.source))?;
+        let maker = tokens.owner();
+        require_eq(maker.key().identity()?, self.public.maker_owner_pk_field);
+
+        // 2. Lock `source_amount` in the order UTXO.
         require(private.source_amount != 0);
+        let mut order = DataUtxo::<OrderTerms>::new_init(private.order_address.owner())
+            .with_asset(&tokens.asset())?;
+        tokens.transfer(&mut order, &private.source_amount)?;
 
-        // 2. Spend the source UTXO.
-        let mut source = TokenUtxos::new_mut(core::array::from_ref(&private.source))?.close();
-        let asset = source.asset();
+        // 3. Set and check the order terms.
+        order.destination_mint = private.destination_mint;
+        order.destination_amount = private.destination_amount;
+        order.maker = maker;
+        order.expiry = private.expiry;
+        order.taker_pk_fe = private.taker_pk_fe;
+        order.assert_valid();
 
-        // 3. Create the change and the order UTXO. A zero change is still a
-        // real UTXO, as the order UTXO follows it.
-        let mut change =
-            TokenUtxos::new_init(private.terms.maker.owner(), &asset).with_zero_output();
-        let mut order =
-            DataUtxo::<OrderTerms>::new_init(private.order_address.owner()).with_asset(&asset)?;
-        *order = private.terms;
-
-        // 4. Lock `source_amount`; the rest is change.
-        source.transfer(&mut order, &private.source_amount)?;
-        source.transfer_all(&mut change)?;
-
-        // 5. Check the transaction: outputs `[change, order UTXO]`.
+        // 4. Check the transaction: outputs `[change, order UTXO]`.
         ConfidentialTransaction::new(&private.tx_context, &self.public)
-            .with(source)
-            .with(change)
+            .with(tokens)
             .with(order)
             .check()
     }

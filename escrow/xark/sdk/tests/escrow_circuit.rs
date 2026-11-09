@@ -1,6 +1,6 @@
 use crate::shared::*;
 use timelock_escrow_program::verifier::escrow::{PublicInputs, Verifier, VERIFYINGKEY};
-use timelock_escrow_sdk::{escrow_authority, proof::CircuitId};
+use timelock_escrow_sdk::{escrow_authority, proof::CircuitId, state::escrow_utxo};
 
 const CIRCUIT: CircuitId = CircuitId::Escrow;
 
@@ -21,7 +21,7 @@ fn program_vk_has_no_commitment() {
 #[test]
 fn escrow_prove_verify() {
     // 1. Check the outputs: the change to the creator, then the escrow UTXO
-    // owned by the escrow-authority PDA and committing the terms.
+    // owned by the escrow-authority PDA, whose data decodes to the terms.
     let inputs = escrow_inputs(250, 750);
     let finalized = inputs.create_finalized_transaction().unwrap();
     let outputs = finalized.output_utxos();
@@ -41,7 +41,7 @@ fn escrow_prove_verify() {
                 .map(|address| address.owner_hash().unwrap()),
             escrow.asset,
             escrow.amount,
-            escrow.data_hash,
+            escrow_utxo(escrow, OUTPUT_TREE_ID, 0).unwrap().data,
             outputs.len(),
         ),
         (
@@ -52,7 +52,7 @@ fn escrow_prove_verify() {
             Some(escrow_authority().owner_hash().unwrap()),
             mint(),
             250,
-            Some(terms.data_hash().unwrap()),
+            terms,
             2,
         )
     );
@@ -61,14 +61,18 @@ fn escrow_prove_verify() {
     // transaction's private_tx_hash.
     let (_, proof) = prove_and_verify(CIRCUIT, &inputs, &VERIFYINGKEY);
     let private_tx_hash = finalized.padding_independent_private_tx_hash().unwrap();
-    verify(&proof, &private_tx_hash).expect(
+    let signer = field_bytes(owner_pk_field(&inputs.creator));
+    verify(&proof, signer, &private_tx_hash).expect(
         "the committed escrow VERIFYINGKEY must accept the proof; run `zolana zk compile --test`",
     );
 
-    // 3. A tampered private_tx_hash fails.
+    // 3. Another signer or a tampered private_tx_hash fails.
+    let mut other_signer = signer;
+    other_signer[31] ^= 0x01;
     let mut tampered = private_tx_hash;
     tampered[31] ^= 0x01;
-    assert!(verify(&proof, &tampered).is_err());
+    assert!(verify(&proof, other_signer, &private_tx_hash).is_err());
+    assert!(verify(&proof, signer, &tampered).is_err());
 }
 
 #[test]
@@ -90,15 +94,11 @@ fn escrow_zero_change_proves() {
 }
 
 #[test]
-fn escrow_rejects_wrong_terms_owner_amount_and_source() {
-    // 1. Tamper the change owner, the locked amount or the source data. The
-    // source commitment itself is bound by the SPP proof, not this circuit.
-    let mutations: [fn(&mut Escrow); 4] = [
-        |inputs| inputs.program.private.terms.owner_hash = field(99),
-        |inputs| {
-            let other = creator().shielded_address().unwrap();
-            inputs.program.private.creator = inputs.address(other);
-        },
+fn escrow_rejects_wrong_signer_amount_and_source() {
+    // 1. Tamper the signer, the locked amount or the source data. The source
+    // commitment itself is bound by the SPP proof, not this circuit.
+    let mutations: [fn(&mut Escrow); 3] = [
+        |inputs| inputs.program.public.owner_pk_field = field(99),
         |inputs| inputs.program.private.amount = 1_001,
         |inputs| inputs.program.private.source.data_hash = field(99),
     ];
@@ -120,7 +120,8 @@ fn escrow_proof_rejects_a_different_escrow_output() {
     let escrow = finalized.output_utxos().get(1).unwrap();
     let source = field_bytes(inputs.program.private.source.hash().unwrap());
 
-    // 2. Recompute the SPP hash with other terms or another amount locked.
+    // 2. Recompute the SPP hash with another data hash or another amount
+    // locked.
     for other_terms in [false, true] {
         let mut output = escrow.clone();
         if other_terms {
@@ -138,17 +139,18 @@ fn escrow_proof_rejects_a_different_escrow_output() {
         )
         .hash()
         .unwrap();
-        assert!(verify(&proof, &hash).is_err());
+        assert!(verify(&proof, field_bytes(owner_pk_field(&inputs.creator)), &hash).is_err());
     }
 }
 
 fn verify(
     proof: &spr_program::CompressedProof,
+    owner_pk_field: [u8; 32],
     private_tx_hash: &[u8; 32],
 ) -> Result<(), spr_program::verifier::VerifyError> {
     Verifier {
         proof,
-        public_inputs: PublicInputs {},
+        public_inputs: PublicInputs { owner_pk_field },
         private_tx_hash,
         transfers: &[],
     }

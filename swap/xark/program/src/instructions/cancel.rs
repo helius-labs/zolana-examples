@@ -10,12 +10,23 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     error::SwapError,
-    instructions::shared::{check_after_window, cpi_spp_transact_signed},
+    instructions::shared::{check_after_window, cpi_spp_transact_signed, IxData},
     verifier::cancel,
 };
 
 pub use spr_program::CompressedProof as CancelProof;
 
+/// The cancel arguments the program reads ahead of the transact bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
+pub struct CancelArgs {
+    pub proof: CancelProof,
+    /// See [`CancelIxData::order_expiry`].
+    pub order_expiry: u64,
+}
+
+/// The cancel instruction data as a client writes it: [`CancelArgs`], then
+/// the transact data, which the program reads in place ([`IxData`]) and
+/// forwards to SPP unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct CancelIxData {
     pub proof: CancelProof,
@@ -48,11 +59,14 @@ pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
             .map_err(SwapError::from)?;
 
     // 2. Decode the instruction.
-    let CancelIxData {
-        proof,
-        order_expiry,
+    let IxData {
+        args: CancelArgs {
+            proof,
+            order_expiry,
+        },
         transact,
-    } = wincode::deserialize_exact(data).map_err(|_| SwapError::InvalidInstructionData)?;
+        transact_bytes,
+    } = IxData::<CancelArgs>::parse(data)?;
 
     // 3. Check `now > order_expiry`.
     let clock = Clock::get()?;
@@ -63,15 +77,12 @@ pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
         &proof,
         order_expiry,
         maker_owner_pk_field,
-        &transact.private_tx_hash,
+        transact.private_tx_hash,
     )?;
 
     // 5. Invoke SPP with the order-authority PDA signer.
-    let transact_bytes = transact
-        .serialize()
-        .map_err(|_| SwapError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
-    cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    cpi_spp_transact_signed(spp_accounts, transact_bytes)
 }
 
 /// Hashes the cancel proof's public inputs and verifies the proof.

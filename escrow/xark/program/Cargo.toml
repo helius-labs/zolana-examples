@@ -20,7 +20,7 @@ default = ["insecure-test-setup"]
 insecure-test-setup = []
 bpf-entrypoint = []
 # The Rust circuits and their native client (`<Program>Client::prepare`).
-circuits = ["dep:xark", "spr-program/client"]
+circuits = ["dep:borsh", "dep:xark", "spr-program/client"]
 # Enabled only while `zolana zk compile` discovers the programs, before the
 # generated verifiers exist.
 build-circuits = ["circuits", "spr-program/build"]
@@ -28,6 +28,7 @@ profile-program = ["light-program-profiler/profile-program"]
 
 [dependencies]
 xark = { workspace = true, optional = true }
+borsh = { workspace = true, optional = true }
 groth16-solana = { workspace = true, features = ["bsb22"] }
 light-program-profiler = { workspace = true }
 pinocchio = { workspace = true, features = ["cpi"] }

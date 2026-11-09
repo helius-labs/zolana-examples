@@ -52,7 +52,7 @@ use solana_keypair::Keypair;
 use solana_signer::Signer;
 use spr_client::{
     transaction_size, ComputeBudgetConfig, MerkleContext, MerkleProof, NonInclusionProof,
-    ProverClient, ProverExt, SpendProof, STATE_TREE_HEIGHT,
+    ProofAuthority, ProverClient, ProverExt, SpendProof, STATE_TREE_HEIGHT,
 };
 use spr_hasher::Poseidon;
 use spr_interface::{
@@ -63,20 +63,19 @@ use spr_interface::{
     },
     SHIELDED_POOL_PROGRAM_ID,
 };
-use spr_keypair::{random_blinding, NullifierKey, ShieldedKeypair};
+use spr_keypair::{random_blinding, ShieldedKeypair};
 use spr_merkle_tree::{indexed::IndexedMerkleTree, MerkleTree};
-use spr_program::{proof::compressed_proof, CompressedProof, ProgramProofInputs};
+use spr_program::{proof::compressed_proof, CompressedProof, ProgramOwner, ProgramProofInputs};
 use spr_test_utils::{transact::nullifier_tree, utxo::dummy_proofs};
-use spr_transaction::{instructions::transact::SppProofInputs, Mint, SppProofOutputUtxo};
+use spr_transaction::{instructions::transact::SppProofInputs, utxo::Utxo, Data, Mint, WalletUtxo};
 use spr_tree::TreeAccount;
 use timelock_escrow_sdk::{
-    escrow_authority,
     instructions::{
-        escrow::{Escrow, EscrowTransactionParams},
+        escrow::{Escrow, EscrowTransaction, EscrowTransactionParams},
         withdraw::{Withdraw, WithdrawTransactionParams},
     },
     proof::{self, CircuitId},
-    state::{EscrowTerms, EscrowUtxo},
+    state::escrow_utxo,
 };
 
 const PROFILING_SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/bench");
@@ -277,19 +276,23 @@ fn assemble_accounts(ix: &Instruction, fixtures: &[(Address, Account)]) -> Vec<(
         })
         .collect()
 }
-/// Prove the PDA transaction against fixture trees: one warm-up proof, then
-/// the median time of the timed proofs on the running prover server.
-fn prove_spp(bench: &Bench, proof_inputs: SppProofInputs) -> (Account, TransactIxData, Duration) {
+/// Prove the transaction, whose inputs `authority` completes, against fixture
+/// trees: one warm-up proof, then the median time of the timed proofs on the
+/// running prover server.
+fn prove_spp(
+    bench: &Bench,
+    proof_inputs: SppProofInputs,
+    authority: &dyn ProofAuthority,
+) -> (Account, TransactIxData, Duration) {
     let private_tx_hash = proof_inputs
         .padding_independent_private_tx_hash()
         .expect("private transaction hash");
     let (tree_account, spend_proofs) = spend_fixture(&bench.tree, &proof_inputs);
     let dummies = dummy_proofs(&proof_inputs);
-    let key = NullifierKey::from_secret([0; 31]);
     let prove = || {
         bench
             .prover
-            .prove_transact(proof_inputs.clone(), &spend_proofs, &dummies, &key)
+            .prove_transact(proof_inputs.clone(), &spend_proofs, &dummies, authority)
             .expect("prove transact")
     };
     let (transact, warm) = warm_median(prove);
@@ -404,12 +407,51 @@ fn creator() -> (Keypair, ShieldedKeypair) {
     (payer, shielded)
 }
 
-fn terms(creator: &ShieldedKeypair) -> EscrowTerms {
-    EscrowTerms {
-        creator: creator.shielded_address().expect("creator address"),
-        unlock_timestamp: UNLOCK_TIMESTAMP,
+/// The creator's `amount` SOL source at leaf 0 of the fixture tree.
+fn creator_source(creator: &ShieldedKeypair, amount: u64) -> WalletUtxo {
+    let address = creator.shielded_address().expect("creator address");
+    let utxo = Utxo {
+        owner: creator.signing_pubkey(),
+        asset: Mint::SOL,
+        amount,
+        blinding: random_blinding(),
+        ring_program_id: None,
+        data: Data::default(),
+    };
+    let utxo_hash = utxo
+        .hash(&address.nullifier_pubkey, &[0; 32], &[0; 32], BENCH_TREE_ID)
+        .expect("source hash");
+    WalletUtxo {
+        nullifier: creator
+            .nullifier(&utxo_hash, &utxo.blinding)
+            .expect("source nullifier"),
+        tx_viewing_key: None,
+        utxo,
+        nullifier_pubkey: address.nullifier_pubkey,
+        utxo_hash,
+        data_hash: None,
+        ring_data_hash: None,
+        tree_id: BENCH_TREE_ID,
+        leaf_index: 0,
+        latest_tree_id: Some(BENCH_TREE_ID),
+        slot: 0,
+        tx_signature: Default::default(),
+        slot_index: 0,
     }
 }
+
+/// An escrow transaction locking [`LOCK_AMOUNT`] from the creator's source.
+fn escrow_transaction(payer: &Keypair, creator: &ShieldedKeypair) -> EscrowTransaction {
+    EscrowTransactionParams {
+        unlock_timestamp: UNLOCK_TIMESTAMP,
+        amount: LOCK_AMOUNT,
+        source: creator_source(creator, INPUT_AMOUNT),
+        payer: payer.pubkey(),
+    }
+    .build(creator)
+    .expect("build escrow")
+}
+
 struct Bench {
     mollusk: Mollusk,
     tree: Address,
@@ -454,34 +496,9 @@ impl Bench {
 
 fn bench_escrow(bench: &mut Bench) {
     let (payer, creator) = creator();
-    let authority = escrow_authority();
-    let source = authority
-        .input(
-            &SppProofOutputUtxo {
-                asset: Mint::SOL,
-                amount: INPUT_AMOUNT,
-                blinding: random_blinding(),
-                owner_address: Some(
-                    authority
-                        .address(creator.viewing_pubkey())
-                        .expect("authority address"),
-                ),
-                ..Default::default()
-            },
-            BENCH_TREE_ID,
-            0,
-        )
-        .expect("source input");
-    let transaction = EscrowTransactionParams {
-        terms: terms(&creator),
-        amount: LOCK_AMOUNT,
-        source,
-        payer: payer.pubkey(),
-        tree_id: BENCH_TREE_ID,
-    }
-    .build(&creator)
-    .expect("build escrow");
-    let (tree_account, spp_proof, spp_dur) = prove_spp(bench, transaction.spp_proof_inputs.clone());
+    let transaction = escrow_transaction(&payer, &creator);
+    let (tree_account, spp_proof, spp_dur) =
+        prove_spp(bench, transaction.spp_proof_inputs.clone(), &creator);
     let (escrow_proof, circuit) = measure_circuit(CircuitId::Escrow, &transaction.proof_inputs);
 
     let ix = Escrow {
@@ -505,21 +522,18 @@ fn bench_escrow(bench: &mut Bench) {
 
 fn bench_withdraw(bench: &mut Bench) {
     let (payer, creator) = creator();
-    let escrow_utxo = EscrowUtxo {
-        terms: terms(&creator),
-        blinding: random_blinding(),
-        asset: Mint::SOL,
-        amount: LOCK_AMOUNT,
-    };
+    let escrow_output = escrow_transaction(&payer, &creator).escrow_output;
     let transaction = WithdrawTransactionParams {
-        escrow_utxo,
-        tree_id: BENCH_TREE_ID,
-        leaf_index: 0,
+        escrow: escrow_utxo(&escrow_output, BENCH_TREE_ID, 0).expect("escrow utxo"),
         payer: payer.pubkey(),
     }
     .build(&creator)
     .expect("build withdraw");
-    let (tree_account, spp_proof, spp_dur) = prove_spp(bench, transaction.spp_proof_inputs.clone());
+    let (tree_account, spp_proof, spp_dur) = prove_spp(
+        bench,
+        transaction.spp_proof_inputs.clone(),
+        &ProgramOwner::nullifier_key(),
+    );
     let (withdraw_proof, circuit) = measure_circuit(CircuitId::Withdraw, &transaction.proof_inputs);
 
     let ix = Withdraw {

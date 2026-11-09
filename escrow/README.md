@@ -88,9 +88,23 @@ implementation uses. The program ID is
 
 What differs from the gnark implementation, within the spec:
 
+- The escrow terms are an SDK state (`UtxoState`): `creator`, the creator's
+  owner, and `unlock`. The circuits set them on the escrow `DataUtxo` and read
+  them back from it; the SDK hashes them into the data hash
+  (`Poseidon(DATA, Poseidon(discriminator, owner_hash, unlock))`) and encrypts
+  them as the escrow UTXO's data. The SDK finds the creator's open escrows by
+  decrypting the escrow-authority outputs (`state::open_escrows`), and
+  withdraw takes the decoded escrow UTXO, so the terms never travel out of
+  band.
+- The escrow source is the creator's own UTXO, not one owned by the
+  escrow-authority PDA: the creator signs the SPP transact for it, and the
+  escrow-authority PDA signs as the owner of the escrow UTXO, which carries
+  data. The change is the source's remainder, which the SDK returns to the
+  source owner.
 - The proofs' single public input is the SDK's public hash:
-  `Poseidon(transaction_hash)` for escrow and
+  `Poseidon(owner_pk_field, transaction_hash)` for escrow and
   `Poseidon(unlock, owner_pk_field, transaction_hash)` for withdraw, where
+  `owner_pk_field` is `hash_bytes` of the creator signer and
   `transaction_hash` is `private_tx_hash` (neither transaction moves public
   funds). The program recomputes both from its accounts and instruction data.
 - The escrow transaction is proved at the SPP `(1, 2)` shape, without a dummy
@@ -101,13 +115,13 @@ What differs from the gnark implementation, within the spec:
 ### Layout
 
 - [`xark/program/src/circuits/`](xark/program/src/circuits/) holds the escrow
-  and withdraw circuits and the escrow terms.
+  and withdraw circuits and the escrow terms state.
 - [`xark/program/src/instructions/`](xark/program/src/instructions/) checks the
   accounts, verifies the program proof and invokes SPP `transact`, signed by
   the escrow-authority PDA.
 - [`xark/program/src/verifier/`](xark/program/src/verifier/) holds the
   generated verifiers.
-- [`xark/sdk/`](xark/sdk/) holds the escrow state, the transaction and
+- [`xark/sdk/`](xark/sdk/) holds the escrow UTXO lookup, the transaction and
   instruction builders and the checksum-pinned prover.
 - [`xark/test/`](xark/test/) holds the localnet test and the CU benchmark.
 - [`xark/timelock-escrow-keys.CHECKSUM`](xark/timelock-escrow-keys.CHECKSUM)

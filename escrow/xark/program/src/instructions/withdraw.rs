@@ -10,13 +10,24 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     error::TimelockEscrowError,
-    instructions::shared::{check_after_window, cpi_spp_transact_signed},
+    instructions::shared::{check_after_window, cpi_spp_transact_signed, IxData},
     verifier::withdraw,
 };
 
 /// The withdraw proof: compressed Groth16 A, B and C (128 bytes).
 pub use spr_program::CompressedProof as WithdrawProof;
 
+/// The withdraw arguments the program reads ahead of the transact bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
+pub struct WithdrawArgs {
+    pub proof: WithdrawProof,
+    /// See [`WithdrawIxData::unlock_timestamp`].
+    pub unlock_timestamp: u64,
+}
+
+/// The withdraw instruction data as a client writes it: [`WithdrawArgs`],
+/// then the transact data, which the program reads in place ([`IxData`]) and
+/// forwards to SPP unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct WithdrawIxData {
     pub proof: WithdrawProof,
@@ -38,23 +49,24 @@ pub struct WithdrawIxData {
 #[inline(never)]
 #[profile]
 pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
-    // 1. Check the caller and the creator sign. The withdraw proof recomputes
-    // the escrow's committed owner_hash from this pubkey (owner_pk_field), so
-    // only the creator can withdraw and the creator knows the refund blinding
-    // it chose. The identity is tagged as a Solana key, like the owner hash
-    // the escrow terms commit.
+    // 1. Check the caller and the creator sign. The withdraw proof checks
+    // this pubkey (owner_pk_field) against the creator the escrow terms
+    // commit, so only the creator can withdraw. The identity is tagged as a
+    // Solana key, like the creator's owner key.
     let mut iter = AccountIterator::new(accounts);
     iter.next_signer_mut("caller")?;
     let owner_pk_field = solana_owner_identity(iter.next_signer("creator")?.address().as_array())
         .map_err(TimelockEscrowError::from)?;
 
     // 2. Decode the instruction.
-    let WithdrawIxData {
-        proof,
-        unlock_timestamp,
+    let IxData {
+        args: WithdrawArgs {
+            proof,
+            unlock_timestamp,
+        },
         transact,
-    } = wincode::deserialize_exact(data)
-        .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
+        transact_bytes,
+    } = IxData::<WithdrawArgs>::parse(data)?;
 
     // 3. Check the escrow has unlocked.
     let clock = Clock::get()?;
@@ -65,15 +77,12 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
         &proof,
         unlock_timestamp,
         owner_pk_field,
-        &transact.private_tx_hash,
+        transact.private_tx_hash,
     )?;
 
     // 5. Invoke SPP with the escrow-authority PDA signer.
-    let transact_bytes = transact
-        .serialize()
-        .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
-    cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    cpi_spp_transact_signed(spp_accounts, transact_bytes)
 }
 
 /// Verifies the withdraw proof against the escrow's `unlock` timestamp, the

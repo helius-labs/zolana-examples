@@ -24,10 +24,13 @@ Both implement the same instructions, tags, errors, order terms, optional
 designated taker and test scenarios. They differ in program ID, in how each
 circuit's public values fold into its one public input (gnark hashes
 `Poseidon(private_tx_hash, values...)`, make exposing `private_tx_hash`
-itself; Xark hashes `Poseidon(values..., transaction_hash)`), and in how the
-order UTXO carries the terms: Xark stores them as a program SDK data UTXO, so
-its data hash is `Poseidon(DATA, terms_hash)` and its encrypted payload holds
-the full terms, the maker's address included (see [xark](#xark)).
+itself; Xark hashes `Poseidon(values..., transaction_hash)`), in how the
+order UTXO carries the terms, and in who owns make's source: Xark stores the
+terms as a program SDK state (`DataUtxo<OrderTerms>`), so its data hash is the
+SDK state hash and its encrypted payload the Borsh-encoded terms, and its make
+spends a maker-owned source that the maker signs for, with the maker signer as
+a public field (see [xark](#xark)). gnark keeps its own terms hash and spends a
+source owned by the order-authority PDA.
 
 ## Benchmark
 
@@ -137,18 +140,27 @@ The SDK generates `MakeClient`, `TakeClient` and `CancelClient`; their
 commits to.
 
 - **Order terms** (`OrderTerms`): destination mint, destination amount, the
-  maker's shielded address, expiry and `taker_pk_fe`, hashed as
-  `Poseidon(hash_bytes(destination_mint), destination_amount, maker_address,
-  expiry, taker_pk_fe)`. The order UTXO is a `DataUtxo<OrderTerms>` owned by
-  the order-authority PDA, so its data hash is `Poseidon(DATA, terms_hash)`
-  and its encrypted `utxo_data` is the 178-byte terms payload the taker and
-  the maker decode.
-- **make** spends the order-authority-owned source, creates the change to the
-  maker and the order UTXO (outputs `[change, order]`), with a random
-  blinding seed.
+  maker's owner, expiry and `taker_pk_fe` (32 big-endian bytes, zero for an
+  open order). The struct derives `UtxoState`, so the circuits only set its
+  fields: the SDK hashes the state as `Poseidon(discriminator,
+  hash_bytes(destination_mint), destination_amount, maker_owner_hash, expiry,
+  hash_bytes(taker_pk_fe))` and encodes it with Borsh. The order UTXO is a
+  `DataUtxo<OrderTerms>` owned by the order-authority PDA, so its data hash is
+  `Poseidon(DATA, state_hash)` and its encrypted `utxo_data` the Borsh-encoded
+  terms, which the taker and the maker decode with `DataUtxo::try_from`
+  against the committed leaf. The terms commit the maker's owner, not its
+  viewing key: the taker checks the registry-resolved maker address against
+  that owner.
+- **make** spends the maker's source (`TokenUtxos::new_mut`), whose owner
+  must have the public signer identity, creates the order UTXO, moves
+  `source_amount` into it and sets the terms with the source owner as the
+  maker; the SDK returns the rest to the source owner as change (outputs
+  `[change, order]`), with a random blinding seed. The maker signs the
+  transact as the source's owner signer.
 - **take** spends the order UTXO and the taker's destination input and pays
   the source to the taker and exactly `destination_amount` to the maker
-  (outputs `[source, destination]`). It requires
+  (outputs `[source, destination]`); its `maker_address` input only names the
+  viewing key of the maker payout ciphertext. It requires
   `tx_context.blinding_seed == Poseidon("SWTX", order_utxo.blinding)` and that
   the transaction's first nullifier is the public one, so the maker derives its
   payout from the order opening and the first nullifier. A nonzero
@@ -164,7 +176,7 @@ the fields:
 
 | Circuit | Public fields | Program source |
 | ------- | ------------- | -------------- |
-| make | none | — |
+| make | `maker_owner_pk_field` | `solana_owner_identity(maker signer)` |
 | take | `expiry`, `first_nullifier` | `transact.expiry_unix_ts`, `transact.inputs[0].nullifier_hash` |
 | cancel | `expiry`, `maker_owner_pk_field` | `order_expiry`, `solana_owner_identity(maker signer)` |
 

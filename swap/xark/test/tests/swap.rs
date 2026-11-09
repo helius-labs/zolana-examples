@@ -24,9 +24,9 @@ const EXPIRY: u64 = 2_000_000_000;
 // `setup()` starts.
 //
 // Flow:
-//   1. Fund (in setup): 1.0 SPL is shielded to the order authority, the taker
-//      shields 0.25 SOL.
-//   2. Make: the program spends the 1.0 SPL UTXO -> change 0.6 SPL (to the
+//   1. Fund (in setup): 1.0 SPL is shielded to the maker, the taker shields
+//      0.25 SOL.
+//   2. Make: the maker spends its 1.0 SPL UTXO -> change 0.6 SPL (back to the
 //      maker) + order UTXO 0.4 SPL (owned by the order-authority PDA,
 //      designated to the taker and encrypted to it), plus the taker's marker.
 //   3. Discover: the taker finds the marker, decrypts the order and checks the
@@ -70,10 +70,9 @@ fn make_and_take_swap_inline() -> Result<()> {
         source: maker_input,
         taker_address,
         payer: maker_pubkey,
-        tree_id: localnet.tree_id,
     }
     .build(&maker.keypair)?
-    .prove(client.indexer(), localnet.tree)?
+    .prove(client.indexer(), localnet.tree, &maker.keypair)?
     .instruction()?;
     let make_signature = send(client.rpc(), &maker.keypair, make_ix)?;
     client

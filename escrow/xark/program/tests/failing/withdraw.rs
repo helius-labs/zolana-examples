@@ -29,6 +29,19 @@ fn trailing_instruction_data_is_rejected_exactly() {
 }
 
 #[test]
+fn truncated_transact_data_is_rejected_exactly() {
+    // The proof and unlock timestamp parse, but the transact data after them
+    // lacks its last byte.
+    expect_withdraw_err(
+        &setup_unlocked_mollusk(),
+        |instruction| {
+            instruction.data.pop();
+        },
+        TimelockEscrowError::InvalidInstructionData,
+    );
+}
+
+#[test]
 fn missing_accounts_are_rejected_exactly() {
     // No caller, then a caller without the creator.
     for kept in [0, 1] {

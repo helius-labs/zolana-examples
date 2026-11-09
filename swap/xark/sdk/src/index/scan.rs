@@ -1,11 +1,13 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use spr_interface::event::OutputDataEncoding;
+use spr_program::{DataUtxo, ProgramOwner};
 use spr_transaction::{
-    instructions::transact::OutputSlot, AssetRegistry, DataRecord, EncryptedScheme,
-    ShieldedTransaction, SOL_ASSET_ID,
+    instructions::transact::OutputSlot, serialization::confidential::ConfidentialOutputPlaintext,
+    AssetRegistry, EncryptedScheme, ShieldedTransaction, Utxo, WalletUtxo, SOL_ASSET_ID,
 };
+use swap_program::circuits;
 
-use crate::{err, state::OrderTerms};
+use crate::{err, order_authority};
 
 pub(crate) fn resolve_mint(
     registry: &AssetRegistry,
@@ -38,17 +40,37 @@ pub(crate) fn unified_slots(
     })
 }
 
-/// The order terms an order UTXO's decrypted `utxo_data` record carries.
-pub(crate) fn parse_order_terms(
-    records: &[DataRecord],
+/// Decodes the decrypted output in `slot` of `tx` as an order UTXO: owned
+/// by the order authority, with order terms as its state. The SDK's decode
+/// checks the state and the opening reproduce the slot's committed hash.
+pub(crate) fn decode_order(
+    tx: &ShieldedTransaction,
+    slot: &OutputSlot,
+    slot_index: u32,
+    plaintext: ConfidentialOutputPlaintext,
     registry: &AssetRegistry,
-) -> Result<OrderTerms> {
-    let payload = records
-        .iter()
-        .find_map(|record| match record {
-            DataRecord::UtxoData(bytes) => Some(bytes.as_slice()),
-            _ => None,
-        })
-        .ok_or_else(|| anyhow!("order plaintext carries no utxo data record"))?;
-    OrderTerms::from_payload(payload, registry)
+) -> Result<DataUtxo<circuits::OrderTerms>> {
+    let utxo = WalletUtxo {
+        utxo: Utxo {
+            owner: order_authority().public_key(),
+            asset: resolve_mint(registry, plaintext.asset_id)?,
+            amount: plaintext.amount,
+            blinding: plaintext.blinding,
+            ring_program_id: plaintext.ring_program_id,
+            data: plaintext.data,
+        },
+        nullifier_pubkey: ProgramOwner::nullifier_pubkey().map_err(err)?,
+        utxo_hash: slot.output_context.hash,
+        nullifier: [0; 32],
+        tx_viewing_key: None,
+        data_hash: None,
+        ring_data_hash: None,
+        tree_id: slot.output_context.tree_id,
+        leaf_index: slot.output_context.leaf_index,
+        latest_tree_id: None,
+        slot: tx.slot,
+        tx_signature: tx.tx_signature,
+        slot_index,
+    };
+    DataUtxo::try_from(utxo).map_err(err)
 }

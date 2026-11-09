@@ -6926,6 +6926,7 @@ dependencies = [
 name = "timelock-escrow-program"
 version = "0.1.0"
 dependencies = [
+ "borsh",
  "groth16-solana",
  "light-program-profiler",
  "mollusk-svm",
@@ -6961,6 +6962,7 @@ dependencies = [
  "spr-interface",
  "spr-keypair",
  "spr-program",
+ "spr-test-utils",
  "spr-transaction",
  "tempfile",
  "timelock-escrow-program",

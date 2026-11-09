@@ -53,7 +53,7 @@ fn designated_take_proves_and_binds_public_inputs() {
         )
     );
     assert_eq!(
-        spr_program::to_bytes(&terms.maker.owner().hash().unwrap()),
+        spr_program::to_bytes(&terms.maker.hash().unwrap()),
         destination.owner_address.unwrap().owner_hash().unwrap()
     );
 
@@ -85,7 +85,7 @@ fn designated_take_proves_and_binds_public_inputs() {
 fn open_order_is_taken_by_an_arbitrary_taker() {
     // `taker_pk_fe == 0` accepts any taker input owner.
     let inputs = inputs(false);
-    assert_eq!(inputs.program.private.terms.taker_pk_fe, field(0));
+    assert_eq!(inputs.program.private.terms.taker_pk_fe, [0; 32]);
     prove_and_verify(CIRCUIT, &inputs, &VERIFYINGKEY);
 }
 
@@ -137,7 +137,7 @@ fn take_rejects_wrong_terms_and_taker_input() {
         |inputs| inputs.program.private.terms.destination_mint = [9; 32],
         |inputs| {
             let other = keypair().shielded_address().unwrap();
-            inputs.program.private.terms.maker = inputs.address(other);
+            inputs.program.private.terms.maker = *inputs.address(other).owner();
         },
         |inputs| inputs.program.private.order_utxo.data_hash = field(99),
         |inputs| inputs.program.private.taker_in.amount = DESTINATION_AMOUNT + 1,

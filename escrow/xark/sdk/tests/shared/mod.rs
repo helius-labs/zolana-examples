@@ -6,13 +6,16 @@ use spr_program::{
     circuit::CheckedTransaction, from_bytes, to_bytes, Field, InputRecords, ProgramProofInputs,
     ProgramTransaction, TxContext,
 };
-use spr_transaction::{instructions::transact::FinalizedTransaction, Mint, SppProofOutputUtxo};
+use spr_transaction::{
+    instructions::transact::FinalizedTransaction, utxo::Utxo, Data, Mint, WalletUtxo,
+};
 use std::ops::{Deref, DerefMut};
 use timelock_escrow_program::circuits as circuit;
 use timelock_escrow_sdk::{
     escrow_authority,
+    instructions::escrow::ESCROW_SLOT,
     proof::CircuitId,
-    state::{EscrowTerms, EscrowUtxo},
+    state::{escrow_utxo, EscrowTerms},
 };
 
 /// The tree the spent UTXOs are in. Non-zero, and different from the output
@@ -76,20 +79,18 @@ impl<P: Execute> Fixture<P> {
     pub fn create_finalized_transaction(&self) -> anyhow::Result<FinalizedTransaction> {
         Ok(self.create_program_transaction()?.finalized)
     }
-
-    pub fn address(&mut self, address: ShieldedAddress) -> spr_program::ShieldedAddress {
-        self.records.address(&address).unwrap()
-    }
 }
 
 pub fn creator() -> ShieldedKeypair {
     ShieldedKeypair::from_keypair(&Keypair::new()).unwrap()
 }
 
+/// The escrow terms the fixtures commit for `creator`.
 pub fn terms(creator: &ShieldedKeypair) -> EscrowTerms {
+    let address = creator.shielded_address().unwrap();
     EscrowTerms {
-        creator: creator.shielded_address().unwrap(),
-        unlock_timestamp: UNLOCK,
+        creator: *InputRecords::new().address(&address).unwrap().owner(),
+        unlock: UNLOCK,
     }
 }
 
@@ -115,14 +116,6 @@ pub fn context(seed: u8) -> TxContext {
     InputRecords::context(&fe(seed), Some(OUTPUT_TREE_ID)).unwrap()
 }
 
-pub fn circuit_terms(terms: &EscrowTerms) -> circuit::EscrowTerms {
-    let client = terms.circuit_terms().unwrap();
-    circuit::EscrowTerms {
-        owner_hash: client.owner_hash,
-        unlock: client.unlock,
-    }
-}
-
 /// `hash_bytes` of the creator's tagged Solana pubkey.
 pub fn owner_pk_field(creator: &ShieldedKeypair) -> Field {
     let address = creator
@@ -133,66 +126,74 @@ pub fn owner_pk_field(creator: &ShieldedKeypair) -> Field {
     from_bytes(&solana_owner_identity(address.as_array()).unwrap()).unwrap()
 }
 
-/// An escrow of `escrow_amount` from a source UTXO holding
-/// `escrow_amount + change_amount`, owned by the escrow-authority PDA.
+/// A plain `amount` UTXO of [`mint`] owned by `owner`, at leaf 0 of
+/// [`OUTPUT_TREE_ID`].
+pub fn token_input(owner: &ShieldedKeypair, amount: u64) -> WalletUtxo {
+    spr_test_utils::utxo::wallet(
+        Utxo {
+            owner: owner.signing_pubkey(),
+            asset: mint(),
+            amount,
+            blinding: fe(5),
+            ring_program_id: None,
+            data: Data::default(),
+        },
+        &owner.nullifier_key,
+        OUTPUT_TREE_ID,
+        0,
+        None,
+        None,
+    )
+    .unwrap()
+}
+
+/// An escrow of `escrow_amount` from a source UTXO of the creator holding
+/// `escrow_amount + change_amount`.
 pub fn escrow_inputs(escrow_amount: u64, change_amount: u64) -> Escrow {
-    let creator = creator();
-    let terms = terms(&creator);
+    escrow_inputs_of(creator(), escrow_amount, change_amount)
+}
+
+fn escrow_inputs_of(creator: ShieldedKeypair, escrow_amount: u64, change_amount: u64) -> Escrow {
     let sender = creator.shielded_address().unwrap();
-    let authority = escrow_authority();
-    let source = authority
-        .input(
-            &SppProofOutputUtxo {
-                asset: mint(),
-                amount: escrow_amount + change_amount,
-                blinding: fe(5),
-                owner_address: Some(authority.address(sender.viewing_pubkey).unwrap()),
-                ..Default::default()
-            },
-            OUTPUT_TREE_ID,
-            0,
-        )
-        .unwrap();
+    let source = token_input(&creator, escrow_amount + change_amount);
     let mut records = InputRecords::new();
     let private = circuit::EscrowPrivateInputs {
         tx_context: context(41),
-        terms: circuit_terms(&terms),
-        amount: escrow_amount,
         source: records.utxo(&source).unwrap(),
-        creator: records.address(&sender).unwrap(),
+        amount: escrow_amount,
+        unlock: UNLOCK,
         escrow_address: records
-            .address(&authority.address(sender.viewing_pubkey).unwrap())
+            .address(&escrow_authority().address(sender.viewing_pubkey).unwrap())
             .unwrap(),
     };
+    let public = circuit::EscrowPublicInputs {
+        owner_pk_field: owner_pk_field(&creator),
+    };
     Fixture {
-        program: circuit::Escrow {
-            private,
-            public: circuit::EscrowPublicInputs {},
-        },
+        program: circuit::Escrow { private, public },
         records,
         creator,
     }
 }
 
-/// A withdraw of a 1 000-unit escrow UTXO at leaf 5 of [`INPUT_TREE_ID`].
+/// A withdraw of the 1 000-unit escrow UTXO the escrow fixture outputs, at
+/// leaf 5 of [`INPUT_TREE_ID`].
 pub fn withdraw_inputs() -> Withdraw {
-    let creator = creator();
-    let terms = terms(&creator);
-    let sender = creator.shielded_address().unwrap();
-    let escrow = EscrowUtxo {
-        terms: terms.clone(),
-        blinding: fe(7),
-        asset: mint(),
-        amount: 1_000,
-    }
-    .to_input_utxo(INPUT_TREE_ID, 5)
-    .unwrap();
+    let escrow = escrow_inputs_of(creator(), 1_000, 0);
+    let output = escrow
+        .create_finalized_transaction()
+        .unwrap()
+        .output_utxos()
+        .get(ESCROW_SLOT)
+        .unwrap()
+        .clone();
+    let escrow_utxo = escrow_utxo(&output, INPUT_TREE_ID, 5).unwrap();
+    let creator = escrow.creator;
     let mut records = InputRecords::new();
     let private = circuit::WithdrawPrivateInputs {
         tx_context: context(42),
-        terms: circuit_terms(&terms),
-        escrow: records.utxo(&escrow).unwrap(),
-        creator: records.address(&sender).unwrap(),
+        escrow: records.utxo(&escrow_utxo.utxo).unwrap(),
+        terms: escrow_utxo.data,
     };
     let public = circuit::WithdrawPublicInputs {
         unlock: UNLOCK,

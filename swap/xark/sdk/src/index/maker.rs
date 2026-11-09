@@ -4,15 +4,14 @@ use anyhow::Result;
 use spr_client::Rpc;
 use spr_keypair::{ShieldedKeypair, X25519Pubkey};
 use spr_transaction::{
-    serialization::confidential::{Confidential, ConfidentialOutputPlaintext},
-    AssetRegistry, ShieldedTransaction,
+    serialization::confidential::Confidential, AssetRegistry, ShieldedTransaction,
 };
 
 use super::{
     poll::{collect_tagged, index_until},
-    scan::{parse_order_terms, resolve_mint, unified_slots},
+    scan::{decode_order, unified_slots},
 };
-use crate::{err, shared::INDEXED_TREE_ID, state::OrderUtxo};
+use crate::{err, state::OrderUtxo};
 
 /// An order rediscovered by its maker from its own make transaction.
 #[derive(Debug)]
@@ -25,9 +24,9 @@ pub struct MakerOrder {
 /// from the maker's viewing key and the first input's nullifier (a match against
 /// `tx_viewing_pk` proves the maker authored the transaction). Each unified slot
 /// embeds its recipient viewing pubkey, so that key decrypts every slot from
-/// the sender side directly; the opening is accepted only if the terms name
-/// this maker and the reconstructed order UTXO hash matches the slot's
-/// committed leaf.
+/// the sender side directly; the opening is accepted only if it decodes as an
+/// order UTXO matching the slot's committed leaf and the terms name this
+/// maker.
 pub fn scan_maker(
     tx: &ShieldedTransaction,
     keypair: &ShieldedKeypair,
@@ -54,33 +53,17 @@ pub fn scan_maker(
         else {
             continue;
         };
-        let Some(order_utxo) = order_candidate(registry, plaintext) else {
+        let Ok(order_utxo) = decode_order(tx, slot, slot_index, plaintext, registry)
+            .and_then(|order| OrderUtxo::from_data_utxo(order, maker_address, registry))
+        else {
             continue;
         };
-        if order_utxo.terms.maker != maker_address {
-            continue;
-        }
-        if order_utxo.hash(INDEXED_TREE_ID).ok() != Some(slot.output_context.hash) {
-            continue;
-        }
         return Ok(Some(MakerOrder {
             order_utxo,
             taker_viewing_pubkey,
         }));
     }
     Ok(None)
-}
-
-fn order_candidate(
-    registry: &AssetRegistry,
-    plaintext: ConfidentialOutputPlaintext,
-) -> Option<OrderUtxo> {
-    Some(OrderUtxo {
-        terms: parse_order_terms(&plaintext.data.records, registry).ok()?,
-        blinding: plaintext.blinding,
-        source_mint: resolve_mint(registry, plaintext.asset_id).ok()?,
-        source_amount: plaintext.amount,
-    })
 }
 
 pub fn index_maker<I: Rpc>(

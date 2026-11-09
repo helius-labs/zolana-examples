@@ -3,13 +3,12 @@ use solana_keypair::Keypair;
 use solana_signature::Signature;
 use spr_keypair::{ShieldedAddress, ShieldedKeypair, X25519Pubkey};
 use spr_transaction::{
-    instructions::transact::{OutputContext, OutputSlot, SppProofInputs, SppProofOutputUtxo},
-    AssetRegistry, Mint, ShieldedTransaction,
+    instructions::transact::{OutputContext, OutputSlot, SppProofInputs},
+    AssetRegistry, Data, Mint, ShieldedTransaction, Utxo,
 };
 
 use crate::{
     instructions::make::MakeTransactionParams,
-    order_authority,
     shared::{identity, test_blinding, INDEXED_TREE_ID},
     state::{OrderTerms, OrderUtxo},
 };
@@ -65,7 +64,7 @@ fn shielded_transaction(proof_inputs: &SppProofInputs) -> ShieldedTransaction {
 }
 
 /// A make of a 400 000-unit order, designated to the taker and encrypted to
-/// it, from a 1 000 000-unit source owned by the order authority.
+/// it, from a 1 000 000-unit source owned by the maker.
 pub(crate) fn order_fixture() -> OrderFixture {
     let maker_keypair =
         ShieldedKeypair::from_keypair(&Keypair::new_from_array([7u8; 32])).expect("maker keypair");
@@ -81,23 +80,22 @@ pub(crate) fn order_fixture() -> OrderFixture {
     registry.insert(2, source_mint).expect("register mint");
     let source_mint = registry.mint(&source_mint).expect("source mint");
 
-    let source = order_authority()
-        .input(
-            &SppProofOutputUtxo {
-                asset: source_mint,
-                amount: 1_000_000,
-                blinding: test_blinding(5),
-                owner_address: Some(
-                    order_authority()
-                        .address(maker_address.viewing_pubkey)
-                        .expect("order authority address"),
-                ),
-                ..Default::default()
-            },
-            INDEXED_TREE_ID,
-            0,
-        )
-        .expect("source input");
+    let source = spr_test_utils::utxo::wallet(
+        Utxo {
+            owner: maker_keypair.signing_pubkey(),
+            asset: source_mint,
+            amount: 1_000_000,
+            blinding: test_blinding(5),
+            ring_program_id: None,
+            data: Data::default(),
+        },
+        &maker_keypair.nullifier_key,
+        INDEXED_TREE_ID,
+        0,
+        None,
+        None,
+    )
+    .expect("source input");
     let terms = OrderTerms {
         destination_mint: Mint::SOL,
         destination_amount: 250_000,
@@ -118,7 +116,6 @@ pub(crate) fn order_fixture() -> OrderFixture {
         source,
         taker_address,
         payer: maker_pubkey,
-        tree_id: INDEXED_TREE_ID,
     }
     .build(&maker_keypair)
     .expect("make transaction");

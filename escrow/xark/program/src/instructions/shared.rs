@@ -4,9 +4,35 @@ use pinocchio::{
     error::ProgramError,
     AccountView, Address, ProgramResult,
 };
+use spr_interface::instruction::instruction_data::transact::TransactIxDataRef;
 use spr_program::cpi::{SppTransactAccounts, TransactAccountsError};
+use wincode::{config::DefaultConfig, SchemaReadOwned};
 
 use crate::error::TimelockEscrowError;
+
+/// Instruction data: the instruction's own `args`, then the SPP `transact`
+/// data. The program reads the transact fields it checks in place and
+/// forwards `transact_bytes` to SPP unchanged.
+pub struct IxData<'a, A> {
+    pub args: A,
+    pub transact: TransactIxDataRef<'a>,
+    pub transact_bytes: &'a [u8],
+}
+
+impl<'a, A: SchemaReadOwned<DefaultConfig, Dst = A>> IxData<'a, A> {
+    pub fn parse(data: &'a [u8]) -> Result<Self, ProgramError> {
+        let mut transact_bytes = data;
+        let args = wincode::deserialize_from(&mut transact_bytes)
+            .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
+        let transact = TransactIxDataRef::from_bytes(transact_bytes)
+            .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
+        Ok(Self {
+            args,
+            transact,
+            transact_bytes,
+        })
+    }
+}
 
 #[inline(always)]
 pub fn check_after_window(now: i64, unlock_unix_ts: u64) -> ProgramResult {

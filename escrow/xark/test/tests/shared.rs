@@ -8,7 +8,7 @@ use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_signature::Signature;
 use solana_signer::Signer;
-use spr_client::{ComputeBudgetConfig, Rpc};
+use spr_client::{ComputeBudgetConfig, HistoryFilters, Rpc};
 use spr_interface::pda::spl_token_program_id;
 use spr_keypair::{ShieldedAddress, ShieldedKeypair};
 use spr_program_test::{
@@ -17,9 +17,9 @@ use spr_program_test::{
 };
 use spr_test_utils::{
     test_validator_asserts::wait_for_indexed_utxo,
-    wallet::{Deposit, DepositParams},
+    wallet::{sync_wallet, Deposit, DepositParams, Wallet},
 };
-use spr_transaction::{Mint, SppProofOutputUtxo, WalletUtxo, SOL_MINT};
+use spr_transaction::{AssetRegistry, ShieldedTransaction, WalletUtxo, SOL_MINT};
 use timelock_escrow_sdk::escrow_authority;
 
 // The whole per-transaction budget: the escrow forwards an SPP transact.
@@ -60,9 +60,10 @@ pub struct TestEnv {
     /// validator, so it lives as long as the test.
     pub localnet: FixtureLocalnet,
     pub creator: Actor,
-    /// The shielded balance the escrow locks from, owned by the
-    /// escrow-authority PDA.
+    /// The shielded balance the escrow locks from, owned by the creator.
     pub creator_input: WalletUtxo,
+    /// The creator's wallet, synced after the deposit.
+    pub wallet: Wallet,
 }
 
 /// `file` under this workspace's `target/deploy`, where `cargo build-sbf`
@@ -98,7 +99,7 @@ fn localnet_paths() -> Result<LocalnetPaths> {
 
 /// Boot the localnet of test number `test` ([`LocalnetPorts::for_test`]); tests
 /// running in parallel take distinct numbers. Then shield `SHIELD_AMOUNT` SOL
-/// to the escrow authority, the balance the escrow locks from.
+/// to the creator, the balance the escrow locks from.
 pub fn setup(test: u16) -> Result<TestEnv> {
     let localnet = FixtureLocalnet::start(
         "timelock-escrow-xark",
@@ -114,10 +115,9 @@ pub fn setup(test: u16) -> Result<TestEnv> {
 
     // SOL only: asset id 1 is a built-in AssetRegistry::default() entry, no
     // SPL registration needed.
-    let authority = escrow_authority();
-    let authority_address = authority.address(creator.shielded.viewing_pubkey())?;
+    let creator_address = creator.address()?;
     let deposit = Deposit::new(DepositParams {
-        recipient: &authority_address,
+        recipient: &creator_address,
         asset: SOL_MINT,
         amount: SHIELD_AMOUNT,
         spl_token_account: None,
@@ -126,43 +126,50 @@ pub fn setup(test: u16) -> Result<TestEnv> {
     })?;
     let view_tag = deposit.view_tag();
     let signature = deposit.send(&localnet.client, &payer, localnet.tree, &payer)?;
-    // The escrow authority is a PDA holding no viewing key, but a proofless
-    // deposit publishes its UTXO in the clear, so the depositor-chosen view tag
-    // reads it back from the indexer.
-    let indexed = wait_for_indexed_utxo(&localnet.client, view_tag, signature);
-    let deposited = indexed
-        .output_slot
-        .proofless_output()
-        .ok_or_else(|| anyhow!("indexed creator deposit is not a proofless UTXO"))?;
-    let creator_input = authority.input(
-        &SppProofOutputUtxo {
-            asset: Mint::SOL,
-            amount: deposited.amount,
-            blinding: deposited.blinding,
-            owner_address: Some(authority_address),
-            ..Default::default()
-        },
-        localnet.tree_id,
-        indexed.output_slot.output_context.leaf_index,
-    )?;
+    wait_for_indexed_utxo(&localnet.client, view_tag, signature);
+
+    // The creator's wallet reads the deposit back from the indexer.
+    let mut wallet = Wallet::new(creator_address, AssetRegistry::default())
+        .map_err(|e| anyhow!("creator wallet: {e:?}"))?;
+    sync_wallet(&mut wallet, &creator.shielded, localnet.client.indexer())
+        .map_err(|e| anyhow!("sync creator after deposit: {e:?}"))?;
+    let balance = wallet
+        .balance(SOL_MINT, None)
+        .map_err(|e| anyhow!("creator balance: {e:?}"))?;
+    let [creator_input]: [WalletUtxo; 1] = balance
+        .utxos
+        .try_into()
+        .map_err(|utxos: Vec<WalletUtxo>| anyhow!("expected one deposit, found {}", utxos.len()))?;
     assert_eq!(
-        (
-            creator_input.utxo.asset.asset,
-            creator_input.utxo.amount,
-            creator_input.utxo_hash,
-        ),
-        (
-            SOL_MINT,
-            SHIELD_AMOUNT,
-            indexed.output_slot.output_context.hash
-        )
+        (creator_input.utxo.asset.asset, creator_input.utxo.amount),
+        (SOL_MINT, SHIELD_AMOUNT)
     );
 
     Ok(TestEnv {
         localnet,
         creator,
         creator_input,
+        wallet,
     })
+}
+
+/// The shielded transactions tagged for the creator or for the escrow
+/// authority's outputs to the creator.
+pub fn creator_transactions(
+    localnet: &FixtureLocalnet,
+    creator: &Actor,
+) -> Result<Vec<ShieldedTransaction>> {
+    let tags = vec![
+        creator.address()?.confidential_view_tag()?,
+        escrow_authority().confidential_view_tag(),
+    ];
+    Ok(localnet
+        .client
+        .get_shielded_transactions_by_tags(tags, None, Some(50), HistoryFilters::default(), None)?
+        .data
+        .into_iter()
+        .flat_map(|item| item.events)
+        .collect())
 }
 
 // Submit a single (large) instruction as a transaction **v1** message: its

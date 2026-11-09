@@ -67,7 +67,7 @@ fn cancel_rejects_wrong_signer_expiry_maker_and_order() {
         |inputs| inputs.program.public.maker_owner_pk_field = field(89),
         |inputs| {
             let other = keypair().shielded_address().unwrap();
-            inputs.program.private.terms.maker = inputs.address(other);
+            inputs.program.private.terms.maker = *inputs.address(other).owner();
         },
         |inputs| inputs.program.private.order_utxo.data_hash = field(99),
         |inputs| inputs.program.private.order_utxo.amount = 0,

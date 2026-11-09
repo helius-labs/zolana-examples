@@ -124,8 +124,15 @@ order_terms = (
     expiry,                 // unix seconds; revealed at resolve and checked against the Clock by the program
     taker_pk_fe,            // the designated taker's owner pk field, or 0 for an open order; checked by the take circuit
 )
-data_hash = Poseidon(order_terms)        // gnark: enters the order UTXO utxo_hash directly; Xark: wrapped as Poseidon(DATA, data_hash), see the README
+data_hash = Poseidon(order_terms)        // gnark: enters the order UTXO utxo_hash directly; Xark: see below
 ```
+
+Xark: the order UTXO is the program SDK's `DataUtxo<OrderTerms>`, so its data hash is the SDK
+state hash `Poseidon(DATA, Poseidon(discriminator, hash_bytes(destination_mint),
+destination_amount, maker_owner_hash, expiry, hash_bytes(taker_pk_fe)))` and its encrypted
+`utxo_data` is the Borsh-encoded terms. The terms commit the maker's owner (signing key and
+nullifier pubkey) rather than `maker_address`, so the taker's registry resolution is checked against
+that owner; the viewing key only encrypts the maker payout. See the README.
 
 `taker_pk_fe` selects who may take. `0` makes an open order: any holder of the order UTXO hash
 preimage with a matching destination UTXO may take it. A nonzero value designates the taker: it is
@@ -148,8 +155,9 @@ spend capability: the nullifier includes the `blinding` and the circuits need it
 order UTXO `utxo_hash`. The preimage is delivered in the make
 transaction (see
 [make](#make)): the order UTXO output's recipient ciphertext contains the order terms other
-than `maker_address`, encrypted to the taker's viewing pubkey, and the maker can decrypt the same
-slot via the transaction viewing key it holds. The taker resolves `maker_address`
+than `maker_address`, encrypted to the taker's viewing pubkey (the gnark flow; Xark carries the
+Borsh-encoded terms, the maker's owner included, as the output's `utxo_data`, see the Xark note
+above), and the maker can decrypt the same slot via the transaction viewing key it holds. The taker resolves `maker_address`
 from the user registry via the marker's `maker_pubkey`, the `make`
 signer, and verifies the resolution by recomputing the order UTXO `utxo_hash`. Moving the order UTXO also
 requires the program: SPP spends a PDA-owned UTXO only when the swap program
@@ -202,7 +210,7 @@ message tagged to the taker.
 
 The order UTXO output's recipient ciphertext (`TransferRecipientPlaintext { asset_id, amount, blinding,
 ring_program_id, data }`, with `data` = the order terms other than `maker_address`; the Xark
-implementation's `data` also carries `maker_address`) is encrypted to
+implementation's `data` is the Borsh-encoded terms, the maker's owner included) is encrypted to
 the taker's viewing pubkey, so the taker recovers the private order terms and the order UTXO `blinding`;
 the maker can decrypt the same slot via the transaction viewing key it holds. Those two parties are
 exactly who can decrypt the order. The taker resolves `maker_address`
@@ -217,9 +225,19 @@ proof through the external-data hash, so the SPP proof only verifies for the exa
 `MarkerData` the program writes; only the marker's `view_tag` is unenforced: a wrong tag means the
 taker does not index the trade.
 
+Xark: the source UTXO is owned by the maker, who signs the transact as its owner signer (ahead of the
+order-authority PDA, which signs for the data-bearing order output). The change returns to the
+source owner, which the make circuit takes as the order's maker, and the make proof has a public
+field, `maker_owner_pk_field`, the program computes from the `maker` signer, so the marker's
+`maker_pubkey` is the committed maker. The make circuit does not bind the order output's owner,
+the private `order_address`, to the order-authority PDA. A maker that sets another owner can only
+misdirect its own funds, and a take against an order not owned by the order-authority PDA fails
+atomically: SPP requires the order input's owner to match the PDA signer the program provides, so
+the whole take transaction reverts and the taker's inputs stay unspent.
+
 The proof checks the order UTXO output against the order rules (see the [make
 circuit](#make-circuit)) without revealing the terms, and commits the transaction via
-`private_tx_hash`, its sole public input. The source asset, the
+`private_tx_hash`, its sole public input (Xark: with `maker_owner_pk_field`). The source asset, the
 amounts, and the other order terms are private at the swap layer (the transact's own `asset_id`
 public inputs still reveal `source_asset_id` at the SPP layer).
 
@@ -374,6 +392,9 @@ is committed by the SPP proof through the external-data hash, which the make pro
   - The change output is constrained to the order UTXO's asset and to `maker_owner_hash`, with empty
     data.
   - `destination_amount > 0` (64-bit range-checked).
+- **Xark:** the source owner's signing key identity equals the public `maker_owner_pk_field`;
+  the change is the SDK's implicit change to the source owner, and the order terms' maker is that
+  owner.
 
 ### Take circuit
 
@@ -405,6 +426,8 @@ the circuit only reveals `expiry` and checks it equals the committed term.
     The maker reconstructs its payout from the order opening and that nullifier,
     even if the taker omits or corrupts every settlement ciphertext.
   - `destination_amount > 0` (64-bit range-checked); the order UTXO amount is nonzero.
+- **Xark:** the payout owner is the committed maker owner; a private `maker_address` input
+  only names the viewing key the payout ciphertext is encrypted to.
 
 ### Cancel circuit
 

@@ -20,14 +20,14 @@ fn program_vk_has_one_public_input() {
 
 #[test]
 fn make_prove_verify() {
-    // 1. Check the change returns to the maker and the order UTXO commits the
-    // terms with their payload.
-    let inputs = make_inputs(SOURCE_AMOUNT, 750);
+    // 1. Check the change returns to the maker, the source owner, and the
+    // order UTXO commits the terms with the maker as their maker.
+    let mut inputs = make_inputs(SOURCE_AMOUNT, 750);
+    let terms = make_terms(&mut inputs);
     let finalized = inputs.create_finalized_transaction().unwrap();
     let outputs = finalized.output_utxos();
     let change = outputs.get(CHANGE_SLOT).unwrap();
     let order = outputs.get(ORDER_SLOT).unwrap();
-    let terms = &inputs.program.private.terms;
     assert_eq!(
         (
             change.owner_address,
@@ -37,7 +37,7 @@ fn make_prove_verify() {
         ),
         (Some(inputs.sender_address()), source_mint(), 750, None)
     );
-    let terms_hash = spr_program::circuit::DataHash::hash(terms).unwrap();
+    let terms_hash = spr_program::circuit::DataHash::hash(&terms).unwrap();
     assert_eq!(
         (
             order.owner_address.unwrap().owner_hash().unwrap(),
@@ -53,14 +53,16 @@ fn make_prove_verify() {
         )
     );
 
-    // 2. Prove, and verify with the program's verifier for the transaction it
-    // commits; any other transaction fails.
+    // 2. Prove, and verify with the program's verifier for the maker signer
+    // and the transaction it commits; another signer or transaction fails.
     let (_, proof) = prove_and_verify(CIRCUIT, &inputs, &VERIFYINGKEY);
     let private_tx_hash = finalized.padding_independent_private_tx_hash().unwrap();
-    assert!(verify(&proof, &private_tx_hash));
+    let signer = identity_of(&inputs.sender);
+    assert!(verify(&proof, signer, &private_tx_hash));
     let mut tampered = private_tx_hash;
     tampered[31] ^= 0x01;
-    assert!(!verify(&proof, &tampered));
+    assert!(!verify(&proof, signer, &tampered));
+    assert!(!verify(&proof, identity_of(&keypair()), &private_tx_hash));
 }
 
 #[test]
@@ -75,11 +77,13 @@ fn make_zero_change_proves() {
 
 #[test]
 fn make_rejects_invalid_orders() {
-    // A zero order or destination amount, or an order beyond the source.
-    let mutations: [fn(&mut Make); 3] = [
-        |inputs| inputs.program.private.terms.destination_amount = 0,
+    // A zero order or destination amount, an order beyond the source, or a
+    // signer other than the source owner.
+    let mutations: [fn(&mut Make); 4] = [
+        |inputs| inputs.program.private.destination_amount = 0,
         |inputs| inputs.program.private.source_amount = 0,
         |inputs| inputs.program.private.source_amount = SOURCE_AMOUNT + 751,
+        |inputs| inputs.program.public.maker_owner_pk_field = field(89),
     ];
     for mutate in mutations {
         let mut inputs = make_inputs(SOURCE_AMOUNT, 750);
@@ -88,10 +92,16 @@ fn make_rejects_invalid_orders() {
     }
 }
 
-fn verify(proof: &spr_program::CompressedProof, private_tx_hash: &[u8; 32]) -> bool {
+fn verify(
+    proof: &spr_program::CompressedProof,
+    maker_owner_pk_field: [u8; 32],
+    private_tx_hash: &[u8; 32],
+) -> bool {
     Verifier {
         proof,
-        public_inputs: PublicInputs {},
+        public_inputs: PublicInputs {
+            maker_owner_pk_field,
+        },
         private_tx_hash,
         transfers: &[],
     }

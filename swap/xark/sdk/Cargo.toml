@@ -39,5 +39,5 @@ name = "circuits"
 path = "tests/circuits.rs"
 
 [[test]]
-name = "take_signers"
-path = "tests/take_signers.rs"
+name = "instruction_signers"
+path = "tests/instruction_signers.rs"
