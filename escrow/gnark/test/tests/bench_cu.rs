@@ -48,11 +48,11 @@ use timelock_escrow_sdk::{
 };
 
 const PROFILING_SBF_DIR: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../../target/escrow-bench");
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../../../target/escrow-bench");
 const OUTPUT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../BENCHMARK.md");
 const PROVER_KEYS_DIR: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../prover/server/proving-keys"
+    "/../../../../prover/server/proving-keys"
 );
 
 fn to_mollusk_pubkey(key: &Pubkey) -> Pubkey {

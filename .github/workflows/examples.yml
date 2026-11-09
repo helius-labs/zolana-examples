@@ -7,8 +7,8 @@ on:
       - "devnet-e-tee-policy.json"
       - "rust-client/**"
       - "typescript-client/**"
-      - "swap-program/**"
-      - "escrow-program/**"
+      - "swap/gnark/**"
+      - "escrow/gnark/**"
       - "test-utils/**"
       - ".github/workflows/examples.yml"
   pull_request:
@@ -16,8 +16,8 @@ on:
       - "devnet-e-tee-policy.json"
       - "rust-client/**"
       - "typescript-client/**"
-      - "swap-program/**"
-      - "escrow-program/**"
+      - "swap/gnark/**"
+      - "escrow/gnark/**"
       - "test-utils/**"
       - ".github/workflows/examples.yml"
   workflow_dispatch:
@@ -87,7 +87,7 @@ jobs:
         run: pnpm check
 
   swap-build:
-    name: build / swap-program
+    name: build / swap/gnark
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,7 +98,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: swap-program
+          workspaces: swap/gnark
 
       - name: Install Anza (Solana) CLI
         run: |
@@ -106,15 +106,15 @@ jobs:
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
       - name: Install pinned SBF platform tools
-        working-directory: swap-program/program
+        working-directory: swap/gnark/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
 
       - name: Build swap program (SBF)
-        working-directory: swap-program/program
+        working-directory: swap/gnark/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --features bpf-entrypoint
 
   escrow-build:
-    name: build / escrow-program
+    name: build / escrow/gnark
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -125,7 +125,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: escrow-program
+          workspaces: escrow/gnark
 
       - name: Install Anza (Solana) CLI
         run: |
@@ -133,11 +133,11 @@ jobs:
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
       - name: Install pinned SBF platform tools
-        working-directory: escrow-program/program
+        working-directory: escrow/gnark/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
 
       - name: Build escrow program (SBF)
-        working-directory: escrow-program/program
+        working-directory: escrow/gnark/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --features bpf-entrypoint
 
   release-integration:
@@ -167,8 +167,8 @@ jobs:
         with:
           go-version: "1.27.3"
           cache-dependency-path: |
-            examples/swap-program/prover/circuits/go.sum
-            examples/escrow-program/prover/circuits/go.sum
+            examples/swap/gnark/prover/circuits/go.sum
+            examples/escrow/gnark/prover/circuits/go.sum
             zolana/prover/server/go.sum
 
       - name: Cache Rust builds
@@ -176,9 +176,9 @@ jobs:
         with:
           cache-on-failure: true
           workspaces: |
-            examples/swap-program/test -> ../../target/integration
-            examples/swap-program/program
-            examples/escrow-program
+            examples/swap/gnark/test -> ../../../target/integration
+            examples/swap/gnark/program
+            examples/escrow/gnark
             zolana
 
       - name: Cache release binaries and proving keys

@@ -13,24 +13,31 @@ and owns no accounts.
 See [`swap_program.md`](swap_program.md) for the full design: the privacy
 model, order terms, instructions, and circuits.
 
-## Layout
+## Implementations
 
-- [`program/`](program/) — the Pinocchio program. Verifies a Groth16 proof
-  against the public-input hash, then CPIs SPP `transact`.
-- [`prover/`](prover/) — in-process proving engine on the shared
+- [`gnark/`](gnark/) — circuits written in Go with gnark, proved in process
+  through `spr-gnark-ffi-prover`.
+
+## gnark
+
+### Layout
+
+- [`gnark/program/`](gnark/program/) — the Pinocchio program. Verifies a
+  Groth16 proof against the public-input hash, then CPIs SPP `transact`.
+- [`gnark/prover/`](gnark/prover/) — in-process proving engine on the shared
   `spr-gnark-ffi-prover`. Go gnark circuits, their registration, and the
   key-generation binary.
-- [`sdk/`](sdk/) — client library. State, instruction and proof-input
-  builders, UTXO hashing, discovery, encryption codecs, and the prover client.
-- [`test/`](test/) — localnet end-to-end tests and CU benchmarks
-  ([`BENCHMARK.md`](BENCHMARK.md)).
+- [`gnark/sdk/`](gnark/sdk/) — client library. State, instruction and
+  proof-input builders, UTXO hashing, discovery, and the prover client.
+- [`gnark/test/`](gnark/test/) — localnet end-to-end tests and CU benchmarks
+  ([`gnark/BENCHMARK.md`](gnark/BENCHMARK.md)).
 
-## Build
+### Build
 
 Each crate is its own package with no shared workspace, so build them one at a
 time. The Zolana crates come from commit `6bb4f7008294695ebe614f08affb215d4321a538` of
 [helius-labs/zolana](https://github.com/helius-labs/zolana). Run the commands
-below from `swap-program/`.
+below from `swap/gnark/`.
 
 ```bash
 cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 -- --features bpf-entrypoint
@@ -40,26 +47,26 @@ cargo build --manifest-path sdk/Cargo.toml
 The prover compiles Go gnark circuits, so building `prover`, `sdk` or `test`
 needs Go 1.27.3 or newer alongside Rust. The circuits import the `github.com/helius-labs/zolana/prover/server`
 and `zolana/gnarksdk` Go modules, which
-[`prover/circuits/go.mod`](prover/circuits/go.mod) takes from a Zolana checkout
+[`gnark/prover/circuits/go.mod`](gnark/prover/circuits/go.mod) takes from a Zolana checkout
 named `zolana` next to the `zolana-examples` checkout:
 
 ```bash
-git clone https://github.com/helius-labs/zolana ../../zolana
-git -C ../../zolana checkout 6bb4f7008294695ebe614f08affb215d4321a538
+git clone https://github.com/helius-labs/zolana ../../../zolana
+git -C ../../../zolana checkout 6bb4f7008294695ebe614f08affb215d4321a538
 ```
 
 The Go bridge to Rust ships inside the `spr-gnark-ffi-prover-build` crate
 and needs no checkout.
 
 The circuit tests need the pinned proving and verifying keys, whose hashes are
-in [`swap-keys.CHECKSUM`](swap-keys.CHECKSUM). They are insecure test keys from
+in [`gnark/swap-keys.CHECKSUM`](gnark/swap-keys.CHECKSUM). They are insecure test keys from
 a fixed public seed. That is the recommended setup for integration tests, and it
 is secure there because a test validator holds nothing a forged proof could
 take. They are UNSAFE for production. Generate them into `build/gnark/` with the
 `swap-prover-setup` binary:
 
 ```bash
-for c in make take cancel take_verifiable_encryption; do
+for c in make take cancel; do
   cargo run --manifest-path prover/Cargo.toml --bin swap-prover-setup -- \
     "$c" "build/gnark/$c" --insecure-test-keys
 done

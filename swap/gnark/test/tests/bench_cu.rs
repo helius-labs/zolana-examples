@@ -51,7 +51,7 @@ use swap_sdk::{
     state::{OrderTerms, OrderUtxo},
 };
 
-const PROFILING_SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../target/swap-bench");
+const PROFILING_SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../../target/swap-bench");
 const OUTPUT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../BENCHMARK.md");
 fn to_mollusk_pubkey(key: &Pubkey) -> Pubkey {
     Pubkey::new_from_array(key.to_bytes())

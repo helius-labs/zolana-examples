@@ -14,7 +14,7 @@ use spr_test_utils::test_validator_asserts::wait_for_indexed_utxo;
 use spr_test_utils::wallet::{Deposit, DepositParams, Wallet};
 use spr_transaction::{utxo::SppProofInputUtxo, utxo::Utxo, AssetRegistry, Data, SOL_MINT};
 
-#[path = "../../../test-utils/localnet.rs"]
+#[path = "../../../../test-utils/localnet.rs"]
 mod release_localnet;
 
 // The whole per-transaction budget: the escrow forwards an SPP transact.

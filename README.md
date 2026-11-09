@@ -24,8 +24,8 @@
 
 |  |  |
 |---------|-------------|
-| [`swap-program/`](swap-program/) | A confidential swap between a maker and a taker. |
-| [`escrow-program/`](escrow-program/) | A timelock escrow on SPP: lock a private balance until a deadline, then release or reclaim. |
+| [`swap/`](swap/) | A confidential swap between a maker and a taker. |
+| [`escrow/`](escrow/) | A timelock escrow on SPP: lock a private balance until a deadline, then release or reclaim. |
 
 ## Documentation
 

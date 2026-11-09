@@ -16,7 +16,7 @@ use spr_test_utils::wallet::{sync_wallet, Deposit, DepositParams, Wallet};
 use spr_transaction::{utxo::SppProofInputUtxo, utxo::Utxo, AssetRegistry, Data, SOL_MINT};
 use spr_user_registry_interface::user_registry_program_id;
 
-#[path = "../../../test-utils/localnet.rs"]
+#[path = "../../../../test-utils/localnet.rs"]
 mod release_localnet;
 
 // The whole per-transaction budget: a swap verifies an SPP proof and its own.

@@ -19,7 +19,7 @@ The pin files are already updated to the payload sha. Do not change them unless 
 - package name `@heliuslabs/zolana`
 - rust-client Cargo.toml comment that says pins are git revs
 - 4 rust git deps, same crates and features; only `rev` may change
-- swap-program/** and escrow-program/**
+- swap/** and escrow/**
 - READMEs, comments, formatting, CI YAML
 
 ## Sources only if needed
@@ -32,7 +32,7 @@ The pin files are already updated to the payload sha. Do not change them unless 
 ## Forbidden
 
 - new files, extra deps, format/README, improve/clarify
-- swap-program, escrow-program, .github
+- swap, escrow, .github
 
 ## Done
 
