@@ -11,3 +11,4 @@ rust-client/.surfpool/
 build/
 escrow/gnark/Cargo.lock
 swap/gnark/*/Cargo.lock
+.surfpool/

@@ -1,0 +1,73 @@
+name: smart-account-client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "smart-account-client/**"
+      - "test-utils/zolana-release.sh"
+      - ".github/workflows/smart-account-client.yml"
+  pull_request:
+    paths:
+      - "smart-account-client/**"
+      - "test-utils/zolana-release.sh"
+      - ".github/workflows/smart-account-client.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: smart-account-client-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: check and localnet / smart-account-client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: smart-account-client
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: smart-account-client/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting and types
+        run: pnpm check
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Cache release artifacts
+        uses: actions/cache@v4
+        with:
+          path: target/sa-client/zolana-config/cache
+          key: sa-client-zolana-cli-v0.10.0-${{ runner.os }}
+
+      - name: Start localnet
+        run: bash scripts/localnet.sh
+
+      - name: Localnet tests
+        run: pnpm test:localnet
+
+      - name: Stop localnet
+        if: always()
+        run: bash scripts/localnet.sh --stop || true
+
+      - name: Upload localnet logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-account-client-localnet-logs
+          path: target/sa-client/logs

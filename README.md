@@ -35,6 +35,12 @@
 | [`swap/`](swap/) | A confidential swap between a maker and a taker. |
 | [`escrow/`](escrow/) | A timelock escrow on SPP: lock a private balance until a deadline, then release or reclaim. |
 
+### [Private smart account (client only)](smart-account-client/README.md)
+
+|  |  |
+|---------|-------------|
+| [`smart-account-client/`](smart-account-client/) | A Squads smart account whose vault holds a private balance, with a shared viewing key encrypted to every signer off chain. TypeScript, no program. |
+
 ## Documentation
 
 CI runs all five Rust and TypeScript client examples and the swap (take and

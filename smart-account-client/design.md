@@ -82,3 +82,4 @@ A key record is `173 + 97 · N` bytes for N signers.
 9. Membership is public.
 10. All transactions are sync.
 11. The signer count is capped.
+12. A signer added by a rotate cannot open UTXOs the vault received before it.
