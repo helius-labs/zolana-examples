@@ -25,15 +25,14 @@ designated taker and test scenarios. They differ in program ID, in how each
 circuit's public values fold into its one public input (gnark hashes
 `Poseidon(private_tx_hash, values...)`;
 Xark hashes `Poseidon(values..., transaction_hash)`), in how the
-order UTXO carries the terms, and in who owns make's source: Xark stores the
-terms as a program SDK state (`DataUtxo<OrderTerms>`), so its data hash is the
-SDK state hash and its encrypted payload the Borsh-encoded terms, and its make
-spends a maker-owned source that the maker signs for, with the maker signer as
-a public field (see [xark](#xark)). gnark keeps its own terms hash and spends a
-source owned by the maker's order-authority PDA. In both, each maker has its
+order UTXO stores the terms: Xark stores them as a program SDK state
+(`DataUtxo<OrderTerms>`), so its data hash is the SDK state hash and its
+encrypted payload the Borsh-encoded terms (see [xark](#xark)); gnark keeps its
+own terms hash. In both, make spends a maker-owned source that the maker signs
+for, checked against the maker signer through a public field, and each maker has its
 own order-authority PDA, seeds `[b"order_authority", maker]`, which owns its
 order UTXOs, so a maker finds its orders by deriving it; make proves the order
-UTXO is owned by it (gnark binds the PDA's owner hash, Xark the whole order
+UTXO is owned by it (gnark checks the PDA's owner hash, Xark the whole order
 owner address).
 
 ## Benchmark
@@ -169,7 +168,7 @@ commits to.
   `tx_context.blinding_seed == Poseidon("SWTX", order_utxo.blinding)` and that
   the transaction's first nullifier is the public one, so the maker derives its
   payout from the order opening and the first nullifier. A nonzero
-  `taker_pk_fe` binds the taker input's owner:
+  `taker_pk_fe` constrains the taker input's owner:
   `taker_pk_fe * (owner_hash - Poseidon(taker_pk_fe, nullifier_pk)) == 0`.
 - **cancel** spends the order UTXO back to the maker, whose signing key
   identity must be the public signer; random blinding seed.

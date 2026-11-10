@@ -57,7 +57,7 @@ Types used in this document. Shared SPP types are defined in [spec.md](../../doc
 | `private_tx_hash` | `[u8; 32]` | Commitment to the SPP `transact` an escrow proof authorizes: the link between an escrow proof and the SPP transaction. See [spec.md](../../docs/spec.md#zk-program-interface). |
 | `EscrowProof` / `WithdrawProof` | `[u8; 128]` | Groth16 proofs verified by the timelock escrow program, each committing the transaction via `private_tx_hash`. Both use standard Groth16. The creator authorizes with a Solana transaction signature. |
 | `TransactIxData` | — | SPP `transact` instruction data: the SPP proof, input nullifiers, output UTXO hashes, ciphertexts, and routing. See [spec.md](../../docs/spec.md#transact). |
-| `hash_bytes` | fn | `Poseidon` hash of a 32-byte value, folded into the field the circuits check over. |
+| `hash_bytes` | fn | `Poseidon` hash of a 32-byte value, reduced into the field the circuits check over. |
 | `solana_owner_identity` | fn | The owner pk field of a Solana pubkey: `hash_bytes` of the key tagged as a Solana key. An owner hash is `Poseidon(owner_pk_field, nullifier_pk)`; the program computes it from a signer so the proof can compare it against a committed hash. |
 
 ## Privacy Model
@@ -69,8 +69,7 @@ ring; the timelock escrow program does not try to hide which action ran.
   are SPP public inputs); the escrow UTXO hash at escrow; the escrow `unlock` timestamp, revealed at
   withdraw so the program can check it against the Clock; each transaction's SPP output UTXO hashes
   and ciphertexts; the creator's Solana signer pubkey and its escrow-authority PDA, at both
-  escrow and withdraw, which the creator signs. The escrow is confidential, not anonymous: whose
-  escrow it is is public, its amount is not.
+  escrow and withdraw, which the creator signs, so whose escrow it is is public.
 - **Private:** `amount`, the locked value, and the aggregate volume per asset. These live only
   inside confidential UTXOs and the escrow UTXO `utxo_data`.
 - **Unlinkable:** SPP hides the link between a created UTXO and its later spend, so when a creator
@@ -100,13 +99,13 @@ data_hash = commitment to escrow_terms    // enters the escrow UTXO utxo_hash di
 
 Each implementation fixes the `data_hash` form and where the terms are kept:
 
-- gnark: `data_hash = Poseidon(owner_hash, unlock)`. The escrow UTXO carries no `utxo_data`; the
+- gnark: `data_hash = Poseidon(owner_hash, unlock)`. The escrow UTXO has no `utxo_data`; the
   creator keeps the terms with the escrow UTXO opening.
 - Xark: the terms are an SDK state (`UtxoState`) whose `creator` field is the creator's owner
   (`owner_pk_field`, `nullifier_pk`), the preimage of `owner_hash`. `data_hash` is the SDK state
   hash, `Poseidon(DATA, Poseidon(discriminator, owner_hash, unlock))`, where `DATA` is the SDK's
   data-UTXO domain and `discriminator` the first 8 bytes of `sha256("account:EscrowTerms")`.
-  `utxo_data` carries the Borsh-encoded terms, encrypted with the output; the creator decrypts
+  `utxo_data` contains the Borsh-encoded terms, encrypted with the output; the creator decrypts
   them to find its escrow and withdraw.
 
 `asset_id`, `amount`, and `owner` are the escrow UTXO's own SPP fields, already committed in
@@ -119,11 +118,11 @@ escrow_utxo_owner_hash = Poseidon(solana_owner_identity(escrow_authority_pda), P
 nullifier              = Poseidon(utxo_hash, blinding, 0)                                     // recomputed from the preimage
 ```
 
-The escrow proof binds the escrow output's owner to this hash, which the program computes from the
-`creator` signer (see the [escrow circuit](#escrow-circuit)). SPP alone would accept any owner
-that signs the transact, including the creator, who signs for the source; the proof check is what
-keeps a creator from owning the escrow UTXO itself, or putting it under another creator's PDA, and
-spending it before unlock without the program.
+The escrow proof checks that the escrow output's owner equals this hash, which the program
+computes from the `creator` signer (see the [escrow circuit](#escrow-circuit)). SPP alone accepts
+any owner that signs the transact, including the creator, who signs for the source. The proof
+check stops a creator from owning the escrow UTXO itself, or putting it under another creator's
+PDA, and spending it before unlock without the program.
 
 Knowledge of the escrow UTXO hash preimage, the escrow terms plus the escrow UTXO `blinding`, is
 the complete spend capability: the nullifier includes the `blinding` and the circuits need it to
@@ -131,8 +130,10 @@ recompute the escrow UTXO `utxo_hash`. There is no marker message: unlike the sw
 is no counterparty that needs to learn of this UTXO's existence. The creator finds its escrow UTXOs
 by deriving its escrow-authority PDA and fetching the transactions tagged with it, then decrypting
 them with its own viewing key. Moving the escrow UTXO requires the program: SPP spends a PDA-owned
-UTXO only when the timelock escrow program produces that PDA's signature via `invoke_signed`, which
-it does only through `withdraw` (after unlock, creator-signed, to `owner_hash`). The program derives
+UTXO only when the timelock escrow program produces that PDA's signature via `invoke_signed`. The
+program also signs at `escrow`, for the data-bearing escrow output, but there the proof pins the
+only input to the creator signer's own UTXO, so it spends a PDA-owned UTXO only through `withdraw`
+(after unlock, creator-signed, to `owner_hash`). The program derives
 the PDA from the `creator` signer via `find_program_address`, checks it is present among the
 forwarded SPP accounts, and flips it to a signer inside the SPP CPI with seeds
 `[b"escrow_authority", creator, bump]`; the PDA is a bare address and signs only inside the CPI.
@@ -143,7 +144,7 @@ forwarded SPP accounts, and flips it to a signer inside the SPP CPI with seeds
 In both implementations the source UTXO is the creator's own, and the change returns to the
 creator. The creator signs the SPP transact as the source's owner signer, ahead of its
 escrow-authority PDA, which signs only because SPP requires the owner of the data-bearing escrow
-output to sign. The escrow proof binds the source owner to the `creator` signer: in Xark the source
+output to sign. The escrow proof checks the source owner against the `creator` signer: in Xark the source
 owner's `owner_pk_field` must equal `solana_owner_identity` of the signer, and `owner_hash` is the
 source owner's hash; in gnark the source UTXO is a private witness whose owner must equal
 `owner_hash`, and `owner_hash` must be `Poseidon(owner_pk_field, nullifier_pk)` with the public
@@ -187,11 +188,13 @@ still reveal `asset_id` at the SPP layer).
 
 **Accounts**
 
-1. `creator` — owns and spends the source UTXO; signer (in Xark also the fee payer). Consumed by
-   the program, which derives the escrow-authority PDA from it; everything after it is forwarded
-   verbatim to the SPP `transact` CPI.
+1. `creator` — the creator's Solana signer; read-only, signer. Owns and spends the source UTXO.
+   Consumed by the program, which derives the escrow-authority PDA and
+   `solana_owner_identity(creator)` from it; everything after it is forwarded verbatim to the SPP
+   `transact` CPI.
 2. The SPP `transact` accounts, in SPP's order: the fixed `[payer, output_tree, spp_program,
-   system_program]` prefix, the input-tree and nullifier runs, then the ordered owner signers: the
+   system_program]` prefix, where `payer` is the fee payer (signer, writable; any key, which may be
+   the `creator`), the input-tree and nullifier runs, then the ordered owner signers: the
    `creator` again, as the source's owner signer, and last the creator's `escrow_authority` PDA,
    read-only and non-signer, which the program flips to a signer inside the CPI.
 
@@ -202,8 +205,8 @@ struct EscrowIxData {
     /// The escrow proof; verified by the timelock escrow program.
     proof: EscrowProof,
     /// Xark only: the viewing pubkey of the escrow UTXO's owner address, which with the
-    /// PDA's owner hash forms the escrow-owner public input. It decides who can decrypt the
-    /// escrow UTXO, never who can spend it.
+    /// PDA's owner hash forms the escrow-owner public input. It controls who can decrypt the
+    /// escrow UTXO, not who can spend it.
     viewing_pubkey: [u8; 33],
     /// SPP transact (1-in/2-out): creator source UTXO -> change + escrow UTXO.
     transact: TransactIxData,
@@ -283,9 +286,8 @@ implementation's `BENCHMARK.md` names the shape).
   - Xark: the SDK's public-input hash over `owner_pk_field` and `escrow_owner`, the PDA's owner
     address `Poseidon(escrow_owner_hash, hash_bytes(viewing_pubkey))` with the `viewing_pubkey`
     from the instruction data.
-- **Private inputs:** the escrow terms (`owner_hash`, `unlock`), the source UTXO input hash
-  preimage (gnark; Xark witnesses the source UTXO), and the escrow UTXO and change output UTXO hash
-  preimages.
+- **Private inputs:** the escrow terms (`owner_hash`, `unlock`), the source UTXO, and the escrow
+  UTXO and change output UTXO hash preimages.
 - **Constraints:**
   - The `private_tx_hash` recomputation mirrors the padded transact exactly: the input hash chain
     covers `[source_input, 0]`, the output hash chain covers `[change, escrow_utxo]`, and the
@@ -293,9 +295,8 @@ implementation's `BENCHMARK.md` names the shape).
     [private_tx_hash](../../docs/spec.md#spp-proof---solana-privacy-zk-proof)).
     A zero-amount change output is still a real UTXO whose hash enters the output chain.
   - The source input is the creator's: its owner is `owner_hash` (gnark), or its owner's
-    `owner_pk_field` is the public `owner_pk_field` (Xark). It holds the escrow UTXO's asset and,
-    in gnark, is a default-ring UTXO with empty data. SPP additionally requires the source owner
-    to sign.
+    `owner_pk_field` is the public `owner_pk_field` (Xark). It is a default-ring UTXO with empty
+    data holding the escrow UTXO's asset. SPP additionally requires the source owner to sign.
   - The escrow UTXO output committed in `private_tx_hash` has the `data_hash` of the escrow terms
     (see [Escrow Terms](#escrow-terms)),
     `ring_program_id = 0` and `ring_data_hash = 0` (the [default, non-ring](../../docs/spec.md#default-ring)

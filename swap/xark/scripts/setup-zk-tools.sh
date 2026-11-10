@@ -40,10 +40,21 @@ check_pins() {
 checkout https://github.com/helius-labs/zolana.git "$zolana_revision" "$swap/.tools/zolana"
 check_pins https://github.com/helius-labs/zolana "$zolana_revision" "$swap/Cargo.toml"
 # The SDK, the generated circuit crates and this workspace share the crates.io
-# Xark 0.3.0 release. Only Zolana's xark-cli comes from the ananas-block/xark
-# fork, so this pin only guards the CLI build.
+# Xark release. Only Zolana's xark-cli comes from the ananas-block/xark fork, so
+# that pin only guards the CLI build.
 check_pins https://github.com/ananas-block/xark "$xark_revision" \
     "$swap/Cargo.toml" "$swap/.tools/zolana/Cargo.toml"
+if ! grep -F "ananas-block/xark" "$swap/.tools/zolana/Cargo.toml" | grep -qF "rev = \"$xark_revision\""; then
+    echo "Zolana no longer pins xark-cli to $xark_revision" >&2
+    exit 1
+fi
+xark_version() {
+    grep -E '^xark = ' "$1" | grep -oE '"[0-9][^"]*"' | head -n 1
+}
+if [[ $(xark_version "$swap/Cargo.toml") != $(xark_version "$swap/.tools/zolana/Cargo.toml") ]]; then
+    echo "$swap/Cargo.toml and Zolana use different xark versions" >&2
+    exit 1
+fi
 
 if [[ ${1:-} == --prepare-only ]]; then
     exit 0

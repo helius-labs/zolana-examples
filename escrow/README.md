@@ -74,7 +74,7 @@ python3 test-utils/compare-benchmarks.py escrow
 
 The circuits live in the program crate as Rust. Each circuit's `execute`
 method runs natively on the client, where it builds the SPP transaction, and
-compiles through Xark for proving. `zolana zk compile` generates the on-chain
+compiles through Xark for proving. `zolana zk compile` generates the program's
 verifier of each circuit from its verifying key.
 
 The workspace uses Zolana
@@ -97,11 +97,7 @@ What differs from the gnark implementation, within the spec:
   them as the escrow UTXO's data. The SDK finds the creator's open escrows by
   fetching the transactions tagged with the creator's escrow-authority PDA and
   decrypting them (`state::open_escrows`), and withdraw takes the decoded
-  escrow UTXO, so the terms never travel out of band.
-- The escrow source is the creator's own UTXO, not one owned by the
-  creator's escrow-authority PDA: the creator signs the SPP transact for it,
-  and the PDA signs as the owner of the escrow UTXO, which carries data. The
-  change is the source's remainder, which the SDK returns to the source owner.
+  escrow UTXO, so the creator does not store the terms separately.
 - The proofs' single public input is the SDK's public hash over
   `(owner_pk_field, escrow_owner)` for escrow and `(unlock, owner_pk_field)`
   for withdraw, each with `transaction_hash`, where `owner_pk_field` is
@@ -109,8 +105,8 @@ What differs from the gnark implementation, within the spec:
   hash of the creator's escrow-authority PDA owner with the `viewing_pubkey`
   from the instruction data, and `transaction_hash` is `private_tx_hash`
   (neither transaction moves public funds). The program recomputes both from
-  its accounts and instruction data. gnark binds only the PDA's owner hash;
-  Xark binds the whole escrow owner address, as Zolana's reference escrow
+  its accounts and instruction data. gnark checks only the PDA's owner hash;
+  Xark checks the whole escrow owner address, as Zolana's reference escrow
   does.
 - The escrow transaction is proved at the SPP `(1, 2)` shape, without a dummy
   input. The output blindings derive from the transaction's first nullifier,
