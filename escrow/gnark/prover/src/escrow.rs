@@ -13,21 +13,21 @@ pub struct EscrowProofInputs {
     pub owner_pk_field: [u8; 32],
     pub nullifier_pk: [u8; 32],
     pub terms: EscrowTermsProofInput,
+    /// The spent source, owned by the creator.
+    pub source: ProofInputUtxo,
     pub escrow_utxo: ProofInputUtxo,
     pub change: ProofInputUtxo,
-    pub source_input_hash: [u8; 32],
     pub private_tx_blinding: [u8; 32],
 }
 
 impl EscrowProofInputs {
     fn witness(&self) -> ProofInputMap {
-        let scalars: [(&str, [u8; 32]); 7] = [
+        let scalars: [(&str, [u8; 32]); 6] = [
             ("Public_PublicInputHash", self.public_input_hash),
             ("Public_PrivateTxHash", self.private_tx_hash),
             ("Public_EscrowOwnerHash", self.escrow_owner_hash),
             ("OwnerPkField", self.owner_pk_field),
             ("NullifierPk", self.nullifier_pk),
-            ("SourceInputHash", self.source_input_hash),
             ("PrivateTxBlinding", self.private_tx_blinding),
         ];
         let mut map = HashMap::new();
@@ -38,6 +38,7 @@ impl EscrowProofInputs {
             .terms
             .witness_entries("Terms")
             .into_iter()
+            .chain(utxo_proof_inputs(&self.source, "Source"))
             .chain(utxo_proof_inputs(&self.escrow_utxo, "EscrowUtxo"))
             .chain(utxo_proof_inputs(&self.change, "Change"))
         {
@@ -74,9 +75,9 @@ mod tests {
                 owner_hash: [2; 32],
                 unlock: 42,
             },
+            source: ProofInputUtxo::default(),
             escrow_utxo: ProofInputUtxo::default(),
             change: ProofInputUtxo::default(),
-            source_input_hash: [3; 32],
             private_tx_blinding: [5; 32],
         }
     }
@@ -92,10 +93,10 @@ mod tests {
             "Public_EscrowOwnerHash".to_string(),
             "OwnerPkField".to_string(),
             "NullifierPk".to_string(),
-            "SourceInputHash".to_string(),
             "PrivateTxBlinding".to_string(),
         ];
         expected.extend(expected_escrow_terms_witness_keys("Terms"));
+        expected.extend(utxo_proof_input_keys("Source"));
         expected.extend(utxo_proof_input_keys("EscrowUtxo"));
         expected.extend(utxo_proof_input_keys("Change"));
 

@@ -482,14 +482,11 @@ fn bench_escrow(bench: &mut Bench) {
     let creator = keypair_from_payer(&payer);
     let creator_address = creator.shielded_address().expect("creator address");
 
-    // The source UTXO is the creator's balance held by the creator's
-    // escrow-authority PDA, which signs the SPP CPI, as in the localnet test.
-    let authority_nullifier_key = spr_keypair::NullifierKey::from_secret([0; 31]);
+    // The source UTXO is the creator's own balance, which the creator signs
+    // for as owner signer, as in the localnet test.
     let input_blinding = random_blinding();
     let input_utxo = Utxo {
-        owner: spr_keypair::PublicKey::from_ed25519(
-            timelock_escrow_sdk::escrow_authority_pda(&payer.pubkey()).as_array(),
-        ),
+        owner: creator_address.signing_pubkey,
         asset: spr_transaction::Mint::SOL,
         amount: INPUT_AMOUNT,
         blinding: input_blinding,
@@ -498,7 +495,7 @@ fn bench_escrow(bench: &mut Bench) {
     };
     let input_utxo: SppProofInputUtxo = spr_test_utils::utxo::wallet(
         input_utxo,
-        &authority_nullifier_key,
+        &creator.nullifier_key,
         BENCH_TREE_ID,
         0,
         None,
@@ -598,7 +595,7 @@ fn bench_escrow(bench: &mut Bench) {
         spp_proof_inputs,
         &spend_proofs,
         &prover,
-        &[&authority_nullifier_key],
+        &[&creator.nullifier_key],
     );
     let escrow_proof_inputs = escrow_proof_inputs
         .to_proof_inputs()

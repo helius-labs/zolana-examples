@@ -30,7 +30,7 @@ pub struct EscrowIxData {
 /// The escrow circuit's single public input: the transaction's
 /// `private_tx_hash`, the owner hash the escrow utxo must carry (the
 /// creator's escrow-authority PDA) and the creator's owner identity, which
-/// the escrow terms' owner hash must be built from.
+/// the escrow terms' owner hash, and so the source owner, must be built from.
 pub struct EscrowPublicInput<'a> {
     pub private_tx_hash: &'a [u8; 32],
     pub escrow_owner_hash: &'a [u8; 32],
@@ -52,9 +52,13 @@ impl EscrowPublicInput<'_> {
 #[profile]
 pub fn process_escrow_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     let mut iter = AccountIterator::new(accounts);
-    // The creator signs the escrow; its escrow-authority PDA owns the escrow
-    // utxo, and the proof binds the escrow terms to its owner identity, so the
-    // creator who withdraws later derives the same PDA.
+    // The creator signs the escrow. The proof binds the escrow terms and the
+    // spent source to its owner identity, so the creator funds the escrow
+    // from its own balance and signs the SPP transact as the source's owner
+    // signer, and the creator who withdraws later derives the same PDA. Its
+    // escrow-authority PDA owns the escrow utxo; the program signs for it
+    // only because SPP requires the owner of the data-bearing escrow output
+    // to sign.
     let creator = *iter.next_signer("creator")?.address();
     let owner_pk_field =
         solana_owner_identity(creator.as_array()).map_err(TimelockEscrowError::from)?;

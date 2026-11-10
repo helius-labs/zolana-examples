@@ -41,9 +41,9 @@ const EXPIRY: u64 = 2_000_000_000;
 // Flow:
 //   1. Fund (in setup): maker shields 1.0 SPL, taker shields 0.25 SOL; each wallet
 //      syncs from the indexer to discover and decrypt its own note.
-//   2. Make: maker spends its 1.0 SPL UTXO -> order UTXO 0.4 SPL (taker-owned, held
-//      under the maker's order-authority PDA), marker (0-value taker-owned discovery
-//      note), change 0.6 SPL (back to maker). ZK make proof, v0 tx via ALT.
+//   2. Make: maker spends its own 1.0 SPL UTXO, signing for it -> order UTXO 0.4 SPL
+//      (owned by the maker's order-authority PDA, encrypted to the taker), marker
+//      message for the taker, change 0.6 SPL (back to maker). ZK make proof, v1 tx.
 //   3. Take: taker spends the order UTXO (0.4 SPL) + its own 0.25 SOL UTXO ->
 //      source_output 0.4 SPL (to taker), destination_output 0.25 SOL (to maker).
 //      ZK take proof, v0 tx.
@@ -152,10 +152,8 @@ fn make_and_take_swap_inline() -> Result<()> {
         let spp_proof = localnet
             .client
             .indexer()
-            .prove_transact(
-                spp_proof_inputs,
-                &spr_keypair::NullifierKey::from_secret([0; 31]),
-            )
+            // The maker owns the source and signs the transact for it.
+            .prove_transact(spp_proof_inputs, &maker.keypair.nullifier_key)
             .map_err(|e| anyhow!("make transact proof: {e:?}"))?;
 
         let make_proof_inputs = MakeProofInputParams {

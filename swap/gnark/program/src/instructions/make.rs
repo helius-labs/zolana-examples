@@ -42,7 +42,8 @@ pub struct MakePublicInput<'a> {
     /// binds the order UTXO's owner to.
     pub order_owner_hash: &'a [u8; 32],
     /// `solana_owner_identity(maker)`: the circuit binds the order terms'
-    /// maker owner hash to it, so the terms name the signing maker.
+    /// maker owner hash to it, so the terms name the signing maker, and binds
+    /// the spent source's owner to that hash, so the source is the maker's own.
     pub maker_owner_pk_field: &'a [u8; 32],
 }
 
@@ -76,7 +77,9 @@ pub fn verify_make_proof(proof: &MakeProof, public_input: MakePublicInput) -> Pr
 #[profile]
 pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     let mut iter = AccountIterator::new(accounts);
-    // The maker pays and signs; its order-authority PDA owns the order UTXO.
+    // The maker pays and signs. It signs the SPP transact as the owner of
+    // the source it spends; its order-authority PDA, which the program signs
+    // for, owns the order UTXO.
     let maker = *iter.next_signer_mut("payer")?.address();
     let order_authority = OrderAuthority::find(&maker);
     let order_owner_hash = order_authority.owner_hash()?;
@@ -115,6 +118,9 @@ pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
         .serialize()
         .map_err(|_| SwapError::InvalidInstructionData)?;
 
+    // The owner signers are the maker, a transaction signer, and its
+    // order-authority PDA, which SPP requires to sign for the data-bearing
+    // order output.
     let spp_accounts = iter.remaining()?;
     order_authority.cpi_spp_transact_signed(spp_accounts, &transact_bytes)
 }

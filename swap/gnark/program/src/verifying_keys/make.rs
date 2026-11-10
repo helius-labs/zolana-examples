@@ -14,18 +14,18 @@ use groth16_solana::groth16::Groth16Verifyingkey;
 
 static VERIFYINGKEY_VK_IC: &[[u8; 64]] = &[
     [
-        28u8, 114u8, 217u8, 143u8, 108u8, 119u8, 246u8, 91u8, 217u8, 157u8, 41u8, 247u8, 159u8,
-        255u8, 238u8, 78u8, 198u8, 14u8, 48u8, 93u8, 149u8, 169u8, 134u8, 48u8, 82u8, 28u8, 115u8,
-        96u8, 140u8, 68u8, 31u8, 38u8, 47u8, 110u8, 103u8, 212u8, 58u8, 212u8, 129u8, 211u8, 11u8,
-        54u8, 158u8, 222u8, 108u8, 41u8, 229u8, 239u8, 63u8, 181u8, 54u8, 118u8, 231u8, 151u8,
-        10u8, 130u8, 245u8, 67u8, 199u8, 95u8, 67u8, 128u8, 208u8, 12u8,
+        43u8, 68u8, 12u8, 137u8, 93u8, 156u8, 250u8, 143u8, 138u8, 20u8, 9u8, 203u8, 172u8, 29u8,
+        153u8, 97u8, 210u8, 216u8, 192u8, 112u8, 92u8, 143u8, 124u8, 175u8, 79u8, 253u8, 152u8,
+        145u8, 12u8, 60u8, 219u8, 107u8, 22u8, 239u8, 195u8, 187u8, 115u8, 21u8, 232u8, 66u8,
+        144u8, 237u8, 120u8, 122u8, 62u8, 82u8, 218u8, 245u8, 87u8, 71u8, 1u8, 89u8, 165u8, 107u8,
+        213u8, 23u8, 140u8, 214u8, 40u8, 170u8, 9u8, 163u8, 131u8, 55u8,
     ],
     [
-        5u8, 147u8, 70u8, 75u8, 142u8, 18u8, 241u8, 231u8, 142u8, 181u8, 253u8, 184u8, 226u8,
-        150u8, 124u8, 214u8, 202u8, 163u8, 131u8, 20u8, 89u8, 236u8, 251u8, 235u8, 5u8, 89u8, 74u8,
-        22u8, 236u8, 33u8, 171u8, 69u8, 12u8, 22u8, 204u8, 227u8, 54u8, 33u8, 236u8, 60u8, 76u8,
-        213u8, 155u8, 226u8, 136u8, 208u8, 160u8, 209u8, 53u8, 250u8, 5u8, 12u8, 64u8, 203u8,
-        237u8, 218u8, 118u8, 27u8, 232u8, 22u8, 229u8, 58u8, 111u8, 133u8,
+        35u8, 136u8, 125u8, 135u8, 75u8, 170u8, 51u8, 185u8, 206u8, 237u8, 131u8, 148u8, 195u8,
+        76u8, 8u8, 178u8, 180u8, 171u8, 97u8, 251u8, 209u8, 128u8, 197u8, 233u8, 225u8, 203u8,
+        89u8, 162u8, 156u8, 32u8, 67u8, 185u8, 22u8, 129u8, 98u8, 57u8, 26u8, 234u8, 5u8, 88u8,
+        132u8, 181u8, 77u8, 161u8, 16u8, 137u8, 11u8, 112u8, 163u8, 230u8, 164u8, 27u8, 40u8,
+        141u8, 243u8, 28u8, 176u8, 107u8, 189u8, 193u8, 8u8, 237u8, 94u8, 197u8,
     ],
 ];
 
@@ -81,7 +81,7 @@ pub const VERIFYINGKEY: Groth16Verifyingkey = Groth16Verifyingkey {
 /// SHA-256 of the proving key file this verifying key was generated with.
 #[allow(dead_code)]
 #[rustfmt::skip]
-pub const VERIFYINGKEY_PROVING_KEY_SHA256: [u8; 32] = [10u8, 24u8, 23u8, 106u8, 73u8, 202u8, 184u8, 121u8, 144u8, 167u8, 96u8, 84u8, 246u8, 139u8, 239u8, 254u8, 69u8, 142u8, 219u8, 138u8, 87u8, 69u8, 201u8, 202u8, 118u8, 48u8, 162u8, 125u8, 97u8, 152u8, 222u8, 117u8];
+pub const VERIFYINGKEY_PROVING_KEY_SHA256: [u8; 32] = [33u8, 80u8, 160u8, 221u8, 254u8, 37u8, 74u8, 251u8, 147u8, 164u8, 18u8, 98u8, 235u8, 210u8, 167u8, 223u8, 127u8, 175u8, 72u8, 180u8, 99u8, 1u8, 204u8, 183u8, 85u8, 81u8, 148u8, 156u8, 154u8, 38u8, 195u8, 122u8];
 
 /// `true` for a test setup whose secret randomness is public or untrusted:
 /// whoever knows it can make this key accept a proof for any public
@@ -93,9 +93,9 @@ pub const VERIFYINGKEY_INSECURE_TEST_SETUP: bool = true;
 /// The two consts above as a delimited string, exported so it stays in
 /// the program binary; read it back with
 /// `groth16_solana::vk::setup::find_setup_txts`.
-#[unsafe(export_name = "groth16_solana_vk_setup_0668992783fe87e9")]
+#[unsafe(export_name = "groth16_solana_vk_setup_94e41f402a56a3c3")]
 #[rustfmt::skip]
-pub static VERIFYINGKEY_SETUP_TXT: &str = "=======BEGIN GROTH16 VK SETUP V1=======\x00name\x00VERIFYINGKEY\x00insecure_test_setup\x00true\x00proving_key_sha256\x000a18176a49cab87990a76054f68beffe458edb8a5745c9ca7630a27d6198de75\x00=======END GROTH16 VK SETUP V1=======\x00";
+pub static VERIFYINGKEY_SETUP_TXT: &str = "=======BEGIN GROTH16 VK SETUP V1=======\x00name\x00VERIFYINGKEY\x00insecure_test_setup\x00true\x00proving_key_sha256\x002150a0ddfe254afb93a41262ebd2a7df7faf48b46301ccb75551949c9a26c37a\x00=======END GROTH16 VK SETUP V1=======\x00";
 
 #[cfg(not(feature = "insecure-test-setup"))]
 compile_error!("VERIFYINGKEY comes from an insecure test setup: whoever knows its setup randomness can make it accept a proof for any public inputs. Enable the `insecure-test-setup` feature only in test builds, not for a devnet or mainnet deployment.");

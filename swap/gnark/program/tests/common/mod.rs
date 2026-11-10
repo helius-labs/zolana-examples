@@ -15,7 +15,7 @@ use swap_program::{
         make::{MakeIxData, MakeProof},
         take::{TakeIxData, TakeProof},
     },
-    tag, ORDER_AUTHORITY_PDA_SEED,
+    order_authority_seeds, tag,
 };
 
 pub const MAKER: [u8; 32] = [22; 32];
@@ -158,7 +158,7 @@ pub fn fixture(wrapper: Wrapper) -> (Instruction, Vec<(Pubkey, Account)>) {
     let spp_id = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
     let swap_id = Pubkey::new_from_array(*swap_program::ID.as_array());
     let (order_authority, _) =
-        Pubkey::find_program_address(&[ORDER_AUTHORITY_PDA_SEED, &MAKER], &swap_id);
+        Pubkey::find_program_address(&order_authority_seeds(&maker), &swap_id);
 
     let mut metas = vec![AccountMeta::new(payer, true)];
     let mut accounts = vec![(payer, account(1_000_000_000))];

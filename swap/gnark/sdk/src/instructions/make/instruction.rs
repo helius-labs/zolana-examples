@@ -1,12 +1,9 @@
 use anyhow::Result;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
-use spr_interface::{
-    instruction::instruction_data::transact::{MessageData, TransactIxData},
-    SHIELDED_POOL_PROGRAM_ID,
-};
+use spr_interface::instruction::instruction_data::transact::{MessageData, TransactIxData};
 use spr_keypair::ShieldedAddress;
-use spr_program::instruction::nullifier_pda_accounts;
+use spr_program::instruction::Transact;
 use spr_transaction::TransactionError;
 
 use crate::{err, order_authority_pda, tag, MakeIxData, MakeProof, MarkerData};
@@ -31,7 +28,8 @@ impl OrderMarker {
 }
 
 pub struct Make {
-    /// The maker: pays, signs, and its order-authority PDA owns the order.
+    /// The maker: fee payer, marker signer and owner of the spent source. Its
+    /// order-authority PDA owns the order.
     pub payer: Pubkey,
     pub tree: Pubkey,
     pub make_proof: MakeProof,
@@ -50,29 +48,25 @@ impl Make {
         if let Some(marker) = spp_proof.messages.first_mut() {
             marker.data = Vec::new();
         }
-        let nullifier_pdas = nullifier_pda_accounts(
-            &tree,
-            spp_proof.inputs.iter().map(|input| &input.nullifier_hash),
-        );
+        // The owner signers: the maker for the source it spends, then the
+        // maker's order authority for the data-bearing order output, which
+        // the program signs for during the CPI.
+        let transact = Transact {
+            payer,
+            input_trees: vec![tree; spp_proof.tree_contexts.len()],
+            output_tree: tree,
+            owner_signers: vec![payer],
+            interface_transfer_accounts: Vec::new(),
+            data: spp_proof,
+        };
+        let mut accounts = vec![AccountMeta::new(payer, true)];
+        accounts.extend(transact.cpi_accounts(&[order_authority_pda(&payer)]));
+
         let serialized_ix = wincode::serialize(&MakeIxData {
             proof: make_proof,
-            transact: spp_proof,
+            transact: transact.data,
         })
         .map_err(err)?;
-
-        let mut accounts = vec![
-            AccountMeta::new(payer, true),
-            AccountMeta::new(payer, true),
-            AccountMeta::new(tree, false),
-            AccountMeta::new_readonly(Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID), false),
-            AccountMeta::new_readonly(Pubkey::default(), false),
-            AccountMeta::new(tree, false),
-        ];
-        accounts.extend(nullifier_pdas);
-        accounts.push(AccountMeta::new_readonly(
-            order_authority_pda(&payer),
-            false,
-        ));
         let mut instruction_data = vec![tag::MAKE];
         instruction_data.extend_from_slice(&serialized_ix);
         Ok(Instruction {
@@ -167,7 +161,7 @@ mod tests {
             spr_keypair::random_blinding(),
             spr_keypair::random_salt(),
         );
-        let order_utxo = &spp_proof_inputs.output_utxos[1];
+        let order_utxo = spp_proof_inputs.output_utxos.get(1).expect("order output");
         let order_utxo_hash = order_utxo.hash(OUTPUT_TREE_ID).expect("order hash");
         let marker_message = OrderMarker {
             order_utxo_hash,
@@ -302,7 +296,7 @@ mod tests {
             spr_keypair::random_blinding(),
             spr_keypair::random_salt(),
         );
-        let order_utxo = &spp_proof_inputs.output_utxos[1];
+        let order_utxo = spp_proof_inputs.output_utxos.get(1).expect("order output");
         let order_utxo_hash = order_utxo.hash(OUTPUT_TREE_ID).expect("order hash");
         let marker_message = OrderMarker {
             order_utxo_hash,

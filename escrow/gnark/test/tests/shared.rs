@@ -3,16 +3,14 @@ use solana_instruction::Instruction;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use spr_client::{ComputeBudgetConfig, Rpc, SolanaRpc};
-use spr_keypair::{
-    constants::BLINDING_LEN, NullifierKey, PublicKey, ShieldedAddress, ShieldedKeypair, SigningKey,
-};
+use spr_keypair::{ShieldedKeypair, SigningKey};
 use spr_program_test::{
     fixture,
     localnet::{FixtureLocalnet, LocalnetPorts},
 };
 use spr_test_utils::test_validator_asserts::wait_for_indexed_utxo;
-use spr_test_utils::wallet::{Deposit, DepositParams, Wallet};
-use spr_transaction::{utxo::SppProofInputUtxo, utxo::Utxo, AssetRegistry, Data, SOL_MINT};
+use spr_test_utils::wallet::{sync_wallet, Deposit, DepositParams, Wallet};
+use spr_transaction::{utxo::SppProofInputUtxo, AssetRegistry, WalletUtxo, SOL_MINT};
 
 #[path = "../../../../test-utils/localnet.rs"]
 mod release_localnet;
@@ -40,7 +38,9 @@ pub struct TestEnv {
     /// The localnet with its client and default tree. Dropping it stops the
     /// validator, so it lives as long as the test.
     pub localnet: FixtureLocalnet,
+    /// The creator, its wallet synced after the deposit.
     pub creator: TestWallet,
+    /// The shielded balance the escrow locks from, owned by the creator.
     pub creator_input: SppProofInputUtxo,
 }
 
@@ -88,16 +88,14 @@ pub fn setup(test: u16) -> Result<TestEnv> {
     let creator_shielded_keypair =
         ShieldedKeypair::from_keypair(SigningKey::from_ed25519_bytes(&creator_seed))?;
 
-    let escrow_nullifier_key = NullifierKey::from_secret([0u8; BLINDING_LEN]);
-    let escrow_authority_address = ShieldedAddress {
-        signing_pubkey: PublicKey::from_ed25519(
-            timelock_escrow_sdk::escrow_authority_pda(&creator_solana_keypair.pubkey()).as_array(),
-        ),
-        nullifier_pubkey: escrow_nullifier_key.pubkey()?,
-        viewing_pubkey: creator_shielded_keypair.viewing_pubkey(),
-    };
+    let creator_address = creator_shielded_keypair
+        .shielded_address()
+        .map_err(|e| anyhow!("creator address: {e:?}"))?;
+
+    // Shield the creator's balance, which the escrow locks from: the creator
+    // owns it and signs its spend.
     let creator_deposit = Deposit::new(DepositParams {
-        recipient: &escrow_authority_address,
+        recipient: &creator_address,
         asset: SOL_MINT,
         amount: SHIELD_AMOUNT,
         spl_token_account: None,
@@ -107,42 +105,33 @@ pub fn setup(test: u16) -> Result<TestEnv> {
     let creator_view_tag = creator_deposit.view_tag();
     let creator_signature =
         creator_deposit.send(&localnet.client, &payer, localnet.tree, &payer)?;
-    // The escrow authority is a PDA holding no viewing key, but a proofless
-    // deposit publishes its UTXO in the clear, so the depositor-chosen view tag
-    // reads it back from the indexer.
-    let indexed_deposit =
-        wait_for_indexed_utxo(&localnet.client, creator_view_tag, creator_signature);
-    let creator_deposited = indexed_deposit
-        .output_slot
-        .proofless_output()
-        .ok_or_else(|| anyhow!("indexed creator deposit is not a proofless UTXO"))?;
-    let creator_input: SppProofInputUtxo = spr_test_utils::utxo::wallet(
-        Utxo {
-            owner: escrow_authority_address.signing_pubkey,
-            asset: spr_transaction::Mint::SOL,
-            amount: creator_deposited.amount,
-            blinding: creator_deposited.blinding,
-            ring_program_id: None,
-            data: Data::default(),
-        },
-        &escrow_nullifier_key,
-        localnet.tree_id,
-        indexed_deposit.output_slot.output_context.leaf_index,
-        None,
-        None,
-    )?
-    .into();
+    wait_for_indexed_utxo(&localnet.client, creator_view_tag, creator_signature);
+
+    // The creator's wallet reads the deposit back from the indexer.
+    let mut creator_wallet =
+        Wallet::new(creator_address, assets).map_err(|e| anyhow!("creator wallet: {e:?}"))?;
+    sync_wallet(
+        &mut creator_wallet,
+        &creator_shielded_keypair,
+        localnet.client.indexer(),
+    )
+    .map_err(|e| anyhow!("sync creator after deposit: {e:?}"))?;
+    let balance = creator_wallet
+        .balance(SOL_MINT, None)
+        .map_err(|e| anyhow!("creator balance: {e:?}"))?;
+    let [creator_input]: [WalletUtxo; 1] = balance
+        .utxos
+        .try_into()
+        .map_err(|utxos: Vec<WalletUtxo>| anyhow!("expected one deposit, found {}", utxos.len()))?;
+    let creator_input: SppProofInputUtxo = creator_input.into();
     assert_eq!(
-        (creator_input.utxo.asset.asset, creator_input.utxo.amount),
-        (SOL_MINT, SHIELD_AMOUNT)
+        (
+            creator_input.utxo.owner,
+            creator_input.utxo.asset.asset,
+            creator_input.utxo.amount
+        ),
+        (creator_address.signing_pubkey, SOL_MINT, SHIELD_AMOUNT)
     );
-
-    let creator_address = creator_shielded_keypair
-        .shielded_address()
-        .map_err(|e| anyhow!("creator address: {e:?}"))?;
-
-    let creator_wallet = Wallet::new(creator_address, assets.clone())
-        .map_err(|e| anyhow!("creator wallet: {e:?}"))?;
 
     Ok(TestEnv {
         localnet,

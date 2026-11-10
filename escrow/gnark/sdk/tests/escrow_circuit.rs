@@ -10,6 +10,7 @@ use spr_hasher::primitives::solana_owner_identity;
 use spr_keypair::hash::poseidon;
 use spr_transaction::{instructions::transact::PrivateTxHash, utxo::Blinding};
 use timelock_escrow_program::{
+    error::TimelockEscrowError,
     instructions::{
         escrow::{verify_escrow_proof, EscrowProof, EscrowPublicInput},
         verifier::{verify_groth16, CompressedGroth16Proof},
@@ -83,6 +84,9 @@ fn sample_terms() -> EscrowTermsProofInput {
 /// Both outputs of an escrow land in the same tree. A non-zero id keeps the test
 /// honest: a dropped tree id would change every commitment.
 const OUTPUT_TREE_ID: u16 = 3;
+/// The tree the source is spent from, distinct from the output tree so a
+/// swapped tree id changes the source commitment.
+const INPUT_TREE_ID: u16 = 2;
 
 /// The program's public input for `creator`: what `process_escrow_ix`
 /// derives from the creator signer.
@@ -96,18 +100,34 @@ fn program_public_input(private_tx_hash: &[u8; 32], creator: &Pubkey) -> [u8; 32
     .expect("escrow public input hash")
 }
 
-/// Escrow proof inputs whose escrow utxo is owned by `escrow_owner_hash`,
-/// self-consistent: the witness's public escrow owner equals the utxo owner.
-fn build_inputs_owned_by(
+/// A plain token utxo of `amount` in the escrow asset, spent from the input
+/// tree.
+fn token_utxo(owner_hash: [u8; 32], amount: u64) -> ProofInputUtxo {
+    ProofInputUtxo::new(
+        owner_hash,
+        &SOURCE_MINT,
+        amount,
+        &blinding(5),
+        INPUT_TREE_ID,
+    )
+    .expect("token utxo")
+}
+
+const SOURCE_MINT: Address = Address::new_from_array([1u8; 32]);
+
+/// Escrow proof inputs spending `source`, whose escrow utxo is owned by
+/// `escrow_owner_hash`, self-consistent: the witness's public escrow owner
+/// equals the utxo owner and the private tx hash covers every utxo.
+fn build_inputs_with(
+    source: ProofInputUtxo,
     escrow_owner_hash: [u8; 32],
     escrow_amount: u64,
     change_amount: u64,
 ) -> EscrowProofInputs {
     let terms = sample_terms();
-    let source_mint = Address::new_from_array([1u8; 32]);
     let escrow_utxo = ProofInputUtxo::new(
         escrow_owner_hash,
-        &source_mint,
+        &SOURCE_MINT,
         escrow_amount,
         &blinding(7),
         OUTPUT_TREE_ID,
@@ -116,16 +136,15 @@ fn build_inputs_owned_by(
     .with_data_hash(terms.data_hash().expect("terms data hash"));
     let change = ProofInputUtxo::new(
         terms.owner_hash,
-        &source_mint,
+        &SOURCE_MINT,
         change_amount,
         &blinding(6),
         OUTPUT_TREE_ID,
     )
     .expect("change utxo");
-    let source_input_hash = fe(5);
     let private_tx_blinding = fe(21);
     let private_tx_hash = PrivateTxHash::new(
-        &[source_input_hash, [0u8; 32]],
+        &[source.hash().expect("source hash"), [0u8; 32]],
         &[
             change.hash().expect("change hash"),
             escrow_utxo.hash().expect("escrow utxo hash"),
@@ -149,11 +168,23 @@ fn build_inputs_owned_by(
         owner_pk_field,
         nullifier_pk: creator_nullifier_pk(),
         terms,
+        source,
         escrow_utxo,
         change,
-        source_input_hash,
         private_tx_blinding,
     }
+}
+
+/// Escrow proof inputs spending the creator's own source of
+/// `escrow_amount + change_amount`, whose escrow utxo is owned by
+/// `escrow_owner_hash`.
+fn build_inputs_owned_by(
+    escrow_owner_hash: [u8; 32],
+    escrow_amount: u64,
+    change_amount: u64,
+) -> EscrowProofInputs {
+    let source = token_utxo(sample_terms().owner_hash, escrow_amount + change_amount);
+    build_inputs_with(source, escrow_owner_hash, escrow_amount, change_amount)
 }
 
 fn build_inputs(escrow_amount: u64, change_amount: u64) -> EscrowProofInputs {
@@ -328,8 +359,9 @@ fn escrow_rejects_escrow_utxo_not_owned_by_creators_pda() {
             &pda_owner_hash(&creator()),
             &owner_pk_field(&creator()),
         );
-        assert!(
-            result.is_err(),
+        assert_eq!(
+            result,
+            Err(TimelockEscrowError::ProofVerificationFailed.into()),
             "an escrow utxo owned by {name} must not verify against the creator's public input"
         );
     }
@@ -371,5 +403,62 @@ fn escrow_rejects_terms_of_another_creator() {
     assert!(
         inputs.prove().is_err(),
         "proving must fail when the terms' owner hash is not built from the creator signer"
+    );
+}
+
+/// The timelock bypass the source binding closes: the program signs for the
+/// creator's escrow-authority PDA, so a source owned by it would need no
+/// creator signature. The creator knows the preimage of its own escrow utxo
+/// (nullifier secret 0) and could re-lock 1 lamport of it and take the rest
+/// as change before unlock. Every PDA-owned source fails to prove, as does a
+/// source of another owner.
+#[test]
+fn escrow_rejects_source_not_owned_by_creator() {
+    ensure_keys();
+
+    let terms = sample_terms();
+    let pda = pda_owner_hash(&creator());
+    let own_escrow = token_utxo(pda, 1_000).with_data_hash(terms.data_hash().expect("data hash"));
+    let cases = [
+        ("the creator's own escrow utxo", own_escrow),
+        ("a plain utxo of the creator's PDA", token_utxo(pda, 1_000)),
+        (
+            "another owner",
+            token_utxo(
+                poseidon(&[
+                    &owner_pk_field(&Pubkey::new_from_array([43u8; 32])),
+                    &creator_nullifier_pk(),
+                ])
+                .expect("other owner hash"),
+                1_000,
+            ),
+        ),
+    ];
+    for (name, source) in cases {
+        let inputs = build_inputs_with(source, pda, 1, 999);
+        assert!(
+            inputs.prove().is_err(),
+            "proving must fail when the source is owned by {name}"
+        );
+    }
+}
+
+/// The source must hold the escrow's asset.
+#[test]
+fn escrow_rejects_source_of_another_asset() {
+    ensure_keys();
+
+    let source = ProofInputUtxo::new(
+        sample_terms().owner_hash,
+        &Address::new_from_array([2u8; 32]),
+        1_000,
+        &blinding(5),
+        INPUT_TREE_ID,
+    )
+    .expect("source utxo");
+    let inputs = build_inputs_with(source, pda_owner_hash(&creator()), 250, 750);
+    assert!(
+        inputs.prove().is_err(),
+        "proving must fail when the source asset differs from the escrow asset"
     );
 }

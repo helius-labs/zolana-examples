@@ -139,10 +139,8 @@ fn make_and_cancel_swap_inline() -> Result<()> {
         let spp_proof = localnet
             .client
             .indexer()
-            .prove_transact(
-                spp_proof_inputs.clone(),
-                &spr_keypair::NullifierKey::from_secret([0; 31]),
-            )
+            // The maker owns the source and signs the transact for it.
+            .prove_transact(spp_proof_inputs.clone(), &maker.keypair.nullifier_key)
             .map_err(|e| anyhow!("make transact proof: {e:?}"))?;
 
         let make_proof_inputs = MakeProofInputParams {

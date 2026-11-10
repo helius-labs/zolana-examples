@@ -78,6 +78,11 @@ fn sample_order(maker: &Address) -> OrderTermsProofInput {
 /// Both outputs of a make land in the same tree. A non-zero id keeps the test
 /// honest: a dropped tree id would change every commitment.
 const OUTPUT_TREE_ID: u16 = 3;
+/// The source is spent from another tree, so a source hashed under the output
+/// tree's id would not match.
+const SOURCE_TREE_ID: u16 = 2;
+/// The amount locked in the order UTXO; the source funds it and the change.
+const ORDER_AMOUNT: u64 = 1_000;
 
 const MAKER: Address = Address::new_from_array([42u8; 32]);
 const OTHER_MAKER: Address = Address::new_from_array([43u8; 32]);
@@ -103,7 +108,15 @@ struct MakeCase {
     terms_maker: Address,
     /// The maker whose identity is the `maker_owner_pk_field` public input.
     signer: Address,
+    /// The owner the spent source commits to.
+    source_owner_hash: [u8; 32],
+    /// The source's data hash; a plain token UTXO has none.
+    source_data_hash: [u8; 32],
+    /// The source's asset.
+    source_mint: Address,
 }
+
+const SOURCE_MINT: Address = Address::new_from_array([1u8; 32]);
 
 impl Default for MakeCase {
     fn default() -> Self {
@@ -115,6 +128,9 @@ impl Default for MakeCase {
             order_owner_hash: owner_hash,
             terms_maker: MAKER,
             signer: MAKER,
+            source_owner_hash: maker_owner_hash(&MAKER),
+            source_data_hash: [0u8; 32],
+            source_mint: SOURCE_MINT,
         }
     }
 }
@@ -135,15 +151,17 @@ fn build_case(case: MakeCase) -> MakeProofInputs {
         order_owner_hash,
         terms_maker,
         signer,
+        source_owner_hash,
+        source_data_hash,
+        source_mint,
     } = case;
     let maker_owner_pk_field = owner_pk_field(&signer);
     let mut order = sample_order(&terms_maker);
     order.destination_amount = destination_amount;
-    let source_mint = Address::new_from_array([1u8; 32]);
     let order_utxo = ProofInputUtxo::new(
         order_utxo_owner_hash,
-        &source_mint,
-        1_000,
+        &SOURCE_MINT,
+        ORDER_AMOUNT,
         &blinding(7),
         OUTPUT_TREE_ID,
     )
@@ -151,13 +169,22 @@ fn build_case(case: MakeCase) -> MakeProofInputs {
     .with_data_hash(order.data_hash().expect("order data hash"));
     let change = ProofInputUtxo::new(
         order.maker_owner_hash,
-        &source_mint,
+        &SOURCE_MINT,
         change_amount,
         &blinding(6),
         OUTPUT_TREE_ID,
     )
     .expect("change utxo");
-    let source_input_hash = fe(5);
+    let source = ProofInputUtxo::new(
+        source_owner_hash,
+        &source_mint,
+        ORDER_AMOUNT + change_amount,
+        &blinding(5),
+        SOURCE_TREE_ID,
+    )
+    .expect("source utxo")
+    .with_data_hash(source_data_hash);
+    let source_input_hash = source.hash().expect("source hash");
     let private_tx_blinding = fe(21);
     let private_tx_hash = PrivateTxHash::new(
         &[source_input_hash, [0u8; 32]],
@@ -183,9 +210,9 @@ fn build_case(case: MakeCase) -> MakeProofInputs {
         maker_owner_pk_field,
         maker_nullifier_pk: fe(MAKER_NULLIFIER_PK),
         order,
+        source,
         order_utxo,
         change,
-        source_input_hash,
         private_tx_blinding,
     }
 }
@@ -410,8 +437,10 @@ fn make_program_rejects_proof_for_other_owner_hash() {
 fn make_rejects_terms_maker_other_than_signer() {
     ensure_keys();
 
+    // The source belongs to the terms' maker, so only the signer check fails.
     let inputs = build_case(MakeCase {
         terms_maker: OTHER_MAKER,
+        source_owner_hash: maker_owner_hash(&OTHER_MAKER),
         ..MakeCase::default()
     });
     assert!(
@@ -424,6 +453,7 @@ fn make_rejects_terms_maker_other_than_signer() {
     let inputs = build_case(MakeCase {
         terms_maker: OTHER_MAKER,
         signer: OTHER_MAKER,
+        source_owner_hash: maker_owner_hash(&OTHER_MAKER),
         ..MakeCase::default()
     });
     let proof: MakeProof = inputs.prove().expect("prove failed").into();
@@ -438,5 +468,59 @@ fn make_rejects_terms_maker_other_than_signer() {
     assert!(
         verify_as_program(&proof, &inputs.private_tx_hash, &order_owner_hash, &MAKER).is_err(),
         "the signer's identity must reject a proof for another maker's terms"
+    );
+}
+
+/// The maker's PDA owns every open order, and the maker knows each order's
+/// opening. A make that spends one, or any other UTXO the maker does not own,
+/// would let the maker pull an order before expiry. The source must be the
+/// maker signer's own.
+#[test]
+fn make_rejects_source_not_owned_by_maker() {
+    ensure_keys();
+
+    let open_order_data_hash = sample_order(&MAKER).data_hash().expect("order data hash");
+    for (name, source_owner_hash, source_data_hash) in [
+        (
+            "maker's open order",
+            order_owner_hash(&MAKER),
+            open_order_data_hash,
+        ),
+        ("maker's PDA", order_owner_hash(&MAKER), [0u8; 32]),
+        ("another maker", maker_owner_hash(&OTHER_MAKER), [0u8; 32]),
+    ] {
+        let inputs = build_case(MakeCase {
+            source_owner_hash,
+            source_data_hash,
+            ..MakeCase::default()
+        });
+        assert!(
+            inputs.prove().is_err(),
+            "{name}: proving must fail when the source is not owned by the maker"
+        );
+    }
+}
+
+/// The source is a plain token UTXO of the order's asset: a data-bearing
+/// UTXO or one of another asset does not fund the order.
+#[test]
+fn make_rejects_source_with_data_or_other_asset() {
+    ensure_keys();
+
+    let with_data = build_case(MakeCase {
+        source_data_hash: fe(77),
+        ..MakeCase::default()
+    });
+    assert!(
+        with_data.prove().is_err(),
+        "proving must fail when the source carries data"
+    );
+    let other_asset = build_case(MakeCase {
+        source_mint: Address::new_from_array([9u8; 32]),
+        ..MakeCase::default()
+    });
+    assert!(
+        other_asset.prove().is_err(),
+        "proving must fail when the source holds another asset"
     );
 }

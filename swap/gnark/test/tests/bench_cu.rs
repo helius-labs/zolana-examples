@@ -443,14 +443,12 @@ fn bench_make(
     let payer = Keypair::new();
     let maker = keypair_from_payer(&payer);
 
-    // As in the localnet flow, the source is deposited to the order-authority
-    // PDA, so the program signs the make transaction alone.
-    let order_nullifier_key = spr_keypair::NullifierKey::from_secret([0; 31]);
+    // As in the localnet flow, the maker spends its own source and signs the
+    // transact for it; the program signs for the order-authority PDA, which
+    // owns the order output.
     let input_blinding = random_blinding();
     let input_utxo = Utxo {
-        owner: spr_keypair::PublicKey::from_ed25519(
-            swap_sdk::order_authority_pda(&payer.pubkey()).as_array(),
-        ),
+        owner: maker.signing_pubkey(),
         asset: spr_transaction::Mint::SOL,
         amount: INPUT_AMOUNT,
         blinding: input_blinding,
@@ -484,7 +482,7 @@ fn bench_make(
     let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
     let input_utxo: SppProofInputUtxo = spr_test_utils::utxo::wallet(
         input_utxo,
-        &order_nullifier_key,
+        &maker.nullifier_key,
         BENCH_TREE_ID,
         0,
         None,
@@ -584,7 +582,7 @@ fn bench_make(
         spp_proof_inputs,
         &spend_proofs,
         &prover,
-        &[&order_nullifier_key],
+        &[&maker.nullifier_key],
     );
     let make_inputs = make_proof_inputs
         .to_proof_inputs()

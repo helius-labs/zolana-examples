@@ -29,14 +29,16 @@ use timelock_escrow_sdk::{
 // real localnet (validator + Photon indexer + prover) that `setup()` starts.
 //
 // Flow:
-//   1. Fund (in setup): creator shields 0.5 SOL to its escrow-authority PDA.
-//   2. Escrow: the program spends that 0.5 SOL UTXO -> escrow UTXO 0.3 SOL (owned
-//      by the creator's escrow-authority PDA, committed unlock timestamp already in
-//      the past) + change 0.2 SOL (back to the creator). ZK escrow proof, v0
-//      tx via ALT.
+//   1. Fund (in setup): 0.5 SOL is shielded to the creator.
+//   2. Escrow: the creator spends that 0.5 SOL UTXO, signing as its owner ->
+//      change 0.2 SOL (back to the creator) + escrow UTXO 0.3 SOL (owned by
+//      the creator's escrow-authority PDA, seeds [b"escrow_authority",
+//      creator], committed unlock timestamp already in the past). The program
+//      signs for the PDA, which SPP requires for the data-bearing escrow
+//      output. ZK escrow proof, v1 tx.
 //   3. Withdraw: creator (still holding the escrow UTXO hash locally --
 //      no discovery needed) spends the escrow UTXO -> source output 0.3 SOL
-//      back to itself. ZK withdraw proof, v0 tx.
+//      back to itself. ZK withdraw proof, v1 tx.
 //   4. Assert the creator's synced confidential balance after each step, and
 //      that the withdraw output is indexed.
 //
@@ -61,8 +63,8 @@ fn escrow_then_withdraw() -> Result<()> {
     };
 
     // escrow: lock `escrow_utxo` -- spend the creator's own shielded balance,
-    // append the escrow UTXO (owned by the escrow-authority PDA) plus a
-    // change output back to the creator.
+    // which the creator signs for, append a change output back to the creator
+    // plus the escrow UTXO (owned by the escrow-authority PDA).
     let creator_address = creator.keypair.shielded_address()?;
     let escrow_output_utxo = escrow_utxo.output_utxo()?;
 
@@ -109,13 +111,11 @@ fn escrow_then_withdraw() -> Result<()> {
     };
 
     let spp_tx_hashes = SppTxHashes::new(&spp_proof_inputs)?;
+    // The creator's nullifier key spends its source.
     let spp_proof = localnet
         .client
         .indexer()
-        .prove_transact(
-            spp_proof_inputs,
-            &spr_keypair::NullifierKey::from_secret([0; 31]),
-        )
+        .prove_transact(spp_proof_inputs, &creator.keypair)
         .map_err(|e| anyhow!("escrow transact proof: {e:?}"))?;
 
     let escrow_proof_inputs = EscrowProofInputParams {

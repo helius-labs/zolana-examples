@@ -13,21 +13,21 @@ pub struct MakeProofInputs {
     pub maker_owner_pk_field: [u8; 32],
     pub maker_nullifier_pk: [u8; 32],
     pub order: OrderTermsProofInput,
+    /// The maker's spent source UTXO, hashed under the tree it is spent from.
+    pub source: ProofInputUtxo,
     pub order_utxo: ProofInputUtxo,
     pub change: ProofInputUtxo,
-    pub source_input_hash: [u8; 32],
     pub private_tx_blinding: [u8; 32],
 }
 
 impl MakeProofInputs {
     fn witness(&self) -> ProofInputMap {
-        let scalars: [(&str, [u8; 32]); 7] = [
+        let scalars: [(&str, [u8; 32]); 6] = [
             ("Public_PublicInputHash", self.public_input_hash),
             ("Public_PrivateTxHash", self.private_tx_hash),
             ("Public_OrderOwnerHash", self.order_owner_hash),
             ("Public_MakerOwnerPkField", self.maker_owner_pk_field),
             ("MakerNullifierPk", self.maker_nullifier_pk),
-            ("SourceInputHash", self.source_input_hash),
             ("PrivateTxBlinding", self.private_tx_blinding),
         ];
         let mut map = HashMap::new();
@@ -38,6 +38,7 @@ impl MakeProofInputs {
             .order
             .witness_entries("Order")
             .into_iter()
+            .chain(utxo_proof_inputs(&self.source, "Source"))
             .chain(utxo_proof_inputs(&self.order_utxo, "OrderUtxo"))
             .chain(utxo_proof_inputs(&self.change, "Change"))
         {
@@ -78,9 +79,9 @@ mod tests {
                 expiry: 9,
                 taker_pk_fe: [5; 32],
             },
+            source: ProofInputUtxo::default(),
             order_utxo: ProofInputUtxo::default(),
             change: ProofInputUtxo::default(),
-            source_input_hash: [6; 32],
             private_tx_blinding: [8; 32],
         }
     }
@@ -96,10 +97,10 @@ mod tests {
             "Public_OrderOwnerHash".to_string(),
             "Public_MakerOwnerPkField".to_string(),
             "MakerNullifierPk".to_string(),
-            "SourceInputHash".to_string(),
             "PrivateTxBlinding".to_string(),
         ];
         expected.extend(expected_order_terms_witness_keys("Order"));
+        expected.extend(utxo_proof_input_keys("Source"));
         expected.extend(utxo_proof_input_keys("OrderUtxo"));
         expected.extend(utxo_proof_input_keys("Change"));
 

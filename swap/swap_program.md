@@ -243,12 +243,13 @@ taker does not index the trade.
 
 Both implementations bind the committed maker to the `maker` signer through a public
 `maker_owner_pk_field`, `solana_owner_identity` of the signer, so the marker's `maker_pubkey`, the
-PDA that owns the order and the maker the terms commit are the same. Xark: the source UTXO is owned
-by the maker, who signs the transact as its owner signer (ahead of its order-authority PDA, which
-signs for the data-bearing order output); the change returns to the source owner, which the make
-circuit takes as the order's maker. gnark: the source UTXO is owned by the maker's order-authority
-PDA, which alone signs the transact, and the circuit checks the terms' `maker_owner_hash` is
-`Poseidon(maker_owner_pk_field, maker_nullifier_pk)`.
+PDA that owns the order and the maker the terms commit are the same. In both implementations the
+source UTXO is owned by the maker, who signs the transact as its owner signer, ahead of its
+order-authority PDA, which signs for the data-bearing order output; the change returns to the
+maker. Xark: the make circuit takes the source owner as the order's maker. gnark: the circuit
+checks the terms' `maker_owner_hash` is `Poseidon(maker_owner_pk_field, maker_nullifier_pk)` and
+that the source's owner hash equals it. A UTXO of the maker's order-authority PDA, such as an open
+order, therefore cannot fund a make, so a maker cannot pull an order before expiry through make.
 
 The proof checks the order UTXO output against the order rules (see the [make
 circuit](#make-circuit)) without revealing the terms, and commits the transaction via
@@ -258,14 +259,14 @@ public inputs still reveal `source_asset_id` at the SPP layer).
 
 **Accounts**
 
-1. `maker` — spends the source UTXO (Xark) or owns the PDA that does (gnark); signer, writable
-   (fee payer). Consumed by the program (its pubkey enters the marker and derives the
-   order-authority PDA); everything after it is forwarded verbatim to the SPP `transact` CPI.
-2. `payer` — the SPP fee payer (the maker again); signer, writable.
-3. `tree_accounts` — SPP trees the transact touches; writable.
-4. `order_authority` — the maker's order-authority PDA; read-only, non-signer. The program flips it
-   to a signer inside the SPP CPI.
-5. `spp_program` — SPP program (CPI target).
+1. `maker` — owns and spends the source UTXO; signer, writable (fee payer). Consumed by the
+   program (its pubkey enters the marker and derives the order-authority PDA); everything after it
+   is forwarded verbatim to the SPP `transact` CPI.
+2. The SPP `transact` accounts, in SPP's order: the fixed `[payer, output_tree, spp_program,
+   system_program]` prefix (the payer is the maker again), the input-tree and nullifier runs, then
+   the ordered owner signers: the `maker` again, as the source's owner signer, and last the
+   maker's `order_authority` PDA, read-only and non-signer, which the program flips to a signer
+   inside the CPI.
 
 **Instruction data**
 
@@ -308,12 +309,11 @@ Clock sysvar (`now <= expiry`); the take proof takes that same value as a public
 
 1. `taker` — fee payer; signer, writable. Consumed by the program; everything after it is forwarded
    verbatim to the SPP `transact` CPI. `now` is read from the Clock sysvar via syscall.
-2. `payer` — the SPP fee payer (the taker again); signer, writable.
-3. `tree_accounts` — SPP trees the transact touches; writable.
-4. `order_authority` — the order-authority PDA of the instruction's `maker` (seeds
-   `[b"order_authority", maker]`); read-only, non-signer. The program flips it to a signer inside
-   the SPP CPI to authorize the order UTXO spend (see [Order Terms](#order-terms)).
-5. `spp_program` — SPP program (CPI target); must be the last account (the program checks this).
+2. The SPP `transact` accounts, in SPP's order: the fixed `[payer, output_tree, spp_program,
+   system_program]` prefix, the input-tree and nullifier runs, then the ordered owner signers,
+   among them the order-authority PDA of the instruction's `maker` (seeds `[b"order_authority",
+   maker]`), read-only and non-signer. The program flips it to a signer inside the SPP CPI to
+   authorize the order UTXO spend (see [Order Terms](#order-terms)).
 
 **Instruction data**
 
@@ -355,12 +355,11 @@ public input.
 2. `maker` — the maker's Solana signer; read-only, signer. Consumed by the program, which includes
    `solana_owner_identity(maker)` in the cancel proof's public input; everything after it is forwarded
    verbatim to the SPP `transact` CPI.
-3. `payer` — the SPP fee payer; signer, writable.
-4. `tree_accounts` — SPP trees the transact touches; writable.
-5. `order_authority` — the `maker` signer's order-authority PDA (seeds `[b"order_authority",
-   maker]`); read-only, non-signer. The program flips it to a signer inside the SPP CPI to
-   authorize the order UTXO spend (see [Order Terms](#order-terms)).
-6. `spp_program` — SPP program (CPI target); must be the last account (the program checks this).
+3. The SPP `transact` accounts, in SPP's order: the fixed `[payer, output_tree, spp_program,
+   system_program]` prefix, the input-tree and nullifier runs, then the owner signer: the `maker`
+   signer's order-authority PDA (seeds `[b"order_authority", maker]`), read-only and non-signer.
+   The program flips it to a signer inside the SPP CPI to authorize the order UTXO spend (see
+   [Order Terms](#order-terms)).
 
 **Instruction data**
 
@@ -406,12 +405,16 @@ is committed by the SPP proof through the external-data hash, which the make pro
   `viewing_pubkey`, in place of `order_owner_hash`.
 - **Private inputs:** the order terms (`destination_asset`, `destination_amount`, the maker's
   owner hash and viewing pubkey, `expiry`, `taker_pk_fe`), the maker's `maker_nullifier_pk`
-  (gnark) and the fully witnessed order UTXO and change output UTXOs.
+  (gnark) and the fully witnessed source input UTXO, order UTXO and change output UTXOs.
 - **Constraints:**
   - The `private_tx_hash` recomputation mirrors the padded transact exactly: `chain([source_input,
     0])` over inputs and `chain([change, order_utxo])` over outputs, each folding only its nonzero
-    entries, and the zero chain over addresses. The source input hash is a free witness; the change
-    slot contributes nothing when the change amount is 0.
+    entries, and the zero chain over addresses. The source input hash is recomputed from the
+    witnessed source UTXO. A zero-amount change output is still a real UTXO whose hash enters the
+    output chain.
+  - The source input is the maker's: a plain UTXO (default ring, `data_hash = 0`) of the order
+    UTXO's asset owned by `maker_owner_hash` (gnark), or whose owner's `owner_pk_field` is the
+    public `maker_owner_pk_field` (Xark). SPP additionally requires the source owner to sign.
   - The order UTXO output committed in `private_tx_hash` has `data_hash = Poseidon(order terms)`
     with `maker_address` hashed in as a field element, ring fields 0, and a nonzero amount, so the
     public SPP order UTXO output commits the terms.

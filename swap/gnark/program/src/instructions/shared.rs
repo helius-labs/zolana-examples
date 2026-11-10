@@ -37,8 +37,9 @@ pub fn check_after_window(now: i64, expiry_unix_ts: u64) -> ProgramResult {
 }
 
 /// The maker's order-authority PDA, seeds `[ORDER_AUTHORITY_PDA_SEED, maker]`.
-/// It owns every order UTXO the maker creates (nullifier secret 0), and the
-/// program signs for it to spend them.
+/// It owns every order UTXO the maker creates (nullifier secret 0). The
+/// program signs for it to create them in make, where the maker signs for its
+/// own source, and to spend them in take and cancel.
 pub struct OrderAuthority {
     address: Address,
     #[cfg(any(target_os = "solana", target_arch = "bpf"))]
