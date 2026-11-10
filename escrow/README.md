@@ -78,12 +78,14 @@ compiles through Xark for proving. `zolana zk compile` generates the on-chain
 verifier of each circuit from its verifying key.
 
 The workspace uses Zolana
-[`af9d32923`](https://github.com/helius-labs/zolana/commit/af9d32923c047e17c7a5b2985c92492ae18bfa2e)
-and Xark
-[`aec8530`](https://github.com/ananas-block/xark/commit/aec8530d4526a082daed68ca2dd9c21d47a86f26),
-the Xark revision that Zolana revision pins. Cargo pins both to Git revisions;
-this Zolana revision is newer than the published 0.8.0 crates the gnark
-implementation uses. The program ID is
+[`98948daa1`](https://github.com/helius-labs/zolana/commit/98948daa1d4043515387041ab42e15961799058d)
+and Xark [0.3.0](https://crates.io/crates/xark/0.3.0) from crates.io, the
+Xark release that Zolana revision depends on. Cargo pins Zolana to a Git
+revision; it is newer than the published 0.8.0 crates the gnark
+implementation uses. The Zolana and Xark CLIs are built from that Zolana
+revision, whose `xark-cli` comes from the Xark fork at
+[`13c3f0c`](https://github.com/ananas-block/xark/commit/13c3f0c28eb202bc34f075ee5414a01c3cac51b8).
+The program ID is
 `42uWG786CJAdtdZy5KEEtE7QCuSHjVFu5ZAq32Z41hDD`.
 
 What differs from the gnark implementation, within the spec:
@@ -135,8 +137,9 @@ What differs from the gnark implementation, within the spec:
 Use Rust 1.95.0 (pinned in `xark/rust-toolchain.toml`, which fixes the compiler
 that generates the checked bytecode), Agave with SBF platform tools v1.54, and
 Go for the localnet services. The setup script checks out the SDK under
-`xark/.tools/`, checks that the SDK and this workspace pin the same Xark
-revision, and builds the Zolana and Xark CLIs. Run from `escrow/xark/`:
+`xark/.tools/`, checks that this workspace pins the same Zolana revision and
+that the SDK's `xark-cli` comes from the pinned Xark fork revision, and builds
+the Zolana and Xark CLIs. Run from `escrow/xark/`:
 
 ```bash
 scripts/setup-zk-tools.sh

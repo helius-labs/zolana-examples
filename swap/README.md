@@ -190,12 +190,13 @@ the fields:
 One Cargo workspace. Use Rust 1.95.0 (`rust-toolchain.toml`), Agave with SBF
 platform tools v1.54, and Go for the localnet services. The workspace pins
 Zolana
-[`af9d32923`](https://github.com/helius-labs/zolana/commit/af9d32923c047e17c7a5b2985c92492ae18bfa2e)
-and Xark
-[`aec8530`](https://github.com/ananas-block/xark/commit/aec8530d4526a082daed68ca2dd9c21d47a86f26),
-the Xark revision that Zolana revision pins. The setup script checks out the
-SDK under `.tools/`, checks that the SDK and this workspace pin the same Xark
-revision, and builds the Zolana and Xark CLIs. Run the commands below from
+[`98948daa1`](https://github.com/helius-labs/zolana/commit/98948daa1d4043515387041ab42e15961799058d)
+and uses Xark [0.3.0](https://crates.io/crates/xark/0.3.0) from crates.io, the
+Xark release that Zolana revision depends on. The setup script checks out the
+SDK under `.tools/`, checks that this workspace pins the same Zolana revision
+and that the SDK's `xark-cli` comes from the Xark fork at
+[`13c3f0c`](https://github.com/ananas-block/xark/commit/13c3f0c28eb202bc34f075ee5414a01c3cac51b8),
+and builds the Zolana and Xark CLIs. Run the commands below from
 `swap/xark/`.
 
 ```bash

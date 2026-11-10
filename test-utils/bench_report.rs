@@ -33,8 +33,8 @@ const GNARK_PROVER_NOTE: &str = "The gnark prover keeps the compiled constraint 
 parsed proving key in memory for the life of the process.";
 
 const XARK_IMPLEMENTATION: &str = "Xark (Rust circuits, spr program SDK)";
-const XARK_SDK: &str = "Zolana af9d32923, Xark aec8530";
-const XARK_SHIELDED_POOL_PROGRAM: &str = "Zolana af9d32923";
+const XARK_SDK: &str = "Zolana 98948daa1, Xark 0.3.0";
+const XARK_SHIELDED_POOL_PROGRAM: &str = "Zolana 98948daa1";
 const XARK_PROVER_NOTE: &str =
     "The Xark prover streams the proving key from its file during each proof.";
 

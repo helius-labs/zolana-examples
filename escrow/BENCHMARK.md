@@ -9,8 +9,8 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 | Field | gnark | Xark |
 | ----- | ----- | ---- |
 | Implementation | gnark (Go circuits, spr-gnark-ffi-prover) | Xark (Rust circuits, spr program SDK) |
-| SDK | Zolana Rust SDK 0.8.0 | Zolana af9d32923, Xark aec8530 |
-| Shielded-pool program | Zolana Rust SDK 0.8.0 | Zolana af9d32923 |
+| SDK | Zolana Rust SDK 0.8.0 | Zolana 98948daa1, Xark 0.3.0 |
+| Shielded-pool program | Zolana Rust SDK 0.8.0 | Zolana 98948daa1 |
 | Machine | Apple M5 Pro, 18 cores, Darwin 25.6.0 (aarch64) | Apple M5 Pro, 18 cores, Darwin 25.6.0 (aarch64) |
 
 ## Circuit size
@@ -32,10 +32,10 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 
 | Circuit | Metric | gnark | Xark | Delta |
 | ------- | ------ | ----- | ---- | ----- |
-| escrow | Key load (ms) | 50 | 117 | +67 (+134.0%) |
-| escrow | Warm proving time (ms) | 10 | 196 | +186 (+1860.0%) |
-| withdraw | Key load (ms) | 41 | 83 | +42 (+102.4%) |
-| withdraw | Warm proving time (ms) | 9 | 142 | +133 (+1477.8%) |
+| escrow | Key load (ms) | 50 | 121 | +71 (+142.0%) |
+| escrow | Warm proving time (ms) | 10 | 203 | +193 (+1930.0%) |
+| withdraw | Key load (ms) | 41 | 86 | +45 (+109.8%) |
+| withdraw | Warm proving time (ms) | 9 | 148 | +139 (+1544.4%) |
 
 ## Instruction circuit
 
@@ -48,10 +48,10 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| escrow | Total CU | 246,456 | 247,011 | +555 (+0.2%) |
+| escrow | Total CU | 246,456 | 249,599 | +3,143 (+1.3%) |
 | escrow | Verify CU | 94,519 | 94,730 | +211 (+0.2%) |
-| escrow | SPP CPI CU | 145,138 | 142,187 | -2,951 (-2.0%) |
-| withdraw | Total CU | 239,122 | 239,480 | +358 (+0.1%) |
+| escrow | SPP CPI CU | 145,138 | 143,275 | -1,863 (-1.3%) |
+| withdraw | Total CU | 239,122 | 240,980 | +1,858 (+0.8%) |
 | withdraw | Verify CU | 94,526 | 94,702 | +176 (+0.2%) |
 | withdraw | SPP CPI CU | 139,885 | 141,271 | +1,386 (+1.0%) |
 
@@ -59,12 +59,12 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| escrow | Warm circuit proof (ms) | 10 | 196 | +186 (+1860.0%) |
-| escrow | Warm SPP proof (ms) | 103 | 60 | -43 (-41.7%) |
-| escrow | Warm total proving (ms) | 114 | 256 | +142 (+124.6%) |
-| withdraw | Warm circuit proof (ms) | 9 | 142 | +133 (+1477.8%) |
-| withdraw | Warm SPP proof (ms) | 61 | 61 | 0 (0.0%) |
-| withdraw | Warm total proving (ms) | 71 | 203 | +132 (+185.9%) |
+| escrow | Warm circuit proof (ms) | 10 | 203 | +193 (+1930.0%) |
+| escrow | Warm SPP proof (ms) | 103 | 64 | -39 (-37.9%) |
+| escrow | Warm total proving (ms) | 114 | 267 | +153 (+134.2%) |
+| withdraw | Warm circuit proof (ms) | 9 | 148 | +139 (+1544.4%) |
+| withdraw | Warm SPP proof (ms) | 61 | 64 | +3 (+4.9%) |
+| withdraw | Warm total proving (ms) | 71 | 212 | +141 (+198.6%) |
 
 ## Transaction size
 

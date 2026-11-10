@@ -3,8 +3,8 @@
 set -euo pipefail
 
 escrow=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-zolana_revision=af9d32923c047e17c7a5b2985c92492ae18bfa2e
-xark_revision=aec8530d4526a082daed68ca2dd9c21d47a86f26
+zolana_revision=98948daa1d4043515387041ab42e15961799058d
+xark_revision=13c3f0c28eb202bc34f075ee5414a01c3cac51b8
 
 checkout() {
     local repository=$1 revision=$2 directory=$3
@@ -12,6 +12,9 @@ checkout() {
         mkdir -p "$directory"
         git -C "$directory" init --quiet
         git -C "$directory" remote add origin "$repository"
+    fi
+    # Fetch on a fresh checkout and when a pin bump left an older revision.
+    if [[ $(git -C "$directory" rev-parse --verify --quiet HEAD) != "$revision" ]]; then
         git -C "$directory" fetch --depth 1 origin "$revision"
         git -C "$directory" checkout --quiet --detach FETCH_HEAD
     fi
@@ -36,7 +39,9 @@ check_pins() {
 
 checkout https://github.com/helius-labs/zolana.git "$zolana_revision" "$escrow/.tools/zolana"
 check_pins https://github.com/helius-labs/zolana "$zolana_revision" "$escrow/Cargo.toml"
-# The SDK, its CLI and the generated circuit crates must share one Xark.
+# The SDK, the generated circuit crates and this workspace share the crates.io
+# Xark 0.3.0 release. Only Zolana's xark-cli comes from the ananas-block/xark
+# fork, so this pin only guards the CLI build.
 check_pins https://github.com/ananas-block/xark "$xark_revision" \
     "$escrow/Cargo.toml" "$escrow/.tools/zolana/Cargo.toml"
 
