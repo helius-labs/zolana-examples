@@ -1,6 +1,8 @@
 use anyhow::{ensure, Result};
 use spr_keypair::{ShieldedAddress, X25519Pubkey};
-use spr_program::{circuit::DataHash, ClientInputs, DataUtxo, EncryptionCodec, InputRecords};
+use spr_program::{
+    circuit::DataHash, ClientInputs, DataUtxo, EncryptionCodec, InputRecords, ProgramOwner,
+};
 use spr_transaction::{AssetRegistry, Mint, SppProofOutputUtxo, WalletUtxo};
 use swap_program::circuits::{self, OrderTermsClient};
 
@@ -37,6 +39,11 @@ impl OrderTerms {
             expiry: self.expiry,
             taker_pk_fe: self.taker.unwrap_or_default(),
         })
+    }
+
+    /// The maker's order-authority PDA, the owner of the order UTXO.
+    pub fn order_authority(&self) -> Result<ProgramOwner> {
+        Ok(order_authority(&self.maker.solana_address().map_err(err)?))
     }
 
     /// The order UTXO's state, which the SDK hashes and encodes.
@@ -85,7 +92,7 @@ fn resolve_mint(registry: &AssetRegistry, asset: &[u8; 32]) -> Result<Mint> {
         .map_err(err)
 }
 
-/// The order UTXO: `source_amount` of `source_mint` owned by the
+/// The order UTXO: `source_amount` of `source_mint` owned by the maker's
 /// order-authority PDA under the zero nullifier key, with the terms as its
 /// state. Its opening (terms and blinding) is the complete spend capability;
 /// the program signs for the PDA only through `take` and `cancel`.
@@ -124,7 +131,12 @@ impl OrderUtxo {
             asset: self.source_mint,
             amount: self.source_amount,
             blinding: self.blinding,
-            owner_address: Some(order_authority().address(viewing_pubkey).map_err(err)?),
+            owner_address: Some(
+                self.terms
+                    .order_authority()?
+                    .address(viewing_pubkey)
+                    .map_err(err)?,
+            ),
             ..Default::default()
         }
         .with_utxo_data(payload, data_hash))
@@ -141,7 +153,8 @@ impl OrderUtxo {
     /// Anyone holding the opening can build it; spending needs the PDA
     /// signature only the program gives.
     pub fn to_input_utxo(&self, tree_id: u16, leaf_index: u64) -> Result<WalletUtxo> {
-        order_authority()
+        self.terms
+            .order_authority()?
             .input(
                 &self.output_utxo(self.terms.maker.viewing_pubkey)?,
                 tree_id,

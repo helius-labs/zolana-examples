@@ -15,8 +15,12 @@ use swap_program::{
         make::{MakeIxData, MakeProof},
         take::{TakeIxData, TakeProof},
     },
-    tag, ORDER_AUTHORITY_PDA_SEED,
+    order_authority_seeds, tag,
 };
+
+/// The maker the fixture's order authority is derived from: the cancel's
+/// maker signer and the take's `maker` argument.
+pub const MAKER: [u8; 32] = [22; 32];
 
 const SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/deploy");
 
@@ -122,6 +126,7 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
                 b: [11; 64],
                 c: [12; 32],
             },
+            viewing_pubkey: [13; 33],
             transact,
         }),
         Wrapper::Take => wincode::serialize(&TakeIxData {
@@ -130,6 +135,7 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
                 b: [11; 64],
                 c: [12; 32],
             },
+            maker: MAKER,
             transact,
         }),
         Wrapper::Cancel => wincode::serialize(&CancelIxData {
@@ -150,11 +156,12 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
 
 pub fn fixture(wrapper: Wrapper) -> (Instruction, Vec<(Pubkey, Account)>) {
     let payer = Pubkey::new_from_array([21; 32]);
-    let maker = Pubkey::new_from_array([22; 32]);
+    let maker = Pubkey::new_from_array(MAKER);
     let tree = Pubkey::new_from_array([23; 32]);
     let spp_id = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
     let swap_id = Pubkey::new_from_array(*swap_program::ID.as_array());
-    let (order_authority, _) = Pubkey::find_program_address(&[ORDER_AUTHORITY_PDA_SEED], &swap_id);
+    let (order_authority, _) =
+        Pubkey::find_program_address(&order_authority_seeds(&MAKER), &swap_id);
 
     let mut metas = vec![AccountMeta::new(payer, true)];
     let mut accounts = vec![(payer, account(1_000_000_000))];

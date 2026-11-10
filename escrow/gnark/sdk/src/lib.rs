@@ -12,12 +12,16 @@ pub use timelock_escrow_program::{
     tag, ESCROW_AUTHORITY_PDA_SEED,
 };
 
-/// The escrow-authority PDA the timelock escrow program signs with
-/// (`invoke_signed`) to spend an escrow UTXO. It owns the escrow UTXO
-/// (`PublicKey::from_ed25519(pda)`), holds no data, and is never created.
-pub fn escrow_authority_pda() -> Pubkey {
-    let (pda, _bump) =
-        Pubkey::find_program_address(&[ESCROW_AUTHORITY_PDA_SEED], &timelock_escrow_program::ID);
+/// The creator's escrow-authority PDA (seeds `[ESCROW_AUTHORITY_PDA_SEED,
+/// creator]`) the timelock escrow program signs with (`invoke_signed`) to
+/// spend the creator's escrow UTXOs. It owns them
+/// (`PublicKey::from_ed25519(pda)`, nullifier secret 0), holds no data, and is
+/// never created. A creator finds its escrow UTXOs by deriving it.
+pub fn escrow_authority_pda(creator: &Pubkey) -> Pubkey {
+    let (pda, _bump) = Pubkey::find_program_address(
+        &timelock_escrow_program::escrow_authority_seeds(creator),
+        &timelock_escrow_program::ID,
+    );
     pda
 }
 

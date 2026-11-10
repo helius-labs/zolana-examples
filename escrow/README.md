@@ -60,7 +60,7 @@ for circuit in escrow withdraw; do
     cargo run --release --manifest-path prover/Cargo.toml --bin timelock-escrow-prover-setup -- \
         "$circuit" "$PWD/build/gnark/$circuit" --insecure-test-keys
 done
-CARGO_TARGET_DIR=target cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program
+CARGO_TARGET_DIR="$PWD/target" cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program
 cargo test --release --manifest-path test/Cargo.toml --test bench_cu -- --ignored --nocapture
 ```
 
@@ -93,20 +93,23 @@ What differs from the gnark implementation, within the spec:
   them back from it; the SDK hashes them into the data hash
   (`Poseidon(DATA, Poseidon(discriminator, owner_hash, unlock))`) and encrypts
   them as the escrow UTXO's data. The SDK finds the creator's open escrows by
-  decrypting the escrow-authority outputs (`state::open_escrows`), and
-  withdraw takes the decoded escrow UTXO, so the terms never travel out of
-  band.
+  fetching the transactions tagged with the creator's escrow-authority PDA and
+  decrypting them (`state::open_escrows`), and withdraw takes the decoded
+  escrow UTXO, so the terms never travel out of band.
 - The escrow source is the creator's own UTXO, not one owned by the
-  escrow-authority PDA: the creator signs the SPP transact for it, and the
-  escrow-authority PDA signs as the owner of the escrow UTXO, which carries
-  data. The change is the source's remainder, which the SDK returns to the
-  source owner.
-- The proofs' single public input is the SDK's public hash:
-  `Poseidon(owner_pk_field, transaction_hash)` for escrow and
-  `Poseidon(unlock, owner_pk_field, transaction_hash)` for withdraw, where
-  `owner_pk_field` is `hash_bytes` of the creator signer and
-  `transaction_hash` is `private_tx_hash` (neither transaction moves public
-  funds). The program recomputes both from its accounts and instruction data.
+  creator's escrow-authority PDA: the creator signs the SPP transact for it,
+  and the PDA signs as the owner of the escrow UTXO, which carries data. The
+  change is the source's remainder, which the SDK returns to the source owner.
+- The proofs' single public input is the SDK's public hash over
+  `(owner_pk_field, escrow_owner)` for escrow and `(unlock, owner_pk_field)`
+  for withdraw, each with `transaction_hash`, where `owner_pk_field` is
+  `solana_owner_identity` of the creator signer, `escrow_owner` is the address
+  hash of the creator's escrow-authority PDA owner with the `viewing_pubkey`
+  from the instruction data, and `transaction_hash` is `private_tx_hash`
+  (neither transaction moves public funds). The program recomputes both from
+  its accounts and instruction data. gnark binds only the PDA's owner hash;
+  Xark binds the whole escrow owner address, as Zolana's reference escrow
+  does.
 - The escrow transaction is proved at the SPP `(1, 2)` shape, without a dummy
   input. The output blindings derive from the transaction's first nullifier,
   its blinding seed and the output slot.

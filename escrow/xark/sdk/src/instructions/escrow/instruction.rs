@@ -12,6 +12,9 @@ pub struct Escrow {
     /// The SPP tree: output tree, and input tree of every tree context.
     pub tree: Address,
     pub escrow_proof: EscrowProof,
+    /// The escrow UTXO address's viewing pubkey; see
+    /// [`EscrowIxData::viewing_pubkey`].
+    pub viewing_pubkey: [u8; 33],
     pub spp_proof: TransactIxData,
 }
 
@@ -21,18 +24,21 @@ impl Escrow {
             payer,
             tree,
             escrow_proof,
+            viewing_pubkey,
             spp_proof,
         } = self;
         let ix_data = EscrowIxData {
             proof: escrow_proof,
+            viewing_pubkey,
             transact: spp_proof,
         };
-        // The creator signs for the source it owns; the escrow-authority PDA
+        // The creator signs for the source it owns; its escrow-authority PDA
         // follows for the escrow UTXO's data.
         escrow_instruction(
             tag::ESCROW,
             vec![AccountMeta::new(payer, true)],
             vec![payer],
+            payer,
             payer,
             tree,
             &ix_data.transact,

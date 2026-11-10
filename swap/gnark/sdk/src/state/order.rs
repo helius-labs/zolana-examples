@@ -1,9 +1,11 @@
 use anyhow::Result;
 use solana_address::Address;
+use solana_pubkey::Pubkey;
 use spr_hasher::primitives::{hash_bytes, solana_owner_identity};
 use spr_keypair::{
-    constants::BLINDING_LEN, hash::poseidon, CompressedShieldedAddress, NullifierKey, PublicKey,
-    ShieldedAddress, X25519Pubkey,
+    constants::BLINDING_LEN,
+    hash::{owner_hash, poseidon},
+    CompressedShieldedAddress, NullifierKey, PublicKey, ShieldedAddress, X25519Pubkey,
 };
 use spr_transaction::{
     instructions::transact::SppProofOutputUtxo,
@@ -42,8 +44,9 @@ pub struct PlainTextData {
 }
 
 /// The order UTXO's two representations: the output minted at create time and
-/// the spend consumed at take/cancel time. Both share the order-authority PDA
-/// as the ed25519 owner key and the zero-secret nullifier key -- the synthetic
+/// the spend consumed at take/cancel time. Both share the maker's
+/// order-authority PDA (derived from `terms.destination`'s Solana key) as the
+/// ed25519 owner key and the zero-secret nullifier key -- the synthetic
 /// shielded address that the swap program signs for via `invoke_signed` -- so
 /// their utxo hashes are byte-identical.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,10 +126,24 @@ pub fn taker_pk_fe(taker: Option<&Address>) -> Result<[u8; 32]> {
     taker.map_or(Ok([0; 32]), DataHash::data_hash)
 }
 
-// make mints to the synthetic order owner; take and cancel spend from it.
+// make mints to the maker's order-authority PDA; take and cancel spend from it.
 impl OrderUtxo {
-    fn pda_owner() -> PublicKey {
-        PublicKey::from_ed25519(crate::order_authority_pda().as_array())
+    /// The maker's Solana pubkey: the signing key of the order destination,
+    /// which the make, take and cancel instructions derive the PDA from.
+    pub fn maker(&self) -> Result<Pubkey> {
+        self.terms.destination.solana_address().map_err(err)
+    }
+
+    fn pda_owner(&self) -> Result<PublicKey> {
+        let order_authority = crate::order_authority_pda(&self.maker()?);
+        Ok(PublicKey::from_ed25519(order_authority.as_array()))
+    }
+
+    /// The owner hash of the maker's order-authority PDA with the zero-secret
+    /// nullifier key; the make proof binds the order UTXO's owner to it.
+    pub fn owner_hash(&self) -> Result<[u8; 32]> {
+        let nullifier_pubkey = Self::nullifier_key().pubkey().map_err(err)?;
+        owner_hash(&self.pda_owner()?, &nullifier_pubkey).map_err(err)
     }
 
     /// Constant nullifier key so that both counterparties can spend this utxo.
@@ -164,12 +181,12 @@ impl PlainTextData {
 // slots fetched from the indexer.
 impl OrderUtxo {
     /// The taker's viewing pubkey makes the order slot ciphertext
-    /// readable by the taker; its `owner_hash` is a constant across orders.
+    /// readable by the taker; its `owner_hash` is the same for all of a maker's orders.
     pub fn output_utxo(&self, taker_viewing_pubkey: X25519Pubkey) -> Result<SppProofOutputUtxo> {
         let data_hash = self.terms.data_hash()?;
         let nullifier_pubkey = Self::nullifier_key().pubkey().map_err(err)?;
         let owner_address = ShieldedAddress {
-            signing_pubkey: Self::pda_owner(),
+            signing_pubkey: self.pda_owner()?,
             nullifier_pubkey,
             viewing_pubkey: taker_viewing_pubkey,
         };
@@ -200,7 +217,7 @@ impl OrderUtxo {
     /// afterwards, because both the commitment and the nullifier fold it in.
     pub fn to_input_utxo(&self, tree_id: u16, leaf_index: u64) -> Result<SppProofInputUtxo> {
         let utxo = Utxo {
-            owner: Self::pda_owner(),
+            owner: self.pda_owner()?,
             asset: self.source_mint,
             amount: self.source_amount,
             blinding: self.blinding,

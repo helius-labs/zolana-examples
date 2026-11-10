@@ -6568,6 +6568,7 @@ dependencies = [
  "ark-serialize 0.6.0",
  "borsh",
  "groth16-solana",
+ "pinocchio 0.11.2",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6581,6 +6582,8 @@ dependencies = [
  "spr-keypair",
  "spr-macros",
  "spr-transaction",
+ "spr-tree",
+ "thiserror 2.0.20",
  "wincode",
  "zeroize",
 ]

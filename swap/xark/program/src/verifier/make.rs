@@ -5,12 +5,13 @@ include!("make.vk.rs");
 
 pub struct PublicInputs {
     pub maker_owner_pk_field: [u8; 32],
+    pub order_owner: [u8; 32],
 }
 
 #[rustfmt::skip]
 impl PublicInputs {
     pub fn hash(&self, transaction_hash: &[u8; 32]) -> Result<[u8; 32], VerifyError> {
-        public_hash(&[Field::Hash(&self.maker_owner_pk_field)], transaction_hash)
+        public_hash(&[Field::Hash(&self.maker_owner_pk_field), Field::Hash(&self.order_owner)], transaction_hash)
     }
 }
 

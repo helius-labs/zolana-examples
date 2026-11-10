@@ -2,7 +2,7 @@ use light_program_profiler::profile;
 use pinocchio::{
     error::ProgramError,
     sysvars::{clock::Clock, Sysvar},
-    AccountView, ProgramResult,
+    AccountView, Address, ProgramResult,
 };
 use spr_account_checks::AccountIterator;
 use spr_hasher::{Hasher, Poseidon};
@@ -12,7 +12,7 @@ use wincode::{SchemaRead, SchemaWrite};
 use crate::{
     error::SwapError,
     instructions::{
-        shared::{check_within_window, cpi_spp_transact_signed, u64_right_align},
+        shared::{check_within_window, u64_right_align, OrderAuthority},
         verifier::{verify_groth16, CompressedGroth16Proof},
     },
 };
@@ -27,6 +27,10 @@ pub struct TakeProof {
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct TakeIxData {
     pub proof: TakeProof,
+    /// The order's maker (the marker's `maker_pubkey`). The program signs for
+    /// this maker's order-authority PDA; SPP rejects the spend unless that PDA
+    /// owns the order input.
+    pub maker: [u8; 32],
     pub transact: TransactIxData,
 }
 
@@ -68,8 +72,11 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
     let mut iter = AccountIterator::new(accounts);
     iter.next_signer_mut("payer")?;
 
-    let TakeIxData { proof, transact } =
-        wincode::deserialize_exact(data).map_err(|_| SwapError::InvalidInstructionData)?;
+    let TakeIxData {
+        proof,
+        maker,
+        transact,
+    } = wincode::deserialize_exact(data).map_err(|_| SwapError::InvalidInstructionData)?;
 
     let clock = Clock::get()?;
     check_within_window(clock.unix_timestamp, transact.expiry_unix_ts)?;
@@ -91,5 +98,6 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
         .serialize()
         .map_err(|_| SwapError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
-    cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    OrderAuthority::find(&Address::new_from_array(maker))
+        .cpi_spp_transact_signed(spp_accounts, &transact_bytes)
 }

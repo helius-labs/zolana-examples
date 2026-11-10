@@ -171,6 +171,7 @@ fn bench_make(
     let (make_proof, circuit) = measure_circuit(CircuitId::Make, &transaction.proof_inputs);
     let ix = Make {
         payer: payer.pubkey(),
+        viewing_pubkey: transaction.viewing_pubkey,
         tree,
         make_proof,
         spp_proof,
@@ -226,6 +227,7 @@ fn bench_take(
     let (take_proof, circuit) = measure_circuit(CircuitId::Take, &transaction.proof_inputs);
     let ix = Take {
         payer: taker_payer.pubkey(),
+        maker: transaction.maker,
         tree,
         take_proof,
         spp_proof,

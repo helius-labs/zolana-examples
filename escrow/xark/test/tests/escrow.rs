@@ -15,17 +15,23 @@ use timelock_escrow_sdk::{
 };
 use timelock_escrow_test::assert_escrow_error;
 
+/// The escrow instruction data's viewing pubkey: after the tag and the
+/// 128-byte proof.
+const ESCROW_VIEWING_PUBKEY: core::ops::Range<usize> = 129..162;
+
 // Timelock escrow lock-then-withdraw on the shielded pool, driven against a
 // real localnet (validator + Photon indexer + prover) that `setup()` starts.
 //
 // Flow:
 //   1. Fund (in setup): 0.5 SOL is shielded to the creator.
 //   2. Escrow: the creator spends that 0.5 SOL UTXO -> change 0.2 SOL back to
-//      itself + escrow UTXO 0.3 SOL (owned by the escrow-authority PDA, its
-//      terms as encrypted data, committed unlock timestamp already in the
-//      past). Xark escrow proof, v1 transaction.
-//   3. Withdraw: the creator finds its open escrow by decrypting the
-//      escrow-authority outputs, which decode to the terms, and spends the
+//      itself + escrow UTXO 0.3 SOL (owned by the creator's escrow-authority
+//      PDA, seeds [b"escrow_authority", creator], its terms as encrypted
+//      data, committed unlock timestamp already in the past). Xark escrow
+//      proof, v1 transaction. An escrow to another viewing pubkey than the
+//      proof's is refused first.
+//   3. Withdraw: the creator finds its open escrow by decrypting the outputs
+//      of its escrow-authority PDA, which decode to the terms, and spends the
 //      escrow UTXO -> source output 0.3 SOL back to itself. Xark withdraw
 //      proof, v1 transaction. Another signer and a missing escrow authority
 //      are refused first.
@@ -61,6 +67,22 @@ fn escrow_then_withdraw() -> Result<()> {
     let escrow_ix = escrow_transaction
         .prove(client.indexer(), localnet.tree, &creator.shielded)?
         .instruction()?;
+    let other = Actor::new(1)?;
+
+    // The program derives the escrow UTXO's address from the creator signer
+    // and the instruction's viewing pubkey: another viewing pubkey changes
+    // the escrow proof's escrow_owner public input.
+    let mut other_viewer_ix = escrow_ix.clone();
+    let viewing_pubkey = other_viewer_ix
+        .data
+        .get_mut(ESCROW_VIEWING_PUBKEY)
+        .ok_or_else(|| anyhow!("escrow data has no viewing pubkey"))?;
+    viewing_pubkey.copy_from_slice(other.address()?.viewing_pubkey.as_bytes());
+    assert_escrow_error(
+        "an escrow to another viewing pubkey",
+        send(client, &[&creator.solana], other_viewer_ix),
+        TimelockEscrowError::ProofVerificationFailed,
+    );
 
     let signature = send(client, &[&creator.solana], escrow_ix)?;
     client
@@ -123,7 +145,6 @@ fn escrow_then_withdraw() -> Result<()> {
         .instruction()?;
 
     // Only the creator's signature verifies against the withdraw proof.
-    let other = Actor::new(1)?;
     let mut forged_ix = withdraw_ix.clone();
     forged_ix
         .accounts

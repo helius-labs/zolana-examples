@@ -4,11 +4,16 @@ use pinocchio::{
     error::ProgramError,
     AccountView, Address, ProgramResult,
 };
+use spr_hasher::primitives::solana_owner_identity;
 use spr_interface::instruction::instruction_data::transact::TransactIxDataRef;
-use spr_program::cpi::{SppTransactAccounts, TransactAccountsError};
+use spr_program::{
+    cpi::{SppTransactAccounts, TransactAccountsError},
+    program::PdaOwner,
+    verifier::address_hash,
+};
 use wincode::{config::DefaultConfig, SchemaReadOwned};
 
-use crate::error::SwapError;
+use crate::{error::SwapError, verifier::make};
 
 /// Instruction data: the instruction's own `args`, then the SPP `transact`
 /// data. The program reads the transact fields it checks in place and
@@ -52,25 +57,66 @@ pub fn check_after_window(now: i64, expiry_unix_ts: u64) -> ProgramResult {
     }
 }
 
-/// Invokes SPP `transact` with `spp_accounts`, signed by the order-authority
-/// PDA, which must be among them.
-#[inline(never)]
-#[profile]
-pub fn cpi_spp_transact_signed(
-    spp_accounts: &[AccountView],
-    transact_bytes: &[u8],
-) -> ProgramResult {
-    let (order_authority, bump) =
-        Address::find_program_address(&[crate::ORDER_AUTHORITY_PDA_SEED], &crate::ID);
-    let signer_pdas = [&order_authority];
-    let spp =
-        SppTransactAccounts::new(spp_accounts, &signer_pdas).map_err(transact_accounts_error)?;
-    let bump = [bump];
-    let seeds = [
-        Seed::from(crate::ORDER_AUTHORITY_PDA_SEED),
-        Seed::from(&bump),
-    ];
-    spp.invoke::<16>(transact_bytes, &[Signer::from(&seeds)])
+/// A maker's order-authority PDA, `[ORDER_AUTHORITY_PDA_SEED, maker]`: the
+/// owner of the maker's order UTXOs under nullifier secret 0. Only the program
+/// signs for it, so only take and cancel spend an order UTXO.
+pub struct OrderAuthority {
+    address: Address,
+    maker: [u8; 32],
+    bump: u8,
+}
+
+impl OrderAuthority {
+    pub fn find(maker: &[u8; 32]) -> Self {
+        let (address, bump) =
+            Address::find_program_address(&crate::order_authority_seeds(maker), &crate::ID);
+        Self {
+            address,
+            maker: *maker,
+            bump,
+        }
+    }
+
+    /// `Poseidon(solana_owner_identity(pda), Poseidon(0))`.
+    fn owner_hash(&self) -> Result<[u8; 32], SwapError> {
+        Ok(*PdaOwner::new(&self.address)
+            .map_err(|_| SwapError::HashingFailed)?
+            .owner_hash())
+    }
+
+    /// The make proof's public inputs: the maker's owner identity, and this
+    /// PDA's address with the order's `viewing_pubkey` as the order UTXO's
+    /// owner.
+    pub fn make_public_inputs(
+        &self,
+        viewing_pubkey: &[u8; 33],
+    ) -> Result<make::PublicInputs, SwapError> {
+        Ok(make::PublicInputs {
+            maker_owner_pk_field: solana_owner_identity(&self.maker)?,
+            order_owner: address_hash(&self.owner_hash()?, viewing_pubkey)?,
+        })
+    }
+
+    /// Invokes SPP `transact` with `spp_accounts`, signed by this PDA, which
+    /// must be among them.
+    #[inline(never)]
+    #[profile]
+    pub fn cpi_spp_transact_signed(
+        &self,
+        spp_accounts: &[AccountView],
+        transact: &[u8],
+    ) -> ProgramResult {
+        let signer_pdas = [&self.address];
+        let spp = SppTransactAccounts::new(spp_accounts, &signer_pdas)
+            .map_err(transact_accounts_error)?;
+        let bump = [self.bump];
+        let seeds = [
+            Seed::from(crate::ORDER_AUTHORITY_PDA_SEED),
+            Seed::from(&self.maker),
+            Seed::from(&bump),
+        ];
+        spp.invoke::<16>(transact, &[Signer::from(&seeds)])
+    }
 }
 
 fn transact_accounts_error(error: TransactAccountsError) -> ProgramError {

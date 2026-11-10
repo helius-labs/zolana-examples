@@ -2,11 +2,10 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use light_program_profiler::profile;
 use pinocchio::{AccountView, ProgramResult};
 use spr_account_checks::AccountIterator;
-use spr_hasher::primitives::solana_owner_identity;
 use spr_interface::instruction::instruction_data::transact::TransactIxData;
 use wincode::{SchemaRead, SchemaWrite};
 
-use crate::{error::SwapError, instructions::shared::cpi_spp_transact_signed, verifier::make};
+use crate::{error::SwapError, instructions::shared::OrderAuthority, verifier::make};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshDeserialize, BorshSerialize)]
 pub struct MarkerData {
@@ -19,14 +18,19 @@ pub use spr_program::CompressedProof as MakeProof;
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct MakeIxData {
     pub proof: MakeProof,
+    /// The viewing key of the order UTXO's address, the taker's, which the
+    /// order output is encrypted to. The make proof's public `order_owner`
+    /// is the maker's order-authority PDA with this viewing key.
+    pub viewing_pubkey: [u8; 33],
     pub transact: TransactIxData,
 }
 
 const ORDER_OUTPUT_INDEX: usize = 1;
 
-/// 1. Check the maker signer.
+/// 1. Check the maker signer and derive its order-authority PDA.
 /// 2. Decode the instruction.
-/// 3. Verify the make proof against the transaction and the maker.
+/// 3. Verify the make proof against the transaction, the maker and the order
+///    UTXO's owner, the maker's order-authority PDA.
 /// 4. Write the marker message.
 /// 5. Invoke SPP with the order-authority PDA signer, which authorizes the
 ///    order output; the maker signs for the source it owns.
@@ -37,7 +41,7 @@ pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
     // identity against this pubkey, so the marker names the order's maker.
     let mut iter = AccountIterator::new(accounts);
     let maker_pubkey = *iter.next_signer_mut("payer")?.address().as_array();
-    let maker_owner_pk_field = solana_owner_identity(&maker_pubkey).map_err(SwapError::from)?;
+    let order_authority = OrderAuthority::find(&maker_pubkey);
 
     // 2. Decode the instruction. Unlike take and cancel, make decodes the
     // owned transact data: step 4 writes the marker into a message, which
@@ -45,11 +49,15 @@ pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
     // the transact data instead of forwarding the client's bytes.
     let MakeIxData {
         proof,
+        viewing_pubkey,
         mut transact,
     } = wincode::deserialize_exact(data).map_err(|_| SwapError::InvalidInstructionData)?;
 
-    // 3. Verify the make proof against the transaction and the maker.
-    verify_make_proof(&proof, maker_owner_pk_field, &transact.private_tx_hash)?;
+    // 3. Verify the make proof against the transaction, the maker and the
+    // order UTXO's owner. SPP accepts a data-bearing output owned by any
+    // owner signer, the maker included; the proof binds it to the PDA.
+    let public_inputs = order_authority.make_public_inputs(&viewing_pubkey)?;
+    verify_make_proof(&proof, public_inputs, &transact.private_tx_hash)?;
 
     // 4. Write the marker message.
     let order_utxo_hash = transact
@@ -72,9 +80,9 @@ pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
         .serialize()
         .map_err(|_| SwapError::InvalidInstructionData)?;
 
-    // 5. Invoke SPP with the order-authority PDA signer.
+    // 5. Invoke SPP with the maker's order-authority PDA signer.
     let spp_accounts = iter.remaining()?;
-    cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    order_authority.cpi_spp_transact_signed(spp_accounts, &transact_bytes)
 }
 
 /// Hashes the make proof's public inputs and verifies the proof.
@@ -82,14 +90,12 @@ pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
 #[profile]
 fn verify_make_proof(
     proof: &MakeProof,
-    maker_owner_pk_field: [u8; 32],
+    public_inputs: make::PublicInputs,
     private_tx_hash: &[u8; 32],
 ) -> ProgramResult {
     make::Verifier {
         proof,
-        public_inputs: make::PublicInputs {
-            maker_owner_pk_field,
-        },
+        public_inputs,
         private_tx_hash,
         transfers: &[],
     }

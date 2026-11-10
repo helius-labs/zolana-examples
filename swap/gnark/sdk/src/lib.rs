@@ -14,11 +14,16 @@ pub use swap_program::{
     tag, ORDER_AUTHORITY_PDA_SEED,
 };
 
-/// The order-authority PDA the swap program signs with (`invoke_signed`) to spend
-/// an order UTXO. It owns the order UTXO (`PublicKey::from_ed25519(pda)`), holds no
-/// data, and is never created.
-pub fn order_authority_pda() -> Pubkey {
-    let (pda, _bump) = Pubkey::find_program_address(&[ORDER_AUTHORITY_PDA_SEED], &swap_program::ID);
+/// The maker's order-authority PDA, seeds `[ORDER_AUTHORITY_PDA_SEED, maker]`.
+/// The swap program signs with it (`invoke_signed`) to spend the maker's order
+/// UTXOs. It owns every order UTXO of that maker
+/// (`PublicKey::from_ed25519(pda)`), so a maker finds its program UTXOs by
+/// deriving it. It holds no data and is never created.
+pub fn order_authority_pda(maker: &Pubkey) -> Pubkey {
+    let (pda, _bump) = Pubkey::find_program_address(
+        &swap_program::order_authority_seeds(maker),
+        &swap_program::ID,
+    );
     pda
 }
 pub(crate) fn err(e: impl core::fmt::Debug) -> anyhow::Error {

@@ -99,12 +99,18 @@ pub fn setup(test: u16) -> Result<TestEnv> {
     let taker_shielded_keypair =
         ShieldedKeypair::from_keypair(SigningKey::from_ed25519_bytes(&taker_seed))?;
 
-    // Fund the actors: shield the maker-funded SPL to the order authority so it
+    // Fund the actors: shield the maker-funded SPL to the maker's order authority so it
     // can authorize the data-bearing order output, and shield the taker's SOL
     // directly to the taker.
     let order_nullifier_key = NullifierKey::from_secret([0u8; BLINDING_LEN]);
+    let maker_pubkey = maker_shielded_keypair
+        .shielded_address()?
+        .solana_address()
+        .map_err(|e| anyhow!("maker solana address: {e:?}"))?;
     let order_authority_address = ShieldedAddress {
-        signing_pubkey: PublicKey::from_ed25519(swap_sdk::order_authority_pda().as_array()),
+        signing_pubkey: PublicKey::from_ed25519(
+            swap_sdk::order_authority_pda(&maker_pubkey).as_array(),
+        ),
         nullifier_pubkey: order_nullifier_key.pubkey()?,
         viewing_pubkey: maker_shielded_keypair.viewing_pubkey(),
     };

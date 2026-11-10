@@ -54,7 +54,10 @@ impl Cancel {
             AccountMeta::new(tree, false),
         ];
         accounts.extend(nullifier_pdas);
-        accounts.push(AccountMeta::new_readonly(order_authority_pda(), false));
+        accounts.push(AccountMeta::new_readonly(
+            order_authority_pda(&maker),
+            false,
+        ));
         let mut instruction_data = vec![tag::CANCEL];
         instruction_data.extend_from_slice(&serialized_ix);
         Ok(Instruction {

@@ -153,15 +153,15 @@ pub fn setup(test: u16) -> Result<TestEnv> {
     })
 }
 
-/// The shielded transactions tagged for the creator or for the escrow
-/// authority's outputs to the creator.
+/// The shielded transactions tagged for the creator or for the outputs of
+/// the creator's escrow-authority PDA.
 pub fn creator_transactions(
     localnet: &FixtureLocalnet,
     creator: &Actor,
 ) -> Result<Vec<ShieldedTransaction>> {
     let tags = vec![
         creator.address()?.confidential_view_tag()?,
-        escrow_authority().confidential_view_tag(),
+        escrow_authority(&creator.solana.pubkey()).confidential_view_tag(),
     ];
     Ok(localnet
         .client

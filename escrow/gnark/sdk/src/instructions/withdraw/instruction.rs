@@ -54,7 +54,10 @@ impl Withdraw {
             AccountMeta::new(tree, false),
         ];
         accounts.extend(nullifier_pdas);
-        accounts.push(AccountMeta::new_readonly(escrow_authority_pda(), false));
+        accounts.push(AccountMeta::new_readonly(
+            escrow_authority_pda(&creator),
+            false,
+        ));
         let mut instruction_data = vec![tag::WITHDRAW];
         instruction_data.extend_from_slice(&serialized_ix);
         Ok(Instruction {

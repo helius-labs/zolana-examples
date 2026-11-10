@@ -35,7 +35,7 @@ wincode = { version = "0.5", features = ["derive"] }
 spr-account-checks = { version = "0.8.0", default-features = false }
 spr-hasher = { version = "0.8.0", default-features = false }
 spr-interface = { version = "0.8.0" }
-spr-program = { version = "0.8.0", features = ["cpi"] }
+spr-program = { version = "0.8.0", features = ["cpi", "compression"] }
 
 [dev-dependencies]
 mollusk-svm = "0.15.0"

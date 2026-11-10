@@ -41,7 +41,7 @@ wincode = { workspace = true }
 spr-account-checks = { workspace = true }
 spr-hasher = { workspace = true }
 spr-interface = { workspace = true }
-spr-program = { workspace = true, features = ["cpi", "verifier"] }
+spr-program = { workspace = true, features = ["cpi", "compression", "verifier"] }
 
 [dev-dependencies]
 mollusk-svm = { workspace = true }

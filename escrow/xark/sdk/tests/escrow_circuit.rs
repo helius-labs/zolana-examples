@@ -1,5 +1,9 @@
 use crate::shared::*;
-use timelock_escrow_program::verifier::escrow::{PublicInputs, Verifier, VERIFYINGKEY};
+use spr_keypair::ShieldedKeypair;
+use timelock_escrow_program::{
+    instructions::shared::EscrowAuthority,
+    verifier::escrow::{PublicInputs, Verifier, VERIFYINGKEY},
+};
 use timelock_escrow_sdk::{escrow_authority, proof::CircuitId, state::escrow_utxo};
 
 const CIRCUIT: CircuitId = CircuitId::Escrow;
@@ -28,6 +32,7 @@ fn escrow_prove_verify() {
     let change = outputs.first().unwrap();
     let escrow = outputs.get(1).unwrap();
     let terms = terms(&inputs.creator);
+    let creator = creator_address(&inputs.creator);
     assert_eq!(
         (
             change
@@ -41,7 +46,9 @@ fn escrow_prove_verify() {
                 .map(|address| address.owner_hash().unwrap()),
             escrow.asset,
             escrow.amount,
-            escrow_utxo(escrow, OUTPUT_TREE_ID, 0).unwrap().data,
+            escrow_utxo(&creator, escrow, OUTPUT_TREE_ID, 0)
+                .unwrap()
+                .data,
             outputs.len(),
         ),
         (
@@ -49,7 +56,7 @@ fn escrow_prove_verify() {
             mint(),
             750,
             None,
-            Some(escrow_authority().owner_hash().unwrap()),
+            Some(escrow_authority(&creator).owner_hash().unwrap()),
             mint(),
             250,
             terms,
@@ -62,7 +69,7 @@ fn escrow_prove_verify() {
     let (_, proof) = prove_and_verify(CIRCUIT, &inputs, &VERIFYINGKEY);
     let private_tx_hash = finalized.padding_independent_private_tx_hash().unwrap();
     let signer = field_bytes(owner_pk_field(&inputs.creator));
-    verify(&proof, signer, &private_tx_hash).expect(
+    verify(&proof, &inputs.creator, signer, &private_tx_hash).expect(
         "the committed escrow VERIFYINGKEY must accept the proof; run `zolana zk compile --test`",
     );
 
@@ -71,8 +78,58 @@ fn escrow_prove_verify() {
     other_signer[31] ^= 0x01;
     let mut tampered = private_tx_hash;
     tampered[31] ^= 0x01;
-    assert!(verify(&proof, other_signer, &private_tx_hash).is_err());
-    assert!(verify(&proof, signer, &tampered).is_err());
+    assert!(verify(&proof, &inputs.creator, other_signer, &private_tx_hash).is_err());
+    assert!(verify(&proof, &inputs.creator, signer, &tampered).is_err());
+}
+
+#[test]
+fn program_escrow_owner_is_the_creators_escrow_authority_address() {
+    // The program's public input is the SDK's escrow UTXO address hash.
+    let creator = creator();
+    let address = escrow_owner(&creator);
+    assert_eq!(
+        program_escrow_owner(&creator),
+        address.address_hash().unwrap()
+    );
+    assert_eq!(
+        address.owner_hash().unwrap(),
+        escrow_authority(&creator_address(&creator))
+            .owner_hash()
+            .unwrap()
+    );
+}
+
+#[test]
+fn escrow_proof_rejects_an_escrow_utxo_not_owned_by_the_creators_escrow_authority() {
+    // 1. The escrow UTXO goes to the creator itself, which could spend it
+    // without the program, or to another creator's escrow-authority PDA.
+    let creator = creator();
+    let other = super::shared::creator();
+    let owners = [creator.shielded_address().unwrap(), escrow_owner(&other)];
+    for owner in owners {
+        // 2. The circuit proves against the escrow_owner it is given...
+        let inputs = escrow_inputs_owned_by(creator.clone(), 250, 750, &owner);
+        let finalized = inputs.create_finalized_transaction().unwrap();
+        let escrow = finalized.output_utxos().get(1).unwrap();
+        assert_eq!(
+            escrow
+                .owner_address
+                .map(|address| address.owner_hash().unwrap()),
+            Some(owner.owner_hash().unwrap())
+        );
+        let (_, proof) = prove_and_verify(CIRCUIT, &inputs, &VERIFYINGKEY);
+
+        // 3. ...but the program derives it from the creator signer, so the
+        // proof fails verification.
+        let private_tx_hash = finalized.padding_independent_private_tx_hash().unwrap();
+        assert!(verify(
+            &proof,
+            &inputs.creator,
+            field_bytes(owner_pk_field(&inputs.creator)),
+            &private_tx_hash
+        )
+        .is_err());
+    }
 }
 
 #[test]
@@ -139,18 +196,38 @@ fn escrow_proof_rejects_a_different_escrow_output() {
         )
         .hash()
         .unwrap();
-        assert!(verify(&proof, field_bytes(owner_pk_field(&inputs.creator)), &hash).is_err());
+        assert!(verify(
+            &proof,
+            &inputs.creator,
+            field_bytes(owner_pk_field(&inputs.creator)),
+            &hash
+        )
+        .is_err());
     }
 }
 
+/// The escrow proof's `escrow_owner` as the program computes it from the
+/// creator signer and the instruction's viewing pubkey.
+fn program_escrow_owner(creator: &ShieldedKeypair) -> [u8; 32] {
+    let viewing_pubkey = creator.shielded_address().unwrap().viewing_pubkey;
+    EscrowAuthority::find(&creator_address(creator))
+        .address_hash(viewing_pubkey.as_bytes())
+        .unwrap()
+}
+
+/// Verifies `proof` as the program does for an escrow `creator` signs.
 fn verify(
     proof: &spr_program::CompressedProof,
+    creator: &ShieldedKeypair,
     owner_pk_field: [u8; 32],
     private_tx_hash: &[u8; 32],
 ) -> Result<(), spr_program::verifier::VerifyError> {
     Verifier {
         proof,
-        public_inputs: PublicInputs { owner_pk_field },
+        public_inputs: PublicInputs {
+            owner_pk_field,
+            escrow_owner: program_escrow_owner(creator),
+        },
         private_tx_hash,
         transfers: &[],
     }

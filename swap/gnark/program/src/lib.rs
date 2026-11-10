@@ -14,6 +14,12 @@ pub mod tag {
 
 pub const ORDER_AUTHORITY_PDA_SEED: &[u8] = b"order_authority";
 
+/// Each maker's orders are owned by the maker's own order-authority PDA, so a
+/// maker finds its program UTXOs by deriving this PDA.
+pub fn order_authority_seeds(maker: &Address) -> [&[u8]; 2] {
+    [ORDER_AUTHORITY_PDA_SEED, maker.as_array()]
+}
+
 #[cfg(all(feature = "bpf-entrypoint", not(feature = "no-entrypoint")))]
 mod entrypoint {
     pinocchio::entrypoint!(crate::process_instruction);

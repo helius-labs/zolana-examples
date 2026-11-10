@@ -15,28 +15,28 @@ Regenerate with `cargo test --release --manifest-path test/Cargo.toml --test ben
 
 | Circuit | Constraints | Public inputs | Proving key (bytes) | Verifying key (bytes) | Proof (bytes) | Key load (ms) | Warm proving time (ms) |
 | ------- | ----------- | ------------- | ------------------- | --------------------- | ------------- | ------------- | ---------------------- |
-| escrow | 2,514 | 1 | 512,951 | 716 | 128 | 37 | 9 |
-| withdraw | 2,772 | 1 | 551,225 | 716 | 128 | 39 | 9 |
+| escrow | 3,018 | 1 | 588,713 | 716 | 128 | 50 | 10 |
+| withdraw | 2,772 | 1 | 551,225 | 716 | 128 | 41 | 9 |
 
 ## Summary
 
 | Instruction | Constraints | Total CU | Verify CU | SPP CPI CU | Warm circuit proof (ms) | Warm SPP proof (ms) | Warm total proving (ms) | Instruction data (bytes) | Accounts | v1 tx (bytes) |
 | ----------- | ----------- | -------- | --------- | ---------- | ----------------------- | ------------------- | ----------------------- | ------------------------ | -------- | ------------- |
-| escrow | 2,514 | 244,079 | 93,351 | 148,170 | 9 | 102 | 111 | 809 | 9 | 1,192 |
-| withdraw | 2,772 | 240,226 | 94,526 | 142,536 | 9 | 59 | 69 | 624 | 9 | 975 |
+| escrow | 3,018 | 246,456 | 94,519 | 145,138 | 10 | 103 | 114 | 809 | 9 | 1,192 |
+| withdraw | 2,772 | 239,122 | 94,526 | 139,885 | 9 | 61 | 71 | 624 | 9 | 975 |
 
 ## Escrow
 
 | Function | Total CU | Net CU |
 | -------- | -------- | ------ |
-| `process_escrow_ix` | 244,079 | 2,558 |
-| `cpi_spp_transact_signed` | 148,170 | 148,170 |
-| `verify_escrow_proof` | 93,351 | 93,351 |
+| `process_escrow_ix` | 246,456 | 6,799 |
+| `cpi_spp_transact_signed` | 145,138 | 145,138 |
+| `verify_escrow_proof` | 94,519 | 94,519 |
 
 ## Withdraw
 
 | Function | Total CU | Net CU |
 | -------- | -------- | ------ |
-| `process_withdraw_ix` | 240,226 | 3,164 |
-| `cpi_spp_transact_signed` | 142,536 | 142,536 |
+| `process_withdraw_ix` | 239,122 | 4,711 |
+| `cpi_spp_transact_signed` | 139,885 | 139,885 |
 | `verify_withdraw_proof` | 94,526 | 94,526 |

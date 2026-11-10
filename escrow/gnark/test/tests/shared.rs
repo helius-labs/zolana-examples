@@ -91,7 +91,7 @@ pub fn setup(test: u16) -> Result<TestEnv> {
     let escrow_nullifier_key = NullifierKey::from_secret([0u8; BLINDING_LEN]);
     let escrow_authority_address = ShieldedAddress {
         signing_pubkey: PublicKey::from_ed25519(
-            timelock_escrow_sdk::escrow_authority_pda().as_array(),
+            timelock_escrow_sdk::escrow_authority_pda(&creator_solana_keypair.pubkey()).as_array(),
         ),
         nullifier_pubkey: escrow_nullifier_key.pubkey()?,
         viewing_pubkey: creator_shielded_keypair.viewing_pubkey(),

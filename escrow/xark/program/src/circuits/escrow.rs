@@ -26,9 +26,6 @@ pub struct EscrowPrivateInputs {
     pub amount: u64,
     /// Unix seconds; the escrow term `unlock`.
     pub unlock: u64,
-    /// The escrow UTXO's owner. The circuit does not constrain it: SPP spends
-    /// the escrow UTXO only with the escrow-authority PDA's signature.
-    pub escrow_address: ShieldedAddress,
 }
 
 #[input]
@@ -37,11 +34,17 @@ pub struct EscrowPublicInputs {
     /// `hash_bytes` of the creator signer's tagged pubkey, which the program
     /// computes from the signer account.
     pub owner_pk_field: Field,
+    /// The escrow UTXO's address: the creator's escrow-authority PDA under
+    /// the zero nullifier secret, with the viewing key the instruction names.
+    /// The program computes it from the creator signer, so SPP spends the
+    /// escrow UTXO only with the program's signature.
+    pub escrow_owner: ShieldedAddress,
 }
 
 impl Escrow {
     /// 1. Spend the source and check the creator signs.
-    /// 2. Lock `amount` in the escrow UTXO; the rest stays with the creator.
+    /// 2. Lock `amount` in the escrow UTXO, owned by the escrow-authority PDA;
+    ///    the rest stays with the creator.
     /// 3. Set the escrow terms.
     /// 4. Check the transaction: outputs `[change, escrow UTXO]`.
     pub fn execute(&self) -> Result<CheckedTransaction, CircuitError> {
@@ -52,8 +55,9 @@ impl Escrow {
         let mut source = TokenUtxos::new_mut(core::array::from_ref(&private.source))?;
         require_eq(source.owner().key().identity()?, self.public.owner_pk_field);
 
-        // 2. Lock `amount` in the escrow UTXO; the rest stays with the creator.
-        let mut escrow = DataUtxo::<EscrowTerms>::new_init(&private.escrow_address)
+        // 2. Lock `amount` in the escrow UTXO, owned by the escrow-authority
+        // PDA; the rest stays with the creator.
+        let mut escrow = DataUtxo::<EscrowTerms>::new_init(&self.public.escrow_owner)
             .with_asset(&source.asset())?;
         source.transfer(&mut escrow, &private.amount)?;
 

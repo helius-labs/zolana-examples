@@ -27,6 +27,13 @@ pub mod tag {
 
 pub const ORDER_AUTHORITY_PDA_SEED: &[u8] = b"order_authority";
 
+/// The seeds of a maker's order-authority PDA, `[ORDER_AUTHORITY_PDA_SEED,
+/// maker]`. The PDA owns the maker's order UTXOs, so a maker finds them by
+/// deriving it.
+pub fn order_authority_seeds(maker: &[u8; 32]) -> [&[u8]; 2] {
+    [ORDER_AUTHORITY_PDA_SEED, maker]
+}
+
 /// Domain of the take transaction's blinding seed,
 /// `Poseidon(SWTX, order_utxo_blinding)`: the ASCII tag as a big-endian
 /// 32-bit integer.

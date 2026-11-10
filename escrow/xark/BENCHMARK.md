@@ -15,28 +15,28 @@ Regenerate with `cargo test --release --manifest-path test/Cargo.toml --test ben
 
 | Circuit | Constraints | Public inputs | Proving key (bytes) | Verifying key (bytes) | Proof (bytes) | Key load (ms) | Warm proving time (ms) |
 | ------- | ----------- | ------------- | ------------------- | --------------------- | ------------- | ------------- | ---------------------- |
-| escrow | 7,127 | 1 | 1,399,742 | 296 | 128 | 98 | 174 |
-| withdraw | 5,411 | 1 | 1,127,422 | 296 | 128 | 79 | 142 |
+| escrow | 7,626 | 1 | 1,479,422 | 296 | 128 | 117 | 196 |
+| withdraw | 5,411 | 1 | 1,127,422 | 296 | 128 | 83 | 142 |
 
 ## Summary
 
 | Instruction | Constraints | Total CU | Verify CU | SPP CPI CU | Warm circuit proof (ms) | Warm SPP proof (ms) | Warm total proving (ms) | Instruction data (bytes) | Accounts | v1 tx (bytes) |
 | ----------- | ----------- | -------- | --------- | ---------- | ----------------------- | ------------------- | ----------------------- | ------------------------ | -------- | ------------- |
-| escrow | 7,127 | 241,397 | 94,324 | 145,208 | 174 | 61 | 235 | 818 | 9 | 1,169 |
-| withdraw | 5,411 | 241,304 | 94,702 | 144,651 | 142 | 59 | 202 | 593 | 9 | 944 |
+| escrow | 7,626 | 247,011 | 94,730 | 142,187 | 196 | 60 | 256 | 851 | 9 | 1,202 |
+| withdraw | 5,411 | 239,480 | 94,702 | 141,271 | 142 | 61 | 203 | 593 | 9 | 944 |
 
 ## Escrow
 
 | Function | Total CU | Net CU |
 | -------- | -------- | ------ |
-| `process_escrow_ix` | 241,397 | 1,865 |
-| `cpi_spp_transact_signed` | 145,208 | 145,208 |
-| `verify_escrow_proof` | 94,324 | 94,324 |
+| `process_escrow_ix` | 247,011 | 10,094 |
+| `cpi_spp_transact_signed` | 142,187 | 142,187 |
+| `verify_escrow_proof` | 94,730 | 94,730 |
 
 ## Withdraw
 
 | Function | Total CU | Net CU |
 | -------- | -------- | ------ |
-| `process_withdraw_ix` | 241,304 | 1,951 |
-| `cpi_spp_transact_signed` | 144,651 | 144,651 |
+| `process_withdraw_ix` | 239,480 | 3,507 |
+| `cpi_spp_transact_signed` | 141,271 | 141,271 |
 | `verify_withdraw_proof` | 94,702 | 94,702 |

@@ -7,7 +7,11 @@ use crate::{CircuitId, OrderProof, OrderTermsProofInput, PROVER};
 
 #[derive(Debug, Clone)]
 pub struct MakeProofInputs {
+    pub public_input_hash: [u8; 32],
     pub private_tx_hash: [u8; 32],
+    pub order_owner_hash: [u8; 32],
+    pub maker_owner_pk_field: [u8; 32],
+    pub maker_nullifier_pk: [u8; 32],
     pub order: OrderTermsProofInput,
     pub order_utxo: ProofInputUtxo,
     pub change: ProofInputUtxo,
@@ -17,8 +21,12 @@ pub struct MakeProofInputs {
 
 impl MakeProofInputs {
     fn witness(&self) -> ProofInputMap {
-        let scalars: [(&str, [u8; 32]); 3] = [
-            ("PrivateTxHash", self.private_tx_hash),
+        let scalars: [(&str, [u8; 32]); 7] = [
+            ("Public_PublicInputHash", self.public_input_hash),
+            ("Public_PrivateTxHash", self.private_tx_hash),
+            ("Public_OrderOwnerHash", self.order_owner_hash),
+            ("Public_MakerOwnerPkField", self.maker_owner_pk_field),
+            ("MakerNullifierPk", self.maker_nullifier_pk),
             ("SourceInputHash", self.source_input_hash),
             ("PrivateTxBlinding", self.private_tx_blinding),
         ];
@@ -57,7 +65,11 @@ mod tests {
 
     fn sample() -> MakeProofInputs {
         MakeProofInputs {
+            public_input_hash: [10; 32],
             private_tx_hash: [1; 32],
+            order_owner_hash: [11; 32],
+            maker_owner_pk_field: [12; 32],
+            maker_nullifier_pk: [13; 32],
             order: OrderTermsProofInput {
                 destination_asset: [2; 32],
                 destination_amount: 7,
@@ -79,7 +91,11 @@ mod tests {
         let keys: HashSet<String> = witness.keys().cloned().collect();
 
         let mut expected: Vec<String> = vec![
-            "PrivateTxHash".to_string(),
+            "Public_PublicInputHash".to_string(),
+            "Public_PrivateTxHash".to_string(),
+            "Public_OrderOwnerHash".to_string(),
+            "Public_MakerOwnerPkField".to_string(),
+            "MakerNullifierPk".to_string(),
             "SourceInputHash".to_string(),
             "PrivateTxBlinding".to_string(),
         ];

@@ -11,6 +11,9 @@ use crate::{err, order_authority_pda, tag, TakeProof};
 
 pub struct Take {
     pub payer: Pubkey,
+    /// The order's maker (the marker's `maker_pubkey`); the program signs for
+    /// this maker's order-authority PDA.
+    pub maker: Pubkey,
     pub tree: Pubkey,
     pub take_proof: TakeProof,
     pub spp_proof: TransactIxData,
@@ -20,6 +23,7 @@ impl Take {
     pub fn instruction(self) -> Result<Instruction> {
         let Self {
             payer,
+            maker,
             tree,
             take_proof,
             spp_proof,
@@ -31,6 +35,7 @@ impl Take {
         );
         let serialized_ix = wincode::serialize(&TakeIxData {
             proof: take_proof,
+            maker: maker.to_bytes(),
             transact: spp_proof,
         })
         .map_err(err)?;
@@ -46,7 +51,10 @@ impl Take {
         accounts.extend(nullifier_pdas);
         // The order is the first input; the taker's own note is the second.
         // The taker also pays, but must appear explicitly in the owner slots.
-        accounts.push(AccountMeta::new_readonly(order_authority_pda(), false));
+        accounts.push(AccountMeta::new_readonly(
+            order_authority_pda(&maker),
+            false,
+        ));
         accounts.push(AccountMeta::new_readonly(payer, true));
         let mut instruction_data = vec![tag::TAKE];
         instruction_data.extend_from_slice(&serialized_ix);

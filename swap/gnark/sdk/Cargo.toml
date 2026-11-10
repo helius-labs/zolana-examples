@@ -21,6 +21,7 @@ spr-keypair = { version = "0.8.0" }
 spr-transaction = { version = "0.8.0" }
 
 [dev-dependencies]
+spr-program = { version = "0.8.0", features = ["compression"] }
 spr-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "6aba4a70177caaef602baf972ce4958691ec1e65" }
 groth16-solana = "0.3.1"
 solana-keypair = "3.1.2"

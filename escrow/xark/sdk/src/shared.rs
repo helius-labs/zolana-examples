@@ -49,12 +49,15 @@ pub(crate) fn prove_transact(
 }
 
 /// An escrow program instruction: `program_accounts`, then the SPP
-/// `transact` account list with `owner_signers`, then the escrow-authority PDA
-/// as a non-signer (the program signs for it inside the CPI).
+/// `transact` account list with `owner_signers`, then `creator`'s
+/// escrow-authority PDA as a non-signer (the program signs for it inside the
+/// CPI).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn escrow_instruction<T>(
     tag: u8,
     program_accounts: Vec<AccountMeta>,
     owner_signers: Vec<Address>,
+    creator: Address,
     payer: Address,
     tree: Address,
     spp: &TransactIxData,
@@ -72,7 +75,7 @@ where
         data: spp.clone(),
     };
     let mut accounts = program_accounts;
-    accounts.extend(transact.cpi_accounts(&[escrow_authority_pda()]));
+    accounts.extend(transact.cpi_accounts(&[escrow_authority_pda(&creator)]));
 
     let mut data = vec![tag];
     data.extend_from_slice(&wincode::serialize(ix_data).map_err(err)?);

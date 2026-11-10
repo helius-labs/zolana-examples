@@ -29,9 +29,9 @@ use timelock_escrow_sdk::{
 // real localnet (validator + Photon indexer + prover) that `setup()` starts.
 //
 // Flow:
-//   1. Fund (in setup): creator shields 0.5 SOL to the escrow authority.
+//   1. Fund (in setup): creator shields 0.5 SOL to its escrow-authority PDA.
 //   2. Escrow: the program spends that 0.5 SOL UTXO -> escrow UTXO 0.3 SOL (owned
-//      by the escrow-authority PDA, committed unlock timestamp already in
+//      by the creator's escrow-authority PDA, committed unlock timestamp already in
 //      the past) + change 0.2 SOL (back to the creator). ZK escrow proof, v0
 //      tx via ALT.
 //   3. Withdraw: creator (still holding the escrow UTXO hash locally --
@@ -128,6 +128,7 @@ fn escrow_then_withdraw() -> Result<()> {
         .map_err(|e| anyhow!("escrow proof: {e:?}"))?;
 
     let escrow_ix = Escrow {
+        creator: creator_address.solana_address()?,
         payer: creator_address.solana_address()?,
         tree: localnet.tree,
         escrow_proof: escrow_proof.into(),

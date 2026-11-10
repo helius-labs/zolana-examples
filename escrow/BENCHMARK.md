@@ -17,9 +17,9 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 
 | Circuit | Metric | gnark | Xark | Delta |
 | ------- | ------ | ----- | ---- | ----- |
-| escrow | Constraints | 2,514 | 7,127 | +4,613 (+183.5%) |
+| escrow | Constraints | 3,018 | 7,626 | +4,608 (+152.7%) |
 | escrow | Public inputs | 1 | 1 | 0 (0.0%) |
-| escrow | Proving key (bytes) | 512,951 | 1,399,742 | +886,791 (+172.9%) |
+| escrow | Proving key (bytes) | 588,713 | 1,479,422 | +890,709 (+151.3%) |
 | escrow | Verifying key (bytes) | 716 | 296 | -420 (-58.7%) |
 | escrow | Proof (bytes) | 128 | 128 | 0 (0.0%) |
 | withdraw | Constraints | 2,772 | 5,411 | +2,639 (+95.2%) |
@@ -32,47 +32,47 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 
 | Circuit | Metric | gnark | Xark | Delta |
 | ------- | ------ | ----- | ---- | ----- |
-| escrow | Key load (ms) | 37 | 98 | +61 (+164.9%) |
-| escrow | Warm proving time (ms) | 9 | 174 | +165 (+1833.3%) |
-| withdraw | Key load (ms) | 39 | 79 | +40 (+102.6%) |
+| escrow | Key load (ms) | 50 | 117 | +67 (+134.0%) |
+| escrow | Warm proving time (ms) | 10 | 196 | +186 (+1860.0%) |
+| withdraw | Key load (ms) | 41 | 83 | +42 (+102.4%) |
 | withdraw | Warm proving time (ms) | 9 | 142 | +133 (+1477.8%) |
 
 ## Instruction circuit
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| escrow | Constraints | 2,514 | 7,127 | +4,613 (+183.5%) |
+| escrow | Constraints | 3,018 | 7,626 | +4,608 (+152.7%) |
 | withdraw | Constraints | 2,772 | 5,411 | +2,639 (+95.2%) |
 
 ## Compute units
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| escrow | Total CU | 244,079 | 241,397 | -2,682 (-1.1%) |
-| escrow | Verify CU | 93,351 | 94,324 | +973 (+1.0%) |
-| escrow | SPP CPI CU | 148,170 | 145,208 | -2,962 (-2.0%) |
-| withdraw | Total CU | 240,226 | 241,304 | +1,078 (+0.4%) |
+| escrow | Total CU | 246,456 | 247,011 | +555 (+0.2%) |
+| escrow | Verify CU | 94,519 | 94,730 | +211 (+0.2%) |
+| escrow | SPP CPI CU | 145,138 | 142,187 | -2,951 (-2.0%) |
+| withdraw | Total CU | 239,122 | 239,480 | +358 (+0.1%) |
 | withdraw | Verify CU | 94,526 | 94,702 | +176 (+0.2%) |
-| withdraw | SPP CPI CU | 142,536 | 144,651 | +2,115 (+1.5%) |
+| withdraw | SPP CPI CU | 139,885 | 141,271 | +1,386 (+1.0%) |
 
 ## Instruction proving
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| escrow | Warm circuit proof (ms) | 9 | 174 | +165 (+1833.3%) |
-| escrow | Warm SPP proof (ms) | 102 | 61 | -41 (-40.2%) |
-| escrow | Warm total proving (ms) | 111 | 235 | +124 (+111.7%) |
+| escrow | Warm circuit proof (ms) | 10 | 196 | +186 (+1860.0%) |
+| escrow | Warm SPP proof (ms) | 103 | 60 | -43 (-41.7%) |
+| escrow | Warm total proving (ms) | 114 | 256 | +142 (+124.6%) |
 | withdraw | Warm circuit proof (ms) | 9 | 142 | +133 (+1477.8%) |
-| withdraw | Warm SPP proof (ms) | 59 | 59 | 0 (0.0%) |
-| withdraw | Warm total proving (ms) | 69 | 202 | +133 (+192.8%) |
+| withdraw | Warm SPP proof (ms) | 61 | 61 | 0 (0.0%) |
+| withdraw | Warm total proving (ms) | 71 | 203 | +132 (+185.9%) |
 
 ## Transaction size
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| escrow | Instruction data (bytes) | 809 | 818 | +9 (+1.1%) |
+| escrow | Instruction data (bytes) | 809 | 851 | +42 (+5.2%) |
 | escrow | Accounts | 9 | 9 | 0 (0.0%) |
-| escrow | v1 tx (bytes) | 1,192 | 1,169 | -23 (-1.9%) |
+| escrow | v1 tx (bytes) | 1,192 | 1,202 | +10 (+0.8%) |
 | withdraw | Instruction data (bytes) | 624 | 593 | -31 (-5.0%) |
 | withdraw | Accounts | 9 | 9 | 0 (0.0%) |
 | withdraw | v1 tx (bytes) | 975 | 944 | -31 (-3.2%) |

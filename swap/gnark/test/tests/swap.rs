@@ -42,7 +42,7 @@ const EXPIRY: u64 = 2_000_000_000;
 //   1. Fund (in setup): maker shields 1.0 SPL, taker shields 0.25 SOL; each wallet
 //      syncs from the indexer to discover and decrypt its own note.
 //   2. Make: maker spends its 1.0 SPL UTXO -> order UTXO 0.4 SPL (taker-owned, held
-//      under the order-authority PDA), marker (0-value taker-owned discovery
+//      under the maker's order-authority PDA), marker (0-value taker-owned discovery
 //      note), change 0.6 SPL (back to maker). ZK make proof, v0 tx via ALT.
 //   3. Take: taker spends the order UTXO (0.4 SPL) + its own 0.25 SOL UTXO ->
 //      source_output 0.4 SPL (to taker), destination_output 0.25 SOL (to maker).
@@ -315,8 +315,28 @@ fn make_and_take_swap_inline() -> Result<()> {
             .prove_take(&take_proof_inputs.to_proof_inputs()?)
             .map_err(|e| anyhow!("take proof: {e:?}"))?;
 
+        let maker = order.maker_pubkey;
+        // Naming another maker makes the program sign for that maker's
+        // order-authority PDA, which does not own the order input, so SPP's
+        // transact proof (bound to the owner signers) fails to verify.
+        let wrong_maker_take_ix = Take {
+            payer: taker_address.solana_address()?,
+            maker: taker_address.solana_address()?,
+            tree: localnet.tree,
+            take_proof: take_proof.into(),
+            spp_proof: spp_proof.clone(),
+        }
+        .instruction()?;
+        let wrong_maker_error = send(localnet.client.rpc(), &taker.keypair, wrong_maker_take_ix)
+            .expect_err("a take naming the wrong maker must be rejected");
+        assert!(
+            format!("{wrong_maker_error:?}").contains("TransactProofVerificationFailed"),
+            "SPP must reject the wrong maker's PDA as the order owner: {wrong_maker_error:?}"
+        );
+
         let take_ix = Take {
             payer: taker_address.solana_address()?,
+            maker,
             tree: localnet.tree,
             take_proof: take_proof.into(),
             spp_proof,

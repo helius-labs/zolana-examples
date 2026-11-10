@@ -10,7 +10,7 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     error::TimelockEscrowError,
-    instructions::shared::{check_after_window, cpi_spp_transact_signed, IxData},
+    instructions::shared::{check_after_window, EscrowAuthority, IxData},
     verifier::withdraw,
 };
 
@@ -45,7 +45,7 @@ pub struct WithdrawIxData {
 /// 2. Decode the instruction.
 /// 3. Check the escrow has unlocked.
 /// 4. Verify the withdraw proof.
-/// 5. Invoke SPP with the escrow-authority PDA signer.
+/// 5. Invoke SPP with the creator's escrow-authority PDA signer.
 #[inline(never)]
 #[profile]
 pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -55,8 +55,9 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
     // Solana key, like the creator's owner key.
     let mut iter = AccountIterator::new(accounts);
     iter.next_signer_mut("caller")?;
-    let owner_pk_field = solana_owner_identity(iter.next_signer("creator")?.address().as_array())
-        .map_err(TimelockEscrowError::from)?;
+    let creator = *iter.next_signer("creator")?.address();
+    let owner_pk_field =
+        solana_owner_identity(creator.as_array()).map_err(TimelockEscrowError::from)?;
 
     // 2. Decode the instruction.
     let IxData {
@@ -80,9 +81,10 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
         transact.private_tx_hash,
     )?;
 
-    // 5. Invoke SPP with the escrow-authority PDA signer.
+    // 5. Invoke SPP with the creator's escrow-authority PDA signer, which
+    // the escrow UTXO's owner requires: only the creator's escrows spend.
     let spp_accounts = iter.remaining()?;
-    cpi_spp_transact_signed(spp_accounts, transact_bytes)
+    EscrowAuthority::find(&creator).cpi_spp_transact_signed(spp_accounts, transact_bytes)
 }
 
 /// Verifies the withdraw proof against the escrow's `unlock` timestamp, the

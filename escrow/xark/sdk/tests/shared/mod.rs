@@ -116,6 +116,23 @@ pub fn context(seed: u8) -> TxContext {
     InputRecords::context(&fe(seed), Some(OUTPUT_TREE_ID)).unwrap()
 }
 
+/// The creator's Solana pubkey.
+pub fn creator_address(creator: &ShieldedKeypair) -> Address {
+    creator
+        .shielded_address()
+        .unwrap()
+        .solana_address()
+        .unwrap()
+}
+
+/// The address of `creator`'s escrow UTXOs: its escrow-authority PDA, with
+/// its own viewing key.
+pub fn escrow_owner(creator: &ShieldedKeypair) -> ShieldedAddress {
+    escrow_authority(&creator_address(creator))
+        .address(creator.shielded_address().unwrap().viewing_pubkey)
+        .unwrap()
+}
+
 /// `hash_bytes` of the creator's tagged Solana pubkey.
 pub fn owner_pk_field(creator: &ShieldedKeypair) -> Field {
     let address = creator
@@ -154,7 +171,18 @@ pub fn escrow_inputs(escrow_amount: u64, change_amount: u64) -> Escrow {
 }
 
 fn escrow_inputs_of(creator: ShieldedKeypair, escrow_amount: u64, change_amount: u64) -> Escrow {
-    let sender = creator.shielded_address().unwrap();
+    let escrow_owner = escrow_owner(&creator);
+    escrow_inputs_owned_by(creator, escrow_amount, change_amount, &escrow_owner)
+}
+
+/// An escrow of `escrow_amount` from a source UTXO of the creator holding
+/// `escrow_amount + change_amount`, whose escrow UTXO goes to `escrow_owner`.
+pub fn escrow_inputs_owned_by(
+    creator: ShieldedKeypair,
+    escrow_amount: u64,
+    change_amount: u64,
+    escrow_owner: &ShieldedAddress,
+) -> Escrow {
     let source = token_input(&creator, escrow_amount + change_amount);
     let mut records = InputRecords::new();
     let private = circuit::EscrowPrivateInputs {
@@ -162,12 +190,10 @@ fn escrow_inputs_of(creator: ShieldedKeypair, escrow_amount: u64, change_amount:
         source: records.utxo(&source).unwrap(),
         amount: escrow_amount,
         unlock: UNLOCK,
-        escrow_address: records
-            .address(&escrow_authority().address(sender.viewing_pubkey).unwrap())
-            .unwrap(),
     };
     let public = circuit::EscrowPublicInputs {
         owner_pk_field: owner_pk_field(&creator),
+        escrow_owner: records.address(escrow_owner).unwrap(),
     };
     Fixture {
         program: circuit::Escrow { private, public },
@@ -187,8 +213,8 @@ pub fn withdraw_inputs() -> Withdraw {
         .get(ESCROW_SLOT)
         .unwrap()
         .clone();
-    let escrow_utxo = escrow_utxo(&output, INPUT_TREE_ID, 5).unwrap();
     let creator = escrow.creator;
+    let escrow_utxo = escrow_utxo(&creator_address(&creator), &output, INPUT_TREE_ID, 5).unwrap();
     let mut records = InputRecords::new();
     let private = circuit::WithdrawPrivateInputs {
         tx_context: context(42),

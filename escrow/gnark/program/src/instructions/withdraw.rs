@@ -13,7 +13,7 @@ use wincode::{SchemaRead, SchemaWrite};
 use crate::{
     error::TimelockEscrowError,
     instructions::{
-        shared::{check_after_window, cpi_spp_transact_signed, u64_right_align},
+        shared::{check_after_window, u64_right_align, EscrowAuthority},
         verifier::{verify_groth16, CompressedGroth16Proof},
     },
 };
@@ -65,8 +65,12 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
     // the creator can withdraw and the creator knows the refund blinding it
     // chose. The identity is tagged as a Solana key, like the owner hash the
     // escrow terms commit.
-    let owner_pk_field = solana_owner_identity(iter.next_signer("creator")?.address().as_array())
-        .map_err(TimelockEscrowError::from)?;
+    // The escrow utxo is owned by this creator's escrow-authority PDA, which
+    // the program signs for.
+    let creator = *iter.next_signer("creator")?.address();
+    let owner_pk_field =
+        solana_owner_identity(creator.as_array()).map_err(TimelockEscrowError::from)?;
+    let escrow_authority = EscrowAuthority::find(&creator);
 
     let WithdrawIxData {
         proof,
@@ -89,7 +93,7 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
         .serialize()
         .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
-    cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    escrow_authority.cpi_spp_transact_signed(spp_accounts, &transact_bytes)
 }
 
 /// Verifies the withdraw proof against the escrow's `unlock` timestamp, the

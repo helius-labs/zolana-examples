@@ -5,21 +5,19 @@ use groth16_solana::{
 };
 use solana_address::Address;
 use spr_client::ProofInputUtxo;
-use spr_hasher::primitives::hash_bytes;
-use spr_keypair::ViewingKey;
+use spr_hasher::primitives::{hash_bytes, solana_owner_identity};
+use spr_keypair::{hash::poseidon, ViewingKey};
+use spr_program::program::PdaOwner;
 use spr_transaction::{instructions::transact::PrivateTxHash, utxo::Blinding};
 use swap_program::{
     instructions::{
-        make::MakeProof,
+        make::{verify_make_proof, MakeProof, MakePublicInput},
         verifier::{verify_groth16, CompressedGroth16Proof},
     },
     verifying_keys::make::VERIFYINGKEY,
 };
 use swap_prover::{CircuitId, MakeProofInputs, OrderTermsProofInput, PROVER};
-use swap_sdk::state::DataHash;
-
-mod shared;
-use shared::order_utxo_owner_hash;
+use swap_sdk::{order_authority_pda, state::DataHash};
 
 fn build_dir() -> std::path::PathBuf {
     PROVER.keys_dir(CircuitId::Make)
@@ -51,12 +49,26 @@ fn blinding(byte: u8) -> Blinding {
     out
 }
 
-fn sample_order() -> OrderTermsProofInput {
+/// The maker's nullifier pubkey; with the maker's owner identity it forms the
+/// order terms' maker owner hash.
+const MAKER_NULLIFIER_PK: u8 = 99;
+
+/// `solana_owner_identity(maker)`, which the program computes from the maker
+/// signer.
+fn owner_pk_field(maker: &Address) -> [u8; 32] {
+    solana_owner_identity(maker.as_array()).expect("owner identity")
+}
+
+fn maker_owner_hash(maker: &Address) -> [u8; 32] {
+    poseidon(&[&owner_pk_field(maker), &fe(MAKER_NULLIFIER_PK)]).expect("maker owner hash")
+}
+
+fn sample_order(maker: &Address) -> OrderTermsProofInput {
     let maker_viewing_pk = *ViewingKey::new().pubkey().as_bytes();
     OrderTermsProofInput {
         destination_asset: hash_bytes(&[2u8; 32]).expect("destination asset"),
         destination_amount: 250,
-        maker_owner_hash: fe(99),
+        maker_owner_hash: maker_owner_hash(maker),
         maker_viewing_pk,
         expiry: 1_700_000_000,
         taker_pk_fe: fe(123),
@@ -67,12 +79,69 @@ fn sample_order() -> OrderTermsProofInput {
 /// honest: a dropped tree id would change every commitment.
 const OUTPUT_TREE_ID: u16 = 3;
 
+const MAKER: Address = Address::new_from_array([42u8; 32]);
+const OTHER_MAKER: Address = Address::new_from_array([43u8; 32]);
+
+/// The owner hash the program derives on chain for `maker`'s order-authority
+/// PDA (`OrderAuthority::owner_hash`).
+fn order_owner_hash(maker: &Address) -> [u8; 32] {
+    *PdaOwner::new(&order_authority_pda(maker))
+        .expect("pda owner")
+        .owner_hash()
+}
+
+/// A make witness. The honest case has every field derived from `MAKER`; the
+/// failing tests change one of them.
+struct MakeCase {
+    destination_amount: u64,
+    change_amount: u64,
+    /// The owner the order UTXO actually commits to.
+    order_utxo_owner_hash: [u8; 32],
+    /// The order-authority owner hash public input.
+    order_owner_hash: [u8; 32],
+    /// The maker the order terms name.
+    terms_maker: Address,
+    /// The maker whose identity is the `maker_owner_pk_field` public input.
+    signer: Address,
+}
+
+impl Default for MakeCase {
+    fn default() -> Self {
+        let owner_hash = order_owner_hash(&MAKER);
+        Self {
+            destination_amount: 250,
+            change_amount: 750,
+            order_utxo_owner_hash: owner_hash,
+            order_owner_hash: owner_hash,
+            terms_maker: MAKER,
+            signer: MAKER,
+        }
+    }
+}
+
 fn build_inputs(destination_amount: u64, change_amount: u64) -> MakeProofInputs {
-    let mut order = sample_order();
+    build_case(MakeCase {
+        destination_amount,
+        change_amount,
+        ..MakeCase::default()
+    })
+}
+
+fn build_case(case: MakeCase) -> MakeProofInputs {
+    let MakeCase {
+        destination_amount,
+        change_amount,
+        order_utxo_owner_hash,
+        order_owner_hash,
+        terms_maker,
+        signer,
+    } = case;
+    let maker_owner_pk_field = owner_pk_field(&signer);
+    let mut order = sample_order(&terms_maker);
     order.destination_amount = destination_amount;
     let source_mint = Address::new_from_array([1u8; 32]);
     let order_utxo = ProofInputUtxo::new(
-        order_utxo_owner_hash(&fe(42)),
+        order_utxo_owner_hash,
         &source_mint,
         1_000,
         &blinding(7),
@@ -100,8 +169,19 @@ fn build_inputs(destination_amount: u64, change_amount: u64) -> MakeProofInputs 
     )
     .hash()
     .expect("private tx hash");
+    let public_input_hash = MakePublicInput {
+        private_tx_hash: &private_tx_hash,
+        order_owner_hash: &order_owner_hash,
+        maker_owner_pk_field: &maker_owner_pk_field,
+    }
+    .hash()
+    .expect("public input hash");
     MakeProofInputs {
+        public_input_hash,
         private_tx_hash,
+        order_owner_hash,
+        maker_owner_pk_field,
+        maker_nullifier_pk: fe(MAKER_NULLIFIER_PK),
         order,
         order_utxo,
         change,
@@ -112,6 +192,33 @@ fn build_inputs(destination_amount: u64, change_amount: u64) -> MakeProofInputs 
 
 fn sample_inputs() -> MakeProofInputs {
     build_inputs(250, 750)
+}
+
+/// Verifies `proof` as `process_make_ix` does for the maker signer `signer`
+/// and the order-authority owner hash `order_owner_hash`.
+fn verify_as_program(
+    proof: &MakeProof,
+    private_tx_hash: &[u8; 32],
+    order_owner_hash: &[u8; 32],
+    signer: &Address,
+) -> Result<(), impl std::fmt::Debug> {
+    verify_make_proof(
+        proof,
+        MakePublicInput {
+            private_tx_hash,
+            order_owner_hash,
+            maker_owner_pk_field: &owner_pk_field(signer),
+        },
+    )
+}
+
+/// Order UTXO owners other than the maker's order-authority PDA: the maker
+/// itself, or another maker's PDA.
+fn foreign_order_owners() -> [(&'static str, [u8; 32]); 2] {
+    [
+        ("maker-owned", maker_owner_hash(&MAKER)),
+        ("other maker's PDA", order_owner_hash(&OTHER_MAKER)),
+    ]
 }
 
 fn verify_with_generated_vk(
@@ -173,9 +280,9 @@ fn make_prove_verify() {
             &proof.proof_a,
             &proof.proof_b,
             &proof.proof_c,
-            inputs.private_tx_hash,
+            inputs.public_input_hash,
         ),
-        "groth16 proof must verify against the make verifying key with private_tx_hash as the sole public input"
+        "groth16 proof must verify against the make verifying key with the public input hash as the sole public input"
     );
 
     let proof: MakeProof = proof.into();
@@ -185,7 +292,7 @@ fn make_prove_verify() {
             b: &proof.proof_b,
             c: &proof.proof_c,
         },
-        inputs.private_tx_hash,
+        inputs.public_input_hash,
         &VERIFYINGKEY,
     )
     .expect("the committed make VERIFYINGKEY must accept the proof; run `just ensure-swap-keys`");
@@ -199,7 +306,7 @@ fn make_rejects_tampered_public_input() {
     let inputs = sample_inputs();
     let proof = inputs.prove().expect("prove failed");
 
-    let mut tampered = inputs.private_tx_hash;
+    let mut tampered = inputs.public_input_hash;
     tampered[31] ^= 0x01;
 
     assert!(
@@ -240,8 +347,96 @@ fn make_zero_change_proves() {
             &proof.proof_a,
             &proof.proof_b,
             &proof.proof_c,
-            inputs.private_tx_hash,
+            inputs.public_input_hash,
         ),
         "a zero-value change output is non-dummy: its real utxo hash enters private_tx_hash and the proof must verify, matching SPP"
+    );
+}
+
+/// A maker who owns the order UTXO, or puts it under another maker's PDA,
+/// could spend it outside its own order authority. With the maker's PDA owner
+/// hash as the public input, no witness proves either.
+#[test]
+fn make_rejects_order_not_owned_by_makers_pda() {
+    ensure_keys();
+
+    for (name, order_utxo_owner_hash) in foreign_order_owners() {
+        let inputs = build_case(MakeCase {
+            order_utxo_owner_hash,
+            ..MakeCase::default()
+        });
+        assert!(
+            inputs.prove().is_err(),
+            "{name}: proving must fail when the order utxo owner is not the maker's order-authority PDA"
+        );
+    }
+}
+
+/// A prover that binds the order UTXO to an owner hash of its choice gets a
+/// valid proof for that public input, but the program hashes in the owner
+/// hash of the signing maker's PDA, so the proof does not verify on chain.
+#[test]
+fn make_program_rejects_proof_for_other_owner_hash() {
+    ensure_keys();
+
+    for (name, owner_hash) in foreign_order_owners() {
+        let inputs = build_case(MakeCase {
+            order_utxo_owner_hash: owner_hash,
+            order_owner_hash: owner_hash,
+            ..MakeCase::default()
+        });
+        let proof: MakeProof = inputs.prove().expect("prove failed").into();
+
+        verify_as_program(&proof, &inputs.private_tx_hash, &owner_hash, &MAKER).unwrap_or_else(
+            |e| panic!("{name}: the proof verifies against its own owner hash: {e:?}"),
+        );
+        assert!(
+            verify_as_program(
+                &proof,
+                &inputs.private_tx_hash,
+                &order_owner_hash(&MAKER),
+                &MAKER
+            )
+            .is_err(),
+            "{name}: the signing maker's PDA owner hash must reject the proof"
+        );
+    }
+}
+
+/// Terms naming maker M2 in a make signed by M1 would create an order owned
+/// by PDA(M1) that only M2 may cancel, and M2's cancel derives PDA(M2): the
+/// order could never be cancelled. The terms' maker must be the signer.
+#[test]
+fn make_rejects_terms_maker_other_than_signer() {
+    ensure_keys();
+
+    let inputs = build_case(MakeCase {
+        terms_maker: OTHER_MAKER,
+        ..MakeCase::default()
+    });
+    assert!(
+        inputs.prove().is_err(),
+        "proving must fail when the terms' maker is not the signer"
+    );
+
+    // A proof whose public maker identity is the terms' maker M2 verifies only
+    // against M2's identity; the program hashes in the signer M1's.
+    let inputs = build_case(MakeCase {
+        terms_maker: OTHER_MAKER,
+        signer: OTHER_MAKER,
+        ..MakeCase::default()
+    });
+    let proof: MakeProof = inputs.prove().expect("prove failed").into();
+    let order_owner_hash = order_owner_hash(&MAKER);
+    verify_as_program(
+        &proof,
+        &inputs.private_tx_hash,
+        &order_owner_hash,
+        &OTHER_MAKER,
+    )
+    .expect("the proof verifies against the terms' maker identity");
+    assert!(
+        verify_as_program(&proof, &inputs.private_tx_hash, &order_owner_hash, &MAKER).is_err(),
+        "the signer's identity must reject a proof for another maker's terms"
     );
 }

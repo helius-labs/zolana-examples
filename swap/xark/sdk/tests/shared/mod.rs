@@ -179,12 +179,20 @@ pub fn wallet_utxo(owner: &ShieldedKeypair, mint: Mint, amount: u64) -> WalletUt
     .unwrap()
 }
 
+/// The order UTXO address a make by `maker` encrypted to `taker` uses: the
+/// maker's order-authority PDA with the taker's viewing key.
+pub fn order_address(maker: &ShieldedKeypair, taker: &ShieldedKeypair) -> ShieldedAddress {
+    order_authority(&maker.shielded_address().unwrap().solana_address().unwrap())
+        .address(taker.viewing_pubkey())
+        .unwrap()
+}
+
 /// A make locking `source_amount` of a `source_amount + change_amount` source
 /// owned by the maker, designated to and encrypted for `taker`.
 pub fn make_inputs(source_amount: u64, change_amount: u64) -> Make {
     let maker = keypair();
     let taker = keypair();
-    let order_address = order_authority().address(taker.viewing_pubkey()).unwrap();
+    let order_address = order_address(&maker, &taker);
     let source = wallet_utxo(&maker, source_mint(), source_amount + change_amount);
     let maker_owner_pk_field = spr_program::from_bytes(&identity_of(&maker)).unwrap();
     let mut fixture = Fixture {
@@ -197,10 +205,10 @@ pub fn make_inputs(source_amount: u64, change_amount: u64) -> Make {
                 destination_amount: DESTINATION_AMOUNT,
                 expiry: EXPIRY,
                 taker_pk_fe: identity_of(&taker),
-                order_address: spr_program::ShieldedAddress::default(),
             },
             public: circuit::MakePublicInputs {
                 maker_owner_pk_field,
+                order_owner: spr_program::ShieldedAddress::default(),
             },
         },
         records: InputRecords::new(),
@@ -208,7 +216,7 @@ pub fn make_inputs(source_amount: u64, change_amount: u64) -> Make {
     };
     fixture.program.private.destination_mint = fixture.asset(destination_mint());
     fixture.program.private.source = fixture.records.utxo(&source).unwrap();
-    fixture.program.private.order_address = fixture.address(order_address);
+    fixture.program.public.order_owner = fixture.address(order_address);
     fixture
 }
 

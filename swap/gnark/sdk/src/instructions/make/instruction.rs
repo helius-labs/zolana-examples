@@ -31,6 +31,7 @@ impl OrderMarker {
 }
 
 pub struct Make {
+    /// The maker: pays, signs, and its order-authority PDA owns the order.
     pub payer: Pubkey,
     pub tree: Pubkey,
     pub make_proof: MakeProof,
@@ -68,7 +69,10 @@ impl Make {
             AccountMeta::new(tree, false),
         ];
         accounts.extend(nullifier_pdas);
-        accounts.push(AccountMeta::new_readonly(order_authority_pda(), false));
+        accounts.push(AccountMeta::new_readonly(
+            order_authority_pda(&payer),
+            false,
+        ));
         let mut instruction_data = vec![tag::MAKE];
         instruction_data.extend_from_slice(&serialized_ix);
         Ok(Instruction {

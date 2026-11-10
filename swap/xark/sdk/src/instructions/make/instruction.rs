@@ -33,6 +33,8 @@ impl OrderMarker {
 pub struct Make {
     /// The maker: fee payer, marker signer and owner of the spent source.
     pub payer: Pubkey,
+    /// The viewing key of the order UTXO's address, the taker's.
+    pub viewing_pubkey: [u8; 33],
     pub tree: Pubkey,
     pub make_proof: MakeProof,
     pub spp_proof: TransactIxData,
@@ -42,6 +44,7 @@ impl Make {
     pub fn instruction(self) -> Result<Instruction> {
         let Self {
             payer,
+            viewing_pubkey,
             tree,
             make_proof,
             mut spp_proof,
@@ -56,6 +59,7 @@ impl Make {
         );
         let serialized_ix = wincode::serialize(&MakeIxData {
             proof: make_proof,
+            viewing_pubkey,
             transact: spp_proof,
         })
         .map_err(err)?;
@@ -70,10 +74,13 @@ impl Make {
         ];
         accounts.extend(nullifier_pdas);
         // The owner signers: the maker for the source it spends, then the
-        // order authority for the data-bearing order output, which the
-        // program signs for during the CPI.
+        // maker's order authority for the data-bearing order output, which
+        // the program signs for during the CPI.
         accounts.push(AccountMeta::new_readonly(payer, true));
-        accounts.push(AccountMeta::new_readonly(order_authority_pda(), false));
+        accounts.push(AccountMeta::new_readonly(
+            order_authority_pda(&payer),
+            false,
+        ));
         let mut instruction_data = vec![tag::MAKE];
         instruction_data.extend_from_slice(&serialized_ix);
         Ok(Instruction {

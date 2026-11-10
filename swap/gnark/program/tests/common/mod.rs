@@ -18,6 +18,8 @@ use swap_program::{
     tag, ORDER_AUTHORITY_PDA_SEED,
 };
 
+pub const MAKER: [u8; 32] = [22; 32];
+
 const SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/deploy");
 
 #[derive(Clone, Copy)]
@@ -130,6 +132,7 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
                 proof_b: [11; 64],
                 proof_c: [12; 32],
             },
+            maker: MAKER,
             transact,
         }),
         Wrapper::Cancel => wincode::serialize(&CancelIxData {
@@ -150,11 +153,12 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
 
 pub fn fixture(wrapper: Wrapper) -> (Instruction, Vec<(Pubkey, Account)>) {
     let payer = Pubkey::new_from_array([21; 32]);
-    let maker = Pubkey::new_from_array([22; 32]);
+    let maker = Pubkey::new_from_array(MAKER);
     let tree = Pubkey::new_from_array([23; 32]);
     let spp_id = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
     let swap_id = Pubkey::new_from_array(*swap_program::ID.as_array());
-    let (order_authority, _) = Pubkey::find_program_address(&[ORDER_AUTHORITY_PDA_SEED], &swap_id);
+    let (order_authority, _) =
+        Pubkey::find_program_address(&[ORDER_AUTHORITY_PDA_SEED, &MAKER], &swap_id);
 
     let mut metas = vec![AccountMeta::new(payer, true)];
     let mut accounts = vec![(payer, account(1_000_000_000))];

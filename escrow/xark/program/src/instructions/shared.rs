@@ -5,7 +5,11 @@ use pinocchio::{
     AccountView, Address, ProgramResult,
 };
 use spr_interface::instruction::instruction_data::transact::TransactIxDataRef;
-use spr_program::cpi::{SppTransactAccounts, TransactAccountsError};
+use spr_program::{
+    cpi::{SppTransactAccounts, TransactAccountsError},
+    program::PdaOwner,
+    verifier::address_hash,
+};
 use wincode::{config::DefaultConfig, SchemaReadOwned};
 
 use crate::error::TimelockEscrowError;
@@ -43,25 +47,60 @@ pub fn check_after_window(now: i64, unlock_unix_ts: u64) -> ProgramResult {
     }
 }
 
-/// Invokes SPP `transact` with `spp_accounts`, signed by the escrow-authority
-/// PDA, which must be among them.
-#[inline(never)]
-#[profile]
-pub fn cpi_spp_transact_signed(
-    spp_accounts: &[AccountView],
-    transact_bytes: &[u8],
-) -> ProgramResult {
-    let (escrow_authority, bump) =
-        Address::find_program_address(&[crate::ESCROW_AUTHORITY_PDA_SEED], &crate::ID);
-    let signer_pdas = [&escrow_authority];
-    let spp =
-        SppTransactAccounts::new(spp_accounts, &signer_pdas).map_err(transact_accounts_error)?;
-    let bump = [bump];
-    let seeds = [
-        Seed::from(crate::ESCROW_AUTHORITY_PDA_SEED),
-        Seed::from(&bump),
-    ];
-    spp.invoke::<16>(transact_bytes, &[Signer::from(&seeds)])
+/// `creator`'s escrow-authority PDA (seeds
+/// [`crate::escrow_authority_seeds`]), which owns `creator`'s escrow UTXOs
+/// under the zero nullifier secret and signs their spends.
+pub struct EscrowAuthority {
+    address: Address,
+    creator: Address,
+    bump: u8,
+}
+
+impl EscrowAuthority {
+    pub fn find(creator: &Address) -> Self {
+        let (address, bump) =
+            Address::find_program_address(&crate::escrow_authority_seeds(creator), &crate::ID);
+        Self {
+            address,
+            creator: *creator,
+            bump,
+        }
+    }
+
+    /// `Poseidon(solana_owner_identity(pda), Poseidon(0))`: the owner hash of
+    /// an escrow UTXO.
+    fn owner_hash(&self) -> Result<[u8; 32], TimelockEscrowError> {
+        Ok(*PdaOwner::new(&self.address)
+            .map_err(|_| TimelockEscrowError::HashingFailed)?
+            .owner_hash())
+    }
+
+    /// The escrow UTXO's address hash under `viewing_pubkey`: the escrow
+    /// proof's `escrow_owner` public input.
+    pub fn address_hash(&self, viewing_pubkey: &[u8; 33]) -> Result<[u8; 32], TimelockEscrowError> {
+        address_hash(&self.owner_hash()?, viewing_pubkey).map_err(TimelockEscrowError::from)
+    }
+
+    /// Invokes SPP `transact` with `spp_accounts`, signed by this PDA, which
+    /// must be among them.
+    #[inline(never)]
+    #[profile]
+    pub fn cpi_spp_transact_signed(
+        &self,
+        spp_accounts: &[AccountView],
+        transact_bytes: &[u8],
+    ) -> ProgramResult {
+        let signer_pdas = [&self.address];
+        let spp = SppTransactAccounts::new(spp_accounts, &signer_pdas)
+            .map_err(transact_accounts_error)?;
+        let bump = [self.bump];
+        let seeds = [
+            Seed::from(crate::ESCROW_AUTHORITY_PDA_SEED),
+            Seed::from(self.creator.as_array()),
+            Seed::from(&bump),
+        ];
+        spp.invoke::<16>(transact_bytes, &[Signer::from(&seeds)])
+    }
 }
 
 fn transact_accounts_error(error: TransactAccountsError) -> ProgramError {

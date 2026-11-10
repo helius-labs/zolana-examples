@@ -1,14 +1,15 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use light_program_profiler::profile;
-use pinocchio::{AccountView, ProgramResult};
+use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 use spr_account_checks::AccountIterator;
+use spr_hasher::{primitives::solana_owner_identity, Hasher, Poseidon};
 use spr_interface::instruction::instruction_data::transact::TransactIxData;
 use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     error::SwapError,
     instructions::{
-        shared::cpi_spp_transact_signed,
+        shared::OrderAuthority,
         verifier::{verify_groth16, CompressedGroth16Proof},
     },
     verifying_keys::make,
@@ -35,18 +36,38 @@ pub struct MakeIxData {
 
 const ORDER_OUTPUT_INDEX: usize = 1;
 
-/// Verifies the make proof. Its only public input is the SPP private tx hash,
-/// so there is no public-input hashing.
+pub struct MakePublicInput<'a> {
+    pub private_tx_hash: &'a [u8; 32],
+    /// The owner hash of the maker's order-authority PDA, which the circuit
+    /// binds the order UTXO's owner to.
+    pub order_owner_hash: &'a [u8; 32],
+    /// `solana_owner_identity(maker)`: the circuit binds the order terms'
+    /// maker owner hash to it, so the terms name the signing maker.
+    pub maker_owner_pk_field: &'a [u8; 32],
+}
+
+impl MakePublicInput<'_> {
+    pub fn hash(&self) -> Result<[u8; 32], ProgramError> {
+        Poseidon::hashv(&[
+            self.private_tx_hash.as_slice(),
+            self.order_owner_hash.as_slice(),
+            self.maker_owner_pk_field.as_slice(),
+        ])
+        .map_err(|_| SwapError::HashingFailed.into())
+    }
+}
+
+/// Verifies the make proof against the Poseidon hash of its public inputs.
 #[inline(never)]
 #[profile]
-pub fn verify_make_proof(proof: &MakeProof, private_tx_hash: [u8; 32]) -> ProgramResult {
+pub fn verify_make_proof(proof: &MakeProof, public_input: MakePublicInput) -> ProgramResult {
     verify_groth16(
         CompressedGroth16Proof {
             a: &proof.proof_a,
             b: &proof.proof_b,
             c: &proof.proof_c,
         },
-        private_tx_hash,
+        public_input.hash()?,
         &make::VERIFYINGKEY,
     )
 }
@@ -55,14 +76,25 @@ pub fn verify_make_proof(proof: &MakeProof, private_tx_hash: [u8; 32]) -> Progra
 #[profile]
 pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     let mut iter = AccountIterator::new(accounts);
-    let maker_pubkey = *iter.next_signer_mut("payer")?.address().as_array();
+    // The maker pays and signs; its order-authority PDA owns the order UTXO.
+    let maker = *iter.next_signer_mut("payer")?.address();
+    let order_authority = OrderAuthority::find(&maker);
+    let order_owner_hash = order_authority.owner_hash()?;
+    let maker_owner_pk_field = solana_owner_identity(maker.as_array()).map_err(SwapError::from)?;
 
     let MakeIxData {
         proof,
         mut transact,
     } = wincode::deserialize_exact(data).map_err(|_| SwapError::InvalidInstructionData)?;
 
-    verify_make_proof(&proof, transact.private_tx_hash)?;
+    verify_make_proof(
+        &proof,
+        MakePublicInput {
+            private_tx_hash: &transact.private_tx_hash,
+            order_owner_hash: &order_owner_hash,
+            maker_owner_pk_field: &maker_owner_pk_field,
+        },
+    )?;
     let order_utxo_hash = transact
         .outputs
         .get(ORDER_OUTPUT_INDEX)
@@ -76,7 +108,7 @@ pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
     }
     let marker = MarkerData {
         order_utxo_hash,
-        maker_pubkey,
+        maker_pubkey: *maker.as_array(),
     };
     marker_message.data = borsh::to_vec(&marker).map_err(|_| SwapError::InvalidInstructionData)?;
     let transact_bytes = transact
@@ -84,5 +116,5 @@ pub fn process_make_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
         .map_err(|_| SwapError::InvalidInstructionData)?;
 
     let spp_accounts = iter.remaining()?;
-    cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    order_authority.cpi_spp_transact_signed(spp_accounts, &transact_bytes)
 }

@@ -13,7 +13,7 @@ use wincode::{SchemaRead, SchemaWrite};
 use crate::{
     error::SwapError,
     instructions::{
-        shared::{check_after_window, cpi_spp_transact_signed, u64_right_align},
+        shared::{check_after_window, u64_right_align, OrderAuthority},
         verifier::{verify_groth16, CompressedGroth16Proof},
     },
 };
@@ -79,9 +79,8 @@ pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
     // committed maker_owner_hash from this pubkey (owner_pk_field), so only the
     // maker can cancel and the maker knows the refund blinding it chose. The
     // identity is tagged as a Solana key, like the owner hash the order commits.
-    let maker_owner_pk_field =
-        solana_owner_identity(iter.next_signer("maker")?.address().as_array())
-            .map_err(SwapError::from)?;
+    let maker = *iter.next_signer("maker")?.address();
+    let maker_owner_pk_field = solana_owner_identity(maker.as_array()).map_err(SwapError::from)?;
 
     let CancelIxData {
         proof,
@@ -105,5 +104,5 @@ pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
         .serialize()
         .map_err(|_| SwapError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
-    cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    OrderAuthority::find(&maker).cpi_spp_transact_signed(spp_accounts, &transact_bytes)
 }

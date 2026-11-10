@@ -32,6 +32,8 @@ pub struct TakeTransactionParams {
 }
 
 pub struct TakeTransaction {
+    /// The order's maker, whose order-authority PDA the program signs for.
+    pub maker: Address,
     pub spp_proof_inputs: SppProofInputs,
     pub proof_inputs: ProgramProofInputs,
     /// The order UTXO's nullifier, the transaction's first nullifier.
@@ -126,6 +128,7 @@ impl TakeTransactionParams {
             .map_err(err)?;
         let spp_proof_inputs = finalized.encrypt_with_viewing_key(&key).map_err(err)?;
         Ok(TakeTransaction {
+            maker: terms.maker.solana_address().map_err(err)?,
             spp_proof_inputs,
             proof_inputs: transaction.proof_inputs,
             first_nullifier,
@@ -151,6 +154,7 @@ impl TakeTransaction {
         let take_proof = proof::prove(CircuitId::Take, &self.proof_inputs)?;
         Ok(Take {
             payer,
+            maker: self.maker,
             tree,
             take_proof,
             spp_proof,

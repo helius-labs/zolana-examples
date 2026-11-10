@@ -448,7 +448,9 @@ fn bench_make(
     let order_nullifier_key = spr_keypair::NullifierKey::from_secret([0; 31]);
     let input_blinding = random_blinding();
     let input_utxo = Utxo {
-        owner: spr_keypair::PublicKey::from_ed25519(swap_sdk::order_authority_pda().as_array()),
+        owner: spr_keypair::PublicKey::from_ed25519(
+            swap_sdk::order_authority_pda(&payer.pubkey()).as_array(),
+        ),
         asset: spr_transaction::Mint::SOL,
         amount: INPUT_AMOUNT,
         blinding: input_blinding,
@@ -778,6 +780,9 @@ fn bench_take(
 
     let ix = Take {
         payer: taker_payer.pubkey(),
+        maker: maker_address
+            .solana_address()
+            .expect("maker solana address"),
         tree,
         take_proof: take_proof.into(),
         spp_proof: transact,

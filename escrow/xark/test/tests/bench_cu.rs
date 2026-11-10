@@ -505,6 +505,7 @@ fn bench_escrow(bench: &mut Bench) {
         payer: payer.pubkey(),
         tree: bench.tree,
         escrow_proof,
+        viewing_pubkey: transaction.viewing_pubkey,
         spp_proof,
     }
     .instruction()
@@ -524,7 +525,8 @@ fn bench_withdraw(bench: &mut Bench) {
     let (payer, creator) = creator();
     let escrow_output = escrow_transaction(&payer, &creator).escrow_output;
     let transaction = WithdrawTransactionParams {
-        escrow: escrow_utxo(&escrow_output, BENCH_TREE_ID, 0).expect("escrow utxo"),
+        escrow: escrow_utxo(&payer.pubkey(), &escrow_output, BENCH_TREE_ID, 0)
+            .expect("escrow utxo"),
         payer: payer.pubkey(),
     }
     .build(&creator)

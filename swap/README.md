@@ -23,14 +23,18 @@ model, order terms, instructions, and circuits.
 Both implement the same instructions, tags, errors, order terms, optional
 designated taker and test scenarios. They differ in program ID, in how each
 circuit's public values fold into its one public input (gnark hashes
-`Poseidon(private_tx_hash, values...)`, make exposing `private_tx_hash`
-itself; Xark hashes `Poseidon(values..., transaction_hash)`), in how the
+`Poseidon(private_tx_hash, values...)`;
+Xark hashes `Poseidon(values..., transaction_hash)`), in how the
 order UTXO carries the terms, and in who owns make's source: Xark stores the
 terms as a program SDK state (`DataUtxo<OrderTerms>`), so its data hash is the
 SDK state hash and its encrypted payload the Borsh-encoded terms, and its make
 spends a maker-owned source that the maker signs for, with the maker signer as
 a public field (see [xark](#xark)). gnark keeps its own terms hash and spends a
-source owned by the order-authority PDA.
+source owned by the maker's order-authority PDA. In both, each maker has its
+own order-authority PDA, seeds `[b"order_authority", maker]`, which owns its
+order UTXOs, so a maker finds its orders by deriving it; make proves the order
+UTXO is owned by it (gnark binds the PDA's owner hash, Xark the whole order
+owner address).
 
 ## Benchmark
 
@@ -69,7 +73,7 @@ python3 test-utils/compare-benchmarks.py swap
 ### Build
 
 Each crate is its own package with no shared workspace, so build them one at a
-time. The Zolana crates come from commit `6bb4f7008294695ebe614f08affb215d4321a538` of
+time. The Zolana crates come from commit `6aba4a70177caaef602baf972ce4958691ec1e65` of
 [helius-labs/zolana](https://github.com/helius-labs/zolana). Run the commands
 below from `swap/gnark/`.
 
@@ -86,7 +90,7 @@ named `zolana` next to the `zolana-examples` checkout:
 
 ```bash
 git clone https://github.com/helius-labs/zolana ../../../zolana
-git -C ../../../zolana checkout 6bb4f7008294695ebe614f08affb215d4321a538
+git -C ../../../zolana checkout 6aba4a70177caaef602baf972ce4958691ec1e65
 ```
 
 The Go bridge to Rust ships inside the `spr-gnark-ffi-prover-build` crate
@@ -145,14 +149,15 @@ commits to.
   fields: the SDK hashes the state as `Poseidon(discriminator,
   hash_bytes(destination_mint), destination_amount, maker_owner_hash, expiry,
   hash_bytes(taker_pk_fe))` and encodes it with Borsh. The order UTXO is a
-  `DataUtxo<OrderTerms>` owned by the order-authority PDA, so its data hash is
+  `DataUtxo<OrderTerms>` owned by the maker's order-authority PDA, so its data hash is
   `Poseidon(DATA, state_hash)` and its encrypted `utxo_data` the Borsh-encoded
   terms, which the taker and the maker decode with `DataUtxo::try_from`
   against the committed leaf. The terms commit the maker's owner, not its
   viewing key: the taker checks the registry-resolved maker address against
   that owner.
 - **make** spends the maker's source (`TokenUtxos::new_mut`), whose owner
-  must have the public signer identity, creates the order UTXO, moves
+  must have the public signer identity, creates the order UTXO owned by the
+  public `order_owner` (the maker's order-authority PDA address), moves
   `source_amount` into it and sets the terms with the source owner as the
   maker; the SDK returns the rest to the source owner as change (outputs
   `[change, order]`), with a random blinding seed. The maker signs the
@@ -176,7 +181,7 @@ the fields:
 
 | Circuit | Public fields | Program source |
 | ------- | ------------- | -------------- |
-| make | `maker_owner_pk_field` | `solana_owner_identity(maker signer)` |
+| make | `maker_owner_pk_field`, `order_owner` | `solana_owner_identity(maker signer)`, `address_hash(order_authority(maker signer).owner_hash, viewing_pubkey)` |
 | take | `expiry`, `first_nullifier` | `transact.expiry_unix_ts`, `transact.inputs[0].nullifier_hash` |
 | cancel | `expiry`, `maker_owner_pk_field` | `order_expiry`, `solana_owner_identity(maker signer)` |
 

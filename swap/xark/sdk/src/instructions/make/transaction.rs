@@ -36,6 +36,9 @@ pub struct MakeTransactionParams {
 }
 
 pub struct MakeTransaction {
+    /// The taker's viewing key, the order UTXO address's viewing key, which
+    /// the program hashes into the make proof's public `order_owner`.
+    pub viewing_pubkey: [u8; 33],
     pub spp_proof_inputs: SppProofInputs,
     pub proof_inputs: ProgramProofInputs,
     /// The order UTXO the transaction creates, with its derived blinding.
@@ -68,7 +71,9 @@ impl MakeTransactionParams {
         let tree_id = self.source.tree_id;
 
         // 2. Build the program transaction. The circuit takes the maker from
-        // the source owner.
+        // the source owner; the order UTXO's owner is the maker's order
+        // authority with the taker's viewing key, which the program derives
+        // from the maker signer.
         let terms = self.terms.circuit_terms()?;
         let transaction = MakeClient {
             private: MakePrivateInputsClient {
@@ -82,12 +87,12 @@ impl MakeTransactionParams {
                 destination_amount: terms.destination_amount,
                 expiry: terms.expiry,
                 taker_pk_fe: terms.taker_pk_fe,
-                order_address: order_authority()
-                    .address(self.taker_address.viewing_pubkey)
-                    .map_err(err)?,
             },
             public: MakePublicInputsClient {
                 maker_owner_pk_field: field(identity(&self.payer)?)?,
+                order_owner: order_authority(&self.payer)
+                    .address(self.taker_address.viewing_pubkey)
+                    .map_err(err)?,
             },
         }
         .prepare(&sender, self.payer)
@@ -131,6 +136,7 @@ impl MakeTransactionParams {
             .map_err(err)?,
         );
         Ok(MakeTransaction {
+            viewing_pubkey: *self.taker_address.viewing_pubkey.as_bytes(),
             spp_proof_inputs,
             proof_inputs: transaction.proof_inputs,
             order_utxo,
@@ -154,6 +160,7 @@ impl MakeTransaction {
         // 2. Prove the make circuit and build the instruction.
         let make_proof = proof::prove(CircuitId::Make, &self.proof_inputs)?;
         Ok(Make {
+            viewing_pubkey: self.viewing_pubkey,
             payer,
             tree,
             make_proof,

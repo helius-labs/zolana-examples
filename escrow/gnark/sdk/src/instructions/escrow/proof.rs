@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use spr_client::ProofInputUtxo;
 use spr_transaction::instructions::transact::{PrivateTxHash, SppProofInputs, SppProofOutputUtxo};
+use timelock_escrow_program::instructions::escrow::EscrowPublicInput;
 use timelock_escrow_prover::{EscrowProofInputs, EscrowTermsProofInput};
 
 use crate::{err, state::EscrowUtxo};
@@ -60,6 +61,10 @@ impl EscrowProofInputParams {
         let escrow_utxo =
             ProofInputUtxo::try_from((&self.escrow_utxo.output_utxo()?, output_tree_id))
                 .map_err(err)?;
+        let escrow_owner_hash = self.escrow_utxo.owner_hash()?;
+        if escrow_utxo.owner_hash != escrow_owner_hash {
+            bail!("escrow utxo owner is not the creator's escrow-authority PDA");
+        }
         let change = ProofInputUtxo::try_from((&self.change, output_tree_id)).map_err(err)?;
         let private_tx_hash = PrivateTxHash::new(
             &[self.spp_tx_hashes.source_input_hash, [0u8; 32]],
@@ -71,8 +76,24 @@ impl EscrowProofInputParams {
         )
         .hash()
         .map_err(err)?;
+        let owner_pk_field = terms
+            .creator
+            .signing_pubkey
+            .owner_proof_input_hash()
+            .map_err(err)?;
+        let public_input_hash = EscrowPublicInput {
+            private_tx_hash: &private_tx_hash,
+            escrow_owner_hash: &escrow_owner_hash,
+            owner_pk_field: &owner_pk_field,
+        }
+        .hash()
+        .map_err(err)?;
         Ok(EscrowProofInputs {
+            public_input_hash,
             private_tx_hash,
+            escrow_owner_hash,
+            owner_pk_field,
+            nullifier_pk: terms.creator.nullifier_pubkey,
             terms: terms_input,
             escrow_utxo,
             change,

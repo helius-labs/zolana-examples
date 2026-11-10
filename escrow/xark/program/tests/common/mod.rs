@@ -9,11 +9,12 @@ use spr_interface::{
     N_PUBLIC_SLOTS, SHIELDED_POOL_PROGRAM_ID,
 };
 use timelock_escrow_program::{
+    escrow_authority_seeds,
     instructions::{
         escrow::{EscrowIxData, EscrowProof},
         withdraw::{WithdrawIxData, WithdrawProof},
     },
-    tag, ESCROW_AUTHORITY_PDA_SEED,
+    tag,
 };
 
 /// The workspace target: `cargo build-sbf` in `escrow/xark/program` writes
@@ -54,8 +55,13 @@ fn account(lamports: u64) -> Account {
     }
 }
 
+/// The creator's escrow-authority PDA.
 fn escrow_authority() -> Address {
-    Address::find_program_address(&[ESCROW_AUTHORITY_PDA_SEED], &timelock_escrow_program::ID).0
+    Address::find_program_address(
+        &escrow_authority_seeds(&CREATOR),
+        &timelock_escrow_program::ID,
+    )
+    .0
 }
 
 /// A placeholder proof: its points do not decompress, so verification fails.
@@ -99,6 +105,7 @@ fn spp() -> TransactIxData {
 pub fn escrow_data() -> Vec<u8> {
     let body = wincode::serialize(&EscrowIxData {
         proof: PROOF,
+        viewing_pubkey: [2; 33],
         transact: spp(),
     })
     .expect("serialize escrow");
@@ -131,7 +138,7 @@ pub fn edit_payer(instruction: &mut Instruction, edit: impl Fn(&mut AccountMeta)
 }
 
 /// An escrow instruction with the builder's account layout: the creator,
-/// then the forwarded SPP list ending in `escrow_authority`.
+/// then the forwarded SPP list ending in the creator's `escrow_authority`.
 pub fn escrow_fixture() -> (Instruction, Vec<(Address, Account)>) {
     fixture(vec![AccountMeta::new(CREATOR, true)], escrow_data())
 }

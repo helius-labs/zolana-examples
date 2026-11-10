@@ -48,10 +48,11 @@ fn transact(inputs: u8) -> TransactIxData {
     }
 }
 
-/// The SPP accounts of `data` with `owner_signers`, where the order
+/// The SPP accounts of `data` with `owner_signers`, where `maker`'s order
 /// authority does not sign at transaction entry: the swap program supplies
 /// its signature during the CPI.
 fn spp_accounts(
+    maker: &Address,
     payer: Address,
     tree: Address,
     owner_signers: Vec<Address>,
@@ -68,7 +69,7 @@ fn spp_accounts(
     .instruction()
     .accounts;
     for account in &mut accounts {
-        if account.pubkey == order_authority_pda() {
+        if account.pubkey == order_authority_pda(maker) {
             account.is_signer = false;
         }
     }
@@ -77,19 +78,21 @@ fn spp_accounts(
 
 #[test]
 fn make_forwards_the_paying_maker_and_order_authority_as_owner_signers() {
-    // The maker owns the spent source; the order authority owns the
+    // The maker owns the spent source; its order authority owns the
     // data-bearing order output.
     let payer = Address::new_unique();
     let tree = Address::new_unique();
     let data = transact(1);
     let expected = spp_accounts(
+        &payer,
         payer,
         tree,
-        vec![payer, order_authority_pda()],
+        vec![payer, order_authority_pda(&payer)],
         data.clone(),
     );
     let instruction = Make {
         payer,
+        viewing_pubkey: [2; 33],
         tree,
         spp_proof: data,
         make_proof: MakeProof {
@@ -109,17 +112,22 @@ fn make_forwards_the_paying_maker_and_order_authority_as_owner_signers() {
 
 #[test]
 fn take_forwards_the_order_and_paying_taker_as_owner_signers() {
+    // The maker's order authority owns the order input; the taker owns its
+    // destination input.
     let payer = Address::new_unique();
+    let maker = Address::new_unique();
     let tree = Address::new_unique();
     let data = transact(2);
     let expected = spp_accounts(
+        &maker,
         payer,
         tree,
-        vec![order_authority_pda(), payer],
+        vec![order_authority_pda(&maker), payer],
         data.clone(),
     );
     let instruction = Take {
         payer,
+        maker,
         tree,
         spp_proof: data,
         take_proof: TakeProof {

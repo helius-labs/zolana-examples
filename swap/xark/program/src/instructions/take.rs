@@ -9,18 +9,30 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     error::SwapError,
-    instructions::shared::{check_within_window, cpi_spp_transact_signed, IxData},
+    instructions::shared::{check_within_window, IxData, OrderAuthority},
     verifier::take,
 };
 
 pub use spr_program::CompressedProof as TakeProof;
 
-/// The take instruction data as a client writes it. The program reads the
-/// proof, then the transact bytes in place ([`IxData`]), and forwards those
-/// bytes to SPP unchanged.
+/// The take arguments the program reads ahead of the transact bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
+pub struct TakeArgs {
+    pub proof: TakeProof,
+    /// See [`TakeIxData::maker`].
+    pub maker: [u8; 32],
+}
+
+/// The take instruction data as a client writes it: [`TakeArgs`], then the
+/// transact bytes, which the program reads in place ([`IxData`]) and forwards
+/// to SPP unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct TakeIxData {
     pub proof: TakeProof,
+    /// The order's maker (the marker's `maker_pubkey`), whose order-authority
+    /// PDA the program signs for. A wrong maker signs for a PDA that does not
+    /// own the order UTXO, and SPP rejects the spend.
+    pub maker: [u8; 32],
     pub transact: TransactIxData,
 }
 
@@ -28,7 +40,7 @@ pub struct TakeIxData {
 /// 2. Decode the instruction.
 /// 3. Check `now <= expiry`, the expiry being the transact's `expiry_unix_ts`.
 /// 4. Verify the take proof against the expiry and the first nullifier.
-/// 5. Invoke SPP with the order-authority PDA signer.
+/// 5. Invoke SPP with the maker's order-authority PDA signer.
 #[inline(never)]
 #[profile]
 pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -38,10 +50,10 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
 
     // 2. Decode the instruction.
     let IxData {
-        args: proof,
+        args: TakeArgs { proof, maker },
         transact,
         transact_bytes,
-    } = IxData::<TakeProof>::parse(data)?;
+    } = IxData::<TakeArgs>::parse(data)?;
 
     // 3. Check `now <= expiry`.
     let clock = Clock::get()?;
@@ -60,9 +72,9 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
         transact.private_tx_hash,
     )?;
 
-    // 5. Invoke SPP with the order-authority PDA signer.
+    // 5. Invoke SPP with the maker's order-authority PDA signer.
     let spp_accounts = iter.remaining()?;
-    cpi_spp_transact_signed(spp_accounts, transact_bytes)
+    OrderAuthority::find(&maker).cpi_spp_transact_signed(spp_accounts, transact_bytes)
 }
 
 /// Hashes the take proof's public inputs and verifies the proof.

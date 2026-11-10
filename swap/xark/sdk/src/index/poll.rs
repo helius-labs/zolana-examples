@@ -2,7 +2,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 use spr_client::{HistoryFilters, Rpc};
-use spr_keypair::ShieldedKeypair;
 use spr_transaction::ShieldedTransaction;
 
 use crate::err;
@@ -27,21 +26,18 @@ pub(crate) fn index_until<T>(
     }
 }
 
+/// Scans every indexed transaction with an output or message under `tag`.
 pub(crate) fn collect_tagged<I: Rpc, T>(
-    keypair: &ShieldedKeypair,
+    tag: [u8; 32],
     indexer: &I,
     mut scan: impl FnMut(&ShieldedTransaction) -> Result<Option<T>>,
 ) -> Result<Vec<T>> {
-    let owner_tag = keypair
-        .signing_pubkey()
-        .confidential_view_tag()
-        .map_err(err)?;
     let mut found = Vec::new();
     let mut cursor = None;
     loop {
         let page = indexer
             .get_shielded_transactions_by_tags(
-                vec![owner_tag],
+                vec![tag],
                 cursor,
                 None,
                 HistoryFilters::default(),

@@ -59,9 +59,12 @@ pub fn scan_taker(
     };
     let cx = DecodeCx::for_slot(&keypair.viewing_key, tx, slot_index);
     let plaintext = Confidential::decode(&body, &cx).map_err(err)?;
+    // The program writes the maker signer into the marker; the order UTXO is
+    // owned by that maker's order authority.
+    let maker_pubkey = Address::new_from_array(marker.maker_pubkey);
     Ok(Some(TakerOrderCandidate {
-        order: decode_order(tx, slot, slot_index, plaintext, registry)?,
-        maker_pubkey: Address::new_from_array(marker.maker_pubkey),
+        order: decode_order(tx, slot, slot_index, plaintext, &maker_pubkey, registry)?,
+        maker_pubkey,
         order_utxo_hash: marker.order_utxo_hash,
     }))
 }
@@ -93,8 +96,14 @@ pub fn index_taker<I: Rpc, R: Rpc>(
     rpc: &R,
     timeout: Duration,
 ) -> Result<Vec<TakerOrder>> {
+    // The confidential view tag of the taker's signing key, under which its
+    // order outputs are indexed.
+    let owner_tag = keypair
+        .signing_pubkey()
+        .confidential_view_tag()
+        .map_err(err)?;
     index_until(timeout, "taker orders", || {
-        collect_tagged(keypair, indexer, |tx| {
+        collect_tagged(owner_tag, indexer, |tx| {
             let Some(candidate) = scan_taker(tx, keypair, registry)? else {
                 return Ok(None);
             };

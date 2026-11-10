@@ -57,11 +57,25 @@ pub struct EscrowUtxo {
     pub amount: u64,
 }
 
-// escrow mints to the synthetic escrow-authority owner; withdraw spends from
-// it.
+// escrow mints to the creator's escrow-authority PDA owner; withdraw spends
+// from it.
 impl EscrowUtxo {
-    fn pda_owner() -> PublicKey {
-        PublicKey::from_ed25519(crate::escrow_authority_pda().as_array())
+    /// The creator's escrow-authority PDA, which owns this escrow UTXO.
+    pub fn escrow_authority(&self) -> Result<solana_pubkey::Pubkey> {
+        let creator = self.terms.creator.solana_address().map_err(err)?;
+        Ok(crate::escrow_authority_pda(&creator))
+    }
+
+    fn pda_owner(&self) -> Result<PublicKey> {
+        Ok(PublicKey::from_ed25519(self.escrow_authority()?.as_array()))
+    }
+
+    /// The escrow UTXO's owner hash: the PDA owner with the zero-secret
+    /// nullifier key. The escrow program recomputes it from the creator
+    /// signer and passes it to the escrow proof as a public input.
+    pub fn owner_hash(&self) -> Result<[u8; 32]> {
+        let nullifier_pubkey = Self::nullifier_key().pubkey().map_err(err)?;
+        spr_keypair::hash::owner_hash(&self.pda_owner()?, &nullifier_pubkey).map_err(err)
     }
 
     /// Constant nullifier key: the escrow-authority PDA is the sole
@@ -79,7 +93,7 @@ impl EscrowUtxo {
         let data_hash = self.terms.data_hash()?;
         let nullifier_pubkey = Self::nullifier_key().pubkey().map_err(err)?;
         let owner_address = ShieldedAddress {
-            signing_pubkey: Self::pda_owner(),
+            signing_pubkey: self.pda_owner()?,
             nullifier_pubkey,
             viewing_pubkey: self.terms.creator.viewing_pubkey,
         };
@@ -105,7 +119,7 @@ impl EscrowUtxo {
     /// different tree.
     pub fn to_input_utxo(&self, tree_id: u16, leaf_index: u64) -> Result<SppProofInputUtxo> {
         let utxo = Utxo {
-            owner: Self::pda_owner(),
+            owner: self.pda_owner()?,
             asset: self.asset,
             amount: self.amount,
             blinding: self.blinding,
@@ -144,5 +158,74 @@ impl EscrowUtxo {
             owner_address: Some(recipient),
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use spr_keypair::ShieldedKeypair;
+    use spr_program::program::PdaOwner;
+    use spr_transaction::utxo::ProofInputUtxo;
+
+    use super::*;
+
+    fn escrow_utxo(creator: ShieldedAddress) -> EscrowUtxo {
+        EscrowUtxo {
+            terms: EscrowTerms {
+                creator,
+                unlock_timestamp: 42,
+            },
+            blinding: [7u8; 32],
+            asset: Mint::default(),
+            amount: 1,
+        }
+    }
+
+    /// The SDK's escrow owner equals what the program computes on chain
+    /// (`EscrowAuthority::owner_hash`, `PdaOwner` of the creator's PDA), and
+    /// the escrow output commits it.
+    #[test]
+    fn escrow_owner_is_the_creators_pda_owner() {
+        let creator = ShieldedKeypair::new_ed25519()
+            .unwrap()
+            .shielded_address()
+            .unwrap();
+        let escrow_utxo = escrow_utxo(creator);
+        let pda = crate::escrow_authority_pda(&creator.solana_address().unwrap());
+        let program_owner_hash = *PdaOwner::new(&pda).unwrap().owner_hash();
+        let output = escrow_utxo.output_utxo().unwrap();
+        let output_owner_hash = ProofInputUtxo::try_from((&output, 0u16))
+            .unwrap()
+            .owner_hash;
+        assert_eq!(
+            (
+                escrow_utxo.escrow_authority().unwrap(),
+                escrow_utxo.owner_hash().unwrap(),
+                output_owner_hash
+            ),
+            (pda, program_owner_hash, program_owner_hash)
+        );
+    }
+
+    /// Each creator gets its own escrow-authority PDA.
+    #[test]
+    fn escrow_authority_is_per_creator() {
+        let first = escrow_utxo(
+            ShieldedKeypair::new_ed25519()
+                .unwrap()
+                .shielded_address()
+                .unwrap(),
+        );
+        let second = escrow_utxo(
+            ShieldedKeypair::new_ed25519()
+                .unwrap()
+                .shielded_address()
+                .unwrap(),
+        );
+        assert_ne!(
+            first.escrow_authority().unwrap(),
+            second.escrow_authority().unwrap()
+        );
+        assert_ne!(first.owner_hash().unwrap(), second.owner_hash().unwrap());
     }
 }

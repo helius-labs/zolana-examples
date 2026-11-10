@@ -13,6 +13,13 @@ pub mod tag {
 
 pub const ESCROW_AUTHORITY_PDA_SEED: &[u8] = b"escrow_authority";
 
+/// Seeds of the creator's escrow-authority PDA, which owns the creator's
+/// escrow utxos. One PDA per creator, so a creator finds its escrow utxos by
+/// deriving it.
+pub fn escrow_authority_seeds(creator: &Address) -> [&[u8]; 2] {
+    [ESCROW_AUTHORITY_PDA_SEED, creator.as_array()]
+}
+
 #[cfg(all(feature = "bpf-entrypoint", not(feature = "no-entrypoint")))]
 mod entrypoint {
     pinocchio::entrypoint!(crate::process_instruction);

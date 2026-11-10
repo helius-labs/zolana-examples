@@ -15,8 +15,9 @@ use swap_sdk::{instructions::take::Take, order_authority_pda, TakeProof};
 #[test]
 fn take_forwards_the_order_and_paying_taker_as_owner_signers() {
     let payer = Address::new_unique();
+    let maker = Address::new_unique();
     let tree = Address::new_unique();
-    let order_authority = order_authority_pda();
+    let order_authority = order_authority_pda(&maker);
     let data = TransactIxData {
         expiry_unix_ts: u64::MAX,
         private_tx_hash: [0; 32],
@@ -64,6 +65,7 @@ fn take_forwards_the_order_and_paying_taker_as_owner_signers() {
     }
     let instruction = Take {
         payer,
+        maker,
         tree,
         spp_proof: data,
         take_proof: TakeProof {

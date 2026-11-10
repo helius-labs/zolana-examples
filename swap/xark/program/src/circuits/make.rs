@@ -31,10 +31,6 @@ pub struct MakePrivateInputs {
     pub destination_amount: u64,
     pub expiry: u64,
     pub taker_pk_fe: [u8; 32],
-    /// The order UTXO's owner, the order-authority PDA with the taker's
-    /// viewing key so the taker can decrypt the order. The circuit does not
-    /// constrain it: SPP spends the order UTXO only with the PDA signature.
-    pub order_address: ShieldedAddress,
 }
 
 #[input]
@@ -43,12 +39,20 @@ pub struct MakePublicInputs {
     /// `hash_bytes` of the maker signer's tagged pubkey, which the program
     /// computes from the signer account.
     pub maker_owner_pk_field: Field,
+    /// The order UTXO's address: the maker's order-authority PDA with the
+    /// taker's viewing key, so the taker can decrypt the order. The program
+    /// derives the PDA from the maker signer and hashes the address. SPP
+    /// accepts a data-bearing output owned by any owner signer, the maker
+    /// included, so this binds the order UTXO to the PDA that only the
+    /// program signs for.
+    pub order_owner: ShieldedAddress,
 }
 
 impl Make {
     /// 1. Spend the source UTXO and check its owner is the maker signer.
-    /// 2. Create the order UTXO and lock `source_amount` in it; the rest of
-    ///    the source returns to its owner as change.
+    /// 2. Create the order UTXO, owned by the public `order_owner`, and lock
+    ///    `source_amount` in it; the rest of the source returns to its owner
+    ///    as change.
     /// 3. Set and check the order terms; the source owner is the maker.
     /// 4. Check the transaction: outputs `[change, order UTXO]`.
     pub fn execute(&self) -> Result<CheckedTransaction, CircuitError> {
@@ -61,7 +65,7 @@ impl Make {
 
         // 2. Lock `source_amount` in the order UTXO.
         require(private.source_amount != 0);
-        let mut order = DataUtxo::<OrderTerms>::new_init(private.order_address.owner())
+        let mut order = DataUtxo::<OrderTerms>::new_init(self.public.order_owner.owner())
             .with_asset(&tokens.asset())?;
         tokens.transfer(&mut order, &private.source_amount)?;
 

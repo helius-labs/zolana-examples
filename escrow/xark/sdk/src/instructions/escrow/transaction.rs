@@ -39,14 +39,20 @@ pub struct EscrowTransaction {
     pub escrow_output: SppProofOutputUtxo,
     /// The change output's blinding.
     pub change_blinding: [u8; 32],
+    /// The escrow UTXO address's viewing pubkey, which the program hashes
+    /// with the creator's escrow-authority PDA into the escrow proof's
+    /// `escrow_owner`.
+    pub viewing_pubkey: [u8; 33],
 }
 
 impl EscrowTransactionParams {
-    /// 1. Build the program transaction; the circuit sets the terms.
+    /// 1. Build the program transaction; the circuit sets the terms and
+    ///    outputs the escrow UTXO to the creator's escrow-authority PDA.
     /// 2. Read the escrow UTXO and the change it created.
     /// 3. Encrypt the outputs.
     pub fn build(self, creator: &ShieldedKeypair) -> Result<EscrowTransaction> {
         let sender = creator.shielded_address().map_err(err)?;
+        let creator_address = sender.solana_address().map_err(err)?;
 
         // 1. Build the program transaction; the circuit sets the terms.
         let transaction = EscrowClient {
@@ -58,12 +64,12 @@ impl EscrowTransactionParams {
                 source: self.source,
                 amount: self.amount,
                 unlock: self.unlock_timestamp,
-                escrow_address: escrow_authority()
-                    .address(sender.viewing_pubkey)
-                    .map_err(err)?,
             },
             public: EscrowPublicInputsClient {
                 owner_pk_field: owner_pk_field(creator)?,
+                escrow_owner: escrow_authority(&creator_address)
+                    .address(sender.viewing_pubkey)
+                    .map_err(err)?,
             },
         }
         .prepare(&sender, self.payer)
@@ -91,6 +97,7 @@ impl EscrowTransactionParams {
             proof_inputs: transaction.proof_inputs,
             escrow_output,
             change_blinding,
+            viewing_pubkey: *sender.viewing_pubkey.as_bytes(),
         })
     }
 }
@@ -113,6 +120,7 @@ impl EscrowTransaction {
             payer,
             tree,
             escrow_proof,
+            viewing_pubkey: self.viewing_pubkey,
             spp_proof,
         })
     }

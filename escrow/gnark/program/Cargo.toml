@@ -34,7 +34,7 @@ wincode = { workspace = true }
 spr-account-checks = { workspace = true }
 spr-hasher = { workspace = true }
 spr-interface = { workspace = true }
-spr-program = { workspace = true, features = ["cpi"] }
+spr-program = { workspace = true, features = ["cpi", "compression"] }
 
 [lints.rust.unexpected_cfgs]
 level = "allow"

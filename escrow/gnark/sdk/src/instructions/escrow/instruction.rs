@@ -9,6 +9,10 @@ use spr_program::instruction::nullifier_pda_accounts;
 use crate::{err, escrow_authority_pda, tag, EscrowIxData, EscrowProof};
 
 pub struct Escrow {
+    /// The creator's ed25519 pubkey, a readonly signer: the timelock escrow
+    /// program derives the creator's escrow-authority PDA from it, which owns
+    /// the escrow UTXO, and binds the escrow terms to its owner identity.
+    pub creator: Pubkey,
     pub payer: Pubkey,
     pub tree: Pubkey,
     pub escrow_proof: EscrowProof,
@@ -18,6 +22,7 @@ pub struct Escrow {
 impl Escrow {
     pub fn instruction(self) -> Result<Instruction> {
         let Self {
+            creator,
             payer,
             tree,
             escrow_proof,
@@ -35,7 +40,7 @@ impl Escrow {
         .map_err(err)?;
 
         let mut accounts = vec![
-            AccountMeta::new(payer, true),
+            AccountMeta::new_readonly(creator, true),
             AccountMeta::new(payer, true),
             AccountMeta::new(tree, false),
             AccountMeta::new_readonly(Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID), false),
@@ -43,7 +48,10 @@ impl Escrow {
             AccountMeta::new(tree, false),
         ];
         accounts.extend(nullifier_pdas);
-        accounts.push(AccountMeta::new_readonly(escrow_authority_pda(), false));
+        accounts.push(AccountMeta::new_readonly(
+            escrow_authority_pda(&creator),
+            false,
+        ));
         let mut instruction_data = vec![tag::ESCROW];
         instruction_data.extend_from_slice(&serialized_ix);
         Ok(Instruction {

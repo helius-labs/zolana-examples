@@ -46,7 +46,12 @@ implementation's circuits and public inputs are formed, are in
   verifiers they call.
 - Instructions: decode, check the Clock window, verify in
   `verify_<ix>_proof` (profiled) with `verifier::<circuit>::Verifier`, then
-  CPI SPP with the order-authority PDA flipped to a signer.
+  CPI SPP with the maker's order-authority PDA (`OrderAuthority`, seeds
+  `[b"order_authority", maker]`) flipped to a signer. make derives it from
+  the maker signer and binds the order UTXO's owner to it through the public
+  `order_owner`; take derives it from its `maker` argument, cancel from the
+  maker signer. Owner-hash and address hashes come from `PdaOwner` and
+  `verifier::address_hash`, never by hand.
   `VerifyError::PublicInputs` maps to `HashingFailed`, `VerifyError::Proof`
   to `ProofVerificationFailed`.
 - Never index slices with `[i]`; use `.get()`.

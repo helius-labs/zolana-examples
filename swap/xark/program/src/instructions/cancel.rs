@@ -10,7 +10,7 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     error::SwapError,
-    instructions::shared::{check_after_window, cpi_spp_transact_signed, IxData},
+    instructions::shared::{check_after_window, IxData, OrderAuthority},
     verifier::cancel,
 };
 
@@ -44,7 +44,7 @@ pub struct CancelIxData {
 /// 2. Decode the instruction.
 /// 3. Check `now > order_expiry`.
 /// 4. Verify the cancel proof against the expiry and the maker.
-/// 5. Invoke SPP with the order-authority PDA signer.
+/// 5. Invoke SPP with the maker's order-authority PDA signer.
 #[inline(never)]
 #[profile]
 pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -54,9 +54,8 @@ pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
     // order commits.
     let mut iter = AccountIterator::new(accounts);
     iter.next_signer_mut("payer")?;
-    let maker_owner_pk_field =
-        solana_owner_identity(iter.next_signer("maker")?.address().as_array())
-            .map_err(SwapError::from)?;
+    let maker = *iter.next_signer("maker")?.address().as_array();
+    let maker_owner_pk_field = solana_owner_identity(&maker).map_err(SwapError::from)?;
 
     // 2. Decode the instruction.
     let IxData {
@@ -80,9 +79,9 @@ pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
         transact.private_tx_hash,
     )?;
 
-    // 5. Invoke SPP with the order-authority PDA signer.
+    // 5. Invoke SPP with the maker's order-authority PDA signer.
     let spp_accounts = iter.remaining()?;
-    cpi_spp_transact_signed(spp_accounts, transact_bytes)
+    OrderAuthority::find(&maker).cpi_spp_transact_signed(spp_accounts, transact_bytes)
 }
 
 /// Hashes the cancel proof's public inputs and verifies the proof.

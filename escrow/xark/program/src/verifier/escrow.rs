@@ -5,12 +5,13 @@ include!("escrow.vk.rs");
 
 pub struct PublicInputs {
     pub owner_pk_field: [u8; 32],
+    pub escrow_owner: [u8; 32],
 }
 
 #[rustfmt::skip]
 impl PublicInputs {
     pub fn hash(&self, transaction_hash: &[u8; 32]) -> Result<[u8; 32], VerifyError> {
-        public_hash(&[Field::Hash(&self.owner_pk_field)], transaction_hash)
+        public_hash(&[Field::Hash(&self.owner_pk_field), Field::Hash(&self.escrow_owner)], transaction_hash)
     }
 }
 

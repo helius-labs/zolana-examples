@@ -15,21 +15,20 @@ pub use swap_program::{
         make::{MakeIxData, MakeProof, MarkerData},
         take::{TakeIxData, TakeProof},
     },
-    tag, ORDER_AUTHORITY_PDA_SEED,
+    order_authority_seeds, tag, ORDER_AUTHORITY_PDA_SEED,
 };
 
-/// The order-authority PDA the swap program signs with (`invoke_signed`) to
-/// spend an order UTXO. It owns the order UTXO, holds no data, and is never
-/// created.
-pub fn order_authority_pda() -> Address {
-    let (pda, _bump) =
-        Address::find_program_address(&[ORDER_AUTHORITY_PDA_SEED], &swap_program::ID);
-    pda
+/// The order-authority PDA of `maker`, `[ORDER_AUTHORITY_PDA_SEED, maker]`,
+/// which the swap program signs with (`invoke_signed`) to spend the maker's
+/// order UTXOs. It owns them, holds no data, and is never created.
+pub fn order_authority_pda(maker: &Address) -> Address {
+    *order_authority(maker).pda()
 }
 
-/// The order-authority PDA as a UTXO owner, under the zero nullifier key.
-pub fn order_authority() -> ProgramOwner {
-    ProgramOwner::new(order_authority_pda())
+/// The order-authority PDA of `maker` as a UTXO owner, under the zero
+/// nullifier key. Its view tag finds the maker's order UTXOs.
+pub fn order_authority(maker: &Address) -> ProgramOwner {
+    ProgramOwner::find(&order_authority_seeds(maker.as_array()), &swap_program::ID)
 }
 
 pub(crate) fn err(e: impl core::fmt::Debug) -> anyhow::Error {
