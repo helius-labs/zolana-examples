@@ -1,4 +1,4 @@
-# Examples for private Solana rings
+# Examples for Solana Privacy Rings
 
 > [!WARNING]
 > **Not for production.** These are examples, not audited code. The escrow and
