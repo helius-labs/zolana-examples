@@ -99,15 +99,13 @@ check_go_pins() {
     fi
 }
 
-# check_all_pins <repo_dir>: check_pins for every tracked Cargo.toml that names
-# the Zolana repository, and check_go_pins for both gnark circuit modules.
+# check_all_pins <repo_dir>: check_pins for every tracked Cargo.toml (it skips
+# manifests that do not name Zolana), and check_go_pins for both gnark circuits.
 check_all_pins() {
     local repo=$1 manifests manifest status=0
     manifests=$(git -C "$repo" ls-files '*Cargo.toml') || return 1
     while IFS= read -r manifest; do
-        if grep -qF https://github.com/helius-labs/zolana "$repo/$manifest"; then
-            check_pins "$repo/$manifest" || status=1
-        fi
+        check_pins "$repo/$manifest" || status=1
     done <<<"$manifests"
     for manifest in swap/gnark/prover/circuits/go.mod escrow/gnark/prover/circuits/go.mod; do
         check_go_pins "$repo/$manifest" || status=1

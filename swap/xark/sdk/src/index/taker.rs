@@ -59,21 +59,16 @@ pub fn scan_taker(
     else {
         return Ok(None);
     };
-    Ok(
-        decode_candidate(tx, keypair, &marker_message.data, registry)
-            .ok()
-            .flatten(),
-    )
+    Ok(decode_candidate(tx, keypair, &marker_message.data, registry).ok())
 }
 
-/// Decodes the order `marker_data` names in `tx`; `None` for an order with a
-/// non-canonical `taker_pk_fe`.
+/// Decodes the order `marker_data` names in `tx`.
 fn decode_candidate(
     tx: &ShieldedTransaction,
     keypair: &ShieldedKeypair,
     marker_data: &[u8],
     registry: &AssetRegistry,
-) -> Result<Option<TakerOrderCandidate>> {
+) -> Result<TakerOrderCandidate> {
     let marker =
         MarkerData::try_from_slice(marker_data).map_err(|e| anyhow!("marker payload: {e}"))?;
     let Some((slot_index, slot, body)) =
@@ -87,21 +82,14 @@ fn decode_candidate(
     // checks it; the order UTXO is owned by that maker's order authority.
     let maker_pubkey = Address::new_from_array(marker.maker_pubkey);
     let order = decode_order(tx, slot, slot_index, plaintext, &maker_pubkey, registry)?;
-    // Skip the order before resolving its maker in the user registry.
-    if !has_canonical_taker(&order) {
-        return Ok(None);
-    }
-    Ok(Some(TakerOrderCandidate {
+    // The circuit reads a non-canonical `taker_pk_fe` as another taker, so the
+    // order is refused before its maker is resolved in the user registry.
+    check_taker_pk_fe(&order.data.taker_pk_fe)?;
+    Ok(TakerOrderCandidate {
         order,
         maker_pubkey,
         order_utxo_hash: marker.order_utxo_hash,
-    }))
-}
-
-/// Whether the order's `taker_pk_fe` is canonical. The circuit reads a
-/// non-canonical value as another taker, so discovery skips such orders.
-fn has_canonical_taker(order: &DataUtxo<circuits::OrderTerms>) -> bool {
-    check_taker_pk_fe(&order.data.taker_pk_fe).is_ok()
+    })
 }
 
 impl TakerOrderCandidate {
@@ -266,19 +254,6 @@ mod tests {
         assert!(scan_taker(&tx, &other_keypair, &fixture.registry)
             .expect("an undecryptable order must not fail the scan")
             .is_none());
-    }
-
-    #[test]
-    fn discovery_skips_a_non_canonical_taker_pk_fe() {
-        let fixture = order_fixture();
-        let mut order = scan_taker(&fixture.tx, &fixture.taker_keypair, &fixture.registry)
-            .expect("scan")
-            .expect("order candidate")
-            .order;
-        assert!(has_canonical_taker(&order));
-        // Above the BN254 scalar field modulus as 32 big-endian bytes.
-        order.data.taker_pk_fe = [0xff; 32];
-        assert!(!has_canonical_taker(&order));
     }
 
     #[test]

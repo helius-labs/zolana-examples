@@ -28,23 +28,26 @@ fn make_transaction_spends_one_source_into_change_then_order_with_one_marker() {
     let taker_address = taker.shielded_address().unwrap();
     let maker_pubkey = maker_address.solana_address().unwrap();
     let source_mint = Mint::new(solana_address::Address::new_from_array([3; 32]), 2);
-    let utxo = |amount, blinding| Utxo {
-        owner: maker.signing_pubkey(),
-        asset: source_mint,
-        amount,
-        blinding,
-        ring_program_id: None,
-        data: Data::default(),
+    // A wallet UTXO of `source_mint` owned by the maker.
+    let wallet = |amount, blinding| {
+        spr_test_utils::utxo::wallet(
+            Utxo {
+                owner: maker.signing_pubkey(),
+                asset: source_mint,
+                amount,
+                blinding,
+                ring_program_id: None,
+                data: Data::default(),
+            },
+            &maker.nullifier_key,
+            TREE_ID,
+            0,
+            None,
+            None,
+        )
+        .unwrap()
     };
-    let source = spr_test_utils::utxo::wallet(
-        utxo(SOURCE, [5; 32]),
-        &maker.nullifier_key,
-        TREE_ID,
-        0,
-        None,
-        None,
-    )
-    .unwrap();
+    let source = wallet(SOURCE, [5; 32]);
     let terms = OrderTerms {
         destination_mint: Mint::SOL,
         destination_amount: 250,
@@ -68,16 +71,7 @@ fn make_transaction_spends_one_source_into_change_then_order_with_one_marker() {
     assert_eq!(spp.check_shape().unwrap(), Shape::IN1_OUT2);
 
     // 2. The change to the maker comes first, then the order UTXO.
-    let change_hash = spr_test_utils::utxo::wallet(
-        utxo(SOURCE - LOCKED, transaction.change_blinding),
-        &maker.nullifier_key,
-        TREE_ID,
-        0,
-        None,
-        None,
-    )
-    .unwrap()
-    .utxo_hash;
+    let change_hash = wallet(SOURCE - LOCKED, transaction.change_blinding).utxo_hash;
     let order_hash = transaction.order_utxo.hash(TREE_ID).unwrap();
     let output_hashes: Vec<[u8; 32]> = spp
         .external_data
