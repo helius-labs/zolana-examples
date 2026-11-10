@@ -17,14 +17,10 @@ pub fn paths() -> LocalnetPaths {
     }
 }
 
-/// The deployed user-registry v1.0.0 program,
-/// `USER_REGISTRY_PROGRAM_PATH`.
-#[allow(dead_code)] // Not every suite loads the registry.
-pub fn user_registry_program() -> PathBuf {
-    env_path("USER_REGISTRY_PROGRAM_PATH")
-}
-
-fn env_path(name: &str) -> PathBuf {
+/// The path in the environment variable `name`, which the release runner
+/// exports. Suites that load the deployed user-registry v1.0.0 program read
+/// `USER_REGISTRY_PROGRAM_PATH` with it.
+pub fn env_path(name: &str) -> PathBuf {
     env::var_os(name).map(PathBuf::from).unwrap_or_else(|| {
         panic!("{name} is not set; run test-utils/run-release-tests.sh to prepare the release artifacts")
     })

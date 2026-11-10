@@ -32,7 +32,7 @@ borsh = { workspace = true }
 groth16-solana = { workspace = true, features = ["bsb22"] }
 light-program-profiler = { workspace = true }
 pinocchio = { workspace = true, features = ["cpi"] }
-# `curve25519` gives `Address::find_program_address` a host implementation;
+# `curve25519` gives `Address::create_program_address` a host implementation;
 # on SBF it uses the syscall and pulls in no curve dependency.
 solana-address = { workspace = true, features = ["curve25519"] }
 solana-program-error = { workspace = true }

@@ -68,50 +68,91 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: false
+
       - name: Record before pins
         id: before
         run: |
           set -euo pipefail
-          ts="$(python3 -c 'import json; print(json.load(open("typescript-client/package.json"))["dependencies"]["@heliuslabs/zolana"])')"
-          rust="$(python3 -c '
-          import re
-          text = open("rust-client/Cargo.toml").read()
-          m = re.search(r"rev = \"([0-9a-f]+)\"", text)
-          print(m.group(1) if m else "")
-          ')"
+          ts="$(python3 -c 'import json; print(json.load(open("typescript-client/package.json"))["dependencies"]["@heliuslabs/spr"])')"
+          rust="$(bash -c 'source test-utils/zolana-release.sh && echo "$zolana_revision"')"
           {
             echo "ts=$ts"
             echo "rust=$rust"
           } >> "$GITHUB_OUTPUT"
 
+      # One Zolana commit is pinned everywhere: every Zolana Git rev in the
+      # Cargo manifests, zolana_revision in test-utils/zolana-release.sh and
+      # the gnark circuits' Go pseudo-versions.
       - name: Bump SDK pins
         env:
           SHA: ${{ steps.payload.outputs.sha }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json, os, re
+          if [[ ! $SHA =~ ^[0-9a-f]{40}$ ]]; then
+            echo "zolana sha must be a full 40-character commit" >&2
+            exit 1
+          fi
+          git ls-files '*Cargo.toml' > "$RUNNER_TEMP/manifests"
+          python3 - "$RUNNER_TEMP/manifests" <<'PY'
+          import json, os, re, sys
           sha = os.environ["SHA"]
           path = "typescript-client/package.json"
           pkg = json.load(open(path))
-          pkg["dependencies"]["@heliuslabs/zolana"] = (
+          pkg["dependencies"]["@heliuslabs/spr"] = (
               f"git+https://github.com/helius-labs/zolana.git#{sha}&path:/sdk-libs/ts"
           )
           json.dump(pkg, open(path, "w"), indent=2)
           open(path, "a").write("\n")
-          cargo = open("rust-client/Cargo.toml").read()
-          cargo, n = re.subn(
-              r'(git = "https://github.com/helius-labs/zolana", )rev = "[0-9a-f]+"',
-              rf'\1rev = "{sha}"',
-              cargo,
-          )
-          if n == 0:
-              raise SystemExit("rust-client/Cargo.toml has no zolana rev fields")
-          open("rust-client/Cargo.toml", "w").write(cargo)
+          total = 0
+          for manifest in open(sys.argv[1]).read().split():
+              text = open(manifest).read()
+              text, n = re.subn(
+                  r'(git\s*=\s*"https://github\.com/helius-labs/zolana(?:\.git)?"\s*,\s*)rev\s*=\s*"[0-9a-f]+"',
+                  rf'\1rev = "{sha}"',
+                  text,
+              )
+              if n:
+                  open(manifest, "w").write(text)
+                  total += n
+          if total == 0:
+              raise SystemExit("no Cargo.toml has a zolana rev field")
+          path = "test-utils/zolana-release.sh"
+          text, n = re.subn(r"(?m)^zolana_revision=[0-9a-f]+$", f"zolana_revision={sha}", open(path).read())
+          if n != 1:
+              raise SystemExit(f"{path} has no zolana_revision line")
+          open(path, "w").write(text)
           PY
           (cd typescript-client && pnpm install)
-          # All spr-* crates share one git source; updating one moves them all.
-          (cd rust-client && cargo update -p spr-client)
+          # Cargo re-resolves only the Zolana Git source whose rev changed.
+          for lock in $(git ls-files '*Cargo.lock'); do
+            cargo metadata --format-version 1 --manifest-path "$(dirname "$lock")/Cargo.toml" > /dev/null
+          done
+          # The circuits modules require the gnark FFI bridge without a replace;
+          # Go tooling needs one, so point it at the bridge of the new commit
+          # while bumping. Name a circuit package of prover/server, not its
+          # module root: the root is the prover server, whose GPU backend
+          # imports a private module.
+          bridge="$(cargo metadata --format-version 1 --manifest-path escrow/gnark/Cargo.toml | python3 -c '
+          import json, os, sys
+          packages = json.load(sys.stdin)["packages"]
+          build = next(p for p in packages if p["name"] == "spr-gnark-ffi-prover-build")
+          print(os.path.join(os.path.dirname(build["manifest_path"]), "go"))
+          ')"
+          for circuits in swap/gnark/prover/circuits escrow/gnark/prover/circuits; do
+            (
+              cd "$circuits"
+              go mod edit -replace "zolana/gnarkffiprover=$bridge"
+              go get "github.com/helius-labs/zolana/sdk-libs/gnark-sdk@$SHA" \
+                "github.com/helius-labs/zolana/prover/server/circuits/gadget@$SHA"
+              go mod tidy
+              go mod edit -dropreplace zolana/gnarkffiprover
+            )
+          done
+          bash -c 'set -euo pipefail; source test-utils/zolana-release.sh; check_all_pins .'
 
       - name: Check examples
         id: check
@@ -151,12 +192,18 @@ jobs:
           allow = {
               "typescript-client/package.json",
               "typescript-client/pnpm-lock.yaml",
-              "rust-client/Cargo.toml",
-              "rust-client/Cargo.lock",
+              "test-utils/zolana-release.sh",
               "typescript-client/examples/deposit_transfer_withdraw.ts",
               "rust-client/examples/deposit_transfer_withdraw.rs",
           }
-          extra = [line.strip() for line in sys.stdin if line.strip() and line.strip() not in allow]
+          pin_files = ("Cargo.toml", "Cargo.lock", "prover/circuits/go.mod", "prover/circuits/go.sum")
+          extra = [
+              line.strip()
+              for line in sys.stdin
+              if line.strip()
+              and line.strip() not in allow
+              and not line.strip().endswith(pin_files)
+          ]
           print("\n".join(extra), end="")
           ')"
           if [[ -n "$extra" ]]; then
@@ -178,8 +225,12 @@ jobs:
 
             ## Before
             - TS pin ${{ steps.before.outputs.ts }}
-            - rust-client rev ${{ steps.before.outputs.rust }}
+            - Zolana rev ${{ steps.before.outputs.rust }}
 
             ## After
             - TS pin git+https://github.com/helius-labs/zolana.git#${{ steps.payload.outputs.sha }}&path:/sdk-libs/ts
-            - rust-client rev ${{ steps.payload.outputs.sha }}
+            - Zolana rev ${{ steps.payload.outputs.sha }} in every Cargo.toml, `zolana_revision` and both gnark `go.mod` files
+
+            The release CLI pins in `test-utils/zolana-release.sh` (`zolana_release`
+            and its digests) and the READMEs are not bumped; update them by hand when
+            the release changes.

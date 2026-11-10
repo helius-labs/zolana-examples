@@ -6,13 +6,17 @@
 #
 # ZOLANA_PORT_OFFSET (default 500) shifts the localnet ports and
 # ZOLANA_PROVER_URL (default http://127.0.0.1:13301) picks the prover port, so a
-# run can avoid ports another checkout uses.
+# run can avoid ports another checkout uses. SBF_TOOLS_VERSION (default v1.54)
+# picks the platform tools of the SBF builds.
 set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=zolana-release.sh
 source "$repo_dir/test-utils/zolana-release.sh"
 cd "$repo_dir"
+# Every Zolana Cargo and Go pin must be the release revision.
+check_all_pins "$repo_dir"
+sbf_tools_version=${SBF_TOOLS_VERSION:-v1.54}
 export ZOLANA_TEST_ARTIFACTS_DIR="${ZOLANA_TEST_ARTIFACTS_DIR:-$repo_dir/target/release-tests}"
 mkdir -p "$ZOLANA_TEST_ARTIFACTS_DIR"
 ZOLANA_TEST_ARTIFACTS_DIR=$(cd "$ZOLANA_TEST_ARTIFACTS_DIR" && pwd)
@@ -81,9 +85,9 @@ trap cleanup EXIT
 
 # SBF builds keep their default output directories; host builds share one cache.
 CARGO_TARGET_DIR="$repo_dir/swap/gnark/program/target" cargo build-sbf \
-    --manifest-path swap/gnark/program/Cargo.toml --tools-version v1.54 -- --features bpf-entrypoint
+    --manifest-path swap/gnark/program/Cargo.toml --tools-version "$sbf_tools_version" -- --features bpf-entrypoint
 CARGO_TARGET_DIR="$repo_dir/escrow/gnark/target" cargo build-sbf \
-    --manifest-path escrow/gnark/program/Cargo.toml --tools-version v1.54 -- --features bpf-entrypoint
+    --manifest-path escrow/gnark/program/Cargo.toml --tools-version "$sbf_tools_version" -- --features bpf-entrypoint
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_dir/target/integration}"
 
 for circuit in make take cancel; do

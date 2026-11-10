@@ -30,8 +30,9 @@ pub struct MakeTransactionParams {
     /// The taker the order output is encrypted to and the marker is tagged
     /// for. It may differ from `terms.taker`, the identity allowed to take.
     pub taker_address: ShieldedAddress,
-    /// The maker's Solana address, the fee payer and the signer the program
-    /// writes into the marker and checks against the source owner.
+    /// The maker's Solana address, the fee payer and the signer the client
+    /// writes into the marker. The program checks the marker names this
+    /// signer, and the make proof checks it against the source owner.
     pub payer: Address,
 }
 

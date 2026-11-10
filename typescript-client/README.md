@@ -38,9 +38,11 @@ For mainnet, set `ZOLANA_ENDPOINT=https://mainnet.helius-rpc.com/?api-key=YOUR_K
 
 To run on localnet, download the `zolana` CLI from the
 [`cli-v0.10.0`](https://github.com/helius-labs/zolana/releases/tag/cli-v0.10.0)
-release and check it against the release's `SHA256SUMS`. `zolana dev start`
-then downloads and verifies the pinned prover, Photon, surfpool and the
-deployed shielded-pool and user-registry programs.
+release and check it against the release's `SHA256SUMS`. Without `--local`,
+`zolana dev start` downloads the prover, Photon, the deployed shielded-pool and
+user-registry v1.0.0 programs, the smart-account program and an account
+snapshot that the release pins and checks each one's SHA-256. It also
+downloads surfpool and checks its version.
 
 ```bash
 platform=darwin-arm64 # or linux-x64

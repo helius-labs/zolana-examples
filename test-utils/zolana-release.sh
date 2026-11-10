@@ -70,11 +70,49 @@ fetch() {
 # check_pins <Cargo.toml>: Cargo manifests cannot read zolana_revision; fail
 # when any Zolana Git dependency is not pinned to it.
 check_pins() {
-    local repository=https://github.com/helius-labs/zolana
-    if grep -F "$repository" "$1" | grep -F "git =" | grep -vqE "rev *= *\"$zolana_revision\""; then
-        echo "$1 references $repository without pinning rev = \"$zolana_revision\"" >&2
+    local repository=https://github.com/helius-labs/zolana bad
+    # Collect first: with pipefail, `grep -q` closing the pipe early would make
+    # the pipeline fail and hide a bad pin.
+    bad=$(grep -F "$repository" "$1" | grep -E 'git *=' |
+        grep -vE "rev *= *\"$zolana_revision\"" || true)
+    if [[ -n $bad ]]; then
+        echo "$1 references $repository without pinning rev = \"$zolana_revision\":" >&2
+        echo "$bad" >&2
         return 1
     fi
+}
+
+# check_go_pins <go.mod>: fail unless the module requires gnark-sdk and every
+# Zolana Go module at the pseudo-version of zolana_revision.
+check_go_pins() {
+    local module=github.com/helius-labs/zolana/ suffix="-${zolana_revision:0:12}" bad sdk
+    bad=$(grep -F "$module" "$1" | grep -vF -- "$suffix" || true)
+    if [[ -n $bad ]]; then
+        echo "$1 requires a Zolana Go module at a version other than *$suffix:" >&2
+        echo "$bad" >&2
+        return 1
+    fi
+    sdk=$(grep -F "${module}sdk-libs/gnark-sdk " "$1" || true)
+    if [[ $sdk != *"$suffix"* ]]; then
+        echo "$1 does not require ${module}sdk-libs/gnark-sdk at *$suffix" >&2
+        return 1
+    fi
+}
+
+# check_all_pins <repo_dir>: check_pins for every tracked Cargo.toml that names
+# the Zolana repository, and check_go_pins for both gnark circuit modules.
+check_all_pins() {
+    local repo=$1 manifests manifest status=0
+    manifests=$(git -C "$repo" ls-files '*Cargo.toml') || return 1
+    while IFS= read -r manifest; do
+        if grep -qF https://github.com/helius-labs/zolana "$repo/$manifest"; then
+            check_pins "$repo/$manifest" || status=1
+        fi
+    done <<<"$manifests"
+    for manifest in swap/gnark/prover/circuits/go.mod escrow/gnark/prover/circuits/go.mod; do
+        check_go_pins "$repo/$manifest" || status=1
+    done
+    return "$status"
 }
 
 # install_zolana_cli <dir> <bin>: download the release CLI for this host to

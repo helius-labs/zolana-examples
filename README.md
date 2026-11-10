@@ -55,9 +55,10 @@ The gnark circuits fetch the Go modules
 `github.com/helius-labs/zolana/sdk-libs/gnark-sdk` and `prover/server` at the
 same commit. The integration tests run against the `cli-v0.10.0` release: its
 CLI is checked against the release's `SHA256SUMS`, and `zolana dev artifacts`
-downloads and verifies the prover, Photon, surfpool and the deployed
-`shielded-pool-v1.0.0` program it pins. The deployed `user-registry-v1.0.0` program is pinned by
-SHA-256 in [`test-utils/run-release-tests.sh`](test-utils/run-release-tests.sh).
+downloads the prover, Photon and the deployed `shielded-pool-v1.0.0` program
+it pins and checks their SHA-256, and downloads surfpool and checks its
+version. The deployed `user-registry-v1.0.0` program is pinned by SHA-256 in
+[`test-utils/zolana-release.sh`](test-utils/zolana-release.sh).
 Nothing clones or builds Zolana.
 The shielded-pool program ID is
 `ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW`; accounts and notes from

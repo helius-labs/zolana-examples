@@ -18,7 +18,7 @@ fn start_localnet(language: &str, test_number: u16) -> Result<FixtureLocalnet> {
         LocalnetPorts::for_test(test_number)?,
         vec![(
             user_registry_program_id(),
-            release_localnet::user_registry_program(),
+            release_localnet::env_path("USER_REGISTRY_PROGRAM_PATH"),
         )],
         &paths,
     )

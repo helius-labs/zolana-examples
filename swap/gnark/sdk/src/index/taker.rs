@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Result};
 use borsh::BorshDeserialize;
 use solana_address::Address;
 use solana_pubkey::Pubkey;
-use spr_client::{user_registry::resolve_registered_address, Rpc};
+use spr_client::{user_registry::try_resolve_registered_address, Rpc};
 use spr_keypair::{ShieldedAddress, ShieldedKeypair, X25519Pubkey};
 use spr_transaction::{
     serialization::confidential::Confidential, utxo::Blinding, AssetRegistry, DecodeCx,
@@ -38,6 +38,10 @@ pub struct TakerOrderCandidate {
     pub order_utxo_hash: [u8; 32],
 }
 
+/// The order the marker tagged to `keypair`'s taker names in `tx`, or `None`
+/// when `tx` has no such marker or does not decode as an order for it. Anyone
+/// can post a message under the taker's view tag, so a malformed marker or
+/// order output skips the transaction instead of failing the scan.
 pub fn scan_taker(
     tx: &ShieldedTransaction,
     keypair: &ShieldedKeypair,
@@ -54,8 +58,18 @@ pub fn scan_taker(
     else {
         return Ok(None);
     };
-    let marker = MarkerData::try_from_slice(&marker_message.data)
-        .map_err(|e| anyhow!("marker payload: {e}"))?;
+    Ok(decode_candidate(tx, keypair, &marker_message.data, registry).ok())
+}
+
+/// Decodes the order `marker_data` names in `tx`.
+fn decode_candidate(
+    tx: &ShieldedTransaction,
+    keypair: &ShieldedKeypair,
+    marker_data: &[u8],
+    registry: &AssetRegistry,
+) -> Result<TakerOrderCandidate> {
+    let marker =
+        MarkerData::try_from_slice(marker_data).map_err(|e| anyhow!("marker payload: {e}"))?;
     let Some((slot_index, _, body)) =
         unified_slots(tx).find(|(_, slot, _)| slot.output_context.hash == marker.order_utxo_hash)
     else {
@@ -64,7 +78,7 @@ pub fn scan_taker(
     let cx = DecodeCx::for_slot(&keypair.viewing_key, tx, slot_index);
     let order_utxo_plaintext = Confidential::decode(&body, &cx).map_err(err)?;
     let order_data = parse_order_data(&order_utxo_plaintext.data.records)?;
-    Ok(Some(TakerOrderCandidate {
+    Ok(TakerOrderCandidate {
         source_amount: order_utxo_plaintext.amount,
         source_mint: resolve_mint(registry, order_utxo_plaintext.asset_id)?,
         destination_mint: resolve_mint(registry, order_data.destination_asset_id)?.asset,
@@ -72,7 +86,7 @@ pub fn scan_taker(
         order_data,
         maker_pubkey: Pubkey::new_from_array(marker.maker_pubkey),
         order_utxo_hash: marker.order_utxo_hash,
-    }))
+    })
 }
 
 impl TakerOrderCandidate {
@@ -122,11 +136,16 @@ pub fn index_taker<I: Rpc, R: Rpc>(
             let Some(candidate) = scan_taker(tx, keypair, registry)? else {
                 return Ok(None);
             };
-            let maker_resolved_address =
-                resolve_registered_address(rpc, candidate.maker_pubkey).map_err(err)?;
-            candidate
+            // RPC errors propagate. A maker missing from the registry or an
+            // order that names another maker skips the transaction.
+            let Some(maker_resolved_address) =
+                try_resolve_registered_address(rpc, candidate.maker_pubkey).map_err(err)?
+            else {
+                return Ok(None);
+            };
+            Ok(candidate
                 .into_order(maker_resolved_address.address, taker_viewing_pubkey)
-                .map(Some)
+                .ok())
         })
     })
 }
@@ -136,7 +155,7 @@ mod tests {
     use solana_keypair::Keypair;
 
     use super::*;
-    use crate::index::fixture::order_fixture;
+    use crate::index::fixture::{order_fixture, OrderFixture};
 
     #[test]
     fn scan_taker_reconstructs_terms_from_the_transaction() {
@@ -172,6 +191,67 @@ mod tests {
         assert!(error
             .to_string()
             .contains("does not match the committed leaf"));
+    }
+
+    /// The fixture with the data of the taker's marker message replaced.
+    fn fixture_with_marker(data: impl FnOnce(&[u8]) -> Vec<u8>) -> OrderFixture {
+        let mut fixture = order_fixture();
+        let taker_tag = fixture
+            .taker_keypair
+            .signing_pubkey()
+            .confidential_view_tag()
+            .expect("taker tag");
+        let marker = fixture
+            .tx
+            .messages
+            .iter_mut()
+            .find(|message| message.view_tag == taker_tag)
+            .expect("taker marker");
+        marker.data = data(&marker.data);
+        fixture
+    }
+
+    #[test]
+    fn scan_taker_skips_a_malformed_marker() {
+        let fixture = fixture_with_marker(|data| data.iter().take(10).copied().collect());
+        assert!(
+            scan_taker(&fixture.tx, &fixture.taker_keypair, &fixture.registry)
+                .expect("a malformed marker must not fail the scan")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn scan_taker_skips_a_marker_without_its_order_output() {
+        let fixture = fixture_with_marker(|data| {
+            let mut marker = MarkerData::try_from_slice(data).expect("marker");
+            marker.order_utxo_hash = [1u8; 32];
+            borsh::to_vec(&marker).expect("marker bytes")
+        });
+        assert!(
+            scan_taker(&fixture.tx, &fixture.taker_keypair, &fixture.registry)
+                .expect("a marker naming no order output must not fail the scan")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn scan_taker_skips_an_order_it_cannot_decrypt() {
+        // A marker tagged to another key over an order encrypted to the taker.
+        let fixture = order_fixture();
+        let other_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([21u8; 32]))
+            .expect("other keypair");
+        let mut tx = fixture.tx;
+        let other_tag = other_keypair
+            .signing_pubkey()
+            .confidential_view_tag()
+            .expect("other tag");
+        for message in tx.messages.iter_mut() {
+            message.view_tag = other_tag;
+        }
+        assert!(scan_taker(&tx, &other_keypair, &fixture.registry)
+            .expect("an undecryptable order must not fail the scan")
+            .is_none());
     }
 
     #[test]

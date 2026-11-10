@@ -41,3 +41,7 @@ path = "tests/circuits.rs"
 [[test]]
 name = "instruction_signers"
 path = "tests/instruction_signers.rs"
+
+[[test]]
+name = "make_transaction"
+path = "tests/make_transaction.rs"

@@ -70,7 +70,7 @@ pub fn setup(test: u16) -> Result<TestEnv> {
             ),
             (
                 user_registry_program_id(),
-                release_localnet::user_registry_program(),
+                release_localnet::env_path("USER_REGISTRY_PROGRAM_PATH"),
             ),
         ],
         &release_localnet::paths(),

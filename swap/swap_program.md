@@ -151,8 +151,9 @@ preimage with a matching destination UTXO may take it. A nonzero value designate
 privately. The value is committed like every other term, so neither party can change it after make.
 `taker_pk_fe` must be a canonical BN254 scalar: as 32 big-endian bytes it is below the field
 modulus. Zero and every `solana_owner_identity` are. The Xark circuit packs the 32 bytes into one
-field element, so a larger value would wrap to a different taker; the SDKs refuse to build such
-terms and discovery skips decoded orders that contain one.
+field element, so a larger value would wrap to a different taker; the Xark SDK refuses to build
+such terms and its discovery skips decoded orders that contain one. The gnark SDK builds
+`taker_pk_fe` from `solana_owner_identity`, which is canonical.
 
 `source_asset_id`, `source_amount`, and `owner` are the order UTXO's own SPP fields, already
 committed in `utxo_hash`. The order UTXO's owner is the maker's order-authority PDA (seeds
@@ -225,7 +226,7 @@ shift the window.
 
 | # | Instruction | Tag | Description | Accounts Read | Accounts Modified | Access control |
 |---|-------------|-----|-------------|---------------|-------------------|----------------|
-| 1 | [make](#make) | 2 | Verify the make proof and CPI SPP `transact` to lock the source funds into the order UTXO, owned by the maker's order-authority PDA, and write the taker's marker message. | order_authority | SPP trees (CPI) | Maker signs (fee payer); the proof checks the order UTXO owner against the PDA the program derives from the maker |
+| 1 | [make](#make) | 2 | Verify the make proof and CPI SPP `transact` to lock the source funds into the order UTXO, owned by the maker's order-authority PDA, and check the taker's marker message, which the client writes. | order_authority | SPP trees (CPI) | Maker signs (fee payer); the proof checks the order UTXO owner against the PDA the program derives from the maker |
 | 2 | [take](#take) | 3 | Verify the take proof (standard Groth16) and CPI SPP `transact`: spend the order UTXO + a matching destination UTXO, pay destination to the maker (blinding derived from the order UTXO blinding, standard output ciphertext) and source to the taker. | order_authority | SPP trees (CPI) | Any fee payer signs; the order UTXO spend is authorized by the order-authority PDA of the `maker` the instruction names; the maker payout is constrained to the committed `maker_address` |
 | 3 | [cancel](#cancel) | 4 | Verify the cancel proof and CPI SPP `transact`: after expiry, spend the order UTXO back to `maker_address`. | order_authority | SPP trees (CPI) | Maker signs; the proof checks the signer against the committed `maker_owner_hash`; the maker's order-authority PDA authorizes the order UTXO spend |
 
@@ -237,8 +238,8 @@ Opens an order. The swap program verifies the [make proof](#make-circuit), then 
 [`transact`](../../docs/spec.md#transact) to spend the maker's `source_asset_id` UTXO and append the
 order UTXO, a UTXO of `source_amount` `source_asset_id` owned by the maker's order-authority PDA
 (seeds `[b"order_authority", maker]`), with the [order terms](#order-terms) in its `utxo_data`.
-The program derives the PDA from the `maker` signer, computes the order owner the make proof must
-match, and signs the SPP CPI as that PDA. The transact is 1-in/2-out
+The program derives the PDA from the `maker` signer and `authority_bump`, computes the order
+owner the make proof must match, and signs the SPP CPI as that PDA. The transact is 1-in/2-out
 (the maker's source UTXO in; a change UTXO to the maker and the order UTXO out) plus a marker
 message tagged to the taker.
 

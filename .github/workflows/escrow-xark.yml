@@ -7,6 +7,7 @@ on:
       - "escrow/xark/**"
       - "escrow/timelock_escrow.md"
       - "test-utils/bench_report.rs"
+      - "test-utils/xark_proving.rs"
       - "test-utils/zolana-release.sh"
       - ".github/workflows/escrow-xark.yml"
   pull_request:
@@ -14,6 +15,7 @@ on:
       - "escrow/xark/**"
       - "escrow/timelock_escrow.md"
       - "test-utils/bench_report.rs"
+      - "test-utils/xark_proving.rs"
       - "test-utils/zolana-release.sh"
       - ".github/workflows/escrow-xark.yml"
   workflow_dispatch:
@@ -65,6 +67,14 @@ jobs:
         working-directory: escrow/xark/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
 
+      # `zolana dev artifacts` downloads the prover, Photon, surfpool and
+      # shielded-pool program the release pins into ~/.config/zolana/cache.
+      - name: Cache Zolana release artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.config/zolana/cache
+          key: escrow-xark-zolana-cache-${{ runner.os }}-${{ runner.arch }}-cli-v0.10.0
+
       # Installs the pinned release CLI and exports ZOLANA_CLI_BIN.
       - name: Install the zolana CLI
         run: scripts/setup-zk-tools.sh >> "$GITHUB_ENV"
@@ -78,7 +88,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.config/zolana/proving-keys
-          key: zolana-proving-keys-cli-v0.10.0
+          key: escrow-xark-proving-keys-cli-v0.10.0
 
       - name: Check Rust formatting
         run: cargo fmt -p timelock-escrow-program -p timelock-escrow-sdk -p timelock-escrow-test -- --check
