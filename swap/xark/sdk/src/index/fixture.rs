@@ -63,9 +63,15 @@ fn shielded_transaction(proof_inputs: &SppProofInputs) -> ShieldedTransaction {
     }
 }
 
-/// A make of a 400 000-unit order, designated to the taker and encrypted to
-/// it, from a 1 000 000-unit source owned by the maker.
+/// A make of a 400 000-unit order for SOL, designated to the taker and
+/// encrypted to it, from a 1 000 000-unit source owned by the maker.
 pub(crate) fn order_fixture() -> OrderFixture {
+    order_fixture_with_destination(Mint::SOL)
+}
+
+/// [`order_fixture`] buying `destination_mint`, which the fixture registry
+/// does not register.
+pub(crate) fn order_fixture_with_destination(destination_mint: Mint) -> OrderFixture {
     let maker_keypair =
         ShieldedKeypair::from_keypair(&Keypair::new_from_array([7u8; 32])).expect("maker keypair");
     let taker_keypair =
@@ -97,7 +103,7 @@ pub(crate) fn order_fixture() -> OrderFixture {
     )
     .expect("source input");
     let terms = OrderTerms {
-        destination_mint: Mint::SOL,
+        destination_mint,
         destination_amount: 250_000,
         maker: maker_address,
         expiry: 2_000_000_000,

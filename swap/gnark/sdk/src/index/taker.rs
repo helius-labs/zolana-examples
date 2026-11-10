@@ -10,6 +10,7 @@ use spr_transaction::{
     serialization::confidential::Confidential, utxo::Blinding, AssetRegistry, DecodeCx,
     ShieldedTransaction, UtxoSerialization,
 };
+use spr_user_registry_interface::{user_record_pda, user_registry_program_id};
 
 use super::{
     poll::{collect_tagged, index_until},
@@ -150,11 +151,21 @@ pub fn index_taker<I: Rpc, R: Rpc>(
 }
 
 /// The address the user registry holds for `maker_pubkey`, or `None` when it
-/// holds no record or a record whose keys do not form an address. The
-/// registry stores the viewing pubkey unchecked, so anyone can register a bad
-/// one and post an order naming it; that skips the order. RPC and record
-/// decode errors propagate: the record PDA is the registry program's.
+/// holds no record or a record whose keys do not form an address. Both are
+/// attacker-controlled and skip the order: the registry stores the viewing
+/// pubkey unchecked, so anyone can register a bad one, and anyone can fund the
+/// record PDA of an unregistered pubkey, leaving a System-owned account there,
+/// then post an order naming it. RPC errors and a registry-owned record that
+/// does not decode propagate.
 fn resolve_maker<R: Rpc>(rpc: &R, maker_pubkey: Pubkey) -> Result<Option<ShieldedAddress>> {
+    let (record_pda, _) = user_record_pda(&maker_pubkey);
+    let is_registry_record = rpc
+        .get_account(record_pda)
+        .map_err(err)?
+        .is_some_and(|record| record.owner == user_registry_program_id());
+    if !is_registry_record {
+        return Ok(None);
+    }
     match try_resolve_registered_address(rpc, maker_pubkey) {
         Ok(resolved) => Ok(resolved.map(|resolved| resolved.address)),
         Err(ClientError::AddressResolution(_)) => Ok(None),
@@ -166,12 +177,10 @@ fn resolve_maker<R: Rpc>(rpc: &R, maker_pubkey: Pubkey) -> Result<Option<Shielde
 mod tests {
     use solana_account::Account;
     use solana_keypair::Keypair;
-    use spr_user_registry_interface::{
-        user_record_pda, user_registry_program_id, MergeEncryptionScheme, UserRecord,
-    };
+    use spr_user_registry_interface::{MergeEncryptionScheme, UserRecord};
 
     use super::*;
-    use crate::index::fixture::{order_fixture, OrderFixture};
+    use crate::index::fixture::{order_fixture, order_fixture_with_destination, OrderFixture};
 
     #[test]
     fn scan_taker_reconstructs_terms_from_the_transaction() {
@@ -279,6 +288,7 @@ mod tests {
             .expect("scan")
             .is_none());
     }
+
     #[test]
     fn scan_taker_skips_an_order_with_an_unknown_asset() {
         let fixture = order_fixture();
@@ -291,15 +301,33 @@ mod tests {
         .is_none());
     }
 
+    #[test]
+    fn scan_taker_skips_an_order_with_an_unknown_destination_asset() {
+        let destination_mint = Address::new_from_array([4u8; 32]);
+        let fixture = order_fixture_with_destination(destination_mint, 3);
+        assert!(
+            scan_taker(&fixture.tx, &fixture.taker_keypair, &fixture.registry)
+                .expect("an unknown destination asset id must not fail the scan")
+                .is_none()
+        );
+        let mut registry = fixture.registry.clone();
+        registry
+            .insert(3, destination_mint)
+            .expect("register destination");
+        assert!(scan_taker(&fixture.tx, &fixture.taker_keypair, &registry)
+            .expect("scan")
+            .is_some());
+    }
+
     /// Serves `account` at `address`, or fails every account read with
     /// `rpc_error`.
     struct AccountRpc {
-        account: Option<(Pubkey, Account)>,
+        account: Option<(Address, Account)>,
         rpc_error: Option<&'static str>,
     }
 
     impl Rpc for AccountRpc {
-        fn get_account(&self, address: Pubkey) -> Result<Option<Account>, ClientError> {
+        fn get_account(&self, address: Address) -> Result<Option<Account>, ClientError> {
             if let Some(message) = self.rpc_error {
                 return Err(ClientError::Rpc(message.to_string()));
             }
@@ -316,8 +344,8 @@ mod tests {
     fn record_rpc(
         keypair: &ShieldedKeypair,
         viewing_pubkey: [u8; 33],
-        owner_program: Pubkey,
-    ) -> (Pubkey, AccountRpc) {
+        owner_program: Address,
+    ) -> (Address, AccountRpc) {
         let owner = keypair
             .shielded_address()
             .and_then(|address| address.solana_address())
@@ -399,15 +427,46 @@ mod tests {
     }
 
     #[test]
+    fn resolve_maker_skips_a_funded_unregistered_record_pda() {
+        // Anyone can fund the record PDA of an unregistered pubkey, which
+        // leaves an empty System-owned account there.
+        let maker_pubkey = order_fixture().maker_pubkey;
+        let funded = Account {
+            lamports: 1_000_000,
+            data: Vec::new(),
+            // The System program.
+            owner: Address::default(),
+            executable: false,
+            rent_epoch: 0,
+        };
+        let rpc = AccountRpc {
+            account: Some((user_record_pda(&maker_pubkey).0, funded)),
+            rpc_error: None,
+        };
+        assert_eq!(
+            resolve_maker(&rpc, maker_pubkey).expect("a funded record PDA must not fail"),
+            None
+        );
+    }
+
+    #[test]
     fn resolve_maker_fails_on_an_undecodable_record() {
         let fixture = order_fixture();
         let viewing_pubkey = *fixture.maker_keypair.viewing_pubkey().as_bytes();
-        let (owner, rpc) = record_rpc(
+        let (owner, mut rpc) = record_rpc(
             &fixture.maker_keypair,
             viewing_pubkey,
-            Pubkey::new_from_array([5u8; 32]),
+            user_registry_program_id(),
         );
+        let discriminator = rpc
+            .account
+            .as_mut()
+            .and_then(|(_, account)| account.data.first_mut())
+            .expect("record discriminator");
+        *discriminator = UserRecord::DISCRIMINATOR.wrapping_add(1);
         let error = resolve_maker(&rpc, owner).expect_err("a record decode error must fail");
-        assert!(error.to_string().contains("not owned by the user registry"));
+        assert!(error
+            .to_string()
+            .contains("invalid user registry record account data"));
     }
 }

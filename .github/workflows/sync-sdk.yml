@@ -211,11 +211,15 @@ jobs:
           BUMP_TREE: ${{ steps.bump.outputs.tree }}
         run: |
           set -euo pipefail
+          if [[ -z "$BUMP_TREE" ]]; then
+            echo "bump step produced no tree" >&2
+            exit 1
+          fi
+          # Separate commands, so a failed diff fails the step.
+          changed="$(git diff --name-only "$BUMP_TREE")"
+          untracked="$(git ls-files --others --exclude-standard)"
           extra="$(
-            {
-              git diff --name-only "$BUMP_TREE"
-              git ls-files --others --exclude-standard
-            } | python3 -c '
+            printf '%s\n%s\n' "$changed" "$untracked" | python3 -c '
           import sys
           allow = {
               "typescript-client/examples/deposit_transfer_withdraw.ts",
@@ -236,7 +240,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: sync/sdk
           delete-branch: false
-          draft: true
+          draft: always-true
           title: "sync: pin SDK ${{ steps.payload.outputs.sha }}"
           commit-message: "sync: pin zolana SDK to ${{ steps.payload.outputs.sha }}"
           body: |
@@ -258,3 +262,6 @@ jobs:
             commit is pinned by hand: `zolana_release`, its SHA256SUMS digest and the
             READMEs, benchmarks and manifest comments that name the release or
             commit. Close it if no release is built from this commit.
+            Pin the release by hand in a separate commit on top of this PR, or close
+            it and re-dispatch; a re-dispatch rebuilds `sync/sdk` from base and
+            drops any hand edits.

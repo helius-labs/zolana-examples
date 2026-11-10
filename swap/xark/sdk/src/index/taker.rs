@@ -10,6 +10,7 @@ use spr_transaction::{
     serialization::confidential::Confidential, AssetRegistry, DecodeCx, ShieldedTransaction,
     UtxoSerialization,
 };
+use spr_user_registry_interface::{user_record_pda, user_registry_program_id};
 use swap_program::circuits;
 
 use super::{
@@ -143,11 +144,21 @@ pub fn index_taker<I: Rpc, R: Rpc>(
 }
 
 /// The address the user registry holds for `maker_pubkey`, or `None` when it
-/// holds no record or a record whose keys do not form an address. The
-/// registry stores the viewing pubkey unchecked, so anyone can register a bad
-/// one and post an order naming it; that skips the order. RPC and record
-/// decode errors propagate: the record PDA is the registry program's.
+/// holds no record or a record whose keys do not form an address. Both are
+/// attacker-controlled and skip the order: the registry stores the viewing
+/// pubkey unchecked, so anyone can register a bad one, and anyone can fund the
+/// record PDA of an unregistered pubkey, leaving a System-owned account there,
+/// then post an order naming it. RPC errors and a registry-owned record that
+/// does not decode propagate.
 fn resolve_maker<R: Rpc>(rpc: &R, maker_pubkey: Address) -> Result<Option<ShieldedAddress>> {
+    let (record_pda, _) = user_record_pda(&maker_pubkey);
+    let is_registry_record = rpc
+        .get_account(record_pda)
+        .map_err(err)?
+        .is_some_and(|record| record.owner == user_registry_program_id());
+    if !is_registry_record {
+        return Ok(None);
+    }
     match try_resolve_registered_address(rpc, maker_pubkey) {
         Ok(resolved) => Ok(resolved.map(|resolved| resolved.address)),
         Err(ClientError::AddressResolution(_)) => Ok(None),
@@ -159,12 +170,17 @@ fn resolve_maker<R: Rpc>(rpc: &R, maker_pubkey: Address) -> Result<Option<Shield
 mod tests {
     use solana_account::Account;
     use solana_keypair::Keypair;
-    use spr_user_registry_interface::{
-        user_record_pda, user_registry_program_id, MergeEncryptionScheme, UserRecord,
+    use spr_user_registry_interface::{MergeEncryptionScheme, UserRecord};
+
+    use spr_interface::event::OutputDataEncoding;
+    use spr_keypair::ViewingKey;
+    use spr_program::{circuit::DataHash, EncryptionCodec};
+    use spr_transaction::{
+        serialization::confidential::ConfidentialEncode, Data, DataRecord, EncryptedScheme, Mint,
     };
 
     use super::*;
-    use crate::index::fixture::{order_fixture, OrderFixture};
+    use crate::index::fixture::{order_fixture, order_fixture_with_destination, OrderFixture};
 
     #[test]
     fn scan_taker_reconstructs_terms_from_the_transaction() {
@@ -295,6 +311,140 @@ mod tests {
         .is_none());
     }
 
+    #[test]
+    fn into_order_rejects_an_unknown_destination_asset() {
+        // The scan resolves only the source asset; `into_order` resolves the
+        // destination, and `index_taker` skips the order when it fails.
+        let destination_mint = Address::new_from_array([4u8; 32]);
+        let fixture = order_fixture_with_destination(Mint::new(destination_mint, 3));
+        let scan = |registry: &AssetRegistry| {
+            scan_taker(&fixture.tx, &fixture.taker_keypair, registry)
+                .expect("an unknown destination asset must not fail the scan")
+                .expect("order candidate")
+        };
+        assert!(scan(&fixture.registry)
+            .into_order(fixture.maker_address, &fixture.registry)
+            .is_err());
+        let mut registry = fixture.registry.clone();
+        registry
+            .insert(3, destination_mint)
+            .expect("register destination");
+        let order = scan(&registry)
+            .into_order(fixture.maker_address, &registry)
+            .expect("order");
+        assert_eq!(order.order_utxo, fixture.order_utxo);
+    }
+
+    /// The fixture with the state of its order UTXO rewritten by `edit`. The
+    /// order is re-encrypted to the taker under a fresh transaction viewing
+    /// key and committed under the hash of the new state, which the marker
+    /// names, as anyone posting an order to the taker could.
+    fn fixture_with_order_state(edit: impl FnOnce(&mut circuits::OrderTerms)) -> OrderFixture {
+        let mut fixture = order_fixture();
+        let taker_tag = fixture
+            .taker_keypair
+            .signing_pubkey()
+            .confidential_view_tag()
+            .expect("taker tag");
+        let marker_message = fixture
+            .tx
+            .messages
+            .iter()
+            .find(|message| message.view_tag == taker_tag)
+            .expect("taker marker");
+        let mut marker = MarkerData::try_from_slice(&marker_message.data).expect("marker");
+        let (slot_index, slot, body) = unified_slots(&fixture.tx)
+            .find(|(_, slot, _)| slot.output_context.hash == marker.order_utxo_hash)
+            .map(|(slot_index, slot, body)| (slot_index, slot.clone(), body))
+            .expect("order slot");
+        let cx = DecodeCx::for_slot(&fixture.taker_keypair.viewing_key, &fixture.tx, slot_index);
+        let mut plaintext = Confidential::decode(&body, &cx).expect("order plaintext");
+        let asset = resolve_mint(&fixture.registry, plaintext.asset_id).expect("source mint");
+        let mut order = decode_order(
+            &fixture.tx,
+            &slot,
+            slot_index,
+            plaintext.clone(),
+            asset,
+            &fixture.maker_pubkey,
+        )
+        .expect("order");
+        edit(&mut order.data);
+
+        let state_bytes = order.data.serialize_for_encryption().expect("state bytes");
+        plaintext.data = Data::new(
+            plaintext
+                .data
+                .records
+                .into_iter()
+                .map(|record| match record {
+                    DataRecord::UtxoData(_) => DataRecord::UtxoData(state_bytes.clone()),
+                    other => other,
+                })
+                .collect(),
+        );
+        let state_hash = DataHash::hash(&order.data).expect("state hash");
+        let data_hash =
+            spr_program::hasher::data_hash(&spr_program::to_bytes(&state_hash)).expect("data hash");
+        let order_utxo_hash = order
+            .utxo
+            .utxo
+            .hash(
+                &order.utxo.nullifier_pubkey,
+                &data_hash,
+                &[0u8; 32],
+                slot.output_context.tree_id,
+            )
+            .expect("order utxo hash");
+
+        let tx_viewing_key = ViewingKey::new();
+        let tx_viewing_pk = tx_viewing_key.pubkey();
+        let encode = ConfidentialEncode {
+            tx: tx_viewing_key,
+            recipient_pubkey: fixture.taker_keypair.viewing_pubkey(),
+            salt: fixture.tx.salt.expect("salt"),
+            slot_index,
+        };
+        let plaintext_bytes = plaintext.serialize().expect("plaintext bytes");
+        let mut blob = vec![EncryptedScheme::Confidential.as_byte()];
+        blob.extend(Confidential::encrypt(&plaintext_bytes, &encode).expect("ciphertext"));
+        let order_slot = fixture
+            .tx
+            .output_slots
+            .iter_mut()
+            .find(|order_slot| order_slot.output_context.hash == marker.order_utxo_hash)
+            .expect("order slot");
+        order_slot.payload =
+            borsh::to_vec(&OutputDataEncoding::Encrypted(blob)).expect("order payload");
+        order_slot.output_context.hash = order_utxo_hash;
+        fixture.tx.tx_viewing_pk = Some(tx_viewing_pk);
+
+        marker.order_utxo_hash = order_utxo_hash;
+        let marker_message = fixture
+            .tx
+            .messages
+            .iter_mut()
+            .find(|message| message.view_tag == taker_tag)
+            .expect("taker marker");
+        marker_message.data = borsh::to_vec(&marker).expect("marker bytes");
+        fixture
+    }
+
+    #[test]
+    fn scan_taker_skips_a_non_canonical_taker_pk_fe() {
+        let scan = |fixture: &OrderFixture| {
+            scan_taker(&fixture.tx, &fixture.taker_keypair, &fixture.registry)
+                .expect("a forged order must not fail the scan")
+        };
+        // 1. A forged open order decodes, so the forgery itself is sound.
+        let open = fixture_with_order_state(|state| state.taker_pk_fe = [0u8; 32]);
+        let candidate = scan(&open).expect("open order candidate");
+        assert_eq!(candidate.order.data.taker_pk_fe, [0u8; 32]);
+        // 2. The same order with a taker at or above the BN254 modulus skips.
+        let non_canonical = fixture_with_order_state(|state| state.taker_pk_fe = [0xffu8; 32]);
+        assert!(scan(&non_canonical).is_none());
+    }
+
     /// Serves `account` at `address`, or fails every account read with
     /// `rpc_error`.
     struct AccountRpc {
@@ -403,15 +553,46 @@ mod tests {
     }
 
     #[test]
+    fn resolve_maker_skips_a_funded_unregistered_record_pda() {
+        // Anyone can fund the record PDA of an unregistered pubkey, which
+        // leaves an empty System-owned account there.
+        let maker_pubkey = order_fixture().maker_pubkey;
+        let funded = Account {
+            lamports: 1_000_000,
+            data: Vec::new(),
+            // The System program.
+            owner: Address::default(),
+            executable: false,
+            rent_epoch: 0,
+        };
+        let rpc = AccountRpc {
+            account: Some((user_record_pda(&maker_pubkey).0, funded)),
+            rpc_error: None,
+        };
+        assert_eq!(
+            resolve_maker(&rpc, maker_pubkey).expect("a funded record PDA must not fail"),
+            None
+        );
+    }
+
+    #[test]
     fn resolve_maker_fails_on_an_undecodable_record() {
         let fixture = order_fixture();
         let viewing_pubkey = *fixture.maker_keypair.viewing_pubkey().as_bytes();
-        let (owner, rpc) = record_rpc(
+        let (owner, mut rpc) = record_rpc(
             &fixture.maker_keypair,
             viewing_pubkey,
-            Address::new_from_array([5u8; 32]),
+            user_registry_program_id(),
         );
+        let discriminator = rpc
+            .account
+            .as_mut()
+            .and_then(|(_, account)| account.data.first_mut())
+            .expect("record discriminator");
+        *discriminator = UserRecord::DISCRIMINATOR.wrapping_add(1);
         let error = resolve_maker(&rpc, owner).expect_err("a record decode error must fail");
-        assert!(error.to_string().contains("not owned by the user registry"));
+        assert!(error
+            .to_string()
+            .contains("invalid user registry record account data"));
     }
 }
