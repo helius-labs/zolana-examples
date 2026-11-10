@@ -15,8 +15,9 @@ A Squads smart account holds private balances in the zolana shielded pool (SPP).
 5. **Create.** The creator submits `create`. The key-rotation program:
    - checks each signer's viewing public key against the user registry or that signer's signature;
    - verifies the proof;
-   - creates the Squads smart account with its PDA as settings authority;
+   - creates the Squads smart account with its key record account as settings authority;
    - writes the key record account.
+6. **Register.** A threshold of signers sends Squads `executeTransactionSyncV2` with an inner user registry `register`, signed by the vault. It registers the key record account's `nullifier_pubkey` and `shared_viewing_pubkey`.
 
 ### 2. Rotate
 
@@ -34,6 +35,7 @@ A Squads smart account holds private balances in the zolana shielded pool (SPP).
    - checks each kept signer's viewing public key against its key record entry, and each added signer's against the user registry or that signer's signature;
    - verifies the proof with the stored `state_hash` as `OldStateHash` and the stored `nullifier_pubkey`;
    - updates the Squads signers and threshold as settings authority;
+   - if the vault's `UserRecord` exists, CPIs Squads `executeTransactionSyncV2` with an inner registry `update_keys` setting the new `shared_viewing_pubkey`;
    - overwrites the key record account with the new keys and ciphertexts, the new `state_hash`, and `epoch + 1`.
 
 ### Properties
@@ -171,8 +173,11 @@ Replaces the shared viewing key, re-encrypts it to the new signer set, and updat
 2. `key_record`: the key record account; writable.
 3. `settings`: the Squads `Settings` account of `key_record`; writable.
 4. `squads_program`, `system_program`.
-5. `approvers`: the current signers approving the rotation; signers.
-6. `added_signer_accounts`: one account per added signer, in entry order. It is either the signer itself as a transaction signer, or the signer's user registry `UserRecord`.
+5. `vault`: the Squads smart account PDA at index 0.
+6. `user_record`: the vault's user registry `UserRecord` PDA; writable.
+7. `user_registry_program`.
+8. `approvers`: the current signers approving the rotation; signers.
+9. `added_signer_accounts`: one account per added signer, in entry order. It is either the signer itself as a transaction signer, or the signer's user registry `UserRecord`.
 
 **Instruction data**
 
@@ -204,12 +209,13 @@ struct RotateIxData {
    - `change_threshold` if `new_threshold` differs;
    - `remove_signer` for each signer missing from `entries`.
 
-   Squads checks its settings invariant after every call, and this order keeps each intermediate state valid. For example, going from 3-of-3 to 1-of-1 fails if the removals run before the threshold change.
-7. The program resizes `key_record`, writes the new keys, ciphertexts and `nullifier_ciphertext`, sets `state_hash = public_input_hash`, and increments `epoch`.
+    Squads checks its settings invariant after every call, and this order keeps each intermediate state valid. For example, going from 3-of-3 to 1-of-1 fails if the removals run before the threshold change.
+7. `vault` is the Squads smart account PDA of `settings` at index 0, and `user_record` is the user registry PDA of `vault`. If `user_record` exists, the program CPIs Squads `executeTransactionSyncV2` with the `approvers` and an inner registry `update_keys` signed by `vault`, setting `shared_viewing_pubkey` and the stored `nullifier_pubkey`. If it is empty, the vault was never registered and the program skips the update.
+8. The program resizes `key_record`, writes the new keys, ciphertexts and `nullifier_ciphertext`, sets `state_hash = public_input_hash`, and increments `epoch`.
 
 ### 3. forward_settings
 
-Forwards one allowlisted Squads `*_as_authority` instruction to Squads, signed as `key_record`, once a threshold of current signers approves. Signer changes and settings-authority changes are not forwarded; signers change only through `rotate`.
+Forwards one allowlisted Squads `*_as_authority` instruction to Squads, signed as `key_record`, once a threshold of current signers approves. Signer changes are not forwarded; signers change only through `rotate`.
 
 **Accounts**
 
@@ -233,12 +239,16 @@ struct ForwardSettingsIxData {
 
 **Allowed Squads instructions**
 
-| Squads instruction | Effect |
-|---|---|
-| `change_threshold_as_authority` | Changes the threshold. |
-| `add_spending_limit_as_authority` | Creates a spending limit. |
-| `remove_spending_limit_as_authority` | Closes a spending limit. |
+
+| Squads instruction                    | Effect                       |
+| ------------------------------------- | ---------------------------- |
+| `change_threshold_as_authority`       | Changes the threshold.       |
+| `add_spending_limit_as_authority`     | Creates a spending limit.    |
+| `remove_spending_limit_as_authority`  | Closes a spending limit.     |
 | `set_archival_authority_as_authority` | Sets the archival authority. |
+| `set_time_lock_as_authority` | Sets the time lock. |
+| `set_new_settings_authority_as_authority` | Hands off the settings authority; `Pubkey::default()` makes the account autonomous. |
+
 
 **Program checks**
 
@@ -252,4 +262,14 @@ struct ForwardSettingsIxData {
 
 ## Limitations
 
-1. we will want to register the smart account and rotate the nullifier key too, we will need to change the registry program to be able to rotate the nullifier key.
+1. The nullifier key does not rotate. The user registry's `update_keys` rejects a new `nullifier_pubkey`, so rotating it needs a registry program change. Every `rotate` still re-encrypts the unchanged nullifier secret to the new shared viewing key.
+2. The key-rotation program does not check the registration in the Create flow. If the signers register a `nullifier_pubkey` other than the key record account's, every later `update_keys` fails and `rotate` cannot succeed.
+3. A removed signer keeps the old shared viewing secret and the nullifier secret. 
+4. The signer count is capped at `MAX_SIGNERS` 17.
+5. All transactions are sync. A nonzero time lock blocks Squads sync execution, including the registry update in `rotate`.
+6. Squads policies cannot be used while the key record account is the settings authority, since Squads creates them only through settings transactions. A threshold can hand off the settings authority through `forward_settings`; from then on, membership can change without a `rotate`.
+7. Signer changes depend on the key-rotation program. If it is unavailable, signers cannot change; spending is unaffected.
+8. `rotate` cannot change a kept signer's permissions. Changing them takes one rotation that removes the signer and another that adds it back.
+9. If a signer updates its own viewing key in the user registry, the key record account keeps the old one until a `rotate` replaces the signer's entry.
+10. The creator learns the shared viewing secret and the nullifier secret, even if it is not a signer.
+11. Membership is public: Squads `Settings` and the key record account link the smart account to its signers' Solana keys and viewing public keys.
