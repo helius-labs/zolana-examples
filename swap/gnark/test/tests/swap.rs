@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use shared::{send, setup, TestEnv, DESTINATION_AMOUNT, SOURCE_AMOUNT};
+use solana_instruction::Instruction;
+use solana_pubkey::Pubkey;
 use spr_client::user_registry::ensure_registered;
 use spr_client::Rpc;
 use spr_keypair::random_blinding;
@@ -22,6 +24,7 @@ use swap_sdk::{
         make::{Make, MakeProofInputParams, OrderMarker, SppTxHashes},
         take::{take_blinding_seed, Take, TakeProofInputParams},
     },
+    order_authority_pda_and_bump,
     prover::SwapProverClient,
     shared::input_sum,
     state::{OrderTerms, OrderUtxo},
@@ -341,6 +344,17 @@ fn make_and_take_swap_inline() -> Result<()> {
         }
         .instruction()?;
 
+        // A valid non-canonical bump makes the program sign for another PDA
+        // of the maker, which does not own the order input, so SPP's transact
+        // proof fails to verify.
+        let non_canonical_ix = with_non_canonical_authority_bump(take_ix.clone(), &maker)?;
+        let non_canonical_error = send(localnet.client.rpc(), &taker.keypair, non_canonical_ix)
+            .expect_err("a take with a non-canonical authority bump must be rejected");
+        assert!(
+            format!("{non_canonical_error:?}").contains("TransactProofVerificationFailed"),
+            "SPP must reject the non-canonical PDA as the order owner: {non_canonical_error:?}"
+        );
+
         let take_signature = send(localnet.client.rpc(), &taker.keypair, take_ix)?;
         localnet
             .client
@@ -358,4 +372,40 @@ fn make_and_take_swap_inline() -> Result<()> {
             .map_err(|e| anyhow!("take outputs index: {e}"))?;
     }
     Ok(())
+}
+
+/// Offset of `authority_bump` in take instruction data: the tag, the proof
+/// (128 bytes) and the maker.
+const TAKE_AUTHORITY_BUMP_OFFSET: usize = 1 + 128 + 32;
+
+/// `take_ix` with the largest valid bump below the canonical one, and its PDA
+/// in place of the canonical order-authority account.
+fn with_non_canonical_authority_bump(
+    mut take_ix: Instruction,
+    maker: &Pubkey,
+) -> Result<Instruction> {
+    let (canonical, canonical_bump) = order_authority_pda_and_bump(maker);
+    let [seed, maker_seed] = swap_program::order_authority_seeds(maker);
+    let (non_canonical, bump) = (0..canonical_bump)
+        .rev()
+        .find_map(|bump| {
+            Pubkey::create_program_address(&[seed, maker_seed, &[bump]], &swap_program::ID)
+                .ok()
+                .map(|pda| (pda, bump))
+        })
+        .ok_or_else(|| anyhow!("no valid non-canonical bump"))?;
+    let authority_bump = take_ix
+        .data
+        .get_mut(TAKE_AUTHORITY_BUMP_OFFSET)
+        .ok_or_else(|| anyhow!("take data has no authority bump"))?;
+    assert_eq!(*authority_bump, canonical_bump);
+    *authority_bump = bump;
+    for meta in take_ix
+        .accounts
+        .iter_mut()
+        .filter(|meta| meta.pubkey == canonical)
+    {
+        meta.pubkey = non_canonical;
+    }
+    Ok(take_ix)
 }

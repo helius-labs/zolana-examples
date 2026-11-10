@@ -10,14 +10,16 @@ use spr_interface::{
     N_PUBLIC_SLOTS,
 };
 use spr_program::instruction::Transact;
-use swap_sdk::{instructions::take::Take, order_authority_pda, TakeProof};
+use swap_sdk::{
+    instructions::take::Take, order_authority_pda_and_bump, tag, TakeIxData, TakeProof,
+};
 
 #[test]
 fn take_forwards_the_order_and_paying_taker_as_owner_signers() {
     let payer = Address::new_unique();
     let maker = Address::new_unique();
     let tree = Address::new_unique();
-    let order_authority = order_authority_pda(&maker);
+    let (order_authority, authority_bump) = order_authority_pda_and_bump(&maker);
     let data = TransactIxData {
         expiry_unix_ts: u64::MAX,
         private_tx_hash: [0; 32],
@@ -63,19 +65,31 @@ fn take_forwards_the_order_and_paying_taker_as_owner_signers() {
             account.is_signer = false;
         }
     }
+    let take_proof = TakeProof {
+        proof_a: [0; 32],
+        proof_b: [0; 64],
+        proof_c: [0; 32],
+    };
+    let mut expected_data = vec![tag::TAKE];
+    expected_data.extend(
+        wincode::serialize(&TakeIxData {
+            proof: take_proof,
+            maker: maker.to_bytes(),
+            authority_bump,
+            transact: data.clone(),
+        })
+        .expect("serialize take"),
+    );
     let instruction = Take {
         payer,
         maker,
         tree,
         spp_proof: data,
-        take_proof: TakeProof {
-            proof_a: [0; 32],
-            proof_b: [0; 64],
-            proof_c: [0; 32],
-        },
+        take_proof,
     }
     .instruction()
     .expect("take");
+    assert_eq!(instruction.data, expected_data);
     assert_eq!(
         instruction.accounts.first(),
         Some(&AccountMeta::new(payer, true))

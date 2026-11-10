@@ -28,6 +28,9 @@ profile-program = ["light-program-profiler/profile-program"]
 groth16-solana = { workspace = true, features = ["bsb22"] }
 light-program-profiler = { workspace = true }
 pinocchio = { workspace = true, features = ["cpi"] }
+# `curve25519` gives `Address::create_program_address` a host implementation;
+# on SBF it uses the syscall and pulls in no curve dependency.
+solana-address = { workspace = true, features = ["curve25519"] }
 solana-program-error = { workspace = true }
 thiserror = { workspace = true }
 wincode = { workspace = true }
@@ -35,6 +38,13 @@ spr-account-checks = { workspace = true }
 spr-hasher = { workspace = true }
 spr-interface = { workspace = true }
 spr-program = { workspace = true, features = ["cpi", "compression"] }
+
+[dev-dependencies]
+mollusk-svm = { workspace = true }
+spr-test-utils = { workspace = true, features = ["mollusk"] }
+solana-account = { workspace = true }
+solana-instruction = { workspace = true }
+solana-pubkey = { workspace = true }
 
 [lints.rust.unexpected_cfgs]
 level = "allow"

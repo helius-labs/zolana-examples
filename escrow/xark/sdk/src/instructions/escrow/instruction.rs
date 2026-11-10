@@ -3,7 +3,7 @@ use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use spr_interface::instruction::instruction_data::transact::TransactIxData;
 
-use crate::{shared::escrow_instruction, tag, EscrowIxData, EscrowProof};
+use crate::{escrow_authority_bump, shared::escrow_instruction, tag, EscrowIxData, EscrowProof};
 
 pub struct Escrow {
     /// The creator's Solana pubkey. It owns the spent source, so it signs the
@@ -40,6 +40,7 @@ impl Escrow {
         let ix_data = EscrowIxData {
             proof: escrow_proof,
             viewing_pubkey,
+            authority_bump: escrow_authority_bump(&creator),
             transact: spp_proof,
         };
         escrow_instruction(

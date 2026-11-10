@@ -6,7 +6,7 @@ use spr_interface::{
 };
 use spr_program::instruction::nullifier_pda_accounts;
 
-use crate::{err, escrow_authority_pda, tag, WithdrawIxData, WithdrawProof};
+use crate::{err, escrow_authority_pda_and_bump, tag, WithdrawIxData, WithdrawProof};
 
 pub struct Withdraw {
     /// The creator's ed25519 pubkey, a dedicated readonly signer the timelock
@@ -34,9 +34,11 @@ impl Withdraw {
             &tree,
             spp_proof.inputs.iter().map(|input| &input.nullifier_hash),
         );
+        let (escrow_authority, authority_bump) = escrow_authority_pda_and_bump(&creator);
         let serialized_ix = wincode::serialize(&WithdrawIxData {
             proof: withdraw_proof,
             unlock_timestamp,
+            authority_bump,
             transact: spp_proof,
         })
         .map_err(err)?;
@@ -54,10 +56,7 @@ impl Withdraw {
             AccountMeta::new(tree, false),
         ];
         accounts.extend(nullifier_pdas);
-        accounts.push(AccountMeta::new_readonly(
-            escrow_authority_pda(&creator),
-            false,
-        ));
+        accounts.push(AccountMeta::new_readonly(escrow_authority, false));
         let mut instruction_data = vec![tag::WITHDRAW];
         instruction_data.extend_from_slice(&serialized_ix);
         Ok(Instruction {

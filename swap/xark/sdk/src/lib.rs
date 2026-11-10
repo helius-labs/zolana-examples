@@ -25,6 +25,12 @@ pub fn order_authority_pda(maker: &Address) -> Address {
     *order_authority(maker).pda()
 }
 
+/// The canonical bump of `maker`'s order-authority PDA, which the instruction
+/// builders pass as `authority_bump`.
+pub fn order_authority_bump(maker: &Address) -> u8 {
+    Address::find_program_address(&order_authority_seeds(maker.as_array()), &swap_program::ID).1
+}
+
 /// The order-authority PDA of `maker` as a UTXO owner, under the zero
 /// nullifier key. Its view tag finds the maker's order UTXOs.
 pub fn order_authority(maker: &Address) -> ProgramOwner {

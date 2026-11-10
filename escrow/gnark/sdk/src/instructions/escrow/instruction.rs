@@ -4,7 +4,7 @@ use solana_pubkey::Pubkey;
 use spr_interface::instruction::instruction_data::transact::TransactIxData;
 use spr_program::instruction::Transact;
 
-use crate::{err, escrow_authority_pda, tag, EscrowIxData, EscrowProof};
+use crate::{err, escrow_authority_pda_and_bump, tag, EscrowIxData, EscrowProof};
 
 pub struct Escrow {
     /// The creator's ed25519 pubkey. It owns the spent source, so it signs
@@ -43,11 +43,13 @@ impl Escrow {
             interface_transfer_accounts: Vec::new(),
             data: spp_proof,
         };
+        let (escrow_authority, authority_bump) = escrow_authority_pda_and_bump(&creator);
         let mut accounts = vec![AccountMeta::new_readonly(creator, true)];
-        accounts.extend(transact.cpi_accounts(&[escrow_authority_pda(&creator)]));
+        accounts.extend(transact.cpi_accounts(&[escrow_authority]));
 
         let serialized_ix = wincode::serialize(&EscrowIxData {
             proof: escrow_proof,
+            authority_bump,
             transact: transact.data,
         })
         .map_err(err)?;

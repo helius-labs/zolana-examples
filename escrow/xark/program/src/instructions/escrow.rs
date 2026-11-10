@@ -20,6 +20,8 @@ pub struct EscrowArgs {
     pub proof: EscrowProof,
     /// See [`EscrowIxData::viewing_pubkey`].
     pub viewing_pubkey: [u8; 33],
+    /// See [`EscrowIxData::authority_bump`].
+    pub authority_bump: u8,
 }
 
 /// The escrow instruction data as a client writes it: [`EscrowArgs`], then
@@ -33,11 +35,14 @@ pub struct EscrowIxData {
     /// proof's `escrow_owner`; it chooses who can decrypt the escrow UTXO,
     /// never who can spend it.
     pub viewing_pubkey: [u8; 33],
+    /// The bump of the creator's escrow-authority PDA; see
+    /// [`EscrowAuthority::new`].
+    pub authority_bump: u8,
     pub transact: TransactIxData,
 }
 
-/// 1. Check the creator signs and derive its escrow-authority PDA.
-/// 2. Decode the instruction.
+/// 1. Check the creator signs.
+/// 2. Decode the instruction and derive the creator's escrow-authority PDA.
 /// 3. Verify the escrow proof against the creator, the escrow UTXO's address
 ///    (the creator's escrow-authority PDA) and the transaction's
 ///    `private_tx_hash`.
@@ -46,26 +51,28 @@ pub struct EscrowIxData {
 #[inline(never)]
 #[profile]
 pub fn process_escrow_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
-    // 1. Check the creator signs and derive its escrow-authority PDA. The
-    // escrow proof checks the source owner against this pubkey
-    // (owner_pk_field), tagged as a Solana key like the owner the escrow
-    // terms commit. The creator is read-only: the fee payer is the separate
-    // SPP payer among the forwarded accounts, and may be the same key.
+    // 1. Check the creator signs. The escrow proof checks the source owner
+    // against this pubkey (owner_pk_field), tagged as a Solana key like the
+    // owner the escrow terms commit. The creator is read-only: the fee payer
+    // is the separate SPP payer among the forwarded accounts, and may be the
+    // same key.
     let mut iter = AccountIterator::new(accounts);
     let creator = *iter.next_signer("creator")?.address();
     let owner_pk_field =
         solana_owner_identity(creator.as_array()).map_err(TimelockEscrowError::from)?;
-    let escrow_authority = EscrowAuthority::find(&creator);
 
-    // 2. Decode the instruction.
+    // 2. Decode the instruction and derive the escrow-authority PDA.
     let IxData {
-        args: EscrowArgs {
-            proof,
-            viewing_pubkey,
-        },
+        args:
+            EscrowArgs {
+                proof,
+                viewing_pubkey,
+                authority_bump,
+            },
         transact,
         transact_bytes,
     } = IxData::<EscrowArgs>::parse(data)?;
+    let escrow_authority = EscrowAuthority::new(&creator, authority_bump)?;
 
     // 3. Verify the escrow proof against the creator, the escrow UTXO's
     // address and the transaction's `private_tx_hash`. The proof outputs the

@@ -90,7 +90,8 @@ fn localnet_paths() -> Result<LocalnetPaths> {
 }
 
 /// The user registry program, `USER_REGISTRY_PROGRAM_PATH`, which
-/// `scripts/build-localnet.sh` builds from the pinned SDK.
+/// `scripts/build-localnet.sh` downloads from the `user-registry-v1.0.0`
+/// release.
 fn user_registry_program_path() -> Result<PathBuf> {
     env::var("USER_REGISTRY_PROGRAM_PATH")
         .map(PathBuf::from)

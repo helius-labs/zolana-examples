@@ -9,7 +9,9 @@ use spr_keypair::ShieldedAddress;
 use spr_program::instruction::nullifier_pda_accounts;
 use spr_transaction::TransactionError;
 
-use crate::{err, order_authority_pda, tag, MakeIxData, MakeProof, MarkerData};
+use crate::{
+    err, order_authority_bump, order_authority_pda, tag, MakeIxData, MakeProof, MarkerData,
+};
 
 pub struct OrderMarker {
     pub order_utxo_hash: [u8; 32],
@@ -47,12 +49,9 @@ impl Make {
             viewing_pubkey,
             tree,
             make_proof,
-            mut spp_proof,
+            spp_proof,
         } = self;
 
-        if let Some(marker) = spp_proof.messages.first_mut() {
-            marker.data = Vec::new();
-        }
         let nullifier_pdas = nullifier_pda_accounts(
             &tree,
             spp_proof.inputs.iter().map(|input| &input.nullifier_hash),
@@ -60,6 +59,7 @@ impl Make {
         let serialized_ix = wincode::serialize(&MakeIxData {
             proof: make_proof,
             viewing_pubkey,
+            authority_bump: order_authority_bump(&payer),
             transact: spp_proof,
         })
         .map_err(err)?;
@@ -93,264 +93,39 @@ impl Make {
 
 #[cfg(test)]
 mod tests {
-    use solana_address::Address;
     use solana_keypair::Keypair;
-    use spr_keypair::shielded::ShieldedKeypair;
-    use spr_transaction::{
-        instructions::transact::{PrivateTxHash, Shape, SppProofOutputUtxo},
-        utxo::{SppProofInputUtxo, Utxo},
-        Data,
-    };
+    use spr_keypair::ShieldedKeypair;
 
     use super::*;
 
-    // The localnet's single default tree.
-    const OUTPUT_TREE_ID: u16 = 0;
-
-    fn data_hash_bytes(byte: u8) -> [u8; 32] {
-        let mut out = [byte; 32];
-        out[0] = 0;
-        out
-    }
-
+    /// The marker message's data is the `MarkerData` bytes the program
+    /// compares against, and its view tag is the taker's.
     #[test]
-    fn sign_order_utxo_make_layout() {
-        let owner_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([7u8; 32]))
-            .expect("owner keypair");
-        let order_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([9u8; 32]))
-            .expect("order keypair");
-        let taker_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([13u8; 32]))
-            .expect("market maker keypair");
-
-        let input_amount = 1_000_000u64;
-        let order_utxo_amount = 400_000u64;
-
-        let input_utxo = Utxo {
-            owner: owner_keypair.signing_pubkey(),
-            asset: spr_transaction::Mint::SOL,
-            amount: input_amount,
-            blinding: crate::shared::test_blinding(5),
-            ring_program_id: None,
-            data: Data::default(),
-        };
-        let input_utxo = spr_test_utils::utxo::wallet(
-            input_utxo,
-            &owner_keypair.nullifier_key,
-            OUTPUT_TREE_ID,
-            0,
-            None,
-            None,
-        )
-        .unwrap()
-        .into();
-
-        let order_utxo = SppProofOutputUtxo {
-            owner_address: Some(order_keypair.shielded_address().expect("order address")),
-            asset: spr_transaction::Mint::SOL,
-            amount: order_utxo_amount,
-            blinding: crate::shared::test_blinding(11),
-            ..Default::default()
-        }
-        .with_utxo_data(vec![1, 2, 3, 4], data_hash_bytes(0xAB));
-
-        let taker_address = taker_keypair
+    fn order_marker_message_is_the_program_marker() {
+        let taker_address = ShieldedKeypair::from_keypair(&Keypair::new_from_array([13u8; 32]))
+            .expect("taker keypair")
             .shielded_address()
-            .expect("market maker address");
-        let owner_address = owner_keypair.shielded_address().expect("owner address");
-
-        let change_amount = input_amount - order_utxo_amount;
-        let change =
-            SppProofOutputUtxo::new(spr_transaction::Mint::SOL, change_amount, owner_address)
-                .expect("change output");
-        let input_utxos = vec![
-            input_utxo,
-            SppProofInputUtxo::dummy(OUTPUT_TREE_ID).unwrap(),
-        ];
-        let mut spp_proof_inputs = spr_test_utils::utxo::finalized_transaction(
-            input_utxos,
-            vec![change, order_utxo],
-            &owner_keypair,
-            Address::default(),
-            OUTPUT_TREE_ID,
-            spr_keypair::random_blinding(),
-            spr_keypair::random_salt(),
-        );
-        let order_utxo = spp_proof_inputs.output_utxos.get(1).expect("order output");
-        let order_utxo_hash = order_utxo.hash(OUTPUT_TREE_ID).expect("order hash");
-        let marker_message = OrderMarker {
-            order_utxo_hash,
-            maker_pubkey: Pubkey::default(),
+            .expect("taker address");
+        let marker = MarkerData {
+            order_utxo_hash: [5; 32],
+            maker_pubkey: [7; 32],
+        };
+        let message = OrderMarker {
+            order_utxo_hash: marker.order_utxo_hash,
+            maker_pubkey: Pubkey::new_from_array(marker.maker_pubkey),
             taker_address,
         }
         .message()
         .expect("marker message");
-        let expected_marker_bytes = borsh::to_vec(&MarkerData {
-            order_utxo_hash,
-            maker_pubkey: Pubkey::default().to_bytes(),
-        })
-        .expect("marker bytes");
-        spp_proof_inputs.external_data.messages.push(marker_message);
-
         assert_eq!(
-            spp_proof_inputs.check_shape().expect("shape"),
-            Shape::IN2_OUT2
-        );
-        assert_eq!(spp_proof_inputs.output_utxos.len(), 2);
-
-        let change = spp_proof_inputs
-            .output_utxos
-            .first()
-            .expect("change output");
-        assert!(!change.is_dummy());
-        assert_eq!(change.amount, input_amount - order_utxo_amount);
-        let order_output_utxo = spp_proof_inputs.output_utxos.get(1).expect("order output");
-        assert!(!order_output_utxo.is_dummy());
-
-        let change_hash = change.hash(OUTPUT_TREE_ID).expect("change hash");
-        let output_hashes: Vec<[u8; 32]> = spp_proof_inputs
-            .external_data
-            .outputs
-            .iter()
-            .map(|output| output.utxo_hash)
-            .collect();
-        assert_eq!(output_hashes, vec![change_hash, order_utxo_hash]);
-
-        let marker = spp_proof_inputs
-            .external_data
-            .messages
-            .first()
-            .expect("marker message");
-        assert_eq!(spp_proof_inputs.external_data.messages.len(), 1);
-        assert_eq!(marker.data, expected_marker_bytes);
-
-        assert_eq!(spp_proof_inputs.input_utxos.len(), 2);
-        let input_utxo = spp_proof_inputs.input_utxos.first().expect("input");
-        assert!(!input_utxo.is_dummy());
-        assert!(spp_proof_inputs
-            .input_utxos
-            .get(1)
-            .expect("dummy input")
-            .is_dummy());
-        let source_input_hash = input_utxo.hash();
-
-        let external_data_hash = spp_proof_inputs
-            .external_data
-            .hash()
-            .expect("external data hash");
-        let expected = PrivateTxHash::new(
-            &[source_input_hash, [0u8; 32]],
-            &[change_hash, order_utxo_hash],
-            &spp_proof_inputs
-                .private_tx_blinding()
-                .expect("private tx blinding"),
-        )
-        .hash()
-        .expect("private tx hash");
-        assert_eq!(
-            spr_keypair::hash::sha256(&[expected, external_data_hash].concat()),
-            spp_proof_inputs.message_hash().expect("message hash")
-        );
-    }
-
-    #[test]
-    fn sign_order_utxo_make_zero_change_utxo() {
-        let owner_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([3u8; 32]))
-            .expect("owner keypair");
-        let order_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([4u8; 32]))
-            .expect("order keypair");
-        let taker_keypair = ShieldedKeypair::from_keypair(&Keypair::new_from_array([14u8; 32]))
-            .expect("market maker keypair");
-
-        let amount = 250_000u64;
-        let input_utxo = Utxo {
-            owner: owner_keypair.signing_pubkey(),
-            asset: spr_transaction::Mint::SOL,
-            amount,
-            blinding: crate::shared::test_blinding(6),
-            ring_program_id: None,
-            data: Data::default(),
-        };
-        let input_utxo = spr_test_utils::utxo::wallet(
-            input_utxo,
-            &owner_keypair.nullifier_key,
-            OUTPUT_TREE_ID,
-            0,
-            None,
-            None,
-        )
-        .unwrap()
-        .into();
-
-        let order_utxo = SppProofOutputUtxo {
-            owner_address: Some(order_keypair.shielded_address().expect("order address")),
-            asset: spr_transaction::Mint::SOL,
-            amount,
-            blinding: crate::shared::test_blinding(12),
-            ..Default::default()
-        }
-        .with_utxo_data(vec![9, 9], data_hash_bytes(0xCD));
-
-        let taker_address = taker_keypair
-            .shielded_address()
-            .expect("market maker address");
-        let owner_address = owner_keypair.shielded_address().expect("owner address");
-
-        let change = SppProofOutputUtxo::new(spr_transaction::Mint::SOL, 0, owner_address)
-            .expect("change output");
-        let input_utxos = vec![
-            input_utxo,
-            SppProofInputUtxo::dummy(OUTPUT_TREE_ID).unwrap(),
-        ];
-        let mut spp_proof_inputs = spr_test_utils::utxo::finalized_transaction(
-            input_utxos,
-            vec![change, order_utxo],
-            &owner_keypair,
-            Address::default(),
-            OUTPUT_TREE_ID,
-            spr_keypair::random_blinding(),
-            spr_keypair::random_salt(),
-        );
-        let order_utxo = spp_proof_inputs.output_utxos.get(1).expect("order output");
-        let order_utxo_hash = order_utxo.hash(OUTPUT_TREE_ID).expect("order hash");
-        let marker_message = OrderMarker {
-            order_utxo_hash,
-            maker_pubkey: Pubkey::default(),
-            taker_address,
-        }
-        .message()
-        .expect("marker message");
-        spp_proof_inputs.external_data.messages.push(marker_message);
-
-        let change = spp_proof_inputs
-            .output_utxos
-            .first()
-            .expect("change output");
-        assert!(!change.is_dummy());
-        assert_eq!(change.amount, 0);
-
-        let order_output_utxo = spp_proof_inputs.output_utxos.get(1).expect("order output");
-        let external_data_hash = spp_proof_inputs
-            .external_data
-            .hash()
-            .expect("external data hash");
-        let input_utxo = spp_proof_inputs.input_utxos.first().expect("input");
-        let source_input_hash = input_utxo.hash();
-        let expected = PrivateTxHash::new(
-            &[source_input_hash, [0u8; 32]],
-            &[
-                change.hash(OUTPUT_TREE_ID).expect("change hash"),
-                order_output_utxo.hash(OUTPUT_TREE_ID).expect("order hash"),
-            ],
-            &spp_proof_inputs
-                .private_tx_blinding()
-                .expect("private tx blinding"),
-        )
-        .hash()
-        .expect("private tx hash");
-        let message_hash = spp_proof_inputs.message_hash().expect("message hash");
-        assert_eq!(
-            spr_keypair::hash::sha256(&[expected, external_data_hash].concat()),
-            message_hash
+            message,
+            MessageData {
+                view_tag: taker_address
+                    .signing_pubkey
+                    .confidential_view_tag()
+                    .expect("view tag"),
+                data: borsh::to_vec(&marker).expect("serialize marker"),
+            }
         );
     }
 }

@@ -1,5 +1,9 @@
 # Swap Program
 
+> [!WARNING]
+> Example design, not audited. The implementations in this directory use
+> insecure test keys and must not be deployed or used with real funds.
+
 The swap program settles a confidential swap between a maker and a taker the maker chooses. The two
 agree a price out of band, and the maker commits an order that locks the
 funds it is selling as a shielded UTXO in the Solana Privacy Program (SPP). The taker indexes the order
@@ -74,8 +78,8 @@ Types used in this document. Shared SPP types are defined in [spec.md](../../doc
 | `CompressedShieldedAddress` | `[u8; 65]` | `(owner_hash [u8;32], viewing_pk tagged X25519[33])`. See [spec.md](../../docs/spec.md#shielded-address). |
 | `order-authority PDA` | `Address` | The maker's program address, `find_program_address([b"order_authority", maker], program_id)`: one per maker. It owns the maker's order UTXOs, so a maker finds them by deriving it. |
 | `order UTXO` | — | The SPP [UTXO](../../docs/spec.md#utxo) holding the source funds: `asset = source_asset_id`, `amount = source_amount`, `owner = the maker's order-authority PDA`, nullifier secret `= 0`, `utxo_data = order terms`. The make proof enforces the owner, so the UTXO is spendable only by the swap program. See [Order Terms](#order-terms). |
-| `marker message` | — | The SPP `transact` message (`view_tag`, `data`) `make` appends as the taker's discovery tag: `view_tag` is the taker's confidential view tag, `data` a plaintext [`MarkerData`](#make) the program writes. Committed by the SPP proof through the transact's external-data hash; the `view_tag` is unenforced: a wrong tag only means the taker does not index the trade. |
-| `MarkerData` | Borsh | `{ order_utxo_hash: [u8;32], maker_pubkey: [u8;32] }`, the plaintext `make` writes into the transact's single marker message. `order_utxo_hash` locates the order UTXO slot; `maker_pubkey` is the `make` signer's Solana pubkey, which the taker resolves to the maker's registered shielded address via the user registry. See [make](#make). |
+| `marker message` | — | The SPP `transact` message (`view_tag`, `data`) `make` appends as the taker's discovery tag: `view_tag` is the taker's confidential view tag, `data` a plaintext [`MarkerData`](#make) the client writes and the program checks. Committed by the SPP proof through the transact's external-data hash; the `view_tag` is unchecked: a wrong tag only means the taker does not index the trade. |
+| `MarkerData` | Borsh | `{ order_utxo_hash: [u8;32], maker_pubkey: [u8;32] }`, the plaintext of the transact's single marker message, 64 bytes. `order_utxo_hash` locates the order UTXO slot; `maker_pubkey` is the `make` signer's Solana pubkey, which the taker resolves to the maker's registered shielded address via the user registry. See [make](#make). |
 | `Order terms` | — | The fields committed in the order UTXO's `utxo_data` (record tag `0x02`), hashed into the order UTXO `utxo_hash` via `data_hash`: `destination_asset_id`, `destination_amount`, `maker_address`, `expiry`, `taker_pk_fe`. See [Order Terms](#order-terms). |
 | `private_tx_hash` | `[u8; 32]` | Commitment to the SPP `transact` a swap proof authorizes: the link between a swap proof and the SPP transaction. See [spec.md](../../docs/spec.md#zk-program-interface). |
 | `MakeProof` / `TakeProof` / `CancelProof` | `[u8; 128]` | Standard Groth16 proofs verified by the swap program, each committing the transaction via `private_tx_hash`. |
@@ -145,6 +149,10 @@ preimage with a matching destination UTXO may take it. A nonzero value designate
 `maker_owner_pk_field`, and only the taker whose destination-side input UTXO owner hash equals
 `Poseidon(taker_pk_fe, taker_nullifier_pk)` may take. The take proof witnesses `taker_nullifier_pk`
 privately. The value is committed like every other term, so neither party can change it after make.
+`taker_pk_fe` must be a canonical BN254 scalar: as 32 big-endian bytes it is below the field
+modulus. Zero and every `solana_owner_identity` are. The Xark circuit packs the 32 bytes into one
+field element, so a larger value would wrap to a different taker; the SDKs refuse to build such
+terms and discovery skips decoded orders that contain one.
 
 `source_asset_id`, `source_amount`, and `owner` are the order UTXO's own SPP fields, already
 committed in `utxo_hash`. The order UTXO's owner is the maker's order-authority PDA (seeds
@@ -181,11 +189,20 @@ so it spends a PDA-owned UTXO only through `take` (constrained to the committed 
 and cancel circuits leave the order UTXO input's owner a free witness; SPP enforces it at spend
 time, when the input's owner must match the PDA signer, and its transact proof commits to the owner
 signers, so a take naming the wrong maker fails SPP verification. The program derives the PDA
-via `find_program_address` from the maker (the `maker` signer at make and cancel, the `maker`
-instruction-data field at take), checks it is present among the forwarded SPP accounts, and flips
-it to a signer inside the SPP CPI with seeds `[b"order_authority", maker, bump]`. The PDA appears in the ordered owner
-signer section after the fixed `[payer, output_tree, spp_program, system_program]`
-prefix and the input-tree and nullifier runs; it is a bare address and signs only inside the CPI.
+from the maker (the `maker` signer at make and cancel, the `maker` instruction-data field at
+take) and the instruction's `authority_bump`, checks it is present among the forwarded SPP
+accounts, and flips it to a signer inside the SPP CPI with seeds `[b"order_authority", maker,
+authority_bump]`. The PDA appears in the ordered owner signer section after the fixed `[payer,
+output_tree, spp_program, system_program]` prefix and the input-tree and nullifier runs; it is a
+bare address and signs only inside the CPI.
+
+The PDA's bump travels in the instruction data as `authority_bump: u8`. The program derives the
+PDA with one `create_program_address([b"order_authority", maker, [authority_bump]], program_id)`
+and fails with `InvalidOrderAuthorityBump` (8017) when that is not a program address. Clients
+pass the canonical bump from `find_program_address`, so the program's cost does not depend on how
+many bumps the search tries. A non-canonical bump that still derives a program address names
+another PDA of the same maker: a make with it puts the order UTXO under that PDA, and a take or
+cancel with it spends only UTXOs that PDA owns. It does not reach another maker's UTXOs.
 
 `maker_address` is the committed destination for both outcomes: take pays the destination output
 there, cancel returns the source output there. Either way the maker recovers the bought output from
@@ -232,15 +249,15 @@ the taker's viewing pubkey, so the taker recovers the private order terms and th
 the maker can decrypt the same slot via the transaction viewing key it holds. Those two parties are
 exactly who can decrypt the order. The taker resolves `maker_address`
 from the user registry via the marker's `maker_pubkey` and verifies the resolution by
-recomputing the order UTXO `utxo_hash`. The program requires exactly one transact message, with
-`data` equal to the 64-byte zeroed placeholder (`MARKER_PLACEHOLDER`), and overwrites it in place
-with the plaintext [`MarkerData`](#glossary) `{ order_utxo_hash,
-maker_pubkey }` (the order UTXO hash read from transact output index 1, the pubkey from the
-signer), so ordinary wallet sync finds the trade and
-can locate the matching order UTXO slot to decrypt. The message is committed by the SPP
-proof through the external-data hash, so the SPP proof only verifies for the exact
-`MarkerData` the program writes; only the marker's `view_tag` is unenforced: a wrong tag means the
-taker does not index the trade.
+recomputing the order UTXO `utxo_hash`. The client writes the transact's single message, the
+marker, before proving: its data is the plaintext [`MarkerData`](#glossary) `{ order_utxo_hash,
+maker_pubkey }`, 64 bytes (`order_utxo_hash || maker_pubkey`), so ordinary wallet sync finds the
+trade and can locate the matching order UTXO slot to decrypt. Before verifying the proof, the
+program checks that the transact has exactly one message (`InvalidMarkerMessage`, 8014) and that
+its data equals `MarkerData` of transact output 1's hash and the `maker` signer
+(`InvalidMarkerData`, 8015); it then forwards the transact bytes to SPP unchanged. The SPP proof
+commits to the message through the external-data hash; only the marker's `view_tag` is unchecked:
+a wrong tag means the taker does not index the trade.
 
 Both implementations check the committed maker against the `maker` signer through a public
 `maker_owner_pk_field`, `solana_owner_identity` of the signer, so the marker's `maker_pubkey`, the
@@ -279,8 +296,10 @@ struct MakeIxData {
     /// key the order is encrypted to), which with the PDA's owner hash forms the order-owner
     /// public input. It controls who can decrypt the order, not who can spend it.
     viewing_pubkey: [u8; 33],
-    /// SPP transact (1-in/2-out): maker source UTXO -> change + order UTXO;
-    /// includes the marker message.
+    /// The bump of the maker's order-authority PDA; see [Order Terms](#order-terms).
+    authority_bump: u8,
+    /// SPP transact (1-in/2-out): maker source UTXO -> change + order UTXO; includes the
+    /// marker message. Forwarded to SPP unchanged.
     transact: TransactIxData,
 }
 ```
@@ -325,6 +344,8 @@ struct TakeIxData {
     /// The maker's Solana pubkey, from the marker's `maker_pubkey`; derives the order-authority
     /// PDA. A wrong value makes SPP reject the transact.
     maker: [u8; 32],
+    /// The bump of that maker's order-authority PDA; see [Order Terms](#order-terms).
+    authority_bump: u8,
     /// SPP transact (2-in/2-out): order UTXO + destination UTXO -> source to the taker,
     /// destination to the maker.
     transact: TransactIxData,
@@ -371,6 +392,8 @@ struct CancelIxData {
     /// The committed order expiry, checked against the Clock (now > expiry) and a proof public
     /// input. Distinct from transact.expiry_unix_ts (the SPP relayer deadline).
     order_expiry: u64,
+    /// The bump of the maker's order-authority PDA; see [Order Terms](#order-terms).
+    authority_bump: u8,
     /// SPP transact (1-in/1-out): order UTXO -> source UTXO to maker_address.
     transact: TransactIxData,
 }

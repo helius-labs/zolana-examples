@@ -120,8 +120,9 @@ impl MakeTransactionParams {
         );
         let change_blinding = change.blinding;
 
-        // 4. Encrypt the outputs and add the marker. The program overwrites
-        // its data with the same `MarkerData`.
+        // 4. Encrypt the outputs and add the marker, the transaction's only
+        // message. The program checks its data is the `MarkerData` of the
+        // order output and the payer, and forwards it unchanged.
         let key = maker
             .get_transaction_viewing_key(&finalized.first_nullifier().map_err(err)?)
             .map_err(err)?;

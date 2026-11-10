@@ -13,7 +13,7 @@ use wincode::{SchemaRead, SchemaWrite};
 use crate::{
     error::SwapError,
     instructions::{
-        shared::{check_after_window, u64_right_align, OrderAuthority},
+        shared::{check_after_window, u64_right_align, IxData, OrderAuthority},
         verifier::{verify_groth16, CompressedGroth16Proof},
     },
 };
@@ -25,6 +25,19 @@ pub struct CancelProof {
     pub proof_c: [u8; 32],
 }
 
+/// The cancel arguments the program reads ahead of the transact bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
+pub struct CancelArgs {
+    pub proof: CancelProof,
+    /// See [`CancelIxData::order_expiry`].
+    pub order_expiry: u64,
+    /// See [`CancelIxData::authority_bump`].
+    pub authority_bump: u8,
+}
+
+/// The cancel instruction data as a client writes it: [`CancelArgs`], then
+/// the transact data, which the program reads in place ([`IxData`]) and
+/// forwards to SPP unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct CancelIxData {
     pub proof: CancelProof,
@@ -35,6 +48,9 @@ pub struct CancelIxData {
     /// order's committed terms hash includes `order_expiry`; the proof
     /// recomputes it.
     pub order_expiry: u64,
+    /// The bump of the maker's order-authority PDA. The SDK passes the
+    /// canonical bump; see [`OrderAuthority::new`].
+    pub authority_bump: u8,
     pub transact: TransactIxData,
 }
 
@@ -82,11 +98,19 @@ pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
     let maker = *iter.next_signer("maker")?.address();
     let maker_owner_pk_field = solana_owner_identity(maker.as_array()).map_err(SwapError::from)?;
 
-    let CancelIxData {
-        proof,
-        order_expiry,
+    // The program reads the transact data in place and forwards the client's
+    // bytes to SPP unchanged.
+    let IxData {
+        args:
+            CancelArgs {
+                proof,
+                order_expiry,
+                authority_bump,
+            },
         transact,
-    } = wincode::deserialize_exact(data).map_err(|_| SwapError::InvalidInstructionData)?;
+        transact_bytes,
+    } = IxData::<CancelArgs>::parse(data)?;
+    let order_authority = OrderAuthority::new(&maker, authority_bump)?;
 
     let clock = Clock::get()?;
     check_after_window(clock.unix_timestamp, order_expiry)?;
@@ -94,15 +118,12 @@ pub fn process_cancel_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
     verify_cancel_proof(
         &proof,
         CancelPublicInput {
-            private_tx_hash: &transact.private_tx_hash,
+            private_tx_hash: transact.private_tx_hash,
             expiry: order_expiry,
             maker_owner_pk_field: &maker_owner_pk_field,
         },
     )?;
 
-    let transact_bytes = transact
-        .serialize()
-        .map_err(|_| SwapError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
-    OrderAuthority::find(&maker).cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    order_authority.cpi_spp_transact_signed(spp_accounts, transact_bytes)
 }

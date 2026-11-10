@@ -17,6 +17,8 @@ pub enum TimelockEscrowError {
     HashingFailed = 9004,
     #[error("escrow has not yet unlocked")]
     NotYetUnlocked = 9005,
+    #[error("authority bump does not derive the creator's escrow-authority PDA")]
+    InvalidEscrowAuthorityBump = 9006,
 }
 
 impl From<TimelockEscrowError> for ProgramError {

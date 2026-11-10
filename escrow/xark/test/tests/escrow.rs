@@ -4,6 +4,8 @@ use anyhow::{anyhow, Result};
 use shared::{
     creator_transactions, send, setup, Actor, TestEnv, LOCK_AMOUNT, SHIELD_AMOUNT, UNLOCK_TIMESTAMP,
 };
+use solana_address::Address;
+use solana_instruction::Instruction;
 use solana_signer::Signer;
 use spr_program::InputRecords;
 use spr_program_test::fixture;
@@ -11,6 +13,7 @@ use spr_test_utils::wallet::{sync_wallet, Wallet};
 use spr_transaction::{AssetRegistry, SOL_ASSET_ID, SOL_MINT};
 use timelock_escrow_program::error::TimelockEscrowError;
 use timelock_escrow_sdk::{
+    escrow_authority_bump, escrow_authority_seeds,
     instructions::{escrow::EscrowTransactionParams, withdraw::WithdrawTransactionParams},
     state::{open_escrows, EscrowTerms, EscrowUtxo},
 };
@@ -19,6 +22,43 @@ use timelock_escrow_test::assert_escrow_error;
 /// The escrow instruction data's viewing pubkey: after the tag and the
 /// 128-byte proof.
 const ESCROW_VIEWING_PUBKEY: core::ops::Range<usize> = 129..162;
+
+/// Offset of the escrow instruction data's `authority_bump`: after the
+/// viewing pubkey.
+const ESCROW_AUTHORITY_BUMP: usize = ESCROW_VIEWING_PUBKEY.end;
+
+/// Offset of the withdraw instruction data's `authority_bump`: after the tag,
+/// the 128-byte proof and the 8-byte unlock timestamp.
+const WITHDRAW_AUTHORITY_BUMP: usize = 137;
+
+/// The highest bump below the canonical one that still derives a program
+/// address of `creator`'s escrow authority.
+fn non_canonical_bump(creator: &Address) -> Result<u8> {
+    let [seed, creator_seed] = escrow_authority_seeds(creator);
+    (0..escrow_authority_bump(creator))
+        .rev()
+        .find(|bump| {
+            Address::create_program_address(
+                &[seed, creator_seed, &[*bump]],
+                &timelock_escrow_program::ID,
+            )
+            .is_ok()
+        })
+        .ok_or_else(|| anyhow!("no non-canonical escrow-authority bump"))
+}
+
+/// `ix` with its `authority_bump` at `offset` set to `bump`, after checking
+/// it held `expected`.
+fn with_bump(ix: &Instruction, offset: usize, expected: u8, bump: u8) -> Result<Instruction> {
+    let mut ix = ix.clone();
+    let authority_bump = ix
+        .data
+        .get_mut(offset)
+        .ok_or_else(|| anyhow!("instruction data has no authority bump"))?;
+    assert_eq!(*authority_bump, expected);
+    *authority_bump = bump;
+    Ok(ix)
+}
 
 // Timelock escrow lock-then-withdraw on the shielded pool, driven against a
 // real localnet (validator + Photon indexer + prover) that `setup()` starts.
@@ -31,12 +71,13 @@ const ESCROW_VIEWING_PUBKEY: core::ops::Range<usize> = 129..162;
 //      data, committed unlock timestamp already in the past). Xark escrow
 //      proof, v1 transaction, paid by a separate fee payer while the creator
 //      signs for its source. An escrow to another viewing pubkey than the
-//      proof's is refused first.
+//      proof's, one naming the fee payer as creator, and one with a
+//      non-canonical authority bump are refused first.
 //   3. Withdraw: the creator finds its open escrow by decrypting the outputs
 //      of its escrow-authority PDA, which decode to the terms, and spends the
 //      escrow UTXO -> source output 0.3 SOL back to itself. Xark withdraw
-//      proof, v1 transaction. Another signer and a missing escrow authority
-//      are refused first.
+//      proof, v1 transaction. Another signer, a missing escrow authority and
+//      a non-canonical authority bump are refused first.
 //   4. Assert the creator's synced confidential balance after each step, and
 //      that no open escrow remains.
 //
@@ -91,6 +132,46 @@ fn escrow_then_withdraw() -> Result<()> {
     assert_escrow_error(
         "an escrow to another viewing pubkey",
         send(client, &[&fee_payer, &creator.solana], other_viewer_ix),
+        TimelockEscrowError::ProofVerificationFailed,
+    );
+
+    // The fee payer in the creator slot (account 0), with its own canonical
+    // bump: the program derives the owner identity and the escrow authority
+    // from the fee payer, which owns neither the source nor the proof's
+    // escrow address. The creator still signs as the source's owner signer.
+    let mut fee_payer_creator_ix = with_bump(
+        &escrow_ix,
+        ESCROW_AUTHORITY_BUMP,
+        escrow_authority_bump(&creator_pubkey),
+        escrow_authority_bump(&fee_payer.pubkey()),
+    )?;
+    let creator_meta = fee_payer_creator_ix
+        .accounts
+        .first_mut()
+        .ok_or_else(|| anyhow!("escrow has no creator account"))?;
+    creator_meta.pubkey = fee_payer.pubkey();
+    assert!(creator_meta.is_signer);
+    assert_escrow_error(
+        "an escrow naming the fee payer as creator",
+        send(client, &[&fee_payer, &creator.solana], fee_payer_creator_ix),
+        TimelockEscrowError::ProofVerificationFailed,
+    );
+
+    // A non-canonical bump of the creator derives another escrow authority,
+    // whose address is not the escrow proof's escrow_owner.
+    let creator_bump = escrow_authority_bump(&creator_pubkey);
+    assert_escrow_error(
+        "an escrow with a non-canonical authority bump",
+        send(
+            client,
+            &[&fee_payer, &creator.solana],
+            with_bump(
+                &escrow_ix,
+                ESCROW_AUTHORITY_BUMP,
+                creator_bump,
+                non_canonical_bump(&creator_pubkey)?,
+            )?,
+        ),
         TimelockEscrowError::ProofVerificationFailed,
     );
 
@@ -173,6 +254,23 @@ fn escrow_then_withdraw() -> Result<()> {
     assert_escrow_error(
         "a withdraw without the escrow_authority account",
         send(client, &[&creator.solana], no_authority_ix),
+        TimelockEscrowError::MissingEscrowAuthority,
+    );
+
+    // A non-canonical bump derives another escrow authority, which is not
+    // among the forwarded accounts.
+    assert_escrow_error(
+        "a withdraw with a non-canonical authority bump",
+        send(
+            client,
+            &[&creator.solana],
+            with_bump(
+                &withdraw_ix,
+                WITHDRAW_AUTHORITY_BUMP,
+                creator_bump,
+                non_canonical_bump(&creator_pubkey)?,
+            )?,
+        ),
         TimelockEscrowError::MissingEscrowAuthority,
     );
 

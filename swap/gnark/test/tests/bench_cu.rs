@@ -8,11 +8,12 @@
 //! 2. Build the profiling program:
 //!    `cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54
 //!    --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program`.
-//! 3. Build the SDK 0.8.0 shielded-pool program into the same directory:
-//!    `cargo build-sbf --manifest-path <zolana>/programs/shielded-pool/Cargo.toml
-//!    --tools-version v1.54 --sbf-out-dir target/bench -- --features bpf-entrypoint`.
-//! 4. Point `ZOLANA_CLI_BIN` and `ZOLANA_PROVER_BIN` at the SDK revision's `zolana`
-//!    CLI and prover server (`ZOLANA_PROVER_URL` moves its port), then run
+//! 3. Export the variables the `cli-v0.10.0` release CLI prints with
+//!    `zolana dev artifacts` (see `test-utils/run-release-tests.sh`), and copy
+//!    the deployed shielded-pool program it names into the same directory:
+//!    `cp "$SHIELDED_POOL_PROGRAM_PATH" target/bench/shielded_pool_program.so`.
+//! 4. With `ZOLANA_CLI_BIN` and `PROVER_BIN` from step 3 (`ZOLANA_PROVER_URL`
+//!    moves the prover's port, and a prover already serving it is reused), run
 //!    `cargo test --release --manifest-path test/Cargo.toml --test bench_cu --
 //!    --ignored --nocapture`.
 //!
@@ -122,8 +123,7 @@ const BENCH_TREE_ID: u16 = 0;
 /// The runtime slot, after the slots `build_tree_fixture` appends leaves at.
 const BENCH_SLOT: u64 = 1_000;
 /// Keypair seeds of each instruction's paying party; the counterparties use
-/// fixed keys too. Fixed keys keep the order-authority PDA bump search, and
-/// with it the CU, the same every run.
+/// fixed keys too. Fixed keys make every run replay the same transactions.
 const MAKE_MAKER_SEED: u8 = 1;
 const TAKE_TAKER_SEED: u8 = 3;
 const CANCEL_MAKER_SEED: u8 = 5;
@@ -141,8 +141,7 @@ fn build_tree_fixture(tree: &Pubkey, leaves: &[[u8; 32]]) -> (Account, [u8; 32],
             tree.to_bytes(),
             BENCH_TREE_ID,
             nullifier_tree_params(),
-            default_tree_fees(nullifier_tree_params().input_queue_zkp_batch_size)
-                .expect("default tree fees"),
+            default_tree_fees(),
         )
         .expect("init tree account");
         for (slot, leaf) in (1_u64..).zip(leaves) {

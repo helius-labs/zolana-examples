@@ -20,11 +20,16 @@ pub use swap_program::{
 /// (`PublicKey::from_ed25519(pda)`), so a maker finds its program UTXOs by
 /// deriving it. It holds no data and is never created.
 pub fn order_authority_pda(maker: &Pubkey) -> Pubkey {
-    let (pda, _bump) = Pubkey::find_program_address(
+    order_authority_pda_and_bump(maker).0
+}
+
+/// The maker's order-authority PDA and its canonical bump, which the make,
+/// take and cancel instructions carry as `authority_bump`.
+pub fn order_authority_pda_and_bump(maker: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
         &swap_program::order_authority_seeds(maker),
         &swap_program::ID,
-    );
-    pda
+    )
 }
 pub(crate) fn err(e: impl core::fmt::Debug) -> anyhow::Error {
     anyhow::anyhow!("{e:?}")

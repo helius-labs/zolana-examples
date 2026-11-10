@@ -9,8 +9,8 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 | Field | gnark | Xark |
 | ----- | ----- | ---- |
 | Implementation | gnark (Go circuits, spr-gnark-ffi-prover) | Xark (Rust circuits, spr program SDK) |
-| SDK | Zolana Rust SDK 0.8.0 | Zolana 98948daa1, Xark 0.3.0 |
-| Shielded-pool program | Zolana Rust SDK 0.8.0 | Zolana 98948daa1 |
+| SDK | Zolana ca4cf4f (cli-v0.10.0) | Zolana ca4cf4f (cli-v0.10.0), Xark 0.3.0 |
+| Shielded-pool program | shielded-pool v1.0.0 (cli-v0.10.0) | shielded-pool v1.0.0 (cli-v0.10.0) |
 | Machine | Apple M5 Pro, 18 cores, Darwin 25.6.0 (aarch64) | Apple M5 Pro, 18 cores, Darwin 25.6.0 (aarch64) |
 
 ## Circuit size
@@ -37,18 +37,18 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 
 | Circuit | Metric | gnark | Xark | Delta |
 | ------- | ------ | ----- | ---- | ----- |
-| make | Key load (ms) | 59 | 128 | +69 (+116.9%) |
+| make | Key load (ms) | 64 | 134 | +70 (+109.4%) |
 | make | Per-proof setup (ms) | 0 | 28 | +28 |
-| make | Warm proving time (ms) | 14 | 221 | +207 (+1478.6%) |
+| make | Warm proving time (ms) | 14 | 229 | +215 (+1535.7%) |
 | make | In-memory proving time (ms) | 14 | 174 | +160 (+1142.9%) |
-| take | Key load (ms) | 81 | 159 | +78 (+96.3%) |
-| take | Per-proof setup (ms) | 0 | 26 | +26 |
-| take | Warm proving time (ms) | 17 | 261 | +244 (+1435.3%) |
-| take | In-memory proving time (ms) | 17 | 207 | +190 (+1117.6%) |
-| cancel | Key load (ms) | 46 | 99 | +53 (+115.2%) |
-| cancel | Per-proof setup (ms) | 0 | 18 | +18 |
-| cancel | Warm proving time (ms) | 11 | 162 | +151 (+1372.7%) |
-| cancel | In-memory proving time (ms) | 11 | 129 | +118 (+1072.7%) |
+| take | Key load (ms) | 84 | 169 | +85 (+101.2%) |
+| take | Per-proof setup (ms) | 0 | 29 | +29 |
+| take | Warm proving time (ms) | 18 | 277 | +259 (+1438.9%) |
+| take | In-memory proving time (ms) | 18 | 210 | +192 (+1066.7%) |
+| cancel | Key load (ms) | 49 | 95 | +46 (+93.9%) |
+| cancel | Per-proof setup (ms) | 0 | 19 | +19 |
+| cancel | Warm proving time (ms) | 11 | 164 | +153 (+1390.9%) |
+| cancel | In-memory proving time (ms) | 11 | 132 | +121 (+1100.0%) |
 
 ## Instruction circuit
 
@@ -62,40 +62,40 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| make | Total CU | 250,147 | 246,329 | -3,818 (-1.5%) |
+| make | Total CU | 249,723 | 244,670 | -5,053 (-2.0%) |
 | make | Verify CU | 94,483 | 94,713 | +230 (+0.2%) |
-| make | SPP CPI CU | 148,436 | 142,697 | -5,739 (-3.9%) |
-| take | Total CU | 249,450 | 245,717 | -3,733 (-1.5%) |
+| make | SPP CPI CU | 149,822 | 142,697 | -7,125 (-4.8%) |
+| take | Total CU | 244,808 | 245,742 | +934 (+0.4%) |
 | take | Verify CU | 94,490 | 94,702 | +212 (+0.2%) |
-| take | SPP CPI CU | 146,172 | 148,290 | +2,118 (+1.4%) |
-| cancel | Total CU | 242,822 | 240,557 | -2,265 (-0.9%) |
+| take | SPP CPI CU | 147,559 | 148,290 | +731 (+0.5%) |
+| cancel | Total CU | 240,029 | 240,582 | +553 (+0.2%) |
 | cancel | Verify CU | 94,490 | 94,702 | +212 (+0.2%) |
-| cancel | SPP CPI CU | 140,605 | 142,348 | +1,743 (+1.2%) |
+| cancel | SPP CPI CU | 141,988 | 142,348 | +360 (+0.3%) |
 
 ## Instruction proving
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| make | Warm circuit proof (ms) | 14 | 221 | +207 (+1478.6%) |
-| make | Warm SPP proof (ms) | 105 | 61 | -44 (-41.9%) |
-| make | Warm total proving (ms) | 119 | 282 | +163 (+137.0%) |
-| take | Warm circuit proof (ms) | 17 | 261 | +244 (+1435.3%) |
-| take | Warm SPP proof (ms) | 103 | 104 | +1 (+1.0%) |
-| take | Warm total proving (ms) | 120 | 366 | +246 (+205.0%) |
-| cancel | Warm circuit proof (ms) | 11 | 162 | +151 (+1372.7%) |
-| cancel | Warm SPP proof (ms) | 59 | 59 | 0 (0.0%) |
-| cancel | Warm total proving (ms) | 70 | 222 | +152 (+217.1%) |
+| make | Warm circuit proof (ms) | 14 | 229 | +215 (+1535.7%) |
+| make | Warm SPP proof (ms) | 107 | 61 | -46 (-43.0%) |
+| make | Warm total proving (ms) | 121 | 291 | +170 (+140.5%) |
+| take | Warm circuit proof (ms) | 18 | 277 | +259 (+1438.9%) |
+| take | Warm SPP proof (ms) | 105 | 107 | +2 (+1.9%) |
+| take | Warm total proving (ms) | 124 | 385 | +261 (+210.5%) |
+| cancel | Warm circuit proof (ms) | 11 | 164 | +153 (+1390.9%) |
+| cancel | Warm SPP proof (ms) | 62 | 61 | -1 (-1.6%) |
+| cancel | Warm total proving (ms) | 73 | 226 | +153 (+209.6%) |
 
 ## Transaction size
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| make | Instruction data (bytes) | 900 | 957 | +57 (+6.3%) |
+| make | Instruction data (bytes) | 965 | 1,022 | +57 (+5.9%) |
 | make | Accounts | 10 | 9 | -1 (-10.0%) |
-| make | v1 tx (bytes) | 1,284 | 1,308 | +24 (+1.9%) |
-| take | Instruction data (bytes) | 838 | 807 | -31 (-3.7%) |
+| make | v1 tx (bytes) | 1,349 | 1,373 | +24 (+1.8%) |
+| take | Instruction data (bytes) | 839 | 808 | -31 (-3.7%) |
 | take | Accounts | 10 | 10 | 0 (0.0%) |
-| take | v1 tx (bytes) | 1,222 | 1,191 | -31 (-2.5%) |
-| cancel | Instruction data (bytes) | 624 | 593 | -31 (-5.0%) |
+| take | v1 tx (bytes) | 1,223 | 1,192 | -31 (-2.5%) |
+| cancel | Instruction data (bytes) | 625 | 594 | -31 (-5.0%) |
 | cancel | Accounts | 9 | 9 | 0 (0.0%) |
-| cancel | v1 tx (bytes) | 975 | 944 | -31 (-3.2%) |
+| cancel | v1 tx (bytes) | 976 | 945 | -31 (-3.2%) |

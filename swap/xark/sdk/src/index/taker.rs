@@ -16,7 +16,12 @@ use super::{
     poll::{collect_tagged, index_until},
     scan::{decode_order, unified_slots},
 };
-use crate::{err, shared::INDEXED_TREE_ID, state::OrderUtxo, MarkerData};
+use crate::{
+    err,
+    shared::INDEXED_TREE_ID,
+    state::{check_taker_pk_fe, OrderUtxo},
+    MarkerData,
+};
 
 #[derive(Debug)]
 pub struct TakerOrder {
@@ -62,8 +67,14 @@ pub fn scan_taker(
     // The program writes the maker signer into the marker; the order UTXO is
     // owned by that maker's order authority.
     let maker_pubkey = Address::new_from_array(marker.maker_pubkey);
+    let order = decode_order(tx, slot, slot_index, plaintext, &maker_pubkey, registry)?;
+    // The circuit reads a non-canonical `taker_pk_fe` as another taker; skip
+    // the order before resolving its maker in the user registry.
+    if check_taker_pk_fe(&order.data.taker_pk_fe).is_err() {
+        return Ok(None);
+    }
     Ok(Some(TakerOrderCandidate {
-        order: decode_order(tx, slot, slot_index, plaintext, &maker_pubkey, registry)?,
+        order,
         maker_pubkey,
         order_utxo_hash: marker.order_utxo_hash,
     }))

@@ -57,7 +57,7 @@ pub fn check_after_window(now: i64, expiry_unix_ts: u64) -> ProgramResult {
     }
 }
 
-/// A maker's order-authority PDA, `[ORDER_AUTHORITY_PDA_SEED, maker]`: the
+/// A maker's order-authority PDA, `[ORDER_AUTHORITY_PDA_SEED, maker, [bump]]`: the
 /// owner of the maker's order UTXOs under nullifier secret 0. Only the program
 /// signs for it, so only take and cancel spend an order UTXO.
 pub struct OrderAuthority {
@@ -67,14 +67,27 @@ pub struct OrderAuthority {
 }
 
 impl OrderAuthority {
-    pub fn find(maker: &[u8; 32]) -> Self {
-        let (address, bump) =
-            Address::find_program_address(&crate::order_authority_seeds(maker), &crate::ID);
-        Self {
+    /// The PDA `[ORDER_AUTHORITY_PDA_SEED, maker, [bump]]`, with the bump the
+    /// client passes in the instruction data instead of a
+    /// `find_program_address` search, so the derivation costs one
+    /// `create_program_address` for every maker. A bump that derives no
+    /// program address fails.
+    ///
+    /// The SDK passes the canonical bump. A non-canonical bump that still
+    /// derives a program address names another PDA of the same maker: make
+    /// then outputs the order UTXO to that PDA, which only that bump spends,
+    /// and take and cancel sign for a PDA that owns none of the maker's
+    /// canonical orders. Either way it moves only the maker's own UTXO; it
+    /// signs for no other maker's PDA.
+    pub fn new(maker: &[u8; 32], bump: u8) -> Result<Self, SwapError> {
+        let [seed, maker_seed] = crate::order_authority_seeds(maker);
+        let address = Address::create_program_address(&[seed, maker_seed, &[bump]], &crate::ID)
+            .map_err(|_| SwapError::InvalidOrderAuthorityBump)?;
+        Ok(Self {
             address,
             maker: *maker,
             bump,
-        }
+        })
     }
 
     /// `Poseidon(solana_owner_identity(pda), Poseidon(0))`.

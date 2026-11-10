@@ -12,7 +12,7 @@ use wincode::{SchemaRead, SchemaWrite};
 use crate::{
     error::SwapError,
     instructions::{
-        shared::{check_within_window, u64_right_align, OrderAuthority},
+        shared::{check_within_window, u64_right_align, IxData, OrderAuthority},
         verifier::{verify_groth16, CompressedGroth16Proof},
     },
 };
@@ -24,6 +24,19 @@ pub struct TakeProof {
     pub proof_c: [u8; 32],
 }
 
+/// The take arguments the program reads ahead of the transact bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
+pub struct TakeArgs {
+    pub proof: TakeProof,
+    /// See [`TakeIxData::maker`].
+    pub maker: [u8; 32],
+    /// See [`TakeIxData::authority_bump`].
+    pub authority_bump: u8,
+}
+
+/// The take instruction data as a client writes it: [`TakeArgs`], then the
+/// transact data, which the program reads in place ([`IxData`]) and forwards
+/// to SPP unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct TakeIxData {
     pub proof: TakeProof,
@@ -31,6 +44,9 @@ pub struct TakeIxData {
     /// this maker's order-authority PDA; SPP rejects the spend unless that PDA
     /// owns the order input.
     pub maker: [u8; 32],
+    /// The bump of the maker's order-authority PDA. The SDK passes the
+    /// canonical bump; see [`OrderAuthority::new`].
+    pub authority_bump: u8,
     pub transact: TransactIxData,
 }
 
@@ -72,11 +88,18 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
     let mut iter = AccountIterator::new(accounts);
     iter.next_signer_mut("payer")?;
 
-    let TakeIxData {
-        proof,
-        maker,
+    // The program reads the transact data in place and forwards the client's
+    // bytes to SPP unchanged.
+    let IxData {
+        args: TakeArgs {
+            proof,
+            maker,
+            authority_bump,
+        },
         transact,
-    } = wincode::deserialize_exact(data).map_err(|_| SwapError::InvalidInstructionData)?;
+        transact_bytes,
+    } = IxData::<TakeArgs>::parse(data)?;
+    let order_authority = OrderAuthority::new(&Address::new_from_array(maker), authority_bump)?;
 
     let clock = Clock::get()?;
     check_within_window(clock.unix_timestamp, transact.expiry_unix_ts)?;
@@ -84,7 +107,7 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
     verify_take_proof(
         &proof,
         TakePublicInput {
-            private_tx_hash: &transact.private_tx_hash,
+            private_tx_hash: transact.private_tx_hash,
             expiry: transact.expiry_unix_ts,
             first_nullifier: &transact
                 .inputs
@@ -94,10 +117,6 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
         },
     )?;
 
-    let transact_bytes = transact
-        .serialize()
-        .map_err(|_| SwapError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
-    OrderAuthority::find(&Address::new_from_array(maker))
-        .cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    order_authority.cpi_spp_transact_signed(spp_accounts, transact_bytes)
 }

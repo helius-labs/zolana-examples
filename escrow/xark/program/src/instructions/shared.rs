@@ -48,8 +48,8 @@ pub fn check_after_window(now: i64, unlock_unix_ts: u64) -> ProgramResult {
 }
 
 /// `creator`'s escrow-authority PDA (seeds
-/// [`crate::escrow_authority_seeds`]), which owns `creator`'s escrow UTXOs
-/// under the zero nullifier secret and signs their spends.
+/// [`crate::escrow_authority_seeds`] and the bump), which owns `creator`'s
+/// escrow UTXOs under the zero nullifier secret and signs their spends.
 pub struct EscrowAuthority {
     address: Address,
     creator: Address,
@@ -57,14 +57,27 @@ pub struct EscrowAuthority {
 }
 
 impl EscrowAuthority {
-    pub fn find(creator: &Address) -> Self {
-        let (address, bump) =
-            Address::find_program_address(&crate::escrow_authority_seeds(creator), &crate::ID);
-        Self {
+    /// The PDA `[ESCROW_AUTHORITY_PDA_SEED, creator, [bump]]`, with the bump
+    /// the client passes in the instruction data instead of a
+    /// `find_program_address` search, so the derivation costs one
+    /// `create_program_address` for every creator. A bump that derives no
+    /// program address fails.
+    ///
+    /// The SDK passes the canonical bump. A non-canonical bump that still
+    /// derives a program address names another PDA of the same creator:
+    /// escrow then outputs the escrow UTXO to that PDA, which only that bump
+    /// spends, and withdraw signs for a PDA that owns none of the creator's
+    /// canonical escrows. Either way it moves only the creator's own UTXO; it
+    /// signs for no other creator's PDA.
+    pub fn new(creator: &Address, bump: u8) -> Result<Self, TimelockEscrowError> {
+        let [seed, creator_seed] = crate::escrow_authority_seeds(creator);
+        let address = Address::create_program_address(&[seed, creator_seed, &[bump]], &crate::ID)
+            .map_err(|_| TimelockEscrowError::InvalidEscrowAuthorityBump)?;
+        Ok(Self {
             address,
             creator: *creator,
             bump,
-        }
+        })
     }
 
     /// `Poseidon(solana_owner_identity(pda), Poseidon(0))`: the owner hash of

@@ -4,7 +4,9 @@ use spr_account_checks::error::AccountError;
 use spr_test_utils::mollusk::expect_err_exact;
 use timelock_escrow_program::{error::TimelockEscrowError, tag};
 
-use crate::common::{edit_creator, edit_payer, escrow_fixture, setup_mollusk};
+use crate::common::{
+    edit_creator, edit_payer, escrow_data_with_bump, escrow_fixture, invalid_bump, setup_mollusk,
+};
 
 #[test]
 fn truncated_instruction_data_is_rejected_exactly() {
@@ -83,6 +85,15 @@ fn creator_paying_its_own_escrow_reaches_the_proof_check() {
 #[test]
 fn invalid_escrow_proof_is_rejected_exactly() {
     expect_escrow_err(|_| {}, TimelockEscrowError::ProofVerificationFailed);
+}
+
+/// A bump that derives no program address fails before the proof check.
+#[test]
+fn invalid_authority_bump_is_rejected_exactly() {
+    expect_escrow_err(
+        |instruction| instruction.data = escrow_data_with_bump(invalid_bump()),
+        TimelockEscrowError::InvalidEscrowAuthorityBump,
+    );
 }
 
 /// Runs the escrow fixture after `edit` and expects exactly `error`.

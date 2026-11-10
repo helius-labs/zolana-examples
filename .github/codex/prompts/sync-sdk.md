@@ -18,7 +18,7 @@ The pin files are already updated to the payload sha. Do not change them unless 
 
 - package name `@heliuslabs/zolana`
 - rust-client Cargo.toml comment that says pins are git revs
-- 4 rust git deps, same crates and features; only `rev` may change
+- the rust `spr-*` git deps, same crates and features; only `rev` may change
 - swap/** and escrow/**
 - READMEs, comments, formatting, CI YAML
 

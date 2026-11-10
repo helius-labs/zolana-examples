@@ -1,6 +1,6 @@
 # Zolana examples: TypeScript client
 
-TypeScript client examples for `@heliuslabs/zolana`.
+TypeScript client examples for `@heliuslabs/spr`.
 
 - **[register_private_wallet](examples/register_private_wallet.ts)** - Register a private wallet
 - **[deposit_transfer_withdraw](examples/deposit_transfer_withdraw.ts)** - Deposit, private transfer, and withdraw
@@ -11,7 +11,10 @@ TypeScript client examples for `@heliuslabs/zolana`.
 ## Setup
 
 Install Node.js 24+ and pnpm. The SDK is pinned to the published npm release
-`@heliuslabs/zolana@^0.8.0-alpha`.
+`@heliuslabs/spr@0.9.0-alpha`. It predates two changes in the deployed 1.0
+programs that these examples do not use: the per-tree fee defaults of
+`createTreeInstructions` (#533) and the user-registry `update_keys` data of
+`buildKeyUpdateTransaction` (#591).
 
 ```bash
 pnpm install
@@ -33,10 +36,19 @@ For mainnet, set `ZOLANA_ENDPOINT=https://mainnet.helius-rpc.com/?api-key=YOUR_K
 
 **Localnet**:
 
-To run on localnet, install:
+To run on localnet, download the `zolana` CLI from the
+[`cli-v0.10.0`](https://github.com/helius-labs/zolana/releases/tag/cli-v0.10.0)
+release and check it against the release's `SHA256SUMS`. `zolana dev start`
+then downloads and verifies the pinned prover, Photon, surfpool and the
+deployed shielded-pool and user-registry programs.
 
 ```bash
-cargo install --git https://github.com/helius-labs/zolana --rev 6bb4f7008294695ebe614f08affb215d4321a538 spr-cli
+platform=darwin-arm64 # or linux-x64
+asset=zolana-$platform-cli-v0.10.0
+base=https://github.com/helius-labs/zolana/releases/download/cli-v0.10.0
+curl -sSfLO "$base/$asset" -sSfLO "$base/SHA256SUMS"
+grep " $asset\$" SHA256SUMS | shasum -a 256 -c - # sha256sum -c - on Linux
+mkdir -p ~/.local/bin && install -m 755 "$asset" ~/.local/bin/zolana
 zolana dev start
 ```
 

@@ -1,5 +1,13 @@
 # Examples for private Solana rings
 
+> [!WARNING]
+> **Not for production.** These are examples, not audited code. The escrow and
+> swap programs prove with insecure test keys generated from a fixed public
+> seed, so anyone can forge their proofs, and their program IDs are example IDs.
+> Do not deploy the programs or use them with real funds. The client examples
+> show how to call the SDK; review and adapt them before using them in an
+> application.
+
 ### [Rust client](rust-client/README.md)
 
 |  |  |
@@ -32,39 +40,42 @@
 CI runs all five Rust and TypeScript client examples and the swap (take and
 cancel) and timelock escrow flows of both implementations: the gnark ones in
 the `examples` workflow and the Xark ones in `swap-xark` and `escrow-xark`.
-The Xark implementations pin their own Zolana revision and Xark version; see
-[`swap/README.md`](swap/README.md) and [`escrow/README.md`](escrow/README.md).
-For the gnark implementations and the clients, Rust dependencies, the
-CLI, prover, and the shielded-pool program use the Rust SDK `0.8.0` release.
-Published Rust SDK crates come from crates.io. The unpublished `spr-test-utils`
-helpers and source builds use release commit
-`6aba4a70177caaef602baf972ce4958691ec1e65` (`rust-sdk-v0.8.0`), which preserves the
-TypeScript `0.8.0-alpha` implementation. Git dependency patches make the test
-helpers use the same published SDK crates as the examples.
-The CLI, prover and shielded-pool program are built from source because
-the published binaries predate the SDK's attestation protocol, key catalog and
-finalized ceremony keys. The user registry and Photon use the `v0.6.0-alpha` release binaries;
-their sizes and SHA-256 hashes are pinned in
-[`test-utils/release-artifacts.json`](test-utils/release-artifacts.json).
+All Rust examples and the Rust client pin the Zolana crates as Git
+dependencies at one commit, `ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08`: the
+[`cli-v0.10.0`](https://github.com/helius-labs/zolana/releases/tag/cli-v0.10.0)
+release commit `357dd92` plus the fetchable gnark-sdk Go module, with the same
+SDK. No crates.io release matches the deployed 1.0 programs yet. The Xark
+implementations also pin Xark 0.3.0; see [`swap/README.md`](swap/README.md)
+and [`escrow/README.md`](escrow/README.md).
+The TypeScript client uses the npm release `@heliuslabs/spr@0.9.0-alpha`,
+which has the paged indexer API of the `cli-v0.10.0` Photon. It predates the
+deployed 1.0 programs' per-tree fee defaults and user-registry `update_keys`
+data, which the examples do not use; a matching npm release replaces it.
+The gnark circuits fetch the Go modules
+`github.com/helius-labs/zolana/sdk-libs/gnark-sdk` and `prover/server` at the
+same commit. The integration tests run against the `cli-v0.10.0` release: its
+CLI is checked against the release's `SHA256SUMS`, and `zolana dev artifacts`
+downloads and verifies the prover, Photon, surfpool and the deployed
+`shielded-pool-v1.0.0` program it pins. The deployed `user-registry-v1.0.0` program is pinned by
+SHA-256 in [`test-utils/run-release-tests.sh`](test-utils/run-release-tests.sh).
+Nothing clones or builds Zolana.
 The shielded-pool program ID is
 `ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW`; accounts and notes from
 earlier program IDs are not migrated.
 
-To run the same tests locally, install Rust, Go 1.27.3+, and the Solana CLI
-with `cargo build-sbf`, and check out Zolana commit
-`6aba4a70177caaef602baf972ce4958691ec1e65` in a sibling
-directory named `zolana`. Install the TypeScript dependencies with
-`cd typescript-client && pnpm install --frozen-lockfile`, then run from the
-repository root:
+To run the same tests locally on darwin-arm64 or linux-x64, install Rust,
+Go 1.27.3+, and the Solana CLI with `cargo build-sbf`. Install the TypeScript
+dependencies with `cd typescript-client && pnpm install --frozen-lockfile`,
+then run from the repository root:
 
 ```bash
 bash test-utils/run-release-tests.sh
 ```
 
-The runner downloads and verifies release binaries, builds the CLI, prover,
-shielded-pool program and two example programs, generates the examples'
-insecure test proving keys, and starts isolated
-validators and indexers. The protocol prover downloads its pinned keys as needed.
+The runner installs the release CLI and artifacts, builds the two example
+programs, generates the examples' insecure test proving keys, and starts
+isolated validators and indexers. The protocol prover downloads its pinned keys
+as needed. `ZOLANA_PORT_OFFSET` and `ZOLANA_PROVER_URL` move its ports.
 Logs are retained under `target/release-tests/processes/logs` and uploaded by CI.
 
 The separate `devnet` workflow runs both client suites on Solana devnet, using

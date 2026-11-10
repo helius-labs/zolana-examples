@@ -1,15 +1,19 @@
-// NOTE(pr164-port): the account-shape and marker checks in these processors run
-// AFTER proof verification (PR164's verify-first order), so they cannot be
+// NOTE(pr164-port): the account-shape checks in these processors run AFTER
+// proof verification (PR164's verify-first order), so they cannot be
 // exercised with the placeholder proofs these mollusk fixtures use. The
-// affected cases (marker-message checks, order-authority/SPP-program account
-// checks, privilege-downgrade sweeps) were removed.
+// affected cases (order-authority/SPP-program account checks,
+// privilege-downgrade sweeps) were removed. The authority bump and the marker
+// are checked before the proof, so they are tested here.
 
 use solana_program_error::ProgramError;
 use spr_account_checks::AccountError;
 use spr_test_utils::mollusk::expect_err_exact;
-use swap_program::error::SwapError;
+use swap_program::{error::SwapError, instructions::make::MarkerData};
 
-use crate::common::{fixture, setup_mollusk, wrapper_data, Wrapper};
+use crate::common::{
+    fixture, marker, setup_mollusk, transact, valid_marker_data, wrapper_data, wrapper_data_with,
+    Wrapper, MAKER, ORDER_UTXO_HASH, PAYER,
+};
 
 #[test]
 fn truncated_instruction_data_is_rejected_exactly() {
@@ -83,4 +87,56 @@ fn unsigned_payer_is_rejected_exactly() {
         &accounts,
         ProgramError::Custom(u32::from(AccountError::InvalidSigner)),
     );
+}
+
+/// The marker must be exactly the order output's hash and the maker signer.
+#[test]
+fn wrong_marker_data_is_rejected_exactly() {
+    let wrong_hash = MarkerData {
+        order_utxo_hash: [4; 32],
+        maker_pubkey: PAYER,
+    };
+    let wrong_maker = MarkerData {
+        order_utxo_hash: ORDER_UTXO_HASH,
+        maker_pubkey: MAKER,
+    };
+    let mut trailing = valid_marker_data();
+    trailing.push(0);
+    let cases = [
+        borsh::to_vec(&wrong_hash).expect("serialize marker"),
+        borsh::to_vec(&wrong_maker).expect("serialize marker"),
+        Vec::new(),
+        trailing,
+    ];
+    let (mollusk, _) = setup_mollusk();
+    for data in cases {
+        let (mut instruction, accounts) = fixture(Wrapper::Make);
+        instruction.data = wrapper_data_with(Wrapper::Make, transact(vec![marker(data)]));
+        expect_err_exact(
+            &mollusk,
+            &instruction,
+            &accounts,
+            ProgramError::Custom(SwapError::InvalidMarkerData as u32),
+        );
+    }
+}
+
+/// The make transaction carries exactly one message, the marker.
+#[test]
+fn marker_message_count_is_checked_exactly() {
+    let cases = [
+        Vec::new(),
+        vec![marker(valid_marker_data()), marker(valid_marker_data())],
+    ];
+    let (mollusk, _) = setup_mollusk();
+    for messages in cases {
+        let (mut instruction, accounts) = fixture(Wrapper::Make);
+        instruction.data = wrapper_data_with(Wrapper::Make, transact(messages));
+        expect_err_exact(
+            &mollusk,
+            &instruction,
+            &accounts,
+            ProgramError::Custom(SwapError::InvalidMarkerMessage as u32),
+        );
+    }
 }

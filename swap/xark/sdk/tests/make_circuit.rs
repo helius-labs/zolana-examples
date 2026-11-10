@@ -6,7 +6,7 @@ use swap_program::{
 };
 use swap_sdk::{
     instructions::make::{CHANGE_SLOT, ORDER_SLOT},
-    order_authority,
+    order_authority, order_authority_bump,
     proof::CircuitId,
 };
 
@@ -166,7 +166,9 @@ fn make_rejects_invalid_orders() {
 /// The public inputs the program computes for the maker signer `signer` and
 /// the order's `viewing_pubkey` from the make arguments.
 fn program_public_inputs(signer: &ShieldedAddress, viewing_pubkey: &[u8; 33]) -> PublicInputs {
-    OrderAuthority::find(&signer.solana_address().unwrap().to_bytes())
+    let maker = signer.solana_address().unwrap();
+    OrderAuthority::new(&maker.to_bytes(), order_authority_bump(&maker))
+        .unwrap()
         .make_public_inputs(viewing_pubkey)
         .unwrap()
 }

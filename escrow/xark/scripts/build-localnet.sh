@@ -1,25 +1,15 @@
 #!/usr/bin/env bash
-# Build the localnet prover, Photon and SPP program from the pinned SDK
-# checkout. The SDK revision is newer than its last protocol release: the
-# release prover lacks the proving-key artifacts the SDK checks, and the
-# release program rejects proofs from the SDK revision's prover keys.
+# Download the localnet prover, Photon, surfpool and shielded-pool program that
+# the Zolana release CLI pins, and print the variables to export on stdout.
 set -euo pipefail
-# Build output goes to stderr; stdout carries only the variables to export.
-exec 3>&1 1>&2
 
 escrow=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-zolana="$escrow/.tools/zolana"
-sbf_tools_version="${SBF_TOOLS_VERSION:-v1.54}"
+zolana_cli="${ZOLANA_CLI_BIN:-$escrow/.tools/bin/zolana}"
+if [[ ! -x $zolana_cli ]]; then
+    echo "No zolana CLI at $zolana_cli; run scripts/setup-zk-tools.sh first" >&2
+    exit 1
+fi
 
-mkdir -p "$zolana/target/deploy"
-(cd "$zolana/prover/server" && sh build-release.sh ../../target/prover-server)
-cargo build --release --locked --manifest-path "$zolana/Cargo.toml" -p photon-indexer --bin photon
-cargo build-sbf --tools-version "$sbf_tools_version" --sbf-out-dir "$zolana/target/deploy" \
-    --manifest-path "$zolana/programs/shielded-pool/Cargo.toml" -- --locked --features bpf-entrypoint
-
-{
-    echo "PROVER_BIN=$zolana/target/prover-server"
-    echo "ZOLANA_PHOTON_BIN=$escrow/scripts/photon-localnet.sh"
-    echo "TIMELOCK_ESCROW_PHOTON_BIN=$zolana/target/release/photon"
-    echo "SHIELDED_POOL_PROGRAM_PATH=$zolana/target/deploy/shielded_pool_program.so"
-} >&3
+# Prints ZOLANA_CLI_BIN, SHIELDED_POOL_PROGRAM_PATH, PROVER_BIN,
+# ZOLANA_PHOTON_BIN and SURFPOOL_BIN; progress goes to stderr.
+"$zolana_cli" dev artifacts

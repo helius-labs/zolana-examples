@@ -12,7 +12,7 @@ use spr_interface::{
 use swap_program::{
     instructions::{
         cancel::{CancelIxData, CancelProof},
-        make::{MakeIxData, MakeProof},
+        make::{MakeIxData, MakeProof, MarkerData},
         take::{TakeIxData, TakeProof},
     },
     order_authority_seeds, tag,
@@ -22,9 +22,15 @@ use swap_program::{
 /// maker signer and the take's `maker` argument.
 pub const MAKER: [u8; 32] = [22; 32];
 
+/// The fee payer, and make's maker signer.
+pub const PAYER: [u8; 32] = [21; 32];
+
+/// The hash of the fixture transact's order output (output 1).
+pub const ORDER_UTXO_HASH: [u8; 32] = [6; 32];
+
 const SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/deploy");
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Wrapper {
     Make,
     Take,
@@ -47,6 +53,42 @@ impl Wrapper {
     fn has_maker(self) -> bool {
         matches!(self, Self::Cancel)
     }
+
+    /// The maker whose order-authority PDA the instruction signs for: make's
+    /// payer, take's `maker` argument, cancel's maker signer.
+    fn authority_maker(self) -> [u8; 32] {
+        match self {
+            Self::Make => PAYER,
+            Self::Take | Self::Cancel => MAKER,
+        }
+    }
+
+    fn authority_address(self, bump: &[u8; 1]) -> Option<Pubkey> {
+        let maker = self.authority_maker();
+        let [seed, maker_seed] = order_authority_seeds(&maker);
+        Pubkey::create_program_address(&[seed, maker_seed, bump], &swap_program_id()).ok()
+    }
+
+    /// The canonical bump of the order-authority PDA, which the SDK passes.
+    pub fn canonical_bump(self) -> u8 {
+        Pubkey::find_program_address(
+            &order_authority_seeds(&self.authority_maker()),
+            &swap_program_id(),
+        )
+        .1
+    }
+
+    /// The highest bump that derives no program address: an on-curve point.
+    pub fn invalid_bump(self) -> u8 {
+        (0..=u8::MAX)
+            .rev()
+            .find(|bump| self.authority_address(&[*bump]).is_none())
+            .expect("some bump derives an on-curve point")
+    }
+}
+
+fn swap_program_id() -> Pubkey {
+    Pubkey::new_from_array(*swap_program::ID.as_array())
 }
 
 pub fn setup_mollusk() -> (Mollusk, Pubkey) {
@@ -86,7 +128,7 @@ pub fn transact(messages: Vec<MessageData>) -> TransactIxData {
                 data: None,
             },
             TransactOutput {
-                utxo_hash: [6; 32],
+                utxo_hash: ORDER_UTXO_HASH,
                 owner_tag: OwnerTag::Inline([7; 32]),
                 data: Some(vec![8; 16]),
             },
@@ -99,26 +141,50 @@ pub fn transact(messages: Vec<MessageData>) -> TransactIxData {
     }
 }
 
-pub fn marker(data: Vec<u8>) -> MessageData {
+/// A marker message whose data is the [`MarkerData`] of `order_utxo_hash`
+/// and `maker_pubkey`.
+pub fn marker(order_utxo_hash: [u8; 32], maker_pubkey: [u8; 32]) -> MessageData {
     MessageData {
         view_tag: [9; 32],
-        data,
+        data: borsh::to_vec(&MarkerData {
+            order_utxo_hash,
+            maker_pubkey,
+        })
+        .expect("serialize marker"),
     }
 }
 
-pub fn wrapper_data(wrapper: Wrapper) -> Vec<u8> {
-    let transact = transact(if matches!(wrapper, Wrapper::Make) {
-        vec![marker(Vec::new())]
+/// The marker the program expects of the fixture make.
+pub fn valid_marker() -> MessageData {
+    marker(ORDER_UTXO_HASH, PAYER)
+}
+
+/// The fixture's transact data: a make carries the valid marker.
+pub fn fixture_transact(wrapper: Wrapper) -> TransactIxData {
+    transact(if matches!(wrapper, Wrapper::Make) {
+        vec![valid_marker()]
     } else {
         Vec::new()
-    });
-    wrapper_data_with(wrapper, transact)
+    })
+}
+
+pub fn wrapper_data(wrapper: Wrapper) -> Vec<u8> {
+    wrapper_data_with(wrapper, fixture_transact(wrapper))
 }
 
 /// Serialize a wrapper body around a caller-customized transact payload, so
 /// negatives can tamper with individual transact fields while staying
 /// wire-valid.
 pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> {
+    wrapper_data_with_bump(wrapper, transact, wrapper.canonical_bump())
+}
+
+/// [`wrapper_data_with`] with `authority_bump` in place of the canonical bump.
+pub fn wrapper_data_with_bump(
+    wrapper: Wrapper,
+    transact: TransactIxData,
+    authority_bump: u8,
+) -> Vec<u8> {
     let body = match wrapper {
         Wrapper::Make => wincode::serialize(&MakeIxData {
             proof: MakeProof {
@@ -127,6 +193,7 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
                 c: [12; 32],
             },
             viewing_pubkey: [13; 33],
+            authority_bump,
             transact,
         }),
         Wrapper::Take => wincode::serialize(&TakeIxData {
@@ -136,6 +203,7 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
                 c: [12; 32],
             },
             maker: MAKER,
+            authority_bump,
             transact,
         }),
         Wrapper::Cancel => wincode::serialize(&CancelIxData {
@@ -145,6 +213,7 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
                 c: [12; 32],
             },
             order_expiry: 0,
+            authority_bump,
             transact,
         }),
     }
@@ -155,11 +224,11 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
 }
 
 pub fn fixture(wrapper: Wrapper) -> (Instruction, Vec<(Pubkey, Account)>) {
-    let payer = Pubkey::new_from_array([21; 32]);
+    let payer = Pubkey::new_from_array(PAYER);
     let maker = Pubkey::new_from_array(MAKER);
     let tree = Pubkey::new_from_array([23; 32]);
     let spp_id = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
-    let swap_id = Pubkey::new_from_array(*swap_program::ID.as_array());
+    let swap_id = swap_program_id();
     let (order_authority, _) =
         Pubkey::find_program_address(&order_authority_seeds(&MAKER), &swap_id);
 

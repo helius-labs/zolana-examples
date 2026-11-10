@@ -1,4 +1,5 @@
 use anyhow::{ensure, Result};
+use spr_hasher::primitives::is_canonical_bn254_scalar_be;
 use spr_keypair::{ShieldedAddress, X25519Pubkey};
 use spr_program::{
     circuit::DataHash, ClientInputs, DataUtxo, EncryptionCodec, InputRecords, ProgramOwner,
@@ -22,13 +23,30 @@ pub struct OrderTerms {
     pub expiry: u64,
     /// The designated taker's owner identity ([`crate::shared::identity`] of
     /// its Solana address), or `None` for an order anyone holding the opening
-    /// may take.
+    /// may take. It must be a canonical field element
+    /// ([`check_taker_pk_fe`]); every builder refuses another.
     pub taker: Option<[u8; 32]>,
 }
 
+/// Checks `taker_pk_fe` is a canonical BN254 scalar field element, below the
+/// modulus. The circuit packs its 32 big-endian bytes into one field element,
+/// so a value at or above the modulus wraps to another taker than the one the
+/// bytes name, and the SDK and the circuit would disagree on who may take.
+/// Zero (an open order) and every `solana_owner_identity` are canonical.
+pub fn check_taker_pk_fe(taker_pk_fe: &[u8; 32]) -> Result<()> {
+    ensure!(
+        is_canonical_bn254_scalar_be(taker_pk_fe),
+        "taker_pk_fe is not a canonical field element"
+    );
+    Ok(())
+}
+
 impl OrderTerms {
-    /// The terms as the circuits take them.
+    /// The terms as the circuits take them. Fails if the taker is not a
+    /// canonical field element.
     pub fn circuit_terms(&self) -> Result<OrderTermsClient> {
+        let taker_pk_fe = self.taker.unwrap_or_default();
+        check_taker_pk_fe(&taker_pk_fe)?;
         Ok(OrderTermsClient {
             destination_mint: self.destination_mint,
             destination_amount: self.destination_amount,
@@ -37,7 +55,7 @@ impl OrderTerms {
                 .map_err(err)?
                 .owner(),
             expiry: self.expiry,
-            taker_pk_fe: self.taker.unwrap_or_default(),
+            taker_pk_fe,
         })
     }
 
@@ -53,12 +71,14 @@ impl OrderTerms {
     }
 
     /// The terms of a decoded order UTXO state whose maker is `maker`, with
-    /// the destination mint's asset id resolved in `registry`.
+    /// the destination mint's asset id resolved in `registry`. Fails if the
+    /// state's `taker_pk_fe` is not a canonical field element.
     pub fn from_state(
         state: &circuits::OrderTerms,
         maker: ShieldedAddress,
         registry: &AssetRegistry,
     ) -> Result<Self> {
+        check_taker_pk_fe(&state.taker_pk_fe)?;
         let terms = Self {
             destination_mint: resolve_mint(registry, &state.destination_mint)?,
             destination_amount: state.destination_amount,
@@ -257,6 +277,70 @@ mod tests {
             .with_utxo_data(other.utxo_data().unwrap().0, [0; 32])
             .data;
         assert!(DataUtxo::<circuits::OrderTerms>::try_from(input).is_err());
+    }
+
+    /// The BN254 scalar modulus, big-endian.
+    const MODULUS: [u8; 32] = spr_hasher::primitives::BN254_SCALAR_MODULUS_BE;
+
+    /// The modulus plus one: its last byte is 0x01, so adding one does not
+    /// carry.
+    fn modulus_plus_one() -> [u8; 32] {
+        let mut bytes = MODULUS;
+        if let Some(last) = bytes.last_mut() {
+            *last += 1;
+        }
+        bytes
+    }
+
+    /// A real taker identity, `solana_owner_identity` of a Solana address.
+    fn real_identity() -> [u8; 32] {
+        crate::shared::identity(&Address::new_from_array([13u8; 32])).unwrap()
+    }
+
+    #[test]
+    fn taker_pk_fe_must_be_canonical() {
+        for taker_pk_fe in [MODULUS, modulus_plus_one(), [0xff; 32]] {
+            assert!(check_taker_pk_fe(&taker_pk_fe).is_err());
+            // Building the terms refuses it.
+            assert!(terms(Some(taker_pk_fe)).circuit_terms().is_err());
+            assert!(terms(Some(taker_pk_fe)).state().is_err());
+        }
+        for taker_pk_fe in [[0; 32], real_identity()] {
+            assert!(check_taker_pk_fe(&taker_pk_fe).is_ok());
+            assert_eq!(
+                terms(Some(taker_pk_fe))
+                    .circuit_terms()
+                    .unwrap()
+                    .taker_pk_fe,
+                taker_pk_fe
+            );
+        }
+    }
+
+    /// A decoded state whose `taker_pk_fe` is the modulus, or the modulus
+    /// plus one, is refused; zero and a real identity decode.
+    #[test]
+    fn decoded_state_with_non_canonical_taker_is_refused() {
+        let terms = terms(None);
+        let state = terms.state().unwrap();
+        for taker_pk_fe in [MODULUS, modulus_plus_one()] {
+            let state = circuits::OrderTerms {
+                taker_pk_fe,
+                ..state
+            };
+            assert!(OrderTerms::from_state(&state, terms.maker, &registry()).is_err());
+        }
+        for taker in [None, Some(real_identity())] {
+            let terms = OrderTerms {
+                taker,
+                ..terms.clone()
+            };
+            let state = terms.state().unwrap();
+            assert_eq!(
+                OrderTerms::from_state(&state, terms.maker, &registry()).unwrap(),
+                terms
+            );
+        }
     }
 
     #[test]

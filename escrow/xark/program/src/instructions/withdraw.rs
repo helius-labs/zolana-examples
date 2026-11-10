@@ -23,6 +23,8 @@ pub struct WithdrawArgs {
     pub proof: WithdrawProof,
     /// See [`WithdrawIxData::unlock_timestamp`].
     pub unlock_timestamp: u64,
+    /// See [`WithdrawIxData::authority_bump`].
+    pub authority_bump: u8,
 }
 
 /// The withdraw instruction data as a client writes it: [`WithdrawArgs`],
@@ -38,11 +40,14 @@ pub struct WithdrawIxData {
     /// past. The escrow's committed terms hash includes `unlock`; the proof
     /// recomputes it.
     pub unlock_timestamp: u64,
+    /// The bump of the creator's escrow-authority PDA; see
+    /// [`EscrowAuthority::new`].
+    pub authority_bump: u8,
     pub transact: TransactIxData,
 }
 
 /// 1. Check the caller and the creator sign.
-/// 2. Decode the instruction.
+/// 2. Decode the instruction and derive the creator's escrow-authority PDA.
 /// 3. Check the escrow has unlocked.
 /// 4. Verify the withdraw proof.
 /// 5. Invoke SPP with the creator's escrow-authority PDA signer.
@@ -59,15 +64,18 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
     let owner_pk_field =
         solana_owner_identity(creator.as_array()).map_err(TimelockEscrowError::from)?;
 
-    // 2. Decode the instruction.
+    // 2. Decode the instruction and derive the escrow-authority PDA.
     let IxData {
-        args: WithdrawArgs {
-            proof,
-            unlock_timestamp,
-        },
+        args:
+            WithdrawArgs {
+                proof,
+                unlock_timestamp,
+                authority_bump,
+            },
         transact,
         transact_bytes,
     } = IxData::<WithdrawArgs>::parse(data)?;
+    let escrow_authority = EscrowAuthority::new(&creator, authority_bump)?;
 
     // 3. Check the escrow has unlocked.
     let clock = Clock::get()?;
@@ -84,7 +92,7 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
     // 5. Invoke SPP with the creator's escrow-authority PDA signer, which
     // the escrow UTXO's owner requires: only the creator's escrows spend.
     let spp_accounts = iter.remaining()?;
-    EscrowAuthority::find(&creator).cpi_spp_transact_signed(spp_accounts, transact_bytes)
+    escrow_authority.cpi_spp_transact_signed(spp_accounts, transact_bytes)
 }
 
 /// Verifies the withdraw proof against the escrow's `unlock` timestamp, the

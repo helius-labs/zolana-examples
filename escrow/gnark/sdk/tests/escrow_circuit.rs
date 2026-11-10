@@ -13,12 +13,13 @@ use timelock_escrow_program::{
     error::TimelockEscrowError,
     instructions::{
         escrow::{verify_escrow_proof, EscrowProof, EscrowPublicInput},
+        shared::EscrowAuthority,
         verifier::{verify_groth16, CompressedGroth16Proof},
     },
     verifying_keys::escrow::VERIFYINGKEY,
 };
 use timelock_escrow_prover::{CircuitId, EscrowProofInputs, EscrowTermsProofInput, PROVER};
-use timelock_escrow_sdk::{escrow_authority_pda, state::DataHash};
+use timelock_escrow_sdk::{escrow_authority_pda, escrow_authority_pda_and_bump, state::DataHash};
 
 mod shared;
 use shared::escrow_utxo_owner_hash;
@@ -460,5 +461,37 @@ fn escrow_rejects_source_of_another_asset() {
     assert!(
         inputs.prove().is_err(),
         "proving must fail when the source asset differs from the escrow asset"
+    );
+}
+
+/// The escrow instruction derives the creator's PDA from the
+/// `authority_bump` it carries. A non-canonical bump that still derives a PDA
+/// names another PDA of the creator, whose owner hash is a different public
+/// input, so a proof for the canonical PDA's escrow utxo does not verify.
+#[test]
+fn escrow_proof_rejects_a_non_canonical_authority_bump() {
+    ensure_keys();
+
+    let inputs = sample_inputs();
+    let proof: EscrowProof = inputs.prove().expect("prove failed").into();
+    let (_, canonical_bump) = escrow_authority_pda_and_bump(&creator());
+    let verify_with_bump = |bump: u8| {
+        let escrow_authority = EscrowAuthority::new(&creator(), bump)?;
+        verify_escrow_proof(
+            &proof,
+            &inputs.private_tx_hash,
+            &escrow_authority.owner_hash()?,
+            &owner_pk_field(&creator()),
+        )
+    };
+
+    assert_eq!(verify_with_bump(canonical_bump), Ok(()));
+    let non_canonical_bump = (0..canonical_bump)
+        .rev()
+        .find(|bump| EscrowAuthority::new(&creator(), *bump).is_ok())
+        .expect("a valid non-canonical bump below the canonical one");
+    assert_eq!(
+        verify_with_bump(non_canonical_bump),
+        Err(TimelockEscrowError::ProofVerificationFailed.into())
     );
 }

@@ -9,12 +9,16 @@
 //! (see the README):
 //!
 //! ```sh
-//! CARGO_TARGET_DIR=target cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 \
+//! CARGO_TARGET_DIR="$PWD/target" cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 \
 //!     --sbf-out-dir target/bench -- --features bpf-entrypoint,profile-program
-//! SHIELDED_POOL_PROGRAM_PATH=/path/to/shielded_pool_program.so \
-//! ZOLANA_CLI_BIN=/path/to/zolana \
-//!     cargo test --release --manifest-path test/Cargo.toml --test bench_cu -- --ignored --nocapture
+//! # ZOLANA_CLI_BIN, SHIELDED_POOL_PROGRAM_PATH, PROVER_BIN, ...
+//! export $(zolana dev artifacts)
+//! cargo test --release --manifest-path test/Cargo.toml --test bench_cu -- --ignored --nocapture
 //! ```
+//!
+//! `zolana` is the `cli-v0.10.0` release CLI (see
+//! `test-utils/run-release-tests.sh`); `dev artifacts` downloads the deployed
+//! shielded-pool v1.0.0 program and the prover it pins.
 //!
 //! - The shielded pool program is read from `SHIELDED_POOL_PROGRAM_PATH`,
 //!   else from `target/bench/shielded_pool_program.so`.
@@ -99,8 +103,8 @@ const TRANSACT_CU_LIMIT: u32 = 1_400_000;
 const V1_TX_LIMIT: usize = 4096;
 /// The mollusk slot, past every fixture leaf's append slot.
 const BENCH_SLOT: u64 = 1_000;
-/// Keypair seeds of the escrow and withdraw creators. Fixed keys keep the
-/// escrow-authority PDA bump search, and with it the CU, the same every run.
+/// Keypair seeds of the escrow and withdraw creators. Fixed keys make every
+/// run replay the same transactions.
 const ESCROW_CREATOR_SEED: u8 = 1;
 const WITHDRAW_CREATOR_SEED: u8 = 2;
 /// Blinding of the dummy input, whose nullifier the SPP records too.
@@ -156,8 +160,7 @@ fn build_tree_fixture(tree: &Pubkey, leaves: &[[u8; 32]]) -> (Account, [u8; 32],
             tree.to_bytes(),
             BENCH_TREE_ID,
             nullifier_tree_params(),
-            default_tree_fees(nullifier_tree_params().input_queue_zkp_batch_size)
-                .expect("default tree fees"),
+            default_tree_fees(),
         )
         .expect("init tree account");
         for (slot, leaf) in (1_u64..).zip(leaves) {

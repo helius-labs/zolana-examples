@@ -25,6 +25,16 @@ pub fn escrow_authority_pda(creator: &Address) -> Address {
     *escrow_authority(creator).pda()
 }
 
+/// The canonical bump of `creator`'s escrow-authority PDA, which the
+/// instruction builders pass as `authority_bump`.
+pub fn escrow_authority_bump(creator: &Address) -> u8 {
+    Address::find_program_address(
+        &escrow_authority_seeds(creator),
+        &timelock_escrow_program::ID,
+    )
+    .1
+}
+
 /// `creator`'s escrow-authority PDA as a UTXO owner, under the zero nullifier
 /// key. Its confidential view tag finds `creator`'s escrow UTXOs.
 pub fn escrow_authority(creator: &Address) -> ProgramOwner {

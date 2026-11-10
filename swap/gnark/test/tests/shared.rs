@@ -70,9 +70,7 @@ pub fn setup(test: u16) -> Result<TestEnv> {
             ),
             (
                 user_registry_program_id(),
-                release_localnet::paths()
-                    .working_dir
-                    .join("spr_user_registry.so"),
+                release_localnet::user_registry_program(),
             ),
         ],
         &release_localnet::paths(),

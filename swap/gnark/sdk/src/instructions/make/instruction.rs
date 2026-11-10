@@ -6,7 +6,7 @@ use spr_keypair::ShieldedAddress;
 use spr_program::instruction::Transact;
 use spr_transaction::TransactionError;
 
-use crate::{err, order_authority_pda, tag, MakeIxData, MakeProof, MarkerData};
+use crate::{err, order_authority_pda_and_bump, tag, MakeIxData, MakeProof, MarkerData};
 
 pub struct OrderMarker {
     pub order_utxo_hash: [u8; 32],
@@ -33,6 +33,9 @@ pub struct Make {
     pub payer: Pubkey,
     pub tree: Pubkey,
     pub make_proof: MakeProof,
+    /// Must carry exactly one message, the [`OrderMarker`] of the order
+    /// output and `payer`, which the SPP proof covers. The program checks it
+    /// and forwards the transact data unchanged.
     pub spp_proof: TransactIxData,
 }
 
@@ -42,12 +45,9 @@ impl Make {
             payer,
             tree,
             make_proof,
-            mut spp_proof,
+            spp_proof,
         } = self;
 
-        if let Some(marker) = spp_proof.messages.first_mut() {
-            marker.data = Vec::new();
-        }
         // The owner signers: the maker for the source it spends, then the
         // maker's order authority for the data-bearing order output, which
         // the program signs for during the CPI.
@@ -59,11 +59,13 @@ impl Make {
             interface_transfer_accounts: Vec::new(),
             data: spp_proof,
         };
+        let (order_authority, authority_bump) = order_authority_pda_and_bump(&payer);
         let mut accounts = vec![AccountMeta::new(payer, true)];
-        accounts.extend(transact.cpi_accounts(&[order_authority_pda(&payer)]));
+        accounts.extend(transact.cpi_accounts(&[order_authority]));
 
         let serialized_ix = wincode::serialize(&MakeIxData {
             proof: make_proof,
+            authority_bump,
             transact: transact.data,
         })
         .map_err(err)?;

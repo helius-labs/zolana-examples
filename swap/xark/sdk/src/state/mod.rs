@@ -1,3 +1,3 @@
 pub mod order;
 
-pub use order::{OrderTerms, OrderUtxo};
+pub use order::{check_taker_pk_fe, OrderTerms, OrderUtxo};

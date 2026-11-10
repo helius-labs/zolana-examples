@@ -18,11 +18,16 @@ pub use timelock_escrow_program::{
 /// (`PublicKey::from_ed25519(pda)`, nullifier secret 0), holds no data, and is
 /// never created. A creator finds its escrow UTXOs by deriving it.
 pub fn escrow_authority_pda(creator: &Pubkey) -> Pubkey {
-    let (pda, _bump) = Pubkey::find_program_address(
+    escrow_authority_pda_and_bump(creator).0
+}
+
+/// The creator's escrow-authority PDA and its canonical bump, which the
+/// escrow and withdraw instructions carry as `authority_bump`.
+pub fn escrow_authority_pda_and_bump(creator: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
         &timelock_escrow_program::escrow_authority_seeds(creator),
         &timelock_escrow_program::ID,
-    );
-    pda
+    )
 }
 
 pub(crate) fn err(e: impl core::fmt::Debug) -> anyhow::Error {

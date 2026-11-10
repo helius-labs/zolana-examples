@@ -7,7 +7,7 @@ use spr_interface::{
 use spr_program::instruction::nullifier_pda_accounts;
 use swap_program::instructions::take::TakeIxData;
 
-use crate::{err, order_authority_pda, tag, TakeProof};
+use crate::{err, order_authority_bump, order_authority_pda, tag, TakeProof};
 
 #[derive(Clone)]
 pub struct Take {
@@ -37,6 +37,7 @@ impl Take {
         let serialized_ix = wincode::serialize(&TakeIxData {
             proof: take_proof,
             maker: maker.to_bytes(),
+            authority_bump: order_authority_bump(&maker),
             transact: spp_proof,
         })
         .map_err(err)?;

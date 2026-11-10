@@ -19,10 +19,12 @@ pub enum SwapError {
     MissingOrderAuthority = 8013,
     #[error("make transact must carry exactly one marker message")]
     InvalidMarkerMessage = 8014,
-    #[error("make marker message data must be empty")]
-    MarkerDataNotEmpty = 8015,
+    #[error("make marker message data must be the order UTXO hash and the maker")]
+    InvalidMarkerData = 8015,
     #[error("hashing failed")]
     HashingFailed = 8016,
+    #[error("authority bump does not derive the maker's order-authority PDA")]
+    InvalidOrderAuthorityBump = 8017,
 }
 
 impl From<SwapError> for ProgramError {

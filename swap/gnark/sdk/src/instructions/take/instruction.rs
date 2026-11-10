@@ -7,7 +7,7 @@ use spr_interface::{
 use spr_program::instruction::nullifier_pda_accounts;
 use swap_program::instructions::take::TakeIxData;
 
-use crate::{err, order_authority_pda, tag, TakeProof};
+use crate::{err, order_authority_pda_and_bump, tag, TakeProof};
 
 pub struct Take {
     pub payer: Pubkey,
@@ -33,9 +33,11 @@ impl Take {
             &tree,
             spp_proof.inputs.iter().map(|input| &input.nullifier_hash),
         );
+        let (order_authority, authority_bump) = order_authority_pda_and_bump(&maker);
         let serialized_ix = wincode::serialize(&TakeIxData {
             proof: take_proof,
             maker: maker.to_bytes(),
+            authority_bump,
             transact: spp_proof,
         })
         .map_err(err)?;
@@ -51,10 +53,7 @@ impl Take {
         accounts.extend(nullifier_pdas);
         // The order is the first input; the taker's own note is the second.
         // The taker also pays, but must appear explicitly in the owner slots.
-        accounts.push(AccountMeta::new_readonly(
-            order_authority_pda(&maker),
-            false,
-        ));
+        accounts.push(AccountMeta::new_readonly(order_authority, false));
         accounts.push(AccountMeta::new_readonly(payer, true));
         let mut instruction_data = vec![tag::TAKE];
         instruction_data.extend_from_slice(&serialized_ix);

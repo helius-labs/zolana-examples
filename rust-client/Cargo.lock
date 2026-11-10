@@ -5824,8 +5824,7 @@ dependencies = [
 [[package]]
 name = "spr-api"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd8c684d4c4329e506fb8007da2b73034f39e8ec4c15ab1510f395c362c94576"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "http",
  "reqwest",
@@ -5840,8 +5839,7 @@ dependencies = [
 [[package]]
 name = "spr-client"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ef61bd0025c1993ceb11f1f02dfa0ba492fe197513ddd269b1b91d3a7043a32"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5857,6 +5855,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "solana-account 4.3.1",
  "solana-address 2.6.1",
  "solana-bn254",
@@ -5893,8 +5892,7 @@ dependencies = [
 [[package]]
 name = "spr-event"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a49f13ec73451958d38d3c2b910172d5c89de0a2498363ed6150cc8f5011c3b4"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "borsh",
  "wincode",
@@ -5903,8 +5901,7 @@ dependencies = [
 [[package]]
 name = "spr-event-parser"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41ca10055e6c8eedb602a5d2f60e58b55a04ca6ffd40b54369126d4f6b8ab551"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "borsh",
  "solana-pubkey 4.2.0",
@@ -5915,8 +5912,7 @@ dependencies = [
 [[package]]
 name = "spr-hasher"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "586ea6741991290671566cd7125ed73a27028b0a81b6a5db63522fdee3d89e6d"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
@@ -5931,8 +5927,7 @@ dependencies = [
 [[package]]
 name = "spr-indexer-api"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83d371f0157b692572ea102d969c2148ff0037d6c6aaaf73f7d3587ef9c6081f"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "base64 0.22.1",
  "bs58",
@@ -5945,8 +5940,7 @@ dependencies = [
 [[package]]
 name = "spr-instruction"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8560f50221a9d67151ee5aaff778f448c68ba22994aca2584706387cc449c923"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "solana-address 2.6.1",
  "solana-instruction",
@@ -5960,8 +5954,7 @@ dependencies = [
 [[package]]
 name = "spr-interface"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a643ff8ed64522daf0a13cc696d1ab7c3d9f515a08cd46bf833fcf42146566e"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "arrayvec",
  "borsh",
@@ -5980,8 +5973,7 @@ dependencies = [
 [[package]]
 name = "spr-keypair"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86c9968cfeb4b7965317f72896d4889d5045d8d5d63428e47d8f71f06fc41f45"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "aes",
  "bs58",
@@ -6004,8 +5996,7 @@ dependencies = [
 [[package]]
 name = "spr-merkle-tree"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d247b9b19fe83691720fc9e109a8159af08e6e9e743cc9fca0e07eb73b63b3c"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "num-bigint 0.4.8",
  "num-traits",
@@ -6016,22 +6007,19 @@ dependencies = [
 [[package]]
 name = "spr-program"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6398ec23d68249aa5905fd6ecf21233e1d46179acfb9e457ba0d110373ec972f"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "solana-address 2.6.1",
  "spr-hasher",
  "spr-instruction",
  "spr-interface",
- "spr-zk-dsl",
  "wincode",
 ]
 
 [[package]]
 name = "spr-program-test"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce192e7a9e1dafcbb62e65ce8756a9df00d7d1899916edbbb8d677fc0d2813f6"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "base64 0.22.1",
  "litesvm",
@@ -6066,8 +6054,7 @@ dependencies = [
 [[package]]
 name = "spr-protocol-instructions"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f82976d10ccfa2f588ca783591c58ff91befbd2f9884d800f923eb0a3e043bb9"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "solana-address 2.6.1",
  "solana-instruction",
@@ -6079,8 +6066,7 @@ dependencies = [
 [[package]]
 name = "spr-prover-tee"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43179f7912f280afffa3cbbc244dc54fac07347247cec092e5561831d67bc552"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "aes-gcm",
  "ciborium",
@@ -6104,8 +6090,7 @@ dependencies = [
 [[package]]
 name = "spr-smart-account-client"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "687395a5804176be420e52e158c3eaba1ca525601b4a34e81edb02eb1078e2d9"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "borsh",
  "solana-instruction",
@@ -6115,7 +6100,7 @@ dependencies = [
 [[package]]
 name = "spr-test-utils"
 version = "0.1.0"
-source = "git+https://github.com/helius-labs/zolana?rev=6aba4a70177caaef602baf972ce4958691ec1e65#6aba4a70177caaef602baf972ce4958691ec1e65"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6157,8 +6142,7 @@ dependencies = [
 [[package]]
 name = "spr-transaction"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdda1e29b9491cb9abb6b782bac256d77a10deef31d83afd21538f9a91cab040"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "borsh",
  "num-bigint 0.4.8",
@@ -6176,8 +6160,7 @@ dependencies = [
 [[package]]
 name = "spr-tree"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89024228453f1bf1c1bd70e5a6bdbe371f430adddd6620ed0cdd6602493ebfad"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "borsh",
  "bytemuck",
@@ -6192,23 +6175,11 @@ dependencies = [
 [[package]]
 name = "spr-user-registry-interface"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "183646f05c59b782d0233fbde88865be0ba08e9fc54daae0dc368ad5deb7c314"
+source = "git+https://github.com/helius-labs/zolana?rev=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08#ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08"
 dependencies = [
  "borsh",
  "solana-instruction",
  "solana-pubkey 4.2.0",
-]
-
-[[package]]
-name = "spr-zk-dsl"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c2b7827bc52b59c75dffdbe689b67821dac31817128017858d9e3f816167599"
-dependencies = [
- "getrandom 0.2.17",
- "solana-address 2.6.1",
- "wincode",
 ]
 
 [[package]]

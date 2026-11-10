@@ -12,12 +12,13 @@ use spr_transaction::{instructions::transact::PrivateTxHash, utxo::Blinding};
 use swap_program::{
     instructions::{
         make::{verify_make_proof, MakeProof, MakePublicInput},
+        shared::OrderAuthority,
         verifier::{verify_groth16, CompressedGroth16Proof},
     },
     verifying_keys::make::VERIFYINGKEY,
 };
 use swap_prover::{CircuitId, MakeProofInputs, OrderTermsProofInput, PROVER};
-use swap_sdk::{order_authority_pda, state::DataHash};
+use swap_sdk::{order_authority_pda, order_authority_pda_and_bump, state::DataHash};
 
 fn build_dir() -> std::path::PathBuf {
     PROVER.keys_dir(CircuitId::Make)
@@ -522,5 +523,46 @@ fn make_rejects_source_with_data_or_other_asset() {
     assert!(
         other_asset.prove().is_err(),
         "proving must fail when the source holds another asset"
+    );
+}
+
+/// The make instruction derives the maker's PDA from the `authority_bump` it
+/// carries. A non-canonical bump that still derives a PDA names another PDA
+/// of the maker, whose owner hash is a different public input, so a proof for
+/// an order owned by the canonical PDA does not verify.
+#[test]
+fn make_proof_rejects_a_non_canonical_authority_bump() {
+    ensure_keys();
+
+    let inputs = sample_inputs();
+    let proof: MakeProof = inputs.prove().expect("prove failed").into();
+    let (_, canonical_bump) = order_authority_pda_and_bump(&MAKER);
+    let owner_hash_for = |bump: u8| {
+        OrderAuthority::new(&MAKER, bump)
+            .and_then(|authority| authority.owner_hash())
+            .expect("valid bump")
+    };
+
+    assert_eq!(owner_hash_for(canonical_bump), order_owner_hash(&MAKER));
+    verify_as_program(
+        &proof,
+        &inputs.private_tx_hash,
+        &owner_hash_for(canonical_bump),
+        &MAKER,
+    )
+    .expect("the canonical bump verifies");
+    let non_canonical_bump = (0..canonical_bump)
+        .rev()
+        .find(|bump| OrderAuthority::new(&MAKER, *bump).is_ok())
+        .expect("a valid non-canonical bump below the canonical one");
+    assert!(
+        verify_as_program(
+            &proof,
+            &inputs.private_tx_hash,
+            &owner_hash_for(non_canonical_bump),
+            &MAKER
+        )
+        .is_err(),
+        "a non-canonical bump's PDA owner hash must reject the proof"
     );
 }

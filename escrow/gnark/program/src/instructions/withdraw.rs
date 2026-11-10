@@ -13,7 +13,7 @@ use wincode::{SchemaRead, SchemaWrite};
 use crate::{
     error::TimelockEscrowError,
     instructions::{
-        shared::{check_after_window, u64_right_align, EscrowAuthority},
+        shared::{check_after_window, u64_right_align, EscrowAuthority, IxData},
         verifier::{verify_groth16, CompressedGroth16Proof},
     },
 };
@@ -25,6 +25,19 @@ pub struct WithdrawProof {
     pub proof_c: [u8; 32],
 }
 
+/// The withdraw arguments the program reads ahead of the transact bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
+pub struct WithdrawArgs {
+    pub proof: WithdrawProof,
+    /// See [`WithdrawIxData::unlock_timestamp`].
+    pub unlock_timestamp: u64,
+    /// See [`WithdrawIxData::authority_bump`].
+    pub authority_bump: u8,
+}
+
+/// The withdraw instruction data as a client writes it: [`WithdrawArgs`],
+/// then the transact data, which the program reads in place ([`IxData`]) and
+/// forwards to SPP unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct WithdrawIxData {
     pub proof: WithdrawProof,
@@ -35,6 +48,9 @@ pub struct WithdrawIxData {
     /// past. The escrow's committed terms hash includes `unlock`; the proof
     /// recomputes it.
     pub unlock_timestamp: u64,
+    /// The bump of the creator's escrow-authority PDA. The SDK passes the
+    /// canonical bump; see [`EscrowAuthority::new`].
+    pub authority_bump: u8,
     pub transact: TransactIxData,
 }
 
@@ -70,14 +86,20 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
     let creator = *iter.next_signer("creator")?.address();
     let owner_pk_field =
         solana_owner_identity(creator.as_array()).map_err(TimelockEscrowError::from)?;
-    let escrow_authority = EscrowAuthority::find(&creator);
 
-    let WithdrawIxData {
-        proof,
-        unlock_timestamp,
+    // The program reads the transact data in place and forwards the client's
+    // bytes to SPP unchanged.
+    let IxData {
+        args:
+            WithdrawArgs {
+                proof,
+                unlock_timestamp,
+                authority_bump,
+            },
         transact,
-    } = wincode::deserialize_exact(data)
-        .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
+        transact_bytes,
+    } = IxData::<WithdrawArgs>::parse(data)?;
+    let escrow_authority = EscrowAuthority::new(&creator, authority_bump)?;
 
     let clock = Clock::get()?;
     check_after_window(clock.unix_timestamp, unlock_timestamp)?;
@@ -86,14 +108,11 @@ pub fn process_withdraw_ix(accounts: &mut [AccountView], data: &[u8]) -> Program
         &proof,
         unlock_timestamp,
         &owner_pk_field,
-        &transact.private_tx_hash,
+        transact.private_tx_hash,
     )?;
 
-    let transact_bytes = transact
-        .serialize()
-        .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
     let spp_accounts = iter.remaining()?;
-    escrow_authority.cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    escrow_authority.cpi_spp_transact_signed(spp_accounts, transact_bytes)
 }
 
 /// Verifies the withdraw proof against the escrow's `unlock` timestamp, the

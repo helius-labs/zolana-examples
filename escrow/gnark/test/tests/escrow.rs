@@ -8,6 +8,8 @@ use anyhow::{anyhow, Result};
 use shared::{
     send, setup, TestEnv, LOCK_AMOUNT, SHIELD_AMOUNT, SPP_RELAYER_DEADLINE, UNLOCK_TIMESTAMP,
 };
+use solana_instruction::Instruction;
+use solana_pubkey::Pubkey;
 use spr_client::Rpc;
 use spr_keypair::random_blinding;
 use spr_test_utils::wallet::sync_wallet;
@@ -16,6 +18,7 @@ use spr_transaction::{
     Data, Utxo, SOL_ASSET_ID, SOL_MINT,
 };
 use timelock_escrow_sdk::{
+    escrow_authority_pda_and_bump,
     instructions::{
         escrow::{Escrow, EscrowProofInputParams, SppTxHashes},
         withdraw::{Withdraw, WithdrawProofInputParams},
@@ -274,6 +277,18 @@ fn escrow_then_withdraw() -> Result<()> {
     }
     .instruction()?;
 
+    // A valid non-canonical bump makes the program sign for another PDA of
+    // the creator, which does not own the escrow UTXO, so SPP's transact
+    // proof (bound to the owner signers) fails to verify.
+    let non_canonical_ix =
+        with_non_canonical_authority_bump(withdraw_ix.clone(), &creator_address.solana_address()?)?;
+    let non_canonical_error = send(localnet.client.rpc(), &creator.keypair, non_canonical_ix)
+        .expect_err("a withdraw with a non-canonical authority bump must be rejected");
+    assert!(
+        format!("{non_canonical_error:?}").contains("TransactProofVerificationFailed"),
+        "SPP must reject the non-canonical PDA as the escrow owner: {non_canonical_error:?}"
+    );
+
     let signature = send(localnet.client.rpc(), &creator.keypair, withdraw_ix)?;
     localnet
         .client
@@ -327,4 +342,43 @@ fn escrow_then_withdraw() -> Result<()> {
         .get_merkle_proofs(localnet.tree, vec![source_output_hash], None)
         .map_err(|e| anyhow!("withdraw output index: {e}"))?;
     Ok(())
+}
+
+/// Offset of `authority_bump` in withdraw instruction data: the tag, the
+/// proof (128 bytes) and the unlock timestamp.
+const WITHDRAW_AUTHORITY_BUMP_OFFSET: usize = 1 + 128 + 8;
+
+/// `withdraw_ix` with the largest valid bump below the canonical one, and its
+/// PDA in place of the canonical escrow-authority account.
+fn with_non_canonical_authority_bump(
+    mut withdraw_ix: Instruction,
+    creator: &Pubkey,
+) -> Result<Instruction> {
+    let (canonical, canonical_bump) = escrow_authority_pda_and_bump(creator);
+    let [seed, creator_seed] = timelock_escrow_program::escrow_authority_seeds(creator);
+    let (non_canonical, bump) = (0..canonical_bump)
+        .rev()
+        .find_map(|bump| {
+            Pubkey::create_program_address(
+                &[seed, creator_seed, &[bump]],
+                &timelock_escrow_program::ID,
+            )
+            .ok()
+            .map(|pda| (pda, bump))
+        })
+        .ok_or_else(|| anyhow!("no valid non-canonical bump"))?;
+    let authority_bump = withdraw_ix
+        .data
+        .get_mut(WITHDRAW_AUTHORITY_BUMP_OFFSET)
+        .ok_or_else(|| anyhow!("withdraw data has no authority bump"))?;
+    assert_eq!(*authority_bump, canonical_bump);
+    *authority_bump = bump;
+    for meta in withdraw_ix
+        .accounts
+        .iter_mut()
+        .filter(|meta| meta.pubkey == canonical)
+    {
+        meta.pubkey = non_canonical;
+    }
+    Ok(withdraw_ix)
 }

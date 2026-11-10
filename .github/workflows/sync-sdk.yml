@@ -105,12 +105,13 @@ jobs:
               rf'\1rev = "{sha}"',
               cargo,
           )
-          if n != 4:
-              raise SystemExit(f"expected 4 rust-client zolana rev fields, replaced {n}")
+          if n == 0:
+              raise SystemExit("rust-client/Cargo.toml has no zolana rev fields")
           open("rust-client/Cargo.toml", "w").write(cargo)
           PY
           (cd typescript-client && pnpm install)
-          (cd rust-client && cargo update -p zolana-client -p zolana-interface -p zolana-keypair -p zolana-transaction)
+          # All spr-* crates share one git source; updating one moves them all.
+          (cd rust-client && cargo update -p spr-client)
 
       - name: Check examples
         id: check

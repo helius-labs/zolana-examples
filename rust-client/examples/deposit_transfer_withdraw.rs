@@ -3,7 +3,7 @@ use rust_client_example::{cli_keypair, landed_slot, setup};
 use solana_address::Address;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
-use spr_client::{IndexerRpcConfig, Rpc, SolanaRpc, ZolanaClient};
+use spr_client::{IndexerRpcConfig, Rpc, SolanaRpc, SprClient};
 use spr_keypair::ShieldedKeypair;
 use spr_program::instruction::{
     AssetDeposit, Deposit, DepositAsset, Transact, TransactInterfaceTransferAccounts,
@@ -23,7 +23,7 @@ fn main() -> Result<()> {
     run(&client, context.tree, &cli_keypair()?)
 }
 
-pub fn run(client: &ZolanaClient<SolanaRpc>, tree: Address, payer: &Keypair) -> Result<()> {
+pub fn run(client: &SprClient<SolanaRpc>, tree: Address, payer: &Keypair) -> Result<()> {
     // Mints that are registered with Solana Rings for privacy.
     let assets = AssetRegistry::default();
     // SPL: assets.insert(spl.asset_id, spl.mint)?;

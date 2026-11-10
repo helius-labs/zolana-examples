@@ -27,25 +27,27 @@ const BENCH_COMMAND: &str =
     "cargo test --release --manifest-path test/Cargo.toml --test bench_cu -- --ignored --nocapture";
 
 const GNARK_IMPLEMENTATION: &str = "gnark (Go circuits, spr-gnark-ffi-prover)";
-const GNARK_SDK: &str = "Zolana Rust SDK 0.8.0";
-const GNARK_SHIELDED_POOL_PROGRAM: &str = "Zolana Rust SDK 0.8.0";
+const GNARK_SDK: &str = "Zolana ca4cf4f (cli-v0.10.0)";
+const GNARK_SHIELDED_POOL_PROGRAM: &str = "shielded-pool v1.0.0 (cli-v0.10.0)";
 const GNARK_PROVER_NOTE: &str = "The gnark prover keeps the compiled constraint system and the \
 parsed proving key in memory for the life of the process, so each proof redoes no setup: its \
 per-proof setup is 0 and its in-memory proving time is its warm proving time.";
 
 const XARK_IMPLEMENTATION: &str = "Xark (Rust circuits, spr program SDK)";
-const XARK_SDK: &str = "Zolana 98948daa1, Xark 0.3.0";
-const XARK_SHIELDED_POOL_PROGRAM: &str = "Zolana 98948daa1";
+const XARK_SDK: &str = "Zolana ca4cf4f (cli-v0.10.0), Xark 0.3.0";
+const XARK_SHIELDED_POOL_PROGRAM: &str = "shielded-pool v1.0.0 (cli-v0.10.0)";
 const XARK_PROVER_NOTE: &str = "Xark 0.3.0's `Circuit::prove`, which the SDK proves with, keeps \
-nothing in memory between proofs: every call re-reads `circuit.xbc`, rebuilds the reduced R1CS \
-rows with `rows_for_key` (the SDK's checked circuit copy has no `r1cs.stream` cache), opens \
-`pk.bin` with `SerializedPk::open` and decodes the key's points from the file while proving, and \
-solves the witness. Per-proof setup times the first three steps; the key decode runs inside the \
-proof, so only the in-memory proving time removes it. In-memory proving time proves through \
-public Xark 0.3.0 APIs with the rows built and the whole proving key decoded once before timing \
-(per proof: `resolve_input_ids`, `xark_ir::solver::solve_and_check`, then `xark_groth16::prove` \
-on an `InMemoryPk`), and checks each proof against the key's verifying key; it is the Xark time \
-that compares with gnark's warm proving time.";
+nothing in memory between proofs: every call solves the witness, re-reads `circuit.xbc`, opens \
+`pk.bin` with `SerializedPk::open`, rebuilds the reduced R1CS rows with `rows_for_key` (the \
+SDK's checked circuit copy has no `r1cs.stream` cache), and decodes the key's points from the \
+file while proving. Per-proof setup times the read, the open and the rows; the key decode runs \
+inside the proof, so only the in-memory proving time removes it. In-memory proving time proves \
+through public Xark 0.3.0 APIs with the rows built and the whole proving key decoded once before \
+timing (per proof: `resolve_input_ids`, `xark_ir::solver::solve_and_check`, then \
+`xark_groth16::prove_with_randomness` on an `InMemoryPk` with fixed `r` and `s`, the function \
+`prove` calls after drawing them, so these timing proofs are not zero-knowledge), and checks the \
+last proof against the key's verifying key; it is the Xark time that compares with gnark's warm \
+proving time.";
 
 /// A blinding of all zeros but its last byte `last`, and the one every spent
 /// input of a bench uses. A spent input's nullifier seeds the SPP nullifier

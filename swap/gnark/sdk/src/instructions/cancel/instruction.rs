@@ -7,7 +7,7 @@ use spr_interface::{
 use spr_program::instruction::nullifier_pda_accounts;
 use swap_program::instructions::cancel::CancelIxData;
 
-use crate::{err, order_authority_pda, tag, CancelProof};
+use crate::{err, order_authority_pda_and_bump, tag, CancelProof};
 
 pub struct Cancel {
     /// The maker's ed25519 pubkey, a dedicated readonly signer the swap program
@@ -35,9 +35,11 @@ impl Cancel {
             &tree,
             spp_proof.inputs.iter().map(|input| &input.nullifier_hash),
         );
+        let (order_authority, authority_bump) = order_authority_pda_and_bump(&maker);
         let serialized_ix = wincode::serialize(&CancelIxData {
             proof: cancel_proof,
             order_expiry,
+            authority_bump,
             transact: spp_proof,
         })
         .map_err(err)?;
@@ -54,10 +56,7 @@ impl Cancel {
             AccountMeta::new(tree, false),
         ];
         accounts.extend(nullifier_pdas);
-        accounts.push(AccountMeta::new_readonly(
-            order_authority_pda(&maker),
-            false,
-        ));
+        accounts.push(AccountMeta::new_readonly(order_authority, false));
         let mut instruction_data = vec![tag::CANCEL];
         instruction_data.extend_from_slice(&serialized_ix);
         Ok(Instruction {

@@ -102,10 +102,37 @@ fn spp() -> TransactIxData {
     }
 }
 
-pub fn escrow_data() -> Vec<u8> {
+/// The canonical bump of the creator's escrow-authority PDA, which the SDK
+/// passes.
+pub fn canonical_bump() -> u8 {
+    Address::find_program_address(
+        &escrow_authority_seeds(&CREATOR),
+        &timelock_escrow_program::ID,
+    )
+    .1
+}
+
+/// The highest bump of the creator's escrow authority that derives no
+/// program address: an on-curve point.
+pub fn invalid_bump() -> u8 {
+    let [seed, creator] = escrow_authority_seeds(&CREATOR);
+    (0..=u8::MAX)
+        .rev()
+        .find(|bump| {
+            Address::create_program_address(
+                &[seed, creator, &[*bump]],
+                &timelock_escrow_program::ID,
+            )
+            .is_err()
+        })
+        .expect("some bump derives an on-curve point")
+}
+
+pub fn escrow_data_with_bump(authority_bump: u8) -> Vec<u8> {
     let body = wincode::serialize(&EscrowIxData {
         proof: PROOF,
         viewing_pubkey: [2; 33],
+        authority_bump,
         transact: spp(),
     })
     .expect("serialize escrow");
@@ -115,9 +142,14 @@ pub fn escrow_data() -> Vec<u8> {
 }
 
 pub fn withdraw_data(unlock_timestamp: u64) -> Vec<u8> {
+    withdraw_data_with_bump(unlock_timestamp, canonical_bump())
+}
+
+pub fn withdraw_data_with_bump(unlock_timestamp: u64, authority_bump: u8) -> Vec<u8> {
     let body = wincode::serialize(&WithdrawIxData {
         proof: WithdrawProof { ..PROOF },
         unlock_timestamp,
+        authority_bump,
         transact: spp(),
     })
     .expect("serialize withdraw");
@@ -157,7 +189,7 @@ pub fn escrow_fixture() -> (Instruction, Vec<(Address, Account)>) {
     fixture(
         vec![AccountMeta::new_readonly(CREATOR, true)],
         vec![AccountMeta::new_readonly(CREATOR, true)],
-        escrow_data(),
+        escrow_data_with_bump(canonical_bump()),
     )
 }
 

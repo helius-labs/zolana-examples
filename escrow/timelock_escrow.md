@@ -1,5 +1,9 @@
 # Timelock Escrow Program
 
+> [!WARNING]
+> Example design, not audited. The implementations in this directory use
+> insecure test keys and must not be deployed or used with real funds.
+
 The timelock escrow program lets a creator lock funds as a shielded UTXO in the Solana Privacy
 Program (SPP) with a chosen unlock timestamp, and reclaim them itself once that timestamp has
 passed. The same creator that locks the funds is the only party that can withdraw them.
@@ -134,9 +138,19 @@ UTXO only when the timelock escrow program produces that PDA's signature via `in
 program also signs at `escrow`, for the data-bearing escrow output, but there the proof pins the
 only input to the creator signer's own UTXO, so it spends a PDA-owned UTXO only through `withdraw`
 (after unlock, creator-signed, to `owner_hash`). The program derives
-the PDA from the `creator` signer via `find_program_address`, checks it is present among the
-forwarded SPP accounts, and flips it to a signer inside the SPP CPI with seeds
-`[b"escrow_authority", creator, bump]`; the PDA is a bare address and signs only inside the CPI.
+the PDA from the `creator` signer and the instruction's `authority_bump`, checks it is present
+among the forwarded SPP accounts, and flips it to a signer inside the SPP CPI with seeds
+`[b"escrow_authority", creator, authority_bump]`; the PDA is a bare address and signs only inside
+the CPI.
+
+The PDA's bump travels in the instruction data as `authority_bump: u8`. The program derives the
+PDA with one `create_program_address([b"escrow_authority", creator, [authority_bump]],
+program_id)` and fails with `InvalidEscrowAuthorityBump` (9006) when that is not a program
+address. Clients pass the canonical bump from `find_program_address`, so the program's cost does
+not depend on how many bumps the search tries. A non-canonical bump that still derives a program
+address names another PDA of the same creator: an escrow with it puts the escrow UTXO under that
+PDA, and a withdraw with it spends only UTXOs that PDA owns. It does not reach another creator's
+UTXOs.
 
 `owner_hash` is the committed destination for both the change output at `escrow` and the refund at
 `withdraw`: the creator recovers both from the escrow UTXO blinding it already holds.
@@ -208,7 +222,10 @@ struct EscrowIxData {
     /// PDA's owner hash forms the escrow-owner public input. It controls who can decrypt the
     /// escrow UTXO, not who can spend it.
     viewing_pubkey: [u8; 33],
-    /// SPP transact (1-in/2-out): creator source UTXO -> change + escrow UTXO.
+    /// The bump of the creator's escrow-authority PDA; see [Escrow Terms](#escrow-terms).
+    authority_bump: u8,
+    /// SPP transact (1-in/2-out): creator source UTXO -> change + escrow UTXO, forwarded to SPP
+    /// unchanged.
     transact: TransactIxData,
 }
 ```
@@ -251,6 +268,8 @@ struct WithdrawIxData {
     /// The committed escrow unlock timestamp, checked against the Clock (now > unlock) and a
     /// proof public input.
     unlock_timestamp: u64,
+    /// The bump of the creator's escrow-authority PDA; see [Escrow Terms](#escrow-terms).
+    authority_bump: u8,
     /// SPP transact (1-in/1-out): escrow UTXO -> source UTXO to owner_hash.
     transact: TransactIxData,
 }

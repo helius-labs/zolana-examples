@@ -28,12 +28,12 @@ import {
 } from "@solana/kit";
 import {
   SigningKey,
-  createZolanaClient,
+  createSprClient,
   initializePoseidon,
   type Bytes32,
-  type ZolanaClientConfig,
-} from "@heliuslabs/zolana";
-import { SignedTeePolicy } from "@heliuslabs/zolana/client";
+  type SprClientConfig,
+} from "@heliuslabs/spr";
+import { SignedTeePolicy } from "@heliuslabs/spr/client";
 import { getCreateAccountInstruction } from "@solana-program/system";
 import {
   getInitializeAccount3Instruction,
@@ -43,10 +43,10 @@ import {
   getTokenSize,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
-export type Client = Awaited<ReturnType<typeof createZolanaClient>>;
+export type Client = Awaited<ReturnType<typeof createSprClient>>;
 
 export interface ExampleSetup {
-  readonly clientConfig: ZolanaClientConfig;
+  readonly clientConfig: SprClientConfig;
 }
 
 export interface ConfirmedTransaction {
@@ -92,7 +92,7 @@ export async function cliKeypair(): Promise<SigningKey> {
   }
 }
 
-function clientConfigFromEnv(): ZolanaClientConfig {
+function clientConfigFromEnv(): SprClientConfig {
   const endpoint = process.env["ZOLANA_ENDPOINT"]?.trim();
   const apiKey = process.env["API_KEY"]?.trim();
   const solanaRpcUrl =

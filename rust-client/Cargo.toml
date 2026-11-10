@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-# Use the published Zolana SDK; the unpublished test helpers are pinned to
-# its release source. Solana crates match the versions the SDK builds against.
+# The Zolana crates come from commit ca4cf4f: the cli-v0.10.0 release commit
+# (357dd92) plus the fetchable gnark-sdk Go module, with the same SDK. It
+# matches the deployed 1.0 programs; no crates.io release matches them yet.
+# Solana crates match the versions the SDK builds against.
 [dependencies]
 anyhow = "1.0"
 dotenvy = "0.15"
@@ -16,17 +18,17 @@ solana-signer = "3.0"
 solana-system-interface = { version = "3.2", features = ["bincode"] }
 shellexpand = "3"
 spl-token-interface = "3.0.0"
-spr-client = { version = "0.8.0", features = ["solana-rpc"] }
-spr-interface = { version = "0.8.0" }
-spr-keypair = { version = "0.8.0" }
-spr-program = { version = "0.8.0" }
-spr-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "6aba4a70177caaef602baf972ce4958691ec1e65" }
-spr-transaction = { version = "0.8.0" }
-spr-user-registry-interface = { version = "0.8.0", features = ["solana"] }
+spr-client = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08", features = ["solana-rpc"] }
+spr-interface = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-keypair = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-program = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-transaction = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-user-registry-interface = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08", features = ["solana"] }
 url = "2"
 
 [dev-dependencies]
-spr-program-test = { version = "0.8.0", features = ["localnet"] }
+spr-program-test = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08", features = ["localnet"] }
 
 [[example]]
 name = "register_private_wallet"
@@ -47,21 +49,3 @@ path = "examples/read_history.rs"
 [[example]]
 name = "deposit_with_interface_setup"
 path = "examples/deposit_with_interface_setup.rs"
-
-# spr-test-utils is unpublished. Use the released SDK for its dependencies too,
-# so test helpers and examples share the same Rust types.
-[patch."https://github.com/helius-labs/zolana"]
-spr-client = "0.8.0"
-spr-event = "0.8.0"
-spr-event-parser = "0.8.0"
-spr-hasher = "0.8.0"
-spr-interface = "0.8.0"
-spr-keypair = "0.8.0"
-spr-merkle-tree = "0.8.0"
-spr-program = "0.8.0"
-spr-program-test = "0.8.0"
-spr-protocol-instructions = "0.8.0"
-spr-smart-account-client = "0.8.0"
-spr-transaction = "0.8.0"
-spr-tree = "0.8.0"
-spr-user-registry-interface = "0.8.0"

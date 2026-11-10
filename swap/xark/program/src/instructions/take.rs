@@ -21,6 +21,8 @@ pub struct TakeArgs {
     pub proof: TakeProof,
     /// See [`TakeIxData::maker`].
     pub maker: [u8; 32],
+    /// See [`TakeIxData::authority_bump`].
+    pub authority_bump: u8,
 }
 
 /// The take instruction data as a client writes it: [`TakeArgs`], then the
@@ -33,11 +35,14 @@ pub struct TakeIxData {
     /// PDA the program signs for. A wrong maker signs for a PDA that does not
     /// own the order UTXO, and SPP rejects the spend.
     pub maker: [u8; 32],
+    /// The bump of `maker`'s order-authority PDA; see
+    /// [`OrderAuthority::new`].
+    pub authority_bump: u8,
     pub transact: TransactIxData,
 }
 
 /// 1. Check the fee payer.
-/// 2. Decode the instruction.
+/// 2. Decode the instruction and derive the maker's order-authority PDA.
 /// 3. Check `now <= expiry`, the expiry being the transact's `expiry_unix_ts`.
 /// 4. Verify the take proof against the expiry and the first nullifier.
 /// 5. Invoke SPP with the maker's order-authority PDA signer.
@@ -48,12 +53,17 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
     let mut iter = AccountIterator::new(accounts);
     iter.next_signer_mut("payer")?;
 
-    // 2. Decode the instruction.
+    // 2. Decode the instruction and derive the order-authority PDA.
     let IxData {
-        args: TakeArgs { proof, maker },
+        args: TakeArgs {
+            proof,
+            maker,
+            authority_bump,
+        },
         transact,
         transact_bytes,
     } = IxData::<TakeArgs>::parse(data)?;
+    let order_authority = OrderAuthority::new(&maker, authority_bump)?;
 
     // 3. Check `now <= expiry`.
     let clock = Clock::get()?;
@@ -74,7 +84,7 @@ pub fn process_take_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
 
     // 5. Invoke SPP with the maker's order-authority PDA signer.
     let spp_accounts = iter.remaining()?;
-    OrderAuthority::find(&maker).cpi_spp_transact_signed(spp_accounts, transact_bytes)
+    order_authority.cpi_spp_transact_signed(spp_accounts, transact_bytes)
 }
 
 /// Hashes the take proof's public inputs and verifies the proof.

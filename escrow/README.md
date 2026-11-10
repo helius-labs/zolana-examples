@@ -1,5 +1,12 @@
 # Timelock Escrow Program
 
+> [!WARNING]
+> **Not for production.** This example is not audited. Its circuits use
+> insecure test keys generated from a fixed public seed, so anyone can forge
+> its proofs, and the program builds only with the `insecure-test-setup`
+> feature. Do not deploy it or use it with real funds; a deployment needs its
+> own trusted setup, verifying keys, program ID and audit.
+
 A timelock escrow on the Solana Privacy Program (SPP): a creator locks a
 private balance as a shielded UTXO with an unlock timestamp, and withdraws it
 once that timestamp has passed.
@@ -42,10 +49,9 @@ Each bench profiles its program under Mollusk, so build the profiling program
 into `target/bench` first; a validator does not register the profiler
 syscall. Both read the shielded-pool program from
 `SHIELDED_POOL_PROGRAM_PATH` and use the prover at `ZOLANA_PROVER_URL`, or
-start one with `ZOLANA_CLI_BIN`. Each needs the shielded-pool program and
-prover of its own SDK: the xark ones from `xark/scripts/build-localnet.sh`,
-the gnark ones built from Zolana `6aba4a7` as in
-`test-utils/run-release-tests.sh`. From `escrow/xark/`, with the circuit
+start one with `ZOLANA_CLI_BIN`. Both use the `cli-v0.10.0` release
+artifacts: the xark bench from `xark/scripts/build-localnet.sh`, the gnark
+bench from `zolana dev artifacts` as in `test-utils/run-release-tests.sh`. From `escrow/xark/`, with the circuit
 artifacts compiled (see [Build](#build)):
 
 ```bash
@@ -78,14 +84,13 @@ compiles through Xark for proving. `zolana zk compile` generates the program's
 verifier of each circuit from its verifying key.
 
 The workspace uses Zolana
-[`98948daa1`](https://github.com/helius-labs/zolana/commit/98948daa1d4043515387041ab42e15961799058d)
-and Xark [0.3.0](https://crates.io/crates/xark/0.3.0) from crates.io, the
-Xark release that Zolana revision depends on. Cargo pins Zolana to a Git
-revision; it is newer than the published 0.8.0 crates the gnark
-implementation uses. The Zolana and Xark CLIs are built from that Zolana
-revision, whose `xark-cli` comes from the Xark fork at
-[`13c3f0c`](https://github.com/ananas-block/xark/commit/13c3f0c28eb202bc34f075ee5414a01c3cac51b8).
-The program ID is
+[`ca4cf4f`](https://github.com/helius-labs/zolana/commit/ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08),
+the [`cli-v0.10.0`](https://github.com/helius-labs/zolana/releases/tag/cli-v0.10.0)
+release commit plus the fetchable gnark-sdk Go module, with the same SDK, and
+Xark [0.3.0](https://crates.io/crates/xark/0.3.0) from crates.io, the Xark
+release that Zolana revision depends on. Cargo pins Zolana to that Git
+revision, as the gnark implementation does. The `zolana` CLI is the
+`cli-v0.10.0` release binary, which includes Xark. The program ID is
 `42uWG786CJAdtdZy5KEEtE7QCuSHjVFu5ZAq32Z41hDD`.
 
 What differs from the gnark implementation, within the spec:
@@ -131,15 +136,15 @@ What differs from the gnark implementation, within the spec:
 ### Build
 
 Use Rust 1.95.0 (pinned in `xark/rust-toolchain.toml`, which fixes the compiler
-that generates the checked bytecode), Agave with SBF platform tools v1.54, and
-Go for the localnet services. The setup script checks out the SDK under
-`xark/.tools/`, checks that this workspace pins the same Zolana revision and
-that the SDK's `xark-cli` comes from the pinned Xark fork revision, and builds
-the Zolana and Xark CLIs. Run from `escrow/xark/`:
+that generates the checked bytecode) and Agave with SBF platform tools v1.54.
+The setup script checks that this workspace pins Zolana `ca4cf4f`, downloads
+the `cli-v0.10.0` CLI for darwin-arm64 or linux-x64, checks it against the
+release's `SHA256SUMS` and installs it to `xark/.tools/bin/zolana`. It prints
+`ZOLANA_CLI_BIN`; `scripts/setup-zk-tools.sh --check-pins` only checks the
+pins. Run from `escrow/xark/`:
 
 ```bash
-scripts/setup-zk-tools.sh
-export ZOLANA_CLI_BIN="$PWD/.tools/zolana/target/release/zolana"
+eval "$(scripts/setup-zk-tools.sh | sed 's/^/export /')"
 "$ZOLANA_CLI_BIN" zk compile --test --skip-wasm --manifest-path program/Cargo.toml
 scripts/check-keys.sh
 cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 -- --locked --features bpf-entrypoint
@@ -171,14 +176,14 @@ The program tests run the SBF build under Mollusk, so build it first. The SDK
 tests prove both circuits with the checked artifacts and check that the
 compiled circuits refuse broken inputs.
 
-The localnet test starts surfpool, Photon and the SPP prover. The release
-binaries do not match this SDK revision, so build the prover, Photon and the
-shielded-pool program from the SDK checkout with `scripts/build-localnet.sh`,
-which prints the variables to export (`PROVER_BIN`, `ZOLANA_PHOTON_BIN`,
-`TIMELOCK_ESCROW_PHOTON_BIN`, `SHIELDED_POOL_PROGRAM_PATH`). Set `SURFPOOL_BIN`
-to `surfpool` from
-[v1.6.0-light](https://github.com/Lightprotocol/surfpool/releases/tag/v1.6.0-light).
-The prover downloads missing SPP keys to `ZOLANA_PROVER_KEYS_DIR`, or
+The localnet test starts surfpool, Photon and the SPP prover, and deploys the
+shielded-pool program. `scripts/build-localnet.sh` runs
+`"$ZOLANA_CLI_BIN" dev artifacts`, which downloads the versions the
+`cli-v0.10.0` release pins (the deployed `shielded-pool-v1.0.0` program and
+the release prover, Photon and surfpool), checks their checksums, caches them
+under `~/.config/zolana/cache` and prints the variables to export
+(`ZOLANA_CLI_BIN`, `SHIELDED_POOL_PROGRAM_PATH`, `PROVER_BIN`,
+`ZOLANA_PHOTON_BIN`, `SURFPOOL_BIN`). The prover downloads missing SPP keys to `ZOLANA_PROVER_KEYS_DIR`, or
 `~/.config/zolana/proving-keys` by default. `ZOLANA_PORT_OFFSET` and
 `ZOLANA_PROVER_URL` move the services off the default ports.
 

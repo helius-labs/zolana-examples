@@ -39,9 +39,9 @@ instructions, and circuits.
   Proof input structs are pure containers whose only logic is witness-map
   encoding and a `prove()` method. Circuits take UTXOs as `gnarksdk.Utxo` and
   build their hashes, the private tx hash and the blinding checks from
-  `zolana/gnarksdk` (`sdk-libs/gnark-sdk`); `circuits/go.mod` replaces it and
-  `github.com/helius-labs/zolana/prover/server` with their directories. Go tooling in `circuits/` needs the
-  bridge replace too.
+  `gnarksdk` (`github.com/helius-labs/zolana/sdk-libs/gnark-sdk`, imported
+  with that alias), which `circuits/go.mod` requires at the pinned Zolana
+  commit. Go tooling in `circuits/` needs the bridge replace too.
 - sdk: one directory per instruction with `instruction.rs` (builder struct
   with a consuming `instruction()` method, not free functions) and
   `proof.rs` (a params struct with `to_proof_inputs()` doing validation and

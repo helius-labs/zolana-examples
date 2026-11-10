@@ -3,7 +3,9 @@ use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use spr_interface::instruction::instruction_data::transact::TransactIxData;
 
-use crate::{shared::escrow_instruction, tag, WithdrawIxData, WithdrawProof};
+use crate::{
+    escrow_authority_bump, shared::escrow_instruction, tag, WithdrawIxData, WithdrawProof,
+};
 
 pub struct Withdraw {
     /// The creator's Solana pubkey, a dedicated readonly signer the timelock
@@ -31,6 +33,7 @@ impl Withdraw {
         let ix_data = WithdrawIxData {
             proof: withdraw_proof,
             unlock_timestamp,
+            authority_bump: escrow_authority_bump(&creator),
             transact: spp_proof,
         };
         // The creator is a dedicated readonly signer after the fee payer.

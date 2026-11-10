@@ -10,8 +10,9 @@ fn error_codes_are_stable() {
         (InvalidShieldedPoolProgram as u32, 8012),
         (MissingOrderAuthority as u32, 8013),
         (InvalidMarkerMessage as u32, 8014),
-        (MarkerDataNotEmpty as u32, 8015),
+        (InvalidMarkerData as u32, 8015),
         (HashingFailed as u32, 8016),
+        (InvalidOrderAuthorityBump as u32, 8017),
     ];
     for (got, want) in table {
         assert_eq!(got, want, "error code drifted");

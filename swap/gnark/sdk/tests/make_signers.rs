@@ -10,16 +10,23 @@ use spr_interface::{
     N_PUBLIC_SLOTS,
 };
 use spr_program::instruction::Transact;
-use swap_sdk::{instructions::make::Make, order_authority_pda, MakeProof};
+use swap_sdk::{
+    instructions::make::Make, order_authority_pda_and_bump, tag, MakeIxData, MakeProof, MarkerData,
+};
 
 /// SPP lists the owners of real inputs, then the owners of data-bearing
 /// outputs, as owner signers: the maker for the source it spends, then its
-/// order-authority PDA for the order output.
+/// order-authority PDA for the order output. The instruction data carries the
+/// canonical bump and the client's marker unchanged.
 #[test]
 fn make_forwards_the_maker_then_its_order_authority_as_owner_signers() {
     let maker = Address::new_unique();
     let tree = Address::new_unique();
-    let order_authority = order_authority_pda(&maker);
+    let (order_authority, authority_bump) = order_authority_pda_and_bump(&maker);
+    let marker = MarkerData {
+        order_utxo_hash: [4; 32],
+        maker_pubkey: maker.to_bytes(),
+    };
     let data = TransactIxData {
         expiry_unix_ts: u64::MAX,
         private_tx_hash: [0; 32],
@@ -45,7 +52,7 @@ fn make_forwards_the_maker_then_its_order_authority_as_owner_signers() {
             .to_vec(),
         messages: vec![MessageData {
             view_tag: [5; 32],
-            data: Vec::new(),
+            data: borsh::to_vec(&marker).expect("serialize marker"),
         }],
         tree_contexts: vec![TreeContext {
             utxo_tree_root_index: 0,
@@ -66,18 +73,29 @@ fn make_forwards_the_maker_then_its_order_authority_as_owner_signers() {
     for account in expected.iter_mut().filter(|a| a.pubkey == order_authority) {
         account.is_signer = false;
     }
+    let make_proof = MakeProof {
+        proof_a: [0; 32],
+        proof_b: [0; 64],
+        proof_c: [0; 32],
+    };
+    let mut expected_data = vec![tag::MAKE];
+    expected_data.extend(
+        wincode::serialize(&MakeIxData {
+            proof: make_proof,
+            authority_bump,
+            transact: data.clone(),
+        })
+        .expect("serialize make"),
+    );
     let instruction = Make {
         payer: maker,
         tree,
         spp_proof: data,
-        make_proof: MakeProof {
-            proof_a: [0; 32],
-            proof_b: [0; 64],
-            proof_c: [0; 32],
-        },
+        make_proof,
     }
     .instruction()
     .expect("make");
+    assert_eq!(instruction.data, expected_data);
     assert_eq!(
         instruction.accounts.first(),
         Some(&AccountMeta::new(maker, true))

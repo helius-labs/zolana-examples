@@ -12,17 +12,21 @@ use spr_interface::{
 use swap_program::{
     instructions::{
         cancel::{CancelIxData, CancelProof},
-        make::{MakeIxData, MakeProof},
+        make::{MakeIxData, MakeProof, MarkerData},
         take::{TakeIxData, TakeProof},
     },
     order_authority_seeds, tag,
 };
 
 pub const MAKER: [u8; 32] = [22; 32];
+/// The fee payer, which is also the maker of a make.
+pub const PAYER: [u8; 32] = [21; 32];
+/// The order output's hash in [`transact`].
+pub const ORDER_UTXO_HASH: [u8; 32] = [6; 32];
 
 const SBF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/deploy");
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Wrapper {
     Make,
     Take,
@@ -45,6 +49,43 @@ impl Wrapper {
     fn has_maker(self) -> bool {
         matches!(self, Self::Cancel)
     }
+
+    /// The maker whose order-authority PDA the instruction derives: the payer
+    /// of a make, else [`MAKER`].
+    pub fn maker(self) -> [u8; 32] {
+        match self {
+            Self::Make => PAYER,
+            Self::Take | Self::Cancel => MAKER,
+        }
+    }
+}
+
+fn swap_id() -> Pubkey {
+    Pubkey::new_from_array(*swap_program::ID.as_array())
+}
+
+/// `maker`'s order-authority PDA with `bump`, or `None` if the bump derives
+/// an on-curve point.
+pub fn order_authority_with_bump(maker: [u8; 32], bump: u8) -> Option<Pubkey> {
+    let maker = Pubkey::new_from_array(maker);
+    let [seed, maker_seed] = order_authority_seeds(&maker);
+    Pubkey::create_program_address(&[seed, maker_seed, &[bump]], &swap_id()).ok()
+}
+
+/// `maker`'s order-authority PDA and its canonical bump.
+pub fn canonical_order_authority(maker: [u8; 32]) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &order_authority_seeds(&Pubkey::new_from_array(maker)),
+        &swap_id(),
+    )
+}
+
+/// A bump that derives no order-authority PDA for `maker`.
+pub fn invalid_bump(maker: [u8; 32]) -> u8 {
+    (0..=u8::MAX)
+        .rev()
+        .find(|bump| order_authority_with_bump(maker, *bump).is_none())
+        .expect("some bump derives an on-curve point")
 }
 
 pub fn setup_mollusk() -> (Mollusk, Pubkey) {
@@ -84,7 +125,7 @@ pub fn transact(messages: Vec<MessageData>) -> TransactIxData {
                 data: None,
             },
             TransactOutput {
-                utxo_hash: [6; 32],
+                utxo_hash: ORDER_UTXO_HASH,
                 owner_tag: OwnerTag::Inline([7; 32]),
                 data: Some(vec![8; 16]),
             },
@@ -97,6 +138,15 @@ pub fn transact(messages: Vec<MessageData>) -> TransactIxData {
     }
 }
 
+/// The marker the program requires: the order output's hash and the maker.
+pub fn valid_marker_data() -> Vec<u8> {
+    borsh::to_vec(&MarkerData {
+        order_utxo_hash: ORDER_UTXO_HASH,
+        maker_pubkey: PAYER,
+    })
+    .expect("serialize marker")
+}
+
 pub fn marker(data: Vec<u8>) -> MessageData {
     MessageData {
         view_tag: [9; 32],
@@ -104,19 +154,33 @@ pub fn marker(data: Vec<u8>) -> MessageData {
     }
 }
 
-pub fn wrapper_data(wrapper: Wrapper) -> Vec<u8> {
-    let transact = transact(if matches!(wrapper, Wrapper::Make) {
-        vec![marker(Vec::new())]
+/// The fixture's transact data: a make carries the valid marker.
+pub fn fixture_transact(wrapper: Wrapper) -> TransactIxData {
+    transact(if matches!(wrapper, Wrapper::Make) {
+        vec![marker(valid_marker_data())]
     } else {
         Vec::new()
-    });
-    wrapper_data_with(wrapper, transact)
+    })
+}
+
+pub fn wrapper_data(wrapper: Wrapper) -> Vec<u8> {
+    wrapper_data_with(wrapper, fixture_transact(wrapper))
 }
 
 /// Serialize a wrapper body around a caller-customized transact payload, so
 /// negatives can tamper with individual transact fields while staying
-/// wire-valid.
+/// wire-valid. It carries the maker's canonical order-authority bump.
 pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> {
+    let (_, bump) = canonical_order_authority(wrapper.maker());
+    wrapper_data_with_bump(wrapper, transact, bump)
+}
+
+/// [`wrapper_data`] with the order-authority bump `authority_bump`.
+pub fn wrapper_data_with_bump(
+    wrapper: Wrapper,
+    transact: TransactIxData,
+    authority_bump: u8,
+) -> Vec<u8> {
     let body = match wrapper {
         Wrapper::Make => wincode::serialize(&MakeIxData {
             proof: MakeProof {
@@ -124,6 +188,7 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
                 proof_b: [11; 64],
                 proof_c: [12; 32],
             },
+            authority_bump,
             transact,
         }),
         Wrapper::Take => wincode::serialize(&TakeIxData {
@@ -133,6 +198,7 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
                 proof_c: [12; 32],
             },
             maker: MAKER,
+            authority_bump,
             transact,
         }),
         Wrapper::Cancel => wincode::serialize(&CancelIxData {
@@ -142,6 +208,7 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
                 proof_c: [12; 32],
             },
             order_expiry: 0,
+            authority_bump,
             transact,
         }),
     }
@@ -152,13 +219,12 @@ pub fn wrapper_data_with(wrapper: Wrapper, transact: TransactIxData) -> Vec<u8> 
 }
 
 pub fn fixture(wrapper: Wrapper) -> (Instruction, Vec<(Pubkey, Account)>) {
-    let payer = Pubkey::new_from_array([21; 32]);
+    let payer = Pubkey::new_from_array(PAYER);
     let maker = Pubkey::new_from_array(MAKER);
     let tree = Pubkey::new_from_array([23; 32]);
     let spp_id = Pubkey::new_from_array(SHIELDED_POOL_PROGRAM_ID);
-    let swap_id = Pubkey::new_from_array(*swap_program::ID.as_array());
-    let (order_authority, _) =
-        Pubkey::find_program_address(&order_authority_seeds(&maker), &swap_id);
+    let swap_id = swap_id();
+    let (order_authority, _) = canonical_order_authority(wrapper.maker());
 
     let mut metas = vec![AccountMeta::new(payer, true)];
     let mut accounts = vec![(payer, account(1_000_000_000))];

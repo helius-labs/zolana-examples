@@ -1,17 +1,31 @@
 use spr_program_test::localnet::LocalnetPaths;
 use std::{env, path::PathBuf};
 
-/// Use the verified release artifacts supplied by the integration test runner.
+/// The release CLI and the deployed shielded-pool program that
+/// `test-utils/run-release-tests.sh` exports (`ZOLANA_CLI_BIN` and
+/// `SHIELDED_POOL_PROGRAM_PATH`, from `zolana dev artifacts`). The CLI finds the
+/// prover, Photon and surfpool through `PROVER_BIN`, `ZOLANA_PHOTON_BIN` and
+/// `SURFPOOL_BIN`. Keys and scratch live under `ZOLANA_TEST_ARTIFACTS_DIR`.
 pub fn paths() -> LocalnetPaths {
-    let dir = PathBuf::from(
-        env::var_os("ZOLANA_TEST_ARTIFACTS_DIR")
-            .expect("run test-utils/run-release-tests.sh to prepare the release binaries"),
-    );
+    let dir = env_path("ZOLANA_TEST_ARTIFACTS_DIR");
     LocalnetPaths {
-        cli_bin: dir.join("zolana"),
-        shielded_pool_program: dir.join("shielded_pool_program.so"),
+        cli_bin: env_path("ZOLANA_CLI_BIN"),
+        shielded_pool_program: env_path("SHIELDED_POOL_PROGRAM_PATH"),
         working_dir: dir.clone(),
         proving_keys_dir: dir.join("proving-keys"),
         scratch_dir: dir.join("localnet"),
     }
+}
+
+/// The deployed user-registry v1.0.0 program,
+/// `USER_REGISTRY_PROGRAM_PATH`.
+#[allow(dead_code)] // Not every suite loads the registry.
+pub fn user_registry_program() -> PathBuf {
+    env_path("USER_REGISTRY_PROGRAM_PATH")
+}
+
+fn env_path(name: &str) -> PathBuf {
+    env::var_os(name).map(PathBuf::from).unwrap_or_else(|| {
+        panic!("{name} is not set; run test-utils/run-release-tests.sh to prepare the release artifacts")
+    })
 }

@@ -6,8 +6,8 @@ use spr_test_utils::mollusk::expect_err_exact;
 use timelock_escrow_program::{error::TimelockEscrowError, tag};
 
 use crate::common::{
-    edit_payer, setup_mollusk, setup_unlocked_mollusk, withdraw_data, withdraw_fixture,
-    UNLOCK_TIMESTAMP,
+    edit_payer, invalid_bump, setup_mollusk, setup_unlocked_mollusk, withdraw_data,
+    withdraw_data_with_bump, withdraw_fixture, UNLOCK_TIMESTAMP,
 };
 
 #[test]
@@ -114,6 +114,17 @@ fn invalid_withdraw_proof_is_rejected_exactly() {
         &setup_unlocked_mollusk(),
         |_| {},
         TimelockEscrowError::ProofVerificationFailed,
+    );
+}
+
+/// A bump that derives no program address fails before the unlock and
+/// proof checks: the clock here is before the unlock.
+#[test]
+fn invalid_authority_bump_is_rejected_exactly() {
+    expect_withdraw_err(
+        &setup_mollusk(),
+        |instruction| instruction.data = withdraw_data_with_bump(UNLOCK_TIMESTAMP, invalid_bump()),
+        TimelockEscrowError::InvalidEscrowAuthorityBump,
     );
 }
 

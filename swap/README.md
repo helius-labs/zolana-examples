@@ -1,5 +1,12 @@
 # Swap Program
 
+> [!WARNING]
+> **Not for production.** This example is not audited. Its circuits use
+> insecure test keys generated from a fixed public seed, so anyone can forge
+> its proofs, and the program builds only with the `insecure-test-setup`
+> feature. Do not deploy it or use it with real funds; a deployment needs its
+> own trusted setup, verifying keys, program ID and audit.
+
 A confidential swap between a maker and a taker on the Solana Privacy Program
 (SPP). The maker commits an order that locks the funds it is selling as a
 shielded UTXO; the taker takes it before expiry, or the maker reclaims it
@@ -73,9 +80,11 @@ python3 test-utils/compare-benchmarks.py swap
 ### Build
 
 Each crate is its own package with no shared workspace, so build them one at a
-time. The Zolana crates come from commit `6aba4a70177caaef602baf972ce4958691ec1e65` of
-[helius-labs/zolana](https://github.com/helius-labs/zolana). Run the commands
-below from `swap/gnark/`.
+time. The Zolana crates are Git dependencies at commit
+[`ca4cf4f`](https://github.com/helius-labs/zolana/commit/ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08), the
+[`cli-v0.10.0`](https://github.com/helius-labs/zolana/releases/tag/cli-v0.10.0)
+release commit plus the fetchable gnark-sdk Go module. Run the commands below
+from `swap/gnark/`.
 
 ```bash
 cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 -- --features bpf-entrypoint
@@ -83,18 +92,12 @@ cargo build --manifest-path sdk/Cargo.toml
 ```
 
 The prover compiles Go gnark circuits, so building `prover`, `sdk` or `test`
-needs Go 1.27.3 or newer alongside Rust. The circuits import the `github.com/helius-labs/zolana/prover/server`
-and `zolana/gnarksdk` Go modules, which
-[`gnark/prover/circuits/go.mod`](gnark/prover/circuits/go.mod) takes from a Zolana checkout
-named `zolana` next to the `zolana-examples` checkout:
-
-```bash
-git clone https://github.com/helius-labs/zolana ../../../zolana
-git -C ../../../zolana checkout 6aba4a70177caaef602baf972ce4958691ec1e65
-```
-
-The Go bridge to Rust ships inside the `spr-gnark-ffi-prover-build` crate
-and needs no checkout.
+needs Go 1.27.3 or newer alongside Rust. The circuits import the
+`github.com/helius-labs/zolana/sdk-libs/gnark-sdk` and
+`github.com/helius-labs/zolana/prover/server/circuits/gadget` Go modules at
+`ca4cf4f`, which Go downloads through its module proxy
+([`gnark/prover/circuits/go.mod`](gnark/prover/circuits/go.mod)). The Go bridge
+to Rust ships inside the `spr-gnark-ffi-prover-build` crate.
 
 The circuit tests need the pinned proving and verifying keys, whose hashes are
 in [`gnark/swap-keys.CHECKSUM`](gnark/swap-keys.CHECKSUM). They are insecure test keys from
@@ -188,20 +191,20 @@ the fields:
 ### Build
 
 One Cargo workspace. Use Rust 1.95.0 (`rust-toolchain.toml`), Agave with SBF
-platform tools v1.54, and Go for the localnet services. The workspace pins
-Zolana
-[`98948daa1`](https://github.com/helius-labs/zolana/commit/98948daa1d4043515387041ab42e15961799058d)
-and uses Xark [0.3.0](https://crates.io/crates/xark/0.3.0) from crates.io, the
-Xark release that Zolana revision depends on. The setup script checks out the
-SDK under `.tools/`, checks that this workspace pins the same Zolana revision
-and that the SDK's `xark-cli` comes from the Xark fork at
-[`13c3f0c`](https://github.com/ananas-block/xark/commit/13c3f0c28eb202bc34f075ee5414a01c3cac51b8),
-and builds the Zolana and Xark CLIs. Run the commands below from
-`swap/xark/`.
+platform tools v1.54. The workspace pins Zolana
+[`ca4cf4f`](https://github.com/helius-labs/zolana/commit/ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08),
+the [`cli-v0.10.0`](https://github.com/helius-labs/zolana/releases/tag/cli-v0.10.0)
+release commit plus the fetchable gnark-sdk Go module, with the same SDK, and uses Xark [0.3.0](https://crates.io/crates/xark/0.3.0) from
+crates.io, the Xark release that Zolana revision depends on. The `zolana` CLI
+is the `cli-v0.10.0` release binary, which includes Xark. The setup script
+checks that this workspace pins Zolana `ca4cf4f`, downloads the CLI for
+darwin-arm64 or linux-x64, checks it against the release's `SHA256SUMS` and
+installs it to `.tools/bin/zolana`. It prints `ZOLANA_CLI_BIN`;
+`scripts/setup-zk-tools.sh --check-pins` only checks the pins. Run the
+commands below from `swap/xark/`.
 
 ```bash
-scripts/setup-zk-tools.sh
-export ZOLANA_CLI_BIN="$PWD/.tools/zolana/target/release/zolana"
+eval "$(scripts/setup-zk-tools.sh | sed 's/^/export /')"
 "$ZOLANA_CLI_BIN" zk compile --test --skip-wasm --manifest-path program/Cargo.toml
 scripts/check-keys.sh
 cargo build-sbf --manifest-path program/Cargo.toml --tools-version v1.54 -- --locked --features bpf-entrypoint
@@ -230,13 +233,17 @@ cargo test --locked -p swap-program --features bpf-entrypoint
 cargo test --release --locked -p swap-sdk
 ```
 
-The end-to-end tests start a localnet with surfpool, Photon, the SPP prover
-and the user registry. The release services do not match this SDK revision,
-so build them from the SDK checkout with `scripts/build-localnet.sh` (needs
-Go), which prints the variables to export (`PROVER_BIN`, `ZOLANA_PHOTON_BIN`,
-`SWAP_PHOTON_BIN`, `SHIELDED_POOL_PROGRAM_PATH`, `USER_REGISTRY_PROGRAM_PATH`).
-Also set `ZOLANA_CLI_BIN` and `SURFPOOL_BIN` to `surfpool` from
-[v1.6.0-light](https://github.com/Lightprotocol/surfpool/releases/tag/v1.6.0-light).
+The end-to-end tests start a localnet with surfpool, Photon, the SPP prover,
+the shielded-pool program and the user registry. `scripts/build-localnet.sh`
+runs `"$ZOLANA_CLI_BIN" dev artifacts`, which downloads the versions the
+`cli-v0.10.0` release pins (the deployed `shielded-pool-v1.0.0` program and
+the release prover, Photon and surfpool), checks their checksums and caches
+them under `~/.config/zolana/cache`. It also downloads the deployed user
+registry from the
+[`user-registry-v1.0.0`](https://github.com/helius-labs/zolana/releases/tag/user-registry-v1.0.0)
+release to `.tools/` and checks its SHA-256. It prints the variables to export
+(`ZOLANA_CLI_BIN`, `SHIELDED_POOL_PROGRAM_PATH`, `PROVER_BIN`,
+`ZOLANA_PHOTON_BIN`, `SURFPOOL_BIN`, `USER_REGISTRY_PROGRAM_PATH`).
 `ZOLANA_PORT_OFFSET` (a multiple of 100) and `ZOLANA_PROVER_URL` move the
 ports away from other localnets.
 

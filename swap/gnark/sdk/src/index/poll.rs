@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
-use spr_client::Rpc;
+use spr_client::{HistoryFilters, Rpc};
 use spr_keypair::ShieldedKeypair;
 use spr_transaction::ShieldedTransaction;
 
@@ -40,16 +40,22 @@ pub(crate) fn collect_tagged<I: Rpc, T>(
     let mut cursor = None;
     loop {
         let page = indexer
-            .get_shielded_transactions_by_tags(vec![owner_tag], cursor, None, None)
+            .get_shielded_transactions_by_tags(
+                vec![owner_tag],
+                cursor,
+                None,
+                HistoryFilters::default(),
+                None,
+            )
             .map_err(err)?;
-        for tx in &page.transactions {
+        for tx in page.data.iter().flat_map(|group| &group.events) {
             if let Some(item) = scan(tx)? {
                 found.push(item);
             }
         }
-        let Some(next) = page.next_cursor else {
+        cursor = page.continuation(cursor).map_err(err)?;
+        if cursor.is_none() {
             return Ok(found);
-        };
-        cursor = Some(next);
+        }
     }
 }

@@ -9,8 +9,8 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 | Field | gnark | Xark |
 | ----- | ----- | ---- |
 | Implementation | gnark (Go circuits, spr-gnark-ffi-prover) | Xark (Rust circuits, spr program SDK) |
-| SDK | Zolana Rust SDK 0.8.0 | Zolana 98948daa1, Xark 0.3.0 |
-| Shielded-pool program | Zolana Rust SDK 0.8.0 | Zolana 98948daa1 |
+| SDK | Zolana ca4cf4f (cli-v0.10.0) | Zolana ca4cf4f (cli-v0.10.0), Xark 0.3.0 |
+| Shielded-pool program | shielded-pool v1.0.0 (cli-v0.10.0) | shielded-pool v1.0.0 (cli-v0.10.0) |
 | Machine | Apple M5 Pro, 18 cores, Darwin 25.6.0 (aarch64) | Apple M5 Pro, 18 cores, Darwin 25.6.0 (aarch64) |
 
 ## Circuit size
@@ -32,14 +32,14 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 
 | Circuit | Metric | gnark | Xark | Delta |
 | ------- | ------ | ----- | ---- | ----- |
-| escrow | Key load (ms) | 51 | 119 | +68 (+133.3%) |
-| escrow | Per-proof setup (ms) | 0 | 26 | +26 |
-| escrow | Warm proving time (ms) | 12 | 209 | +197 (+1641.7%) |
-| escrow | In-memory proving time (ms) | 12 | 156 | +144 (+1200.0%) |
-| withdraw | Key load (ms) | 43 | 86 | +43 (+100.0%) |
-| withdraw | Per-proof setup (ms) | 0 | 17 | +17 |
-| withdraw | Warm proving time (ms) | 10 | 147 | +137 (+1370.0%) |
-| withdraw | In-memory proving time (ms) | 10 | 117 | +107 (+1070.0%) |
+| escrow | Key load (ms) | 49 | 119 | +70 (+142.9%) |
+| escrow | Per-proof setup (ms) | 0 | 23 | +23 |
+| escrow | Warm proving time (ms) | 12 | 191 | +179 (+1491.7%) |
+| escrow | In-memory proving time (ms) | 12 | 152 | +140 (+1166.7%) |
+| withdraw | Key load (ms) | 41 | 85 | +44 (+107.3%) |
+| withdraw | Per-proof setup (ms) | 0 | 16 | +16 |
+| withdraw | Warm proving time (ms) | 10 | 141 | +131 (+1310.0%) |
+| withdraw | In-memory proving time (ms) | 10 | 113 | +103 (+1030.0%) |
 
 ## Instruction circuit
 
@@ -52,31 +52,31 @@ Side-by-side view of [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and [`xark/BENCH
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| escrow | Total CU | 254,121 | 245,878 | -8,243 (-3.2%) |
+| escrow | Total CU | 249,495 | 244,411 | -5,084 (-2.0%) |
 | escrow | Verify CU | 94,519 | 94,730 | +211 (+0.2%) |
-| escrow | SPP CPI CU | 148,303 | 142,557 | -5,746 (-3.9%) |
-| withdraw | Total CU | 246,252 | 240,610 | -5,642 (-2.3%) |
+| escrow | SPP CPI CU | 149,689 | 142,557 | -7,132 (-4.8%) |
+| withdraw | Total CU | 238,973 | 239,135 | +162 (+0.1%) |
 | withdraw | Verify CU | 94,526 | 94,702 | +176 (+0.2%) |
-| withdraw | SPP CPI CU | 139,515 | 140,901 | +1,386 (+1.0%) |
+| withdraw | SPP CPI CU | 140,898 | 140,901 | +3 (+0.0%) |
 
 ## Instruction proving
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| escrow | Warm circuit proof (ms) | 12 | 209 | +197 (+1641.7%) |
-| escrow | Warm SPP proof (ms) | 104 | 61 | -43 (-41.3%) |
-| escrow | Warm total proving (ms) | 116 | 270 | +154 (+132.8%) |
-| withdraw | Warm circuit proof (ms) | 10 | 147 | +137 (+1370.0%) |
-| withdraw | Warm SPP proof (ms) | 64 | 62 | -2 (-3.1%) |
-| withdraw | Warm total proving (ms) | 74 | 210 | +136 (+183.8%) |
+| escrow | Warm circuit proof (ms) | 12 | 191 | +179 (+1491.7%) |
+| escrow | Warm SPP proof (ms) | 105 | 64 | -41 (-39.0%) |
+| escrow | Warm total proving (ms) | 117 | 256 | +139 (+118.8%) |
+| withdraw | Warm circuit proof (ms) | 10 | 141 | +131 (+1310.0%) |
+| withdraw | Warm SPP proof (ms) | 59 | 65 | +6 (+10.2%) |
+| withdraw | Warm total proving (ms) | 69 | 206 | +137 (+198.6%) |
 
 ## Transaction size
 
 | Instruction | Metric | gnark | Xark | Delta |
 | ----------- | ------ | ----- | ---- | ----- |
-| escrow | Instruction data (bytes) | 809 | 851 | +42 (+5.2%) |
+| escrow | Instruction data (bytes) | 810 | 852 | +42 (+5.2%) |
 | escrow | Accounts | 10 | 9 | -1 (-10.0%) |
-| escrow | v1 tx (bytes) | 1,193 | 1,202 | +9 (+0.8%) |
-| withdraw | Instruction data (bytes) | 624 | 593 | -31 (-5.0%) |
+| escrow | v1 tx (bytes) | 1,194 | 1,203 | +9 (+0.8%) |
+| withdraw | Instruction data (bytes) | 625 | 594 | -31 (-5.0%) |
 | withdraw | Accounts | 9 | 9 | 0 (0.0%) |
-| withdraw | v1 tx (bytes) | 975 | 944 | -31 (-3.2%) |
+| withdraw | v1 tx (bytes) | 976 | 945 | -31 (-3.2%) |

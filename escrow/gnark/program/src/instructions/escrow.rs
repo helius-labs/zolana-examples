@@ -8,7 +8,7 @@ use wincode::{SchemaRead, SchemaWrite};
 use crate::{
     error::TimelockEscrowError,
     instructions::{
-        shared::EscrowAuthority,
+        shared::{EscrowAuthority, IxData},
         verifier::{verify_groth16, CompressedGroth16Proof},
     },
     verifying_keys::escrow,
@@ -21,9 +21,23 @@ pub struct EscrowProof {
     pub proof_c: [u8; 32],
 }
 
+/// The escrow arguments the program reads ahead of the transact bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
+pub struct EscrowArgs {
+    pub proof: EscrowProof,
+    /// See [`EscrowIxData::authority_bump`].
+    pub authority_bump: u8,
+}
+
+/// The escrow instruction data as a client writes it: [`EscrowArgs`], then
+/// the transact data, which the program reads in place ([`IxData`]) and
+/// forwards to SPP unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct EscrowIxData {
     pub proof: EscrowProof,
+    /// The bump of the creator's escrow-authority PDA. The SDK passes the
+    /// canonical bump; see [`EscrowAuthority::new`].
+    pub authority_bump: u8,
     pub transact: TransactIxData,
 }
 
@@ -62,24 +76,28 @@ pub fn process_escrow_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
     let creator = *iter.next_signer("creator")?.address();
     let owner_pk_field =
         solana_owner_identity(creator.as_array()).map_err(TimelockEscrowError::from)?;
-    let escrow_authority = EscrowAuthority::find(&creator);
 
-    let EscrowIxData { proof, transact } = wincode::deserialize_exact(data)
-        .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
+    // The program reads the transact data in place and forwards the client's
+    // bytes to SPP unchanged.
+    let IxData {
+        args: EscrowArgs {
+            proof,
+            authority_bump,
+        },
+        transact,
+        transact_bytes,
+    } = IxData::<EscrowArgs>::parse(data)?;
+    let escrow_authority = EscrowAuthority::new(&creator, authority_bump)?;
 
     verify_escrow_proof(
         &proof,
-        &transact.private_tx_hash,
+        transact.private_tx_hash,
         &escrow_authority.owner_hash()?,
         &owner_pk_field,
     )?;
 
-    let transact_bytes = transact
-        .serialize()
-        .map_err(|_| TimelockEscrowError::InvalidInstructionData)?;
-
     let spp_accounts = iter.remaining()?;
-    escrow_authority.cpi_spp_transact_signed(spp_accounts, &transact_bytes)
+    escrow_authority.cpi_spp_transact_signed(spp_accounts, transact_bytes)
 }
 
 /// Verifies the escrow proof against the transaction's `private_tx_hash`,

@@ -4,7 +4,9 @@ use timelock_escrow_program::{
     instructions::shared::EscrowAuthority,
     verifier::escrow::{PublicInputs, Verifier, VERIFYINGKEY},
 };
-use timelock_escrow_sdk::{escrow_authority, proof::CircuitId, state::escrow_utxo};
+use timelock_escrow_sdk::{
+    escrow_authority, escrow_authority_bump, proof::CircuitId, state::escrow_utxo,
+};
 
 const CIRCUIT: CircuitId = CircuitId::Escrow;
 
@@ -210,7 +212,9 @@ fn escrow_proof_rejects_a_different_escrow_output() {
 /// creator signer and the instruction's viewing pubkey.
 fn program_escrow_owner(creator: &ShieldedKeypair) -> [u8; 32] {
     let viewing_pubkey = creator.shielded_address().unwrap().viewing_pubkey;
-    EscrowAuthority::find(&creator_address(creator))
+    let creator = creator_address(creator);
+    EscrowAuthority::new(&creator, escrow_authority_bump(&creator))
+        .unwrap()
         .address_hash(viewing_pubkey.as_bytes())
         .unwrap()
 }
