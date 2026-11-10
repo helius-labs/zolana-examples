@@ -92,7 +92,7 @@ async function measure(workers: number): Promise<void> {
           assert.ok(pool || session);
           const bundle = pool
             ? wasm.proveStreamingPreloaded(fixture.proofInputs, { pool })
-            : session!.prove(fixture.proofInputs);
+            : session!.prove(fixture.proofInputs, {});
           try {
             assert.ok(verifier.verify(bundle.proof, bundle.publicInputs));
             const converted = wasm.programProof(

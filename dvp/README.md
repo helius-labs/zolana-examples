@@ -35,14 +35,14 @@ settlement, reclaim, cancellation and rejection with each flow inlined.
 Use Rust 1.95.0, Node.js 24 or newer, `wasm-pack`, Agave with SBF platform
 tools v1.54, and Go for the localnet services. `rust-toolchain.toml` pins the compiler used to
 generate the checked bytecode. The workspace uses Zolana
-[`28d0fc23c`](https://github.com/helius-labs/zolana/commit/28d0fc23cea695aa6b676d3718ea056fe8f3b971)
-and Xark
-[`cccbf88`](https://github.com/ananas-block/xark/commit/cccbf88c527259620c441c1118014c749ecd582b),
-the Xark revision that Zolana revision pins. Cargo pins both to Git
-revisions. The setup script checks out the SDK under `.tools/`, checks that
-the SDK and this workspace pin the same Xark revision, and builds the Zolana
-and Xark CLIs. The TypeScript package uses the SDK checkout; run setup before
-building circuit artifacts or installing the TypeScript dependencies.
+[`98948daa1`](https://github.com/helius-labs/zolana/commit/98948daa1d4043515387041ab42e15961799058d),
+pinned as a Git revision, and the crates.io Xark 0.3.0 release that Zolana
+uses. The setup script checks out the SDK under `.tools/`, checks that the SDK
+and this workspace use the same Xark release, and builds the Zolana and Xark
+CLIs; Zolana builds its CLIs from the Xark fork at
+[`13c3f0c`](https://github.com/ananas-block/xark/commit/13c3f0c28eb202bc34f075ee5414a01c3cac51b8).
+The TypeScript package uses the SDK checkout; run setup before building
+circuit artifacts or installing the TypeScript dependencies.
 
 Run these commands from `dvp/`:
 

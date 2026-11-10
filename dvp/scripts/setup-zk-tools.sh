@@ -3,8 +3,9 @@
 set -euo pipefail
 
 dvp=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-zolana_revision=28d0fc23cea695aa6b676d3718ea056fe8f3b971
-xark_revision=cccbf88c527259620c441c1118014c749ecd582b
+zolana_revision=98948daa1d4043515387041ab42e15961799058d
+xark_version=0.3.0
+xark_cli_revision=13c3f0c28eb202bc34f075ee5414a01c3cac51b8
 
 checkout() {
     local repository=$1 revision=$2 directory=$3
@@ -36,9 +37,21 @@ check_pins() {
 
 checkout https://github.com/helius-labs/zolana.git "$zolana_revision" "$dvp/.tools/zolana"
 check_pins https://github.com/helius-labs/zolana "$zolana_revision" "$dvp/Cargo.toml"
-# The SDK, its CLI and the generated circuit crates must share one Xark.
-check_pins https://github.com/ananas-block/xark "$xark_revision" \
-    "$dvp/Cargo.toml" "$dvp/.tools/zolana/Cargo.toml"
+# The SDK and this workspace must share the released Xark crates; only the
+# Zolana CLI builds from the Xark fork.
+check_pins https://github.com/ananas-block/xark "$xark_cli_revision" "$dvp/.tools/zolana/Cargo.toml"
+if grep -qF https://github.com/ananas-block/xark "$dvp/Cargo.toml"; then
+    echo "$dvp/Cargo.toml must use the crates.io Xark release, not the fork" >&2
+    exit 1
+fi
+for crate in xark xark-groth16; do
+    for file in "$dvp/Cargo.toml" "$dvp/.tools/zolana/Cargo.toml"; do
+        if ! grep -qx "$crate = \"$xark_version\"" "$file"; then
+            echo "$file does not pin $crate = \"$xark_version\"" >&2
+            exit 1
+        fi
+    done
+done
 
 if [[ ${1:-} == --prepare-only ]]; then
     exit 0

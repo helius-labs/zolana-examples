@@ -79,7 +79,7 @@ export class ProgramProver {
           artifacts.sources,
         );
         this.#session = session;
-        this.#prove = (inputs) => session.prove(inputs);
+        this.#prove = (inputs) => session.prove(inputs, {});
       }
     } catch (error) {
       this.#verifier.free();
