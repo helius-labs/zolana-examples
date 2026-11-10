@@ -269,19 +269,19 @@ jobs:
             examples/swap/gnark/program
             examples/escrow/gnark
 
-      # run-release-tests.sh installs the cli-v0.10.0 CLI, which downloads the
-      # prover, Photon, surfpool and shielded-pool program it pins into
-      # zolana-config/cache; the deployed user registry and the prover's keys
-      # sit next to them.
+      # run-release-tests.sh installs the pinned release CLI into a directory
+      # named after the release, and the CLI downloads the prover, Photon,
+      # surfpool and shielded-pool program it pins into zolana-config/cache;
+      # the deployed user registry and the prover's keys sit next to them.
       - name: Cache release binaries and proving keys
         uses: actions/cache@v4
         with:
           path: |
-            examples/target/release-tests/cli-v0.10.0
+            examples/target/release-tests/cli-v*
             examples/target/release-tests/zolana-config/cache
-            examples/target/release-tests/user-registry-v1.0.0
+            examples/target/release-tests/user-registry-v*
             examples/target/release-tests/proving-keys
-          key: release-integration-${{ runner.os }}-${{ runner.arch }}-cli-v0.10.0
+          key: release-integration-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('examples/test-utils/zolana-release.sh') }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4

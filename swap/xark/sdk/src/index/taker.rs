@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use borsh::BorshDeserialize;
 use solana_address::Address;
-use spr_client::{user_registry::try_resolve_registered_address, Rpc};
+use spr_client::{user_registry::try_resolve_registered_address, ClientError, Rpc};
 use spr_keypair::{ShieldedAddress, ShieldedKeypair};
 use spr_program::DataUtxo;
 use spr_transaction::{
@@ -14,7 +14,7 @@ use swap_program::circuits;
 
 use super::{
     poll::{collect_tagged, index_until},
-    scan::{decode_order, unified_slots},
+    scan::{decode_order, resolve_mint, unified_slots},
 };
 use crate::{
     err,
@@ -40,9 +40,13 @@ pub struct TakerOrderCandidate {
 }
 
 /// The order the marker tagged to `keypair`'s taker names in `tx`, or `None`
-/// when `tx` has no such marker or does not decode as an order for it. Anyone
-/// can post a message under the taker's view tag, so a malformed marker or
-/// order output skips the transaction instead of failing the scan.
+/// when `tx` has no such marker or does not decode as an order for it.
+///
+/// Rule: an attacker-controlled field never aborts the scan. Anyone can post a
+/// marker and an order ciphertext under the taker's view tag, so everything
+/// read before the order UTXO hash is checked against the committed leaf,
+/// including the asset id resolved in `registry`, skips the transaction when
+/// it does not decode. Only errors an attacker cannot produce propagate.
 pub fn scan_taker(
     tx: &ShieldedTransaction,
     keypair: &ShieldedKeypair,
@@ -52,40 +56,35 @@ pub fn scan_taker(
         .signing_pubkey()
         .confidential_view_tag()
         .map_err(err)?;
-    let Some(marker_message) = tx
+    Ok(tx
         .messages
         .iter()
         .find(|message| message.view_tag == taker_tag)
-    else {
-        return Ok(None);
-    };
-    Ok(decode_candidate(tx, keypair, &marker_message.data, registry).ok())
+        .and_then(|marker_message| decode_candidate(tx, keypair, &marker_message.data, registry)))
 }
 
-/// Decodes the order `marker_data` names in `tx`.
+/// Decodes the order `marker_data` names in `tx`, or `None` when any of it,
+/// all attacker-controlled, does not decode.
 fn decode_candidate(
     tx: &ShieldedTransaction,
     keypair: &ShieldedKeypair,
     marker_data: &[u8],
     registry: &AssetRegistry,
-) -> Result<TakerOrderCandidate> {
-    let marker =
-        MarkerData::try_from_slice(marker_data).map_err(|e| anyhow!("marker payload: {e}"))?;
-    let Some((slot_index, slot, body)) =
-        unified_slots(tx).find(|(_, slot, _)| slot.output_context.hash == marker.order_utxo_hash)
-    else {
-        bail!("marker without a unified order ciphertext in the same transaction");
-    };
+) -> Option<TakerOrderCandidate> {
+    let marker = MarkerData::try_from_slice(marker_data).ok()?;
+    let (slot_index, slot, body) = unified_slots(tx)
+        .find(|(_, slot, _)| slot.output_context.hash == marker.order_utxo_hash)?;
     let cx = DecodeCx::for_slot(&keypair.viewing_key, tx, slot_index);
-    let plaintext = Confidential::decode(&body, &cx).map_err(err)?;
+    let plaintext = Confidential::decode(&body, &cx).ok()?;
+    let asset = resolve_mint(registry, plaintext.asset_id).ok()?;
     // The client writes the maker signer into the marker and the program
     // checks it; the order UTXO is owned by that maker's order authority.
     let maker_pubkey = Address::new_from_array(marker.maker_pubkey);
-    let order = decode_order(tx, slot, slot_index, plaintext, &maker_pubkey, registry)?;
+    let order = decode_order(tx, slot, slot_index, plaintext, asset, &maker_pubkey).ok()?;
     // The circuit reads a non-canonical `taker_pk_fe` as another taker, so the
     // order is refused before its maker is resolved in the user registry.
-    check_taker_pk_fe(&order.data.taker_pk_fe)?;
-    Ok(TakerOrderCandidate {
+    check_taker_pk_fe(&order.data.taker_pk_fe).ok()?;
+    Some(TakerOrderCandidate {
         order,
         maker_pubkey,
         order_utxo_hash: marker.order_utxo_hash,
@@ -130,21 +129,39 @@ pub fn index_taker<I: Rpc, R: Rpc>(
             let Some(candidate) = scan_taker(tx, keypair, registry)? else {
                 return Ok(None);
             };
-            // RPC errors propagate. A maker missing from the registry or an
-            // order that names another maker skips the transaction.
-            let Some(maker) =
-                try_resolve_registered_address(rpc, candidate.maker_pubkey).map_err(err)?
-            else {
+            // A maker missing from the registry skips the transaction; RPC
+            // errors propagate.
+            let Some(maker) = resolve_maker(rpc, candidate.maker_pubkey)? else {
                 return Ok(None);
             };
-            Ok(candidate.into_order(maker.address, registry).ok())
+            // Same rule as `scan_taker`: an order naming another maker, an
+            // opening off the committed leaf or a destination mint missing
+            // from `registry` are all attacker-controlled and skip.
+            Ok(candidate.into_order(maker, registry).ok())
         })
     })
 }
 
+/// The address the user registry holds for `maker_pubkey`, or `None` when it
+/// holds no record or a record whose keys do not form an address. The
+/// registry stores the viewing pubkey unchecked, so anyone can register a bad
+/// one and post an order naming it; that skips the order. RPC and record
+/// decode errors propagate: the record PDA is the registry program's.
+fn resolve_maker<R: Rpc>(rpc: &R, maker_pubkey: Address) -> Result<Option<ShieldedAddress>> {
+    match try_resolve_registered_address(rpc, maker_pubkey) {
+        Ok(resolved) => Ok(resolved.map(|resolved| resolved.address)),
+        Err(ClientError::AddressResolution(_)) => Ok(None),
+        Err(error) => Err(err(error)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use solana_account::Account;
     use solana_keypair::Keypair;
+    use spr_user_registry_interface::{
+        user_record_pda, user_registry_program_id, MergeEncryptionScheme, UserRecord,
+    };
 
     use super::*;
     use crate::index::fixture::{order_fixture, OrderFixture};
@@ -264,5 +281,137 @@ mod tests {
         assert!(scan_taker(&fixture.tx, &other_keypair, &fixture.registry)
             .expect("scan")
             .is_none());
+    }
+
+    #[test]
+    fn scan_taker_skips_an_order_with_an_unknown_asset() {
+        let fixture = order_fixture();
+        assert!(scan_taker(
+            &fixture.tx,
+            &fixture.taker_keypair,
+            &AssetRegistry::default(),
+        )
+        .expect("an unknown asset id must not fail the scan")
+        .is_none());
+    }
+
+    /// Serves `account` at `address`, or fails every account read with
+    /// `rpc_error`.
+    struct AccountRpc {
+        account: Option<(Address, Account)>,
+        rpc_error: Option<&'static str>,
+    }
+
+    impl Rpc for AccountRpc {
+        fn get_account(&self, address: Address) -> Result<Option<Account>, ClientError> {
+            if let Some(message) = self.rpc_error {
+                return Err(ClientError::Rpc(message.to_string()));
+            }
+            Ok(self
+                .account
+                .as_ref()
+                .filter(|(expected, _)| *expected == address)
+                .map(|(_, account)| account.clone()))
+        }
+    }
+
+    /// An RPC serving the user record of `keypair` with `viewing_pubkey` in
+    /// place of its own, owned by `owner_program`.
+    fn record_rpc(
+        keypair: &ShieldedKeypair,
+        viewing_pubkey: [u8; 33],
+        owner_program: Address,
+    ) -> (Address, AccountRpc) {
+        let owner = keypair
+            .shielded_address()
+            .and_then(|address| address.solana_address())
+            .expect("owner");
+        let (pda, bump) = user_record_pda(&owner);
+        let record = UserRecord {
+            owner,
+            bump,
+            nullifier_pubkey: keypair.nullifier_key.pubkey().expect("nullifier pubkey"),
+            viewing_pubkey,
+            merge_encryption: MergeEncryptionScheme::Disabled,
+        };
+        let mut data = vec![UserRecord::DISCRIMINATOR];
+        data.extend(borsh::to_vec(&record).expect("record bytes"));
+        let account = Account {
+            lamports: 1,
+            data,
+            owner: owner_program,
+            executable: false,
+            rent_epoch: 0,
+        };
+        let rpc = AccountRpc {
+            account: Some((pda, account)),
+            rpc_error: None,
+        };
+        (owner, rpc)
+    }
+
+    #[test]
+    fn resolve_maker_returns_the_registered_address() {
+        let fixture = order_fixture();
+        let viewing_pubkey = *fixture.maker_keypair.viewing_pubkey().as_bytes();
+        let (owner, rpc) = record_rpc(
+            &fixture.maker_keypair,
+            viewing_pubkey,
+            user_registry_program_id(),
+        );
+        assert_eq!(
+            resolve_maker(&rpc, owner).expect("resolve"),
+            Some(fixture.maker_address)
+        );
+    }
+
+    #[test]
+    fn resolve_maker_skips_an_unregistered_maker() {
+        let rpc = AccountRpc {
+            account: None,
+            rpc_error: None,
+        };
+        assert_eq!(
+            resolve_maker(&rpc, order_fixture().maker_pubkey).expect("resolve"),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_maker_skips_a_registered_invalid_viewing_pubkey() {
+        let fixture = order_fixture();
+        let (owner, rpc) = record_rpc(
+            &fixture.maker_keypair,
+            [0u8; 33],
+            user_registry_program_id(),
+        );
+        assert_eq!(
+            resolve_maker(&rpc, owner).expect("a bad registered viewing key must not fail"),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_maker_fails_on_an_rpc_error() {
+        let rpc = AccountRpc {
+            account: None,
+            rpc_error: Some("connection refused"),
+        };
+        let error = resolve_maker(&rpc, order_fixture().maker_pubkey)
+            .expect_err("an RPC error must fail the scan");
+        assert!(error.to_string().contains("connection refused"));
+    }
+
+    #[test]
+    fn resolve_maker_fails_on_an_undecodable_record() {
+        let fixture = order_fixture();
+        let viewing_pubkey = *fixture.maker_keypair.viewing_pubkey().as_bytes();
+        let (owner, rpc) = record_rpc(
+            &fixture.maker_keypair,
+            viewing_pubkey,
+            Address::new_from_array([5u8; 32]),
+        );
+        let error = resolve_maker(&rpc, owner).expect_err("a record decode error must fail");
+        assert!(error.to_string().contains("not owned by the user registry"));
     }
 }

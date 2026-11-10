@@ -41,22 +41,22 @@ pub(crate) fn unified_slots(
     })
 }
 
-/// Decodes the decrypted output in `slot` of `tx` as an order UTXO of
-/// `maker`: owned by the maker's order authority, with order terms as its
-/// state. The SDK's decode checks the state and the opening reproduce the
+/// Decodes the decrypted output in `slot` of `tx`, of `asset`, as an order
+/// UTXO of `maker`: owned by the maker's order authority, with order terms as
+/// its state. The SDK's decode checks the state and the opening reproduce the
 /// slot's committed hash, which commits the owner.
 pub(crate) fn decode_order(
     tx: &ShieldedTransaction,
     slot: &OutputSlot,
     slot_index: u32,
     plaintext: ConfidentialOutputPlaintext,
+    asset: spr_transaction::Mint,
     maker: &Address,
-    registry: &AssetRegistry,
 ) -> Result<DataUtxo<circuits::OrderTerms>> {
     let utxo = WalletUtxo {
         utxo: Utxo {
             owner: order_authority(maker).public_key(),
-            asset: resolve_mint(registry, plaintext.asset_id)?,
+            asset,
             amount: plaintext.amount,
             blinding: plaintext.blinding,
             ring_program_id: plaintext.ring_program_id,

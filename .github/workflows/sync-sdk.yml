@@ -86,8 +86,11 @@ jobs:
 
       # One Zolana commit is pinned everywhere: every Zolana Git rev in the
       # Cargo manifests, zolana_revision in test-utils/zolana-release.sh and
-      # the gnark circuits' Go pseudo-versions.
+      # the gnark circuits' Go pseudo-versions. zolana_release is not bumped,
+      # so the PR opens as a draft until a release built from the commit is
+      # pinned by hand (see test-utils/zolana-release.sh).
       - name: Bump SDK pins
+        id: bump
         env:
           SHA: ${{ steps.payload.outputs.sha }}
         run: |
@@ -153,6 +156,9 @@ jobs:
             )
           done
           bash -c 'set -euo pipefail; source test-utils/zolana-release.sh; check_all_pins .'
+          # The guard compares the Codex edits against this tree.
+          git add -A
+          echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
 
       - name: Check examples
         id: check
@@ -161,6 +167,13 @@ jobs:
           set -euo pipefail
           (cd typescript-client && pnpm check)
           (cd rust-client && cargo check --all-targets --locked)
+          # escrow/gnark and swap/gnark commit no lockfile.
+          (cd escrow/gnark && cargo check --workspace --all-targets)
+          for crate in program prover sdk test; do
+            cargo check --all-targets --manifest-path "swap/gnark/$crate/Cargo.toml"
+          done
+          (cd escrow/xark && cargo check --workspace --all-targets --locked)
+          (cd swap/xark && cargo check --workspace --all-targets --locked)
 
       - name: Codex compile fix
         if: steps.check.outcome == 'failure'
@@ -183,29 +196,35 @@ jobs:
           set -euo pipefail
           (cd typescript-client && pnpm check)
           (cd rust-client && cargo check --all-targets --locked)
+          # escrow/gnark and swap/gnark commit no lockfile.
+          (cd escrow/gnark && cargo check --workspace --all-targets)
+          for crate in program prover sdk test; do
+            cargo check --all-targets --manifest-path "swap/gnark/$crate/Cargo.toml"
+          done
+          (cd escrow/xark && cargo check --workspace --all-targets --locked)
+          (cd swap/xark && cargo check --workspace --all-targets --locked)
 
+      # Only the two example sources may differ from the bumped tree: a pin,
+      # dependency, replace or new file the Codex step adds fails the guard.
       - name: Guard allowlist
+        env:
+          BUMP_TREE: ${{ steps.bump.outputs.tree }}
         run: |
           set -euo pipefail
-          extra="$(git diff --name-only -- . | python3 -c '
+          extra="$(
+            {
+              git diff --name-only "$BUMP_TREE"
+              git ls-files --others --exclude-standard
+            } | python3 -c '
           import sys
           allow = {
-              "typescript-client/package.json",
-              "typescript-client/pnpm-lock.yaml",
-              "test-utils/zolana-release.sh",
               "typescript-client/examples/deposit_transfer_withdraw.ts",
               "rust-client/examples/deposit_transfer_withdraw.rs",
           }
-          pin_files = ("Cargo.toml", "Cargo.lock", "prover/circuits/go.mod", "prover/circuits/go.sum")
-          extra = [
-              line.strip()
-              for line in sys.stdin
-              if line.strip()
-              and line.strip() not in allow
-              and not line.strip().endswith(pin_files)
-          ]
+          extra = sorted({line.strip() for line in sys.stdin if line.strip()} - allow)
           print("\n".join(extra), end="")
-          ')"
+          '
+          )"
           if [[ -n "$extra" ]]; then
             echo "files outside allowlist:" >&2
             echo "$extra" >&2
@@ -217,6 +236,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: sync/sdk
           delete-branch: false
+          draft: true
           title: "sync: pin SDK ${{ steps.payload.outputs.sha }}"
           commit-message: "sync: pin zolana SDK to ${{ steps.payload.outputs.sha }}"
           body: |
@@ -231,6 +251,10 @@ jobs:
             - TS pin git+https://github.com/helius-labs/zolana.git#${{ steps.payload.outputs.sha }}&path:/sdk-libs/ts
             - Zolana rev ${{ steps.payload.outputs.sha }} in every Cargo.toml, `zolana_revision` and both gnark `go.mod` files
 
-            The release CLI pins in `test-utils/zolana-release.sh` (`zolana_release`
-            and its digests) and the READMEs are not bumped; update them by hand when
-            the release changes.
+            ## Before merging
+            `zolana_release` in `test-utils/zolana-release.sh` still names the old
+            release, so the CLI, prover and programs the tests run no longer match
+            these crates. This PR stays a draft until a release built from this
+            commit is pinned by hand: `zolana_release`, its SHA256SUMS digest and the
+            READMEs, benchmarks and manifest comments that name the release or
+            commit. Close it if no release is built from this commit.

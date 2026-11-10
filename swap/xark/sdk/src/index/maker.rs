@@ -9,7 +9,7 @@ use spr_transaction::{
 
 use super::{
     poll::{collect_tagged, index_until},
-    scan::{decode_order, unified_slots},
+    scan::{decode_order, resolve_mint, unified_slots},
 };
 use crate::{err, order_authority, state::OrderUtxo};
 
@@ -54,7 +54,8 @@ pub fn scan_maker(
         else {
             continue;
         };
-        let Ok(order_utxo) = decode_order(tx, slot, slot_index, plaintext, &maker_pubkey, registry)
+        let Ok(order_utxo) = resolve_mint(registry, plaintext.asset_id)
+            .and_then(|asset| decode_order(tx, slot, slot_index, plaintext, asset, &maker_pubkey))
             .and_then(|order| OrderUtxo::from_data_utxo(order, maker_address, registry))
         else {
             continue;

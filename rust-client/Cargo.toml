@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-# The Zolana crates come from commit ca4cf4f: the cli-v0.10.0 release commit
-# (357dd92) plus the fetchable gnark-sdk Go module, with the same SDK. It
-# matches the deployed 1.0 programs; no crates.io release matches them yet.
-# Solana crates match the versions the SDK builds against.
+# The Zolana crates are Git revs pinned to zolana_revision in
+# test-utils/zolana-release.sh, the SDK commit of the pinned release; no
+# crates.io release matches the deployed programs yet. Solana crates match the
+# versions the SDK builds against.
 [dependencies]
 anyhow = "1.0"
 dotenvy = "0.15"

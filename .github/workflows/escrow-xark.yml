@@ -73,7 +73,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.config/zolana/cache
-          key: escrow-xark-zolana-cache-${{ runner.os }}-${{ runner.arch }}-cli-v0.10.0
+          key: escrow-xark-zolana-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('test-utils/zolana-release.sh') }}
 
       # Installs the pinned release CLI and exports ZOLANA_CLI_BIN.
       - name: Install the zolana CLI
@@ -88,7 +88,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.config/zolana/proving-keys
-          key: escrow-xark-proving-keys-cli-v0.10.0
+          key: escrow-xark-proving-keys-${{ hashFiles('test-utils/zolana-release.sh') }}
 
       - name: Check Rust formatting
         run: cargo fmt -p timelock-escrow-program -p timelock-escrow-sdk -p timelock-escrow-test -- --check

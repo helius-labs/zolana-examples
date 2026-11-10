@@ -9,8 +9,13 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
 fi
 
 zolana_release=cli-v0.10.0
-# The cli-v0.10.0 release commit (357dd92) plus the fetchable gnark-sdk Go
-# module; its SDK crates are the ones the release CLI was built from.
+# The SDK commit of zolana_release, which every Zolana Git and Go pin names:
+# the cli-v0.10.0 release commit (357dd92) plus the fetchable gnark-sdk Go
+# module, with the SDK crates the release CLI, prover and programs were built
+# from. The two move together. sync-sdk.yml bumps only this revision and the
+# pins, so it opens a draft PR that is merged only after zolana_release, its
+# digest and the docs naming it are bumped by hand to a release built from the
+# new commit.
 zolana_revision=ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08
 # Digest of the release's SHA256SUMS, which pins the CLI binaries.
 zolana_sha256sums_sha256=c60bebdff467f413e79a915bffd68bef15d6ca804afcd844f466a3a39727675e
@@ -68,15 +73,21 @@ fetch() {
 }
 
 # check_pins <Cargo.toml>: Cargo manifests cannot read zolana_revision; fail
-# when any Zolana Git dependency is not pinned to it.
+# when any line naming the Zolana repository is not
+# `git = "<repository>", rev = "<zolana_revision>"`, the form sync-sdk.yml
+# rewrites. The URL is matched up to an optional `.git` and the closing quote,
+# so other helius-labs repositories such as zolana-examples do not match. A
+# multi-line dependency table, with `git` and `rev` on separate lines, is
+# reported as bad on purpose: neither this check nor the sync bump reads one.
 check_pins() {
-    local repository=https://github.com/helius-labs/zolana bad
+    local repository='"https://github\.com/helius-labs/zolana(\.git)?"' bad
     # Collect first: with pipefail, `grep -q` closing the pipe early would make
     # the pipeline fail and hide a bad pin.
-    bad=$(grep -F "$repository" "$1" | grep -E 'git *=' |
-        grep -vE "rev *= *\"$zolana_revision\"" || true)
+    bad=$(grep -E "$repository" "$1" |
+        grep -vE "git[[:space:]]*=[[:space:]]*$repository[[:space:]]*,[[:space:]]*rev[[:space:]]*=[[:space:]]*\"$zolana_revision\"" ||
+        true)
     if [[ -n $bad ]]; then
-        echo "$1 references $repository without pinning rev = \"$zolana_revision\":" >&2
+        echo "$1 names helius-labs/zolana without git = \"...\", rev = \"$zolana_revision\":" >&2
         echo "$bad" >&2
         return 1
     fi
