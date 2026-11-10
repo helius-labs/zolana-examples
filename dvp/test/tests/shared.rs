@@ -18,18 +18,18 @@ use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_signature::Signature;
 use solana_signer::Signer;
-use zolana_client::{ComputeBudgetConfig, ProverClient, Rpc};
-use zolana_interface::pda::spl_token_program_id;
-use zolana_keypair::{ShieldedAddress, ShieldedKeypair};
-use zolana_program_test::{
+use spr_client::{ComputeBudgetConfig, HistoryFilters, ProverClient, Rpc};
+use spr_interface::pda::spl_token_program_id;
+use spr_keypair::{ShieldedAddress, ShieldedKeypair};
+use spr_program_test::{
     fixture,
     localnet::{FixtureLocalnet, LocalnetPaths, LocalnetPorts},
 };
-use zolana_test_utils::{
+use spr_test_utils::{
     test_validator_asserts::wait_for_non_inclusion_proof,
     wallet::{Deposit as ShieldDeposit, DepositParams},
 };
-use zolana_transaction::{decrypt_spendable, AssetRegistry, WalletUtxo, SOL_MINT};
+use spr_transaction::{decrypt_spendable, AssetRegistry, WalletUtxo, SOL_MINT};
 
 /// The whole per-transaction budget: an instruction verifies its own proof
 /// and the SPP proof.
@@ -152,7 +152,7 @@ impl TestEnv {
             seller_refund_destination: seller,
             buyer_refund_destination: buyer,
             creator: self.seller.solana.pubkey(),
-            blinding: zolana_keypair::random_blinding(),
+            blinding: spr_keypair::random_blinding(),
         })
     }
 
@@ -242,11 +242,20 @@ impl TestEnv {
         mint: Address,
         signature: Signature,
     ) -> Result<WalletUtxo> {
-        let transactions = self
+        let transactions: Vec<_> = self
             .localnet
             .client
-            .get_shielded_transactions_by_tags(vec![view_tag], None, None, None)?
-            .transactions;
+            .get_shielded_transactions_by_tags(
+                vec![view_tag],
+                None,
+                None,
+                HistoryFilters::default(),
+                None,
+            )?
+            .data
+            .into_iter()
+            .flat_map(|group| group.events)
+            .collect();
         decrypt_spendable(&actor.shielded, &transactions, &self.assets()?)
             .map_err(|e| anyhow!("decrypt shielded UTXOs: {e:?}"))?
             .balances

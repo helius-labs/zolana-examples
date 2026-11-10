@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use zolana_client::Rpc;
-use zolana_keypair::ShieldedKeypair;
-use zolana_transaction::{
+use spr_client::Rpc;
+use spr_keypair::ShieldedKeypair;
+use spr_transaction::{
     serialization::confidential::{Confidential, ConfidentialOutputPlaintext},
     AssetRegistry, DecodeCx, ShieldedTransaction, UtxoSerialization,
 };

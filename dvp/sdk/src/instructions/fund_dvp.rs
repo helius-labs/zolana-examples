@@ -1,10 +1,10 @@
 use anyhow::{ensure, Result};
 use solana_address::Address;
 use solana_instruction::Instruction;
-use zolana_interface::instruction::instruction_data::transact::TransactIxData;
-use zolana_keypair::{P256Pubkey, ShieldedKeypair};
-use zolana_program::instruction::Transact;
-use zolana_transaction::{
+use spr_interface::instruction::instruction_data::transact::TransactIxData;
+use spr_keypair::{ShieldedKeypair, X25519Pubkey};
+use spr_program::instruction::Transact;
+use spr_transaction::{
     instructions::transact::{ConfidentialTransaction, SppProofInputs},
     WalletUtxo, SOL_MINT,
 };
@@ -28,7 +28,7 @@ pub struct FundDvpParams {
     /// The settlement authority's viewing pubkey, learned out of band (the
     /// terms name only its Solana address). The deposit ciphertext is
     /// encrypted to it.
-    pub authority_viewing_pubkey: P256Pubkey,
+    pub authority_viewing_pubkey: X25519Pubkey,
     /// The funder's spendable UTXOs, the first one real.
     pub inputs: Vec<WalletUtxo>,
     /// Fee payer and SPP payer; the funder's Solana key, since an Ed25519
@@ -84,7 +84,7 @@ impl FundDvp {
             payer: self.payer,
             input_trees: vec![self.tree; self.spp.tree_contexts.len()],
             output_tree: self.tree,
-            owner_signers: Vec::new(),
+            owner_signers: vec![self.payer],
             interface_transfer_accounts: Vec::new(),
             data: self.spp,
         }
@@ -94,7 +94,7 @@ impl FundDvp {
 
 #[cfg(test)]
 mod tests {
-    use zolana_transaction::Mint;
+    use spr_transaction::Mint;
 
     use super::*;
     use crate::index::fixture::{

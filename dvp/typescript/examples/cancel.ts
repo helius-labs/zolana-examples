@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { createZolanaClient } from "@heliuslabs/zolana";
-import { atSlot, NullifierKeyProofAuthority } from "@heliuslabs/zolana/client";
+import { createSprClient } from "@heliuslabs/spr";
+import { atSlot, NullifierKeyProofAuthority } from "@heliuslabs/spr/client";
 import {
   bytes32,
   initializePoseidon,
@@ -9,17 +9,15 @@ import {
   ShieldedKeypair,
   SigningKey,
   ViewingKey,
-} from "@heliuslabs/zolana/keypair";
+} from "@heliuslabs/spr/keypair";
 import {
   AssetRegistry,
   createExternalData,
-  decodeProgramTransaction,
   SppProofInputs,
   decryptToBalances,
-  ProgramOwner,
   ProofInputUtxo,
   SOL_MINT,
-} from "@heliuslabs/zolana/transaction";
+} from "@heliuslabs/spr/transaction";
 import {
   address,
   appendTransactionMessageInstructions,
@@ -41,20 +39,21 @@ import {
   dvpId,
   encodeTerms,
   encoder,
+  integer,
   PROGRAM_ID,
   type SwapDvp,
 } from "../src/terms.js";
 import { createDvpInstruction, cancelDvpInstruction } from "../src/instructions.js";
-import { provingKey, initWasm, type WalletUtxo } from "../src/wasm.js";
+import { ProgramProver, wasm, type WalletUtxo } from "../src/wasm.js";
+import { ProgramOwner, decodeProgramTransaction } from "@heliuslabs/spr/program";
 
 async function main(): Promise<void> {
   // 1. Connect the seller, buyer, and settlement authority.
   await initializePoseidon();
-  const wasm = await initWasm();
   const seller = keypair("DVP_SELLER_SEED");
   const buyer = keypair("DVP_BUYER_SEED");
   const settlementAuthority = keypair("DVP_AUTHORITY_SEED");
-  const client = await createZolanaClient({
+  const client = await createSprClient({
     solanaRpcUrl: env("ZOLANA_LOCALNET_URL"),
     indexerUrl: env("ZOLANA_INDEXER_URL"),
     proverUrl: env("ZOLANA_PROVER_URL"),
@@ -106,21 +105,21 @@ async function main(): Promise<void> {
             outputTreeId: client.treeId,
           },
           terms: checkedTerms,
+          dvpAddress: dvpAddress.toBytes(),
         },
         public: {
           creatorIdentity: checkedTerms.creatorIdentity,
-          dvpId: id,
-          dvpOwner: dvpAddress.toBytes(),
+          dvpId: integer(id).toString(),
+          dvpOwner: integer(dvpAddress.ownerHash()).toString(),
         },
       },
       seller.shieldedAddress().toBytes(),
       payer.address,
     );
-    const createKey = provingKey("create_dvp");
-    const createProver = wasm.CreateDvpProver.fromKey(createKey.key, createKey.checksum);
+    const createProver = new ProgramProver("create_dvp");
     let createProof;
     try {
-      createProof = createProver.prove(create.proofInputs);
+      createProof = createProver.prove(create);
       assert.deepEqual(createProof.publicInputs, [create.publicHash]);
     } finally {
       createProver.free();
@@ -252,11 +251,12 @@ async function main(): Promise<void> {
           deliveryDeposit: absentDeposit,
           paymentDeposit: absentDeposit,
           buyerRejects: false,
+          dvpAddress: dvpAddress.toBytes(),
         },
         public: {
           creatorIdentity: checkedTerms.creatorIdentity,
-          dvpId: id,
-          dvpOwner: dvpAddress.toBytes(),
+          dvpId: integer(id).toString(),
+          dvpOwner: integer(dvpAddress.ownerHash()).toString(),
           signerIdentity: checkedTerms.settlementAuthorityIdentity,
           reject: false,
         },
@@ -264,11 +264,10 @@ async function main(): Promise<void> {
       settlementAuthority.shieldedAddress().toBytes(),
       payer.address,
     );
-    const abortKey = provingKey("abort_dvp");
-    const abortProver = wasm.AbortDvpProver.fromKey(abortKey.key, abortKey.checksum);
+    const abortProver = new ProgramProver("abort_dvp");
     let abortProof;
     try {
-      abortProof = abortProver.prove(abort.proofInputs);
+      abortProof = abortProver.prove(abort);
       assert.deepEqual(abortProof.publicInputs, [abort.publicHash]);
     } finally {
       abortProver.free();
@@ -276,7 +275,7 @@ async function main(): Promise<void> {
 
     // 8. Encrypt, prove, and submit both refunds.
     const aborted = await decodeProgramTransaction(abort.finalizedTx, assets);
-    const abortInputs = aborted.toProofInputs(settlementAuthority);
+    const abortInputs = aborted.encryptWithKeys(settlementAuthority);
     const abortSpp = await client.proveTransact(abortInputs, pdaKeys);
     assert.deepEqual(abortSpp.privateTxHash, aborted.paddingIndependentPrivateTxHash);
     const abortTx = await sendAndConfirm(
@@ -349,7 +348,7 @@ function equal(left: Uint8Array, right: Uint8Array): boolean {
 }
 
 function sendAndConfirmFactory(
-  client: Awaited<ReturnType<typeof createZolanaClient>>,
+  client: Awaited<ReturnType<typeof createSprClient>>,
   payer: ReturnType<ShieldedKeypair["toSolanaSigner"]>,
 ) {
   const send = sendTransactionWithoutConfirmingFactory({ rpc: client.solanaRpc });

@@ -8,7 +8,7 @@ use dvp_sdk::{
 };
 use solana_clock::Clock;
 use solana_signature::Signature;
-use zolana_client::Rpc;
+use spr_client::Rpc;
 
 /// Every DvP program error, in code order.
 const DVP_ERRORS: [DvpError; 7] = [

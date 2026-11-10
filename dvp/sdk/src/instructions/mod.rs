@@ -9,9 +9,9 @@ pub mod settle_dvp;
 use anyhow::{ensure, Result};
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
+use spr_interface::instruction::instruction_data::transact::TransactIxData;
+use spr_program::instruction::Transact;
 use wincode::{config::DefaultConfig, SchemaWrite};
-use zolana_interface::instruction::instruction_data::transact::TransactIxData;
-use zolana_program::instruction::Transact;
 
 use crate::err;
 

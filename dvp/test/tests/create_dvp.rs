@@ -8,7 +8,7 @@ use dvp_sdk::{
 };
 use dvp_test::{assert_dvp_error, assert_spp_rejects, has_dvp, has_legs};
 use shared::{setup, DELIVERY_AMOUNT, INDEX_TIMEOUT, PAYMENT_AMOUNT};
-use zolana_transaction::SOL_MINT;
+use spr_transaction::SOL_MINT;
 
 /// What the seller sends above the delivery amount, refunded at settlement.
 const DELIVERY_SURPLUS: u64 = 50_000_000;
@@ -172,9 +172,9 @@ fn fund_dvp_and_discover_deposits() -> Result<()> {
 #[ignore = "requires the Node WASM build and npm ci; run explicitly after the Rust flows"]
 fn node_client_lifecycles() -> anyhow::Result<()> {
     use anyhow::ensure;
+    use spr_program_test::{fixture, localnet::LocalnetPorts};
+    use spr_transaction::SOL_MINT;
     use std::{path::Path, process::Command};
-    use zolana_program_test::{fixture, localnet::LocalnetPorts};
-    use zolana_transaction::SOL_MINT;
     let env = shared::setup(12)?;
     env.shield(&env.seller, fixture::spl_mint(), 900_000_000)?;
     env.shield(&env.buyer, SOL_MINT, 50_000_000)?;
@@ -192,7 +192,11 @@ fn node_client_lifecycles() -> anyhow::Result<()> {
             .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../typescript"))
             .env("ZOLANA_LOCALNET_URL", ports.rpc_url())
             .env("ZOLANA_INDEXER_URL", ports.photon_url())
-            .env("ZOLANA_PROVER_URL", "http://127.0.0.1:3001")
+            .env(
+                "ZOLANA_PROVER_URL",
+                std::env::var("ZOLANA_PROVER_URL")
+                    .unwrap_or_else(|_| "http://127.0.0.1:3001".into()),
+            )
             .env("DVP_SELLER_SEED", seed(&env.seller.solana))
             .env("DVP_BUYER_SEED", seed(&env.buyer.solana))
             .env("DVP_AUTHORITY_SEED", seed(&env.settlement_authority.solana))

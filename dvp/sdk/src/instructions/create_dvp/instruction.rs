@@ -1,7 +1,7 @@
 use anyhow::Result;
 use solana_address::Address;
 use solana_instruction::Instruction;
-use zolana_interface::instruction::instruction_data::transact::TransactIxData;
+use spr_interface::instruction::instruction_data::transact::TransactIxData;
 
 use crate::{
     instructions::{dvp_instruction, DvpAccounts},

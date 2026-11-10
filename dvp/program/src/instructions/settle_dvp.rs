@@ -4,15 +4,15 @@ use pinocchio::{
     error::ProgramError,
     AccountView, Address, ProgramResult,
 };
-use wincode::{SchemaRead, SchemaWrite};
-use zolana_account_checks::AccountIterator;
-use zolana_hasher::primitives::solana_owner_identity;
-use zolana_interface::instruction::instruction_data::transact::TransactIxData;
-use zolana_program::{
-    compression::PdaOwner,
+use spr_account_checks::AccountIterator;
+use spr_hasher::primitives::solana_owner_identity;
+use spr_interface::instruction::instruction_data::transact::TransactIxData;
+use spr_program::{
     cpi::{SppTransactAccounts, TransactAccountsError},
+    program::PdaOwner,
     verifier::VerifyError,
 };
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{error::DvpError, verifier::settle_dvp, DVP_AUTHORITY_PDA_SEED};
 use pinocchio::sysvars::{clock::Clock, Sysvar};
@@ -68,17 +68,19 @@ pub fn process_settle_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> Progr
         solana_owner_identity(settlement_authority.as_array()).map_err(DvpError::from)?;
 
     // 5. Verify the DvP proof.
-    settle_dvp::verify(
-        &settle_proof,
-        &settle_dvp::PublicInputs {
+    settle_dvp::Verifier {
+        proof: &settle_proof,
+        public_inputs: settle_dvp::PublicInputs {
             creator_identity,
             dvp_id,
             dvp_owner,
             settlement_authority_identity: signer_identity,
             current_timestamp: timestamp,
         },
-        &spp.private_tx_hash,
-    )
+        private_tx_hash: &spp.private_tx_hash,
+        transfers: &[],
+    }
+    .verify()
     .map_err(|error| match error {
         VerifyError::PublicInputs => DvpError::HashingFailed,
         VerifyError::Proof => DvpError::ProofVerificationFailed,
@@ -107,7 +109,7 @@ pub fn process_settle_dvp_ix(accounts: &mut [AccountView], data: &[u8]) -> Progr
     accounts.invoke::<16>(&transact, &[Signer::from(&seeds)])
 }
 
-pub use zolana_program::CompressedProof as SettleDvpProof;
+pub use spr_program::CompressedProof as SettleDvpProof;
 
 #[derive(Clone, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct SettleDvpIxData {
