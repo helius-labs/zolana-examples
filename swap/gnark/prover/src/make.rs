@@ -1,0 +1,109 @@
+use std::collections::HashMap;
+
+use spr_client::ProofInputUtxo;
+use spr_gnark_ffi_prover::{decimal, utxo_proof_inputs, ProofInputMap};
+
+use crate::{CircuitId, OrderProof, OrderTermsProofInput, PROVER};
+
+#[derive(Debug, Clone)]
+pub struct MakeProofInputs {
+    pub public_input_hash: [u8; 32],
+    pub private_tx_hash: [u8; 32],
+    pub order_owner_hash: [u8; 32],
+    pub maker_owner_pk_field: [u8; 32],
+    pub maker_nullifier_pk: [u8; 32],
+    pub order: OrderTermsProofInput,
+    /// The maker's spent source UTXO, hashed under the tree it is spent from.
+    pub source: ProofInputUtxo,
+    pub order_utxo: ProofInputUtxo,
+    pub change: ProofInputUtxo,
+    pub private_tx_blinding: [u8; 32],
+}
+
+impl MakeProofInputs {
+    fn witness(&self) -> ProofInputMap {
+        let scalars: [(&str, [u8; 32]); 6] = [
+            ("Public_PublicInputHash", self.public_input_hash),
+            ("Public_PrivateTxHash", self.private_tx_hash),
+            ("Public_OrderOwnerHash", self.order_owner_hash),
+            ("Public_MakerOwnerPkField", self.maker_owner_pk_field),
+            ("MakerNullifierPk", self.maker_nullifier_pk),
+            ("PrivateTxBlinding", self.private_tx_blinding),
+        ];
+        let mut map = HashMap::new();
+        for (key, value) in scalars.iter() {
+            map.insert(key.to_string(), vec![decimal(value)]);
+        }
+        for (key, value) in self
+            .order
+            .witness_entries("Order")
+            .into_iter()
+            .chain(utxo_proof_inputs(&self.source, "Source"))
+            .chain(utxo_proof_inputs(&self.order_utxo, "OrderUtxo"))
+            .chain(utxo_proof_inputs(&self.change, "Change"))
+        {
+            map.insert(key, value);
+        }
+        map
+    }
+
+    pub fn prove(&self) -> spr_gnark_ffi_prover::Result<OrderProof> {
+        Ok(PROVER
+            .prove(CircuitId::Make, &self.witness())?
+            .compress()?
+            .into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use spr_gnark_ffi_prover::utxo_proof_input_keys;
+
+    use super::*;
+    use crate::order_terms::expected_order_terms_witness_keys;
+
+    fn sample() -> MakeProofInputs {
+        MakeProofInputs {
+            public_input_hash: [10; 32],
+            private_tx_hash: [1; 32],
+            order_owner_hash: [11; 32],
+            maker_owner_pk_field: [12; 32],
+            maker_nullifier_pk: [13; 32],
+            order: OrderTermsProofInput {
+                destination_asset: [2; 32],
+                destination_amount: 7,
+                maker_owner_hash: [3; 32],
+                maker_viewing_pk: [4; 33],
+                expiry: 9,
+                taker_pk_fe: [5; 32],
+            },
+            source: ProofInputUtxo::default(),
+            order_utxo: ProofInputUtxo::default(),
+            change: ProofInputUtxo::default(),
+            private_tx_blinding: [8; 32],
+        }
+    }
+
+    #[test]
+    fn witness_key_set_matches_circuit_fields() {
+        let witness = sample().witness();
+        let keys: HashSet<String> = witness.keys().cloned().collect();
+
+        let mut expected: Vec<String> = vec![
+            "Public_PublicInputHash".to_string(),
+            "Public_PrivateTxHash".to_string(),
+            "Public_OrderOwnerHash".to_string(),
+            "Public_MakerOwnerPkField".to_string(),
+            "MakerNullifierPk".to_string(),
+            "PrivateTxBlinding".to_string(),
+        ];
+        expected.extend(expected_order_terms_witness_keys("Order"));
+        expected.extend(utxo_proof_input_keys("Source"));
+        expected.extend(utxo_proof_input_keys("OrderUtxo"));
+        expected.extend(utxo_proof_input_keys("Change"));
+
+        assert_eq!(keys, expected.into_iter().collect::<HashSet<String>>());
+    }
+}

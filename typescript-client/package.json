@@ -8,7 +8,7 @@
     "example": "tsx"
   },
   "dependencies": {
-    "@heliuslabs/zolana": "^0.8.0-alpha",
+    "@heliuslabs/spr": "0.9.0-alpha",
     "@solana-program/system": "0.14.1",
     "@solana-program/token": "0.16.1",
     "@solana/kit": "^8.3.0",

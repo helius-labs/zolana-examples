@@ -5,5 +5,9 @@ rust-client/.env
 typescript-client/.env
 rust-client/BUGS.md
 rust-client/test-ledger/
+escrow/gnark/test/test-ledger/
+swap/gnark/test/test-ledger/
 rust-client/.surfpool/
 build/
+escrow/gnark/Cargo.lock
+swap/gnark/*/Cargo.lock

@@ -1,0 +1,28 @@
+[package]
+name = "swap-prover"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "swap_prover"
+path = "src/lib.rs"
+
+[[bin]]
+name = "swap-prover-setup"
+path = "src/bin/setup.rs"
+
+[dependencies]
+spr-gnark-ffi-prover = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+swap-program = { path = "../program" }
+spr-client = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+# Not used directly: a resolution floor for this standalone crate, which has no
+# shared lockfile. solana-address 2.7 and solana-signature 3.6 moved to wincode
+# 0.6; without the floor this crate alone resolves them next to
+# solana-transaction 4.1.5 and solana-message 4.4.0, which still implement
+# wincode 0.5 and do not compile. solana-transaction 4.1.6 bounds its solana-*
+# dependencies to the wincode 0.5 releases that upstream's Cargo.lock holds.
+solana-transaction = { version = "4.1.6", default-features = false }
+
+[build-dependencies]
+spr-gnark-ffi-prover-build = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }

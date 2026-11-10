@@ -1,0 +1,131 @@
+name: escrow-xark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "escrow/xark/**"
+      - "escrow/timelock_escrow.md"
+      - "test-utils/bench_report.rs"
+      - "test-utils/xark_proving.rs"
+      - "test-utils/zolana-release.sh"
+      - ".github/workflows/escrow-xark.yml"
+  pull_request:
+    paths:
+      - "escrow/xark/**"
+      - "escrow/timelock_escrow.md"
+      - "test-utils/bench_report.rs"
+      - "test-utils/xark_proving.rs"
+      - "test-utils/zolana-release.sh"
+      - ".github/workflows/escrow-xark.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: escrow-xark-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  AGAVE_VERSION: v4.0.2
+  SBF_TOOLS_VERSION: v1.54
+
+jobs:
+  escrow-xark-test:
+    name: test / escrow/xark
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: escrow/xark
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Xark circuit build compiles the program crate for wasm32.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      # The Zolana Git pins in Cargo.toml must match the release CLI revision.
+      - name: Check Zolana pins
+        run: scripts/setup-zk-tools.sh --check-pins
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: escrow/xark
+
+      - name: Install Anza CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Install pinned SBF platform tools
+        working-directory: escrow/xark/program
+        run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
+
+      # `zolana dev artifacts` downloads the prover, Photon, surfpool and
+      # shielded-pool program the release pins into ~/.config/zolana/cache.
+      - name: Cache Zolana release artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.config/zolana/cache
+          key: escrow-xark-zolana-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('test-utils/zolana-release.sh') }}
+
+      # Installs the pinned release CLI and exports ZOLANA_CLI_BIN.
+      - name: Install the zolana CLI
+        run: scripts/setup-zk-tools.sh >> "$GITHUB_ENV"
+
+      # Exports ZOLANA_CLI_BIN, SHIELDED_POOL_PROGRAM_PATH, PROVER_BIN,
+      # ZOLANA_PHOTON_BIN and SURFPOOL_BIN.
+      - name: Download localnet artifacts
+        run: scripts/build-localnet.sh >> "$GITHUB_ENV"
+
+      - name: Cache SPP proving keys
+        uses: actions/cache@v4
+        with:
+          path: ~/.config/zolana/proving-keys
+          key: escrow-xark-proving-keys-${{ hashFiles('test-utils/zolana-release.sh') }}
+
+      - name: Check Rust formatting
+        run: cargo fmt -p timelock-escrow-program -p timelock-escrow-sdk -p timelock-escrow-test -- --check
+
+      # The deterministic test setup regenerates the circuits, keys and
+      # verifiers, which must match the committed verifiers and checksums.
+      - name: Check generated verifiers and circuit keys
+        run: |
+          "$ZOLANA_CLI_BIN" zk compile --test --skip-wasm --manifest-path program/Cargo.toml
+          git diff --exit-code -- program/src/verifier
+          test -z "$(git status --porcelain -- program/src/verifier)"
+          scripts/check-keys.sh
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Build escrow program
+        working-directory: escrow/xark/program
+        run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --locked --features bpf-entrypoint
+
+      - name: Run program tests
+        run: cargo test --locked -p timelock-escrow-program --features bpf-entrypoint
+
+      - name: Run circuit tests
+        run: cargo test --release --locked -p timelock-escrow-sdk
+
+      - name: Run localnet end-to-end test
+        run: |
+          mkdir -p ~/.config/zolana/proving-keys
+          cargo test --release --locked -p timelock-escrow-test --test escrow -- --nocapture
+
+      - name: Upload localnet logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: escrow-xark-localnet-logs
+          path: |
+            escrow/xark/target/localnet/**/logs/**
+            escrow/xark/test/test-ledger/**
+          if-no-files-found: ignore

@@ -1,0 +1,3 @@
+.tools/
+# Prover log the localnet e2e tests write relative to the test crate.
+test/test-ledger/

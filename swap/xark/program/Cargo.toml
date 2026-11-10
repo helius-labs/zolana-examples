@@ -1,0 +1,64 @@
+[package]
+name = "swap-program"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+name = "swap_program"
+crate-type = ["cdylib", "lib"]
+
+[features]
+# The committed verifying keys come from `zolana zk compile --test`, a setup
+# whose randomness is a fixed public seed, so the keys are reproducible and
+# need no trusted setup ceremony. That is the recommended setup for
+# integration tests, and it is secure there because a test validator holds
+# nothing a forged proof could take. The generated keys do not compile without
+# this feature, which is on by default because this program is an example,
+# never a devnet or mainnet deployment.
+default = ["insecure-test-setup"]
+insecure-test-setup = []
+bpf-entrypoint = []
+# The Rust circuits and their native witness execution.
+circuits = ["dep:xark", "spr-program/client"]
+# Enabled only while `zolana zk compile` discovers the programs, before the
+# generated verifiers exist.
+build-circuits = ["circuits", "spr-program/build"]
+profile-program = ["light-program-profiler/profile-program"]
+
+[dependencies]
+xark = { workspace = true, optional = true }
+borsh = { workspace = true }
+groth16-solana = { workspace = true, features = ["bsb22"] }
+light-program-profiler = { workspace = true }
+pinocchio = { workspace = true, features = ["cpi"] }
+# `curve25519` gives `Address::create_program_address` a host implementation;
+# on SBF it uses the syscall and pulls in no curve dependency.
+solana-address = { workspace = true, features = ["curve25519"] }
+solana-program-error = { workspace = true }
+thiserror = { workspace = true }
+wincode = { workspace = true }
+spr-account-checks = { workspace = true }
+spr-hasher = { workspace = true }
+spr-interface = { workspace = true }
+spr-program = { workspace = true, features = ["cpi", "compression", "verifier"] }
+
+[dev-dependencies]
+mollusk-svm = { workspace = true }
+spr-test-utils = { workspace = true, features = ["mollusk"] }
+solana-account = { workspace = true }
+solana-instruction = { workspace = true }
+solana-pubkey = { workspace = true }
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = [
+    'cfg(xark)',
+    'cfg(xark_client)',
+    'cfg(target_os, values("solana"))',
+    # light-program-profiler's `#[profile]` checks this feature.
+    'cfg(feature, values("profile-heap"))',
+    # The program derives gate their WASM bindings on this feature, which this
+    # example does not build.
+    'cfg(feature, values("wasm"))',
+]

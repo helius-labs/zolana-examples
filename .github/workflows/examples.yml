@@ -7,8 +7,10 @@ on:
       - "devnet-e-tee-policy.json"
       - "rust-client/**"
       - "typescript-client/**"
-      - "swap-program/**"
-      - "escrow-program/**"
+      - "swap/gnark/**"
+      - "swap/*.md"
+      - "escrow/gnark/**"
+      - "escrow/*.md"
       - "test-utils/**"
       - ".github/workflows/examples.yml"
   pull_request:
@@ -16,8 +18,10 @@ on:
       - "devnet-e-tee-policy.json"
       - "rust-client/**"
       - "typescript-client/**"
-      - "swap-program/**"
-      - "escrow-program/**"
+      - "swap/gnark/**"
+      - "swap/*.md"
+      - "escrow/gnark/**"
+      - "escrow/*.md"
       - "test-utils/**"
       - ".github/workflows/examples.yml"
   workflow_dispatch:
@@ -86,19 +90,41 @@ jobs:
       - name: Check examples
         run: pnpm check
 
-  swap-build:
-    name: build / swap-program
+  swap-gnark:
+    name: test / swap/gnark
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # The four crates have no workspace; their host builds share one target
+      # directory. The SBF build keeps program/target, where the program tests
+      # read the program from.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/examples/swap/gnark/target/host
+    defaults:
+      run:
+        working-directory: examples/swap/gnark
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: examples
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: swap-program
+          cache-on-failure: true
+          workspaces: |
+            examples/swap/gnark/test -> ../target/host
+            examples/swap/gnark/program -> target
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache-dependency-path: examples/swap/gnark/prover/circuits/go.sum
 
       - name: Install Anza (Solana) CLI
         run: |
@@ -106,26 +132,72 @@ jobs:
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
       - name: Install pinned SBF platform tools
-        working-directory: swap-program/program
-        run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
+        working-directory: examples/swap/gnark/program
+        run: CARGO_TARGET_DIR="$PWD/target" cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
+
+      - name: Check formatting
+        run: |
+          for crate in program prover sdk test; do
+            cargo fmt --manifest-path "$crate/Cargo.toml" -- --check
+          done
+
+      - name: Run clippy
+        run: |
+          for crate in program prover sdk test; do
+            cargo clippy --manifest-path "$crate/Cargo.toml" --all-targets -- -D warnings
+          done
 
       - name: Build swap program (SBF)
-        working-directory: swap-program/program
-        run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --features bpf-entrypoint
+        working-directory: examples/swap/gnark/program
+        run: CARGO_TARGET_DIR="$PWD/target" cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --features bpf-entrypoint
 
-  escrow-build:
-    name: build / escrow-program
+      - name: Run program tests
+        run: cargo test --release --manifest-path program/Cargo.toml
+
+      # The SDK's circuit tests prove with these keys; they must be the
+      # pinned insecure test keys.
+      - name: Generate and check the insecure test keys
+        run: |
+          for circuit in make take cancel; do
+            cargo run --release --manifest-path prover/Cargo.toml --bin swap-prover-setup -- \
+              "$circuit" "$PWD/build/gnark/$circuit" --insecure-test-keys
+          done
+          scripts/check-keys.sh
+
+      - name: Run prover tests
+        run: cargo test --release --manifest-path prover/Cargo.toml
+
+      - name: Run SDK and circuit tests
+        run: cargo test --release --manifest-path sdk/Cargo.toml
+
+  escrow-gnark:
+    name: test / escrow/gnark
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: examples/escrow/gnark
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: examples
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: escrow-program
+          cache-on-failure: true
+          workspaces: examples/escrow/gnark
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache-dependency-path: examples/escrow/gnark/prover/circuits/go.sum
 
       - name: Install Anza (Solana) CLI
         run: |
@@ -133,12 +205,37 @@ jobs:
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
       - name: Install pinned SBF platform tools
-        working-directory: escrow-program/program
+        working-directory: examples/escrow/gnark/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
 
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Build escrow program (SBF)
-        working-directory: escrow-program/program
+        working-directory: examples/escrow/gnark/program
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" -- --features bpf-entrypoint
+
+      - name: Run program tests
+        run: cargo test --release -p timelock-escrow-program
+
+      # The SDK's circuit tests prove with these keys; they must be the
+      # pinned insecure test keys.
+      - name: Generate and check the insecure test keys
+        run: |
+          for circuit in escrow withdraw; do
+            cargo run --release -p timelock-escrow-prover --bin timelock-escrow-prover-setup -- \
+              "$circuit" "$PWD/build/gnark/$circuit" --insecure-test-keys
+          done
+          scripts/check-keys.sh
+
+      - name: Run prover tests
+        run: cargo test --release -p timelock-escrow-prover
+
+      - name: Run SDK and circuit tests
+        run: cargo test --release -p timelock-escrow-sdk
 
   release-integration:
     name: test / release binaries
@@ -152,13 +249,6 @@ jobs:
         with:
           path: examples
 
-      # The Go circuits import modules from a sibling release checkout.
-      - uses: actions/checkout@v4
-        with:
-          repository: helius-labs/zolana
-          ref: 6aba4a70177caaef602baf972ce4958691ec1e65
-          path: zolana
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -167,28 +257,31 @@ jobs:
         with:
           go-version: "1.27.3"
           cache-dependency-path: |
-            examples/swap-program/prover/circuits/go.sum
-            examples/escrow-program/prover/circuits/go.sum
-            zolana/prover/server/go.sum
+            examples/swap/gnark/prover/circuits/go.sum
+            examples/escrow/gnark/prover/circuits/go.sum
 
       - name: Cache Rust builds
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
           workspaces: |
-            examples/swap-program/test -> ../../target/integration
-            examples/swap-program/program
-            examples/escrow-program
-            zolana
+            examples/swap/gnark/test -> ../../../target/integration
+            examples/swap/gnark/program
+            examples/escrow/gnark
 
+      # run-release-tests.sh installs the pinned release CLI into a directory
+      # named after the release, and the CLI downloads the prover, Photon,
+      # surfpool and shielded-pool program it pins into zolana-config/cache;
+      # the deployed user registry and the prover's keys sit next to them.
       - name: Cache release binaries and proving keys
         uses: actions/cache@v4
         with:
           path: |
-            examples/target/release-tests/*v0.6.0-alpha*
-            examples/target/release-tests/surfpool-*.tar.gz
+            examples/target/release-tests/cli-v*
+            examples/target/release-tests/zolana-config/cache
+            examples/target/release-tests/user-registry-v*
             examples/target/release-tests/proving-keys
-          key: release-integration-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('examples/test-utils/release-artifacts.json') }}
+          key: release-integration-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('examples/test-utils/zolana-release.sh') }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4

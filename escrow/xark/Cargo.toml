@@ -1,0 +1,49 @@
+[workspace]
+resolver = "2"
+members = ["program", "sdk", "test"]
+
+[workspace.package]
+edition = "2021"
+
+# The Zolana SDK comes from a pinned Git revision: the Xark-backed program SDK
+# is newer than the published 0.8.0 crates. Xark is the crates.io 0.3.0 release
+# that revision depends on. scripts/setup-zk-tools.sh checks the Zolana pins
+# against zolana_revision in test-utils/zolana-release.sh, the cli-v0.10.0
+# release commit plus the fetchable gnark-sdk Go module, and installs that
+# release's CLI.
+[workspace.dependencies]
+xark = "0.3.0"
+xark-groth16 = "0.3.0"
+xark-ir = "0.3.0"
+spr-account-checks = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08", default-features = false }
+spr-client = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-hasher = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08", default-features = false }
+spr-interface = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-keypair = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-merkle-tree = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-program = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-program-test = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-transaction = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+spr-tree = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
+
+groth16-solana = { version = "0.3.1", features = ["bsb22"] }
+light-program-profiler = { git = "https://github.com/Lightprotocol/light-program-profiler", rev = "db49f3c801996a80e1cb7e4e92b13a694e962b65" }
+
+anyhow = "1.0"
+borsh = { version = "1.5", default-features = false, features = ["derive"] }
+mollusk-svm = "0.15.0"
+num-bigint = "0.4.6"
+pinocchio = "0.11"
+thiserror = "2.0"
+wincode = { version = "0.5", features = ["derive"] }
+solana-account = "4.3"
+solana-address = { version = "2.6", features = ["atomic", "borsh", "bytemuck", "copy", "decode", "wincode"] }
+solana-instruction = "3.4"
+solana-keypair = "3.1.2"
+solana-program-error = "3.0"
+solana-signature = "3.4"
+solana-signer = "3.0"
+
+[profile.release]
+overflow-checks = true
