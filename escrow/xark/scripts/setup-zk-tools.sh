@@ -44,15 +44,19 @@ check_pins https://github.com/helius-labs/zolana "$zolana_revision" "$escrow/Car
 # that pin only guards the CLI build.
 check_pins https://github.com/ananas-block/xark "$xark_revision" \
     "$escrow/Cargo.toml" "$escrow/.tools/zolana/Cargo.toml"
-if ! grep -F "ananas-block/xark" "$escrow/.tools/zolana/Cargo.toml" | grep -qF "rev = \"$xark_revision\""; then
-    echo "Zolana no longer pins xark-cli to $xark_revision" >&2
+if ! grep -E '^xark-cli *=' "$escrow/.tools/zolana/Cargo.toml" | grep -F "ananas-block/xark" |
+    grep -qE "rev *= *\"$xark_revision\""; then
+    echo "Zolana no longer pins xark-cli to ananas-block/xark $xark_revision" >&2
     exit 1
 fi
+# The `xark = "<version>"` requirement of a workspace manifest.
 xark_version() {
-    grep -E '^xark = ' "$1" | grep -oE '"[0-9][^"]*"' | head -n 1
+    sed -nE 's/^xark *= *"([^"]+)".*/\1/p' "$1" | head -n 1
 }
-if [[ $(xark_version "$escrow/Cargo.toml") != $(xark_version "$escrow/.tools/zolana/Cargo.toml") ]]; then
-    echo "$escrow/Cargo.toml and Zolana use different xark versions" >&2
+workspace_xark=$(xark_version "$escrow/Cargo.toml")
+zolana_xark=$(xark_version "$escrow/.tools/zolana/Cargo.toml")
+if [[ -z $workspace_xark || "$workspace_xark" != "$zolana_xark" ]]; then
+    echo "xark ${workspace_xark:-unparsed} in $escrow/Cargo.toml differs from Zolana's ${zolana_xark:-unparsed}" >&2
     exit 1
 fi
 

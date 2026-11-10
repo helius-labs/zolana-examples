@@ -31,6 +31,8 @@
 //! account holds.
 #[path = "../../../../test-utils/bench_report.rs"]
 mod bench_report;
+#[path = "../../../../test-utils/xark_proving.rs"]
+mod xark_proving;
 
 use std::{
     env, fs,
@@ -40,7 +42,7 @@ use std::{
 
 use bench_report::{
     cold_key_load, proof_bytes, time_key_load, warm_median, CircuitRow, Implementation,
-    InstructionRow, Report,
+    InstructionRow, Report, INPUT_BLINDING,
 };
 use light_program_profiler::mollusk::{register_profiling_syscalls, take_profiling_entries};
 use mollusk_svm::{program::loader_keys::LOADER_V3, result::Check, Mollusk};
@@ -63,7 +65,7 @@ use spr_interface::{
     },
     SHIELDED_POOL_PROGRAM_ID,
 };
-use spr_keypair::{random_blinding, ShieldedKeypair};
+use spr_keypair::ShieldedKeypair;
 use spr_merkle_tree::{indexed::IndexedMerkleTree, MerkleTree};
 use spr_program::{proof::compressed_proof, CompressedProof, ProgramOwner, ProgramProofInputs};
 use spr_test_utils::{transact::nullifier_tree, utxo::dummy_proofs};
@@ -93,6 +95,10 @@ const BENCH_SLOT: u64 = 1_000;
 const INPUT_AMOUNT: u64 = 1_000_000;
 const LOCK_AMOUNT: u64 = 400_000;
 const UNLOCK_TIMESTAMP: u64 = 1_000_000;
+/// Keypair seeds of the escrow and withdraw creators. Fixed keys keep the
+/// escrow-authority PDA bump search, and with it the CU, the same every run.
+const ESCROW_CREATOR_SEED: u8 = 1;
+const WITHDRAW_CREATOR_SEED: u8 = 2;
 
 #[test]
 #[ignore = "benchmark; slow, needs the profiling SBF build and a prover. See the module docs"]
@@ -300,16 +306,19 @@ fn prove_spp(
     (tree_account, transact, warm)
 }
 
-/// Measure `circuit` on `inputs`: its cold key loads, its warm proof time
-/// from one loaded checked circuit copy, and its sizes. The last proof,
-/// checked against the verifying key, is returned for the instruction.
+/// Measure `circuit` on `inputs`: its cold key load, per-proof setup, warm and
+/// in-memory proof times, and its sizes. The last warm proof, checked against
+/// the verifying key, is returned for the instruction.
 fn measure_circuit(
     circuit: CircuitId,
     inputs: &ProgramProofInputs,
 ) -> (CompressedProof, CircuitRow) {
     let (key_load, _) = cold_key_load(circuit.name());
-    let (_private, loaded) = proof::checked_circuit(circuit).expect("checked circuit");
+    let (private, loaded) = proof::checked_circuit(circuit).expect("checked circuit");
     let (proven, warm_proof) = warm_median(|| loaded.prove(inputs.clone()).expect("circuit proof"));
+    let circuit_dir = private.path().join(circuit.name());
+    let per_proof_setup = xark_proving::per_proof_setup(&circuit_dir);
+    let in_memory_proof = xark_proving::in_memory_proof(&circuit_dir, &inputs.encoded());
     let proof = compressed_proof(&proven.proof).expect("compressed proof");
     let verifying_key = proof::verifying_key(circuit).expect("verifying key");
     let public_hash = spr_program::from_decimal(
@@ -335,7 +344,9 @@ fn measure_circuit(
         verifying_key_bytes: file_size(&keys_dir.join("vk.bin")),
         proof_bytes: proof_bytes(&proof.a, &proof.b, &proof.c),
         key_load,
+        per_proof_setup,
         warm_proof,
+        in_memory_proof,
     };
     (proof, row)
 }
@@ -400,9 +411,9 @@ fn v1_tx_bytes(ix: &Instruction, payer: &Address) -> u64 {
     u64::try_from(v1).expect("fits u64")
 }
 
-/// A creator whose Solana key pays the transactions.
-fn creator() -> (Keypair, ShieldedKeypair) {
-    let payer = Keypair::new();
+/// A creator whose Solana key pays the transactions, from a fixed `seed`.
+fn creator(seed: u8) -> (Keypair, ShieldedKeypair) {
+    let payer = Keypair::new_from_array([seed; 32]);
     let shielded = ShieldedKeypair::from_keypair(&payer).expect("shielded keypair");
     (payer, shielded)
 }
@@ -414,7 +425,7 @@ fn creator_source(creator: &ShieldedKeypair, amount: u64) -> WalletUtxo {
         owner: creator.signing_pubkey(),
         asset: Mint::SOL,
         amount,
-        blinding: random_blinding(),
+        blinding: INPUT_BLINDING,
         ring_program_id: None,
         data: Data::default(),
     };
@@ -495,13 +506,14 @@ impl Bench {
 }
 
 fn bench_escrow(bench: &mut Bench) {
-    let (payer, creator) = creator();
+    let (payer, creator) = creator(ESCROW_CREATOR_SEED);
     let transaction = escrow_transaction(&payer, &creator);
     let (tree_account, spp_proof, spp_dur) =
         prove_spp(bench, transaction.spp_proof_inputs.clone(), &creator);
     let (escrow_proof, circuit) = measure_circuit(CircuitId::Escrow, &transaction.proof_inputs);
 
     let ix = Escrow {
+        creator: payer.pubkey(),
         payer: payer.pubkey(),
         tree: bench.tree,
         escrow_proof,
@@ -522,8 +534,11 @@ fn bench_escrow(bench: &mut Bench) {
 }
 
 fn bench_withdraw(bench: &mut Bench) {
-    let (payer, creator) = creator();
-    let escrow_output = escrow_transaction(&payer, &creator).escrow_output;
+    let (payer, creator) = creator(WITHDRAW_CREATOR_SEED);
+    // The escrow transaction derives its output blindings from a random
+    // seed; the spent escrow UTXO takes the fixed input blinding instead.
+    let mut escrow_output = escrow_transaction(&payer, &creator).escrow_output;
+    escrow_output.blinding = INPUT_BLINDING;
     let transaction = WithdrawTransactionParams {
         escrow: escrow_utxo(&payer.pubkey(), &escrow_output, BENCH_TREE_ID, 0)
             .expect("escrow utxo"),

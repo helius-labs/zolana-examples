@@ -32,7 +32,7 @@ use std::time::Duration;
 
 use bench_report::{
     cold_key_load, proof_bytes, time_key_load, warm_median, CircuitRow, Implementation,
-    InstructionRow, Report,
+    InstructionRow, Report, INPUT_BLINDING,
 };
 use gnark_circuit_size::circuit_size;
 use light_program_profiler::mollusk::{register_profiling_syscalls, take_profiling_entries};
@@ -121,6 +121,14 @@ fn system_owned_account(lamports: u64) -> Account {
 const BENCH_TREE_ID: u16 = 0;
 /// The runtime slot, after the slots `build_tree_fixture` appends leaves at.
 const BENCH_SLOT: u64 = 1_000;
+/// Keypair seeds of each instruction's paying party; the counterparties use
+/// fixed keys too. Fixed keys keep the order-authority PDA bump search, and
+/// with it the CU, the same every run.
+const MAKE_MAKER_SEED: u8 = 1;
+const TAKE_TAKER_SEED: u8 = 3;
+const CANCEL_MAKER_SEED: u8 = 5;
+/// Blinding of the dummy input, whose nullifier the SPP records too.
+const DUMMY_BLINDING: [u8; 32] = bench_report::fixed_blinding(6);
 
 fn build_tree_fixture(tree: &Pubkey, leaves: &[[u8; 32]]) -> (Account, [u8; 32], [u8; 32], u16) {
     let mut tree_account_bytes = vec![0u8; tree_account_size()];
@@ -339,7 +347,9 @@ impl KeyLoads {
             verifying_key_bytes: u64::try_from(vk.len()).expect("fits u64"),
             proof_bytes: proof_bytes(&proof.proof_a, &proof.proof_b, &proof.proof_c),
             key_load: *key_load,
+            per_proof_setup: Duration::ZERO,
             warm_proof,
+            in_memory_proof: warm_proof,
         };
         (proof, row)
     }
@@ -440,18 +450,17 @@ fn bench_make(
     const EXPIRY: u64 = 1_900_000_000;
 
     let tree = spr_interface::pda::tree(BENCH_TREE_ID);
-    let payer = Keypair::new();
+    let payer = Keypair::new_from_array([MAKE_MAKER_SEED; 32]);
     let maker = keypair_from_payer(&payer);
 
     // As in the localnet flow, the maker spends its own source and signs the
     // transact for it; the program signs for the order-authority PDA, which
     // owns the order output.
-    let input_blinding = random_blinding();
     let input_utxo = Utxo {
         owner: maker.signing_pubkey(),
         asset: spr_transaction::Mint::SOL,
         amount: INPUT_AMOUNT,
-        blinding: input_blinding,
+        blinding: INPUT_BLINDING,
         ring_program_id: None,
         data: Data::default(),
     };
@@ -492,7 +501,7 @@ fn bench_make(
     .into();
     let input_utxos = vec![
         input_utxo,
-        SppProofInputUtxo::dummy(BENCH_TREE_ID).expect("dummy"),
+        SppProofInputUtxo::dummy_with_blinding(DUMMY_BLINDING, BENCH_TREE_ID).expect("dummy"),
     ];
 
     let order_utxo_asset = order_output_utxo.asset;
@@ -628,7 +637,7 @@ fn bench_take(
     const EXPIRY: u64 = 1_900_000_000;
 
     let tree = spr_interface::pda::tree(BENCH_TREE_ID);
-    let taker_payer = Keypair::new();
+    let taker_payer = Keypair::new_from_array([TAKE_TAKER_SEED; 32]);
     let taker = keypair_from_payer(&taker_payer);
     let taker_address = taker.shielded_address().expect("taker address");
     let maker =
@@ -644,15 +653,17 @@ fn bench_take(
         )),
         expiry: EXPIRY,
     };
+    // The spent order UTXO.
     let order_utxo = OrderUtxo {
         terms,
-        blinding: random_blinding(),
+        blinding: INPUT_BLINDING,
         source_mint: spr_transaction::Mint::SOL,
         source_amount: SOURCE_AMOUNT,
         destination_asset_id: SOL_ASSET_ID,
     };
 
-    let taker_in_blinding = random_blinding();
+    // The blinding of the taker's spent payment input.
+    let taker_in_blinding = INPUT_BLINDING;
     let source_output_blinding = random_blinding();
 
     let taker_in = order_utxo.destination_output(taker_address, taker_in_blinding);
@@ -814,7 +825,7 @@ fn bench_cancel(
     const SPP_RELAYER_DEADLINE: u64 = u64::MAX;
 
     let tree = spr_interface::pda::tree(BENCH_TREE_ID);
-    let maker_payer = Keypair::new();
+    let maker_payer = Keypair::new_from_array([CANCEL_MAKER_SEED; 32]);
     let maker = keypair_from_payer(&maker_payer);
     let maker_address = maker.shielded_address().expect("maker address");
     let taker =
@@ -832,9 +843,10 @@ fn bench_cancel(
         )),
         expiry: ORDER_EXPIRY,
     };
+    // The spent order UTXO.
     let order_utxo = OrderUtxo {
         terms,
-        blinding: random_blinding(),
+        blinding: INPUT_BLINDING,
         source_mint: spr_transaction::Mint::SOL,
         source_amount: SOURCE_AMOUNT,
         destination_asset_id: 2,

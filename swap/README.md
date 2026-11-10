@@ -44,10 +44,11 @@ hand:
 - [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and
   [`xark/BENCHMARK.md`](xark/BENCHMARK.md) are written by each
   implementation's `bench_cu` test: circuit sizes, constraint counts, key
-  loads and warm proving times, then per instruction the compute units
-  (whole instruction, proof verification, SPP CPI), warm circuit and SPP
-  proving times and the v1 transaction size. The setup each needs is in the
-  doc comment at the top of its `test/tests/bench_cu.rs`.
+  loads, per-proof setup, warm and in-memory proving times, then per
+  instruction the compute units (whole instruction, proof verification, SPP
+  CPI), warm circuit and SPP proving times and the v1 transaction size. The
+  setup each needs is in the doc comment at the top of its
+  `test/tests/bench_cu.rs`.
 - [`BENCHMARK.md`](BENCHMARK.md) puts the two side by side with the delta.
   Regenerate it from the repository root after either bench:
 
@@ -246,7 +247,8 @@ cargo test --release --locked -p swap-test
 ```
 
 The benchmark replays make, take and cancel under mollusk, times warm
-circuit and SPP proofs and circuit key loading, and writes
+circuit and SPP proofs, the circuit proof's per-proof setup and an in-memory
+circuit proof, and circuit key loading, and writes
 [`xark/BENCHMARK.md`](xark/BENCHMARK.md) in the format the gnark benchmark
 shares. It needs `SHIELDED_POOL_PROGRAM_PATH` and starts the SPP prover with
 `ZOLANA_CLI_BIN`. Keep its profiled program in `target/bench`, because a

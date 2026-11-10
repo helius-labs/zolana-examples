@@ -6,6 +6,7 @@ use shared::{
 };
 use solana_signer::Signer;
 use spr_program::InputRecords;
+use spr_program_test::fixture;
 use spr_test_utils::wallet::{sync_wallet, Wallet};
 use spr_transaction::{AssetRegistry, SOL_ASSET_ID, SOL_MINT};
 use timelock_escrow_program::error::TimelockEscrowError;
@@ -28,7 +29,8 @@ const ESCROW_VIEWING_PUBKEY: core::ops::Range<usize> = 129..162;
 //      itself + escrow UTXO 0.3 SOL (owned by the creator's escrow-authority
 //      PDA, seeds [b"escrow_authority", creator], its terms as encrypted
 //      data, committed unlock timestamp already in the past). Xark escrow
-//      proof, v1 transaction. An escrow to another viewing pubkey than the
+//      proof, v1 transaction, paid by a separate fee payer while the creator
+//      signs for its source. An escrow to another viewing pubkey than the
 //      proof's is refused first.
 //   3. Withdraw: the creator finds its open escrow by decrypting the outputs
 //      of its escrow-authority PDA, which decode to the terms, and spends the
@@ -51,15 +53,18 @@ fn escrow_then_withdraw() -> Result<()> {
     let creator_address = creator.address()?;
     let creator_pubkey = creator.solana.pubkey();
     let assets = AssetRegistry::default();
+    // The escrow's fee payer, a key other than the creator's.
+    let fee_payer = fixture::payer();
 
     // escrow: lock LOCK_AMOUNT -- spend the creator's shielded balance, append
     // a change output back to the creator plus the escrow UTXO (owned by the
-    // escrow-authority PDA).
+    // escrow-authority PDA). The fee payer pays; the creator signs for its
+    // source.
     let escrow_transaction = EscrowTransactionParams {
         unlock_timestamp: UNLOCK_TIMESTAMP,
         amount: LOCK_AMOUNT,
         source: creator_input,
-        payer: creator_pubkey,
+        payer: fee_payer.pubkey(),
     }
     .build(&creator.shielded)?;
     let escrow_output = escrow_transaction.escrow_output.clone();
@@ -67,6 +72,11 @@ fn escrow_then_withdraw() -> Result<()> {
     let escrow_ix = escrow_transaction
         .prove(client.indexer(), localnet.tree, &creator.shielded)?
         .instruction()?;
+    assert_eq!(
+        escrow_ix.accounts.first().map(|meta| meta.pubkey),
+        Some(creator_pubkey)
+    );
+    assert_ne!(fee_payer.pubkey(), creator_pubkey);
     let other = Actor::new(1)?;
 
     // The program derives the escrow UTXO's address from the creator signer
@@ -80,11 +90,11 @@ fn escrow_then_withdraw() -> Result<()> {
     viewing_pubkey.copy_from_slice(other.address()?.viewing_pubkey.as_bytes());
     assert_escrow_error(
         "an escrow to another viewing pubkey",
-        send(client, &[&creator.solana], other_viewer_ix),
+        send(client, &[&fee_payer, &creator.solana], other_viewer_ix),
         TimelockEscrowError::ProofVerificationFailed,
     );
 
-    let signature = send(client, &[&creator.solana], escrow_ix)?;
+    let signature = send(client, &[&fee_payer, &creator.solana], escrow_ix)?;
     client
         .confirm_private_transaction_sync(signature)
         .map_err(|e| anyhow!("confirm escrow indexed: {e:?}"))?;

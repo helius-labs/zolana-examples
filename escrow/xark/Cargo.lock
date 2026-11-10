@@ -7000,6 +7000,9 @@ dependencies = [
  "spr-tree",
  "timelock-escrow-program",
  "timelock-escrow-sdk",
+ "xark",
+ "xark-groth16",
+ "xark-ir",
 ]
 
 [[package]]

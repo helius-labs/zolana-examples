@@ -126,21 +126,39 @@ pub fn withdraw_data(unlock_timestamp: u64) -> Vec<u8> {
     data
 }
 
-/// Applies `edit` to every meta of the payer, which is the withdraw caller
-/// (account 0) and the SPP payer (account 2): a privilege kept on one would
-/// hold for both.
+/// Applies `edit` to every meta of the fee payer. In the escrow fixture it is
+/// only the SPP payer (account 1, after the creator). In the withdraw fixture
+/// it is also the caller (account 0) ahead of the SPP payer (account 2), and
+/// a privilege kept on one would hold for both.
 pub fn edit_payer(instruction: &mut Instruction, edit: impl Fn(&mut AccountMeta)) {
+    edit_metas(instruction, PAYER, edit);
+}
+
+/// Applies `edit` to every meta of the creator, which is the escrow's
+/// creator signer (account 0) and the SPP owner signer of the source: a
+/// privilege kept on one would hold for both.
+pub fn edit_creator(instruction: &mut Instruction, edit: impl Fn(&mut AccountMeta)) {
+    edit_metas(instruction, CREATOR, edit);
+}
+
+fn edit_metas(instruction: &mut Instruction, key: Address, edit: impl Fn(&mut AccountMeta)) {
     instruction
         .accounts
         .iter_mut()
-        .filter(|meta| meta.pubkey == PAYER)
+        .filter(|meta| meta.pubkey == key)
         .for_each(edit);
 }
 
-/// An escrow instruction with the builder's account layout: the creator,
-/// then the forwarded SPP list ending in the creator's `escrow_authority`.
+/// An escrow instruction with the builder's account layout: the read-only
+/// creator signer, then the forwarded SPP list with a separate fee payer and
+/// the creator as owner signer of the source, ending in the creator's
+/// `escrow_authority`.
 pub fn escrow_fixture() -> (Instruction, Vec<(Address, Account)>) {
-    fixture(vec![AccountMeta::new(CREATOR, true)], escrow_data())
+    fixture(
+        vec![AccountMeta::new_readonly(CREATOR, true)],
+        vec![AccountMeta::new_readonly(CREATOR, true)],
+        escrow_data(),
+    )
 }
 
 /// A withdraw instruction at [`UNLOCK_TIMESTAMP`] with the builder's account
@@ -152,14 +170,16 @@ pub fn withdraw_fixture() -> (Instruction, Vec<(Address, Account)>) {
             AccountMeta::new(PAYER, true),
             AccountMeta::new_readonly(CREATOR, true),
         ],
+        Vec::new(),
         withdraw_data(UNLOCK_TIMESTAMP),
     )
 }
 
 /// An instruction on `data` with `program_accounts` ahead of the forwarded
-/// SPP accounts, which end with the escrow-authority PDA.
+/// SPP accounts, whose `owner_signers` precede the escrow-authority PDA.
 fn fixture(
     program_accounts: Vec<AccountMeta>,
+    owner_signers: Vec<AccountMeta>,
     data: Vec<u8>,
 ) -> (Instruction, Vec<(Address, Account)>) {
     let spp_id = Address::new_from_array(SHIELDED_POOL_PROGRAM_ID);
@@ -173,8 +193,9 @@ fn fixture(
         AccountMeta::new_readonly(Address::default(), false),
         AccountMeta::new(TREE, false),
         AccountMeta::new(NULLIFIER_PDA, false),
-        AccountMeta::new_readonly(escrow_authority, false),
     ]);
+    metas.extend(owner_signers);
+    metas.push(AccountMeta::new_readonly(escrow_authority, false));
     let accounts = vec![
         (PAYER, account(1_000_000_000)),
         (CREATOR, account(1_000_000_000)),

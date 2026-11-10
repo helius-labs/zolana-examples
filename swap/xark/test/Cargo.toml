@@ -26,6 +26,10 @@ spr-user-registry-interface = { workspace = true, features = ["solana"] }
 
 [dev-dependencies]
 num-bigint = { workspace = true }
+# The bench times Xark proofs from public prover APIs (test-utils/xark_proving.rs).
+xark = { workspace = true }
+xark-groth16 = { workspace = true }
+xark-ir = { workspace = true }
 spr-hasher = { workspace = true }
 spr-merkle-tree = { workspace = true }
 spr-tree = { workspace = true }

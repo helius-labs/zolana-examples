@@ -30,13 +30,32 @@ const GNARK_IMPLEMENTATION: &str = "gnark (Go circuits, spr-gnark-ffi-prover)";
 const GNARK_SDK: &str = "Zolana Rust SDK 0.8.0";
 const GNARK_SHIELDED_POOL_PROGRAM: &str = "Zolana Rust SDK 0.8.0";
 const GNARK_PROVER_NOTE: &str = "The gnark prover keeps the compiled constraint system and the \
-parsed proving key in memory for the life of the process.";
+parsed proving key in memory for the life of the process, so each proof redoes no setup: its \
+per-proof setup is 0 and its in-memory proving time is its warm proving time.";
 
 const XARK_IMPLEMENTATION: &str = "Xark (Rust circuits, spr program SDK)";
 const XARK_SDK: &str = "Zolana 98948daa1, Xark 0.3.0";
 const XARK_SHIELDED_POOL_PROGRAM: &str = "Zolana 98948daa1";
-const XARK_PROVER_NOTE: &str =
-    "The Xark prover streams the proving key from its file during each proof.";
+const XARK_PROVER_NOTE: &str = "Xark 0.3.0's `Circuit::prove`, which the SDK proves with, keeps \
+nothing in memory between proofs: every call re-reads `circuit.xbc`, rebuilds the reduced R1CS \
+rows with `rows_for_key` (the SDK's checked circuit copy has no `r1cs.stream` cache), opens \
+`pk.bin` with `SerializedPk::open` and decodes the key's points from the file while proving, and \
+solves the witness. Per-proof setup times the first three steps; the key decode runs inside the \
+proof, so only the in-memory proving time removes it. In-memory proving time proves through \
+public Xark 0.3.0 APIs with the rows built and the whole proving key decoded once before timing \
+(per proof: `resolve_input_ids`, `xark_ir::solver::solve_and_check`, then `xark_groth16::prove` \
+on an `InMemoryPk`), and checks each proof against the key's verifying key; it is the Xark time \
+that compares with gnark's warm proving time.";
+
+/// A blinding of all zeros but its last byte `last`, and the one every spent
+/// input of a bench uses. A spent input's nullifier seeds the SPP nullifier
+/// PDA, whose bump search costs CU, so spent inputs use a fixed blinding.
+pub const fn fixed_blinding(last: u8) -> [u8; 32] {
+    let mut blinding = [0; 32];
+    blinding[31] = last;
+    blinding
+}
+pub const INPUT_BLINDING: [u8; 32] = fixed_blinding(5);
 
 /// The test of the bench binary that runs one cold key load.
 const KEY_LOAD_PROBE_TEST: &str = "key_load_probe";
@@ -102,8 +121,17 @@ pub struct CircuitRow {
     pub proof_bytes: u64,
     /// [`cold_key_load`].
     pub key_load: Duration,
-    /// [`warm_median`] of the in-process circuit proof.
+    /// [`warm_median`] of the work the prover redoes on every proof before
+    /// proving (artifact reads and constraint rebuilds); zero for a prover
+    /// that keeps its artifacts in memory.
+    pub per_proof_setup: Duration,
+    /// [`warm_median`] of the in-process circuit proof, one full call of the
+    /// implementation's prove function.
     pub warm_proof: Duration,
+    /// [`warm_median`] of a proof with the constraint rows and the decoded
+    /// proving key held in memory; the warm proof for a prover that keeps
+    /// them in memory anyway.
+    pub in_memory_proof: Duration,
 }
 
 /// One instruction's measurements: its Summary row and its CU section.
@@ -312,13 +340,22 @@ impl Report {
              `cpi_spp_transact*` row. The shielded-pool program differs between the gnark and Xark \
              implementations, so `SPP CPI CU` is not an apples-to-apples comparison; `Verify CU` \
              and the circuit columns are. Proving times are warm release-build medians of \
-             {PROOF_SAMPLES} proofs after 1 warm-up proof: the program circuit proof in process \
+             {PROOF_SAMPLES} runs after 1 warm-up run: the program circuit proof in process \
              with its artifacts loaded before timing, the SPP proof against the running prover \
-             server with its keys loaded. Key load is the median of {KEY_LOAD_SAMPLES} cold loads \
-             of a circuit's proving artifacts into the in-process prover until it can prove (gnark: \
-             compile the constraint system and read the proving key; Xark: read the \
-             checksum-checked circuit bytecode and proving key), each in a fresh child process of \
-             the bench; the SPP prover's key load is not measured. {} Proof bytes are the \
+             server with its keys loaded. Warm proving time, and the Summary's circuit proof, is \
+             one full call of the implementation's prove function. Per-proof setup is the part of \
+             that call that reloads circuit artifacts before proving starts, timed on its own. \
+             In-memory proving time is a proof with the constraint rows and the decoded proving \
+             key held in memory, which is what the two implementations' provers compare on. Warm \
+             minus in-memory proving time is the full per-proof overhead, the proving-key decode \
+             included; per-proof setup is only its part before proving starts, so the columns do \
+             not sum. Key load is the median of {KEY_LOAD_SAMPLES} cold loads of a circuit's \
+             proving artifacts, each in a fresh child process of the bench; the SPP prover's key \
+             load is not measured. For gnark it compiles the constraint system and reads the \
+             proving key, after which the prover is ready. For Xark it is a one-time checksum \
+             check and copy of the circuit bytecode and proving key, plus an expansion of the \
+             bytecode; it does not make the prover ready, and every proof still pays the \
+             per-proof setup and the proving-key decode. {} Proof bytes are the \
              serialized Groth16 proof points the instruction submits. Transaction sizes are those \
              of the serialized v1 transaction carrying the instruction.\n\n",
             implementation.prover_note()
@@ -346,7 +383,9 @@ impl Report {
                     thousands(circuit.verifying_key_bytes),
                     thousands(circuit.proof_bytes),
                     millis(circuit.key_load),
+                    millis(circuit.per_proof_setup),
                     millis(circuit.warm_proof),
+                    millis(circuit.in_memory_proof),
                 ]
             })
             .collect();
@@ -360,7 +399,9 @@ impl Report {
                 "Verifying key (bytes)",
                 "Proof (bytes)",
                 "Key load (ms)",
+                "Per-proof setup (ms)",
                 "Warm proving time (ms)",
+                "In-memory proving time (ms)",
             ],
             &circuit_rows,
         );

@@ -6,8 +6,12 @@ use spr_interface::instruction::instruction_data::transact::TransactIxData;
 use crate::{shared::escrow_instruction, tag, EscrowIxData, EscrowProof};
 
 pub struct Escrow {
-    /// The creator, which owns the spent source, signs and pays the
-    /// transaction and SPP.
+    /// The creator's Solana pubkey. It owns the spent source, so it signs the
+    /// SPP transact as its owner signer; the timelock escrow program derives
+    /// the creator's escrow-authority PDA from it, which owns the escrow UTXO,
+    /// and checks the escrow proof against its owner identity.
+    pub creator: Address,
+    /// Signs and pays the transaction and SPP. It may be the creator.
     pub payer: Address,
     /// The SPP tree: output tree, and input tree of every tree context.
     pub tree: Address,
@@ -19,8 +23,14 @@ pub struct Escrow {
 }
 
 impl Escrow {
+    /// Accounts: the creator signer the program reads, then the SPP
+    /// `transact` account list with `payer` as the SPP payer and the creator
+    /// as owner signer of the source, then the creator's escrow-authority
+    /// PDA, which the program signs for inside the CPI because SPP requires
+    /// the owner of the data-bearing escrow output to sign.
     pub fn instruction(self) -> Result<Instruction> {
         let Self {
+            creator,
             payer,
             tree,
             escrow_proof,
@@ -32,13 +42,11 @@ impl Escrow {
             viewing_pubkey,
             transact: spp_proof,
         };
-        // The creator signs for the source it owns; its escrow-authority PDA
-        // follows for the escrow UTXO's data.
         escrow_instruction(
             tag::ESCROW,
-            vec![AccountMeta::new(payer, true)],
-            vec![payer],
-            payer,
+            vec![AccountMeta::new_readonly(creator, true)],
+            vec![creator],
+            creator,
             payer,
             tree,
             &ix_data.transact,

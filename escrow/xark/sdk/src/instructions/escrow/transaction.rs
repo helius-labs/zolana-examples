@@ -28,10 +28,15 @@ pub struct EscrowTransactionParams {
     /// The spent source UTXO, owned by the creator. Its tree is the output
     /// tree.
     pub source: WalletUtxo,
+    /// Pays the transaction and SPP fees; it signs nothing else. It may be
+    /// the creator's Solana key.
     pub payer: Address,
 }
 
 pub struct EscrowTransaction {
+    /// The creator's Solana pubkey, the instruction's creator signer and the
+    /// SPP owner signer of the source.
+    creator: Address,
     pub spp_proof_inputs: SppProofInputs,
     pub proof_inputs: ProgramProofInputs,
     /// The escrow UTXO output, with its derived blinding and its terms as
@@ -93,6 +98,7 @@ impl EscrowTransactionParams {
             .map_err(err)?;
         let spp_proof_inputs = finalized.encrypt_with_viewing_key(&key).map_err(err)?;
         Ok(EscrowTransaction {
+            creator: creator_address,
             spp_proof_inputs,
             proof_inputs: transaction.proof_inputs,
             escrow_output,
@@ -117,6 +123,7 @@ impl EscrowTransaction {
         // 2. Prove the escrow circuit and build the instruction.
         let escrow_proof = proof::prove(CircuitId::Escrow, &self.proof_inputs)?;
         Ok(Escrow {
+            creator: self.creator,
             payer,
             tree,
             escrow_proof,

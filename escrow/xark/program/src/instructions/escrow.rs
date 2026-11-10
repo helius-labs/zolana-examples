@@ -49,9 +49,10 @@ pub fn process_escrow_ix(accounts: &mut [AccountView], data: &[u8]) -> ProgramRe
     // 1. Check the creator signs and derive its escrow-authority PDA. The
     // escrow proof checks the source owner against this pubkey
     // (owner_pk_field), tagged as a Solana key like the owner the escrow
-    // terms commit.
+    // terms commit. The creator is read-only: the fee payer is the separate
+    // SPP payer among the forwarded accounts, and may be the same key.
     let mut iter = AccountIterator::new(accounts);
-    let creator = *iter.next_signer_mut("creator")?.address();
+    let creator = *iter.next_signer("creator")?.address();
     let owner_pk_field =
         solana_owner_identity(creator.as_array()).map_err(TimelockEscrowError::from)?;
     let escrow_authority = EscrowAuthority::find(&creator);

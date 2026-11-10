@@ -12,6 +12,10 @@ solana-signature = { workspace = true }
 
 [dev-dependencies]
 timelock-escrow-sdk = { path = "../sdk" }
+# The bench times Xark proofs from public prover APIs (test-utils/xark_proving.rs).
+xark = { workspace = true }
+xark-groth16 = { workspace = true }
+xark-ir = { workspace = true }
 light-program-profiler = { workspace = true, features = ["mollusk"] }
 mollusk-svm = { workspace = true }
 num-bigint = { workspace = true }

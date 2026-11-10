@@ -35,7 +35,15 @@ TABLES = (
                     "Proof (bytes)",
                 ),
             ),
-            ("Circuit proving", ("Key load (ms)", "Warm proving time (ms)")),
+            (
+                "Circuit proving",
+                (
+                    "Key load (ms)",
+                    "Per-proof setup (ms)",
+                    "Warm proving time (ms)",
+                    "In-memory proving time (ms)",
+                ),
+            ),
         ),
     ),
     (
@@ -179,8 +187,12 @@ def render(example_dir, example, setups, inputs):
         "generate in the shared format; see either file for the methodology. Delta is "
         "Xark minus gnark, with the percentage of the gnark value. The shielded-pool "
         "program differs between the implementations, so `SPP CPI CU` is not an "
-        "apples-to-apples comparison; `Verify CU` and the circuit metrics are. Timings "
-        "from runs on different machines or under different load do not compare.",
+        "apples-to-apples comparison; `Verify CU` and the circuit metrics are. Warm "
+        "proving time is one full call of each implementation's prove function, which "
+        "for Xark 0.3.0 includes per-proof setup (re-reading the circuit and rebuilding "
+        "its constraint rows) and decoding the proving key from disk; in-memory proving "
+        "time holds both in memory and is the prover-to-prover comparison. Timings from "
+        "runs on different machines or under different load do not compare.",
         "",
         "## Setup",
         "",

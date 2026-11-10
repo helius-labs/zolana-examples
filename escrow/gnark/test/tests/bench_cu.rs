@@ -43,7 +43,7 @@ use std::{
 
 use bench_report::{
     cold_key_load, proof_bytes, time_key_load, warm_median, CircuitRow, Implementation,
-    InstructionRow, Report,
+    InstructionRow, Report, INPUT_BLINDING,
 };
 use gnark_circuit_size::circuit_size;
 use light_program_profiler::mollusk::{register_profiling_syscalls, take_profiling_entries};
@@ -99,6 +99,12 @@ const TRANSACT_CU_LIMIT: u32 = 1_400_000;
 const V1_TX_LIMIT: usize = 4096;
 /// The mollusk slot, past every fixture leaf's append slot.
 const BENCH_SLOT: u64 = 1_000;
+/// Keypair seeds of the escrow and withdraw creators. Fixed keys keep the
+/// escrow-authority PDA bump search, and with it the CU, the same every run.
+const ESCROW_CREATOR_SEED: u8 = 1;
+const WITHDRAW_CREATOR_SEED: u8 = 2;
+/// Blinding of the dummy input, whose nullifier the SPP records too.
+const DUMMY_BLINDING: [u8; 32] = bench_report::fixed_blinding(6);
 
 fn to_mollusk_pubkey(key: &Pubkey) -> Pubkey {
     Pubkey::new_from_array(key.to_bytes())
@@ -322,7 +328,9 @@ fn measure_circuit(
         verifying_key_bytes: u64::try_from(vk.len()).expect("fits u64"),
         proof_bytes: proof_bytes(&proof.proof_a, &proof.proof_b, &proof.proof_c),
         key_load,
+        per_proof_setup: Duration::ZERO,
         warm_proof,
+        in_memory_proof: warm_proof,
     };
     (proof, row)
 }
@@ -478,18 +486,17 @@ fn bench_escrow(bench: &mut Bench) {
     const UNLOCK_TIMESTAMP: u64 = 1_000_000;
 
     let tree = spr_interface::pda::tree(BENCH_TREE_ID);
-    let payer = Keypair::new();
+    let payer = Keypair::new_from_array([ESCROW_CREATOR_SEED; 32]);
     let creator = keypair_from_payer(&payer);
     let creator_address = creator.shielded_address().expect("creator address");
 
     // The source UTXO is the creator's own balance, which the creator signs
     // for as owner signer, as in the localnet test.
-    let input_blinding = random_blinding();
     let input_utxo = Utxo {
         owner: creator_address.signing_pubkey,
         asset: spr_transaction::Mint::SOL,
         amount: INPUT_AMOUNT,
-        blinding: input_blinding,
+        blinding: INPUT_BLINDING,
         ring_program_id: None,
         data: Data::default(),
     };
@@ -505,7 +512,7 @@ fn bench_escrow(bench: &mut Bench) {
     .into();
     let input_utxos = vec![
         input_utxo,
-        SppProofInputUtxo::dummy(BENCH_TREE_ID).expect("dummy"),
+        SppProofInputUtxo::dummy_with_blinding(DUMMY_BLINDING, BENCH_TREE_ID).expect("dummy"),
     ];
 
     let mut escrow_utxo = EscrowUtxo {
@@ -633,16 +640,17 @@ fn bench_withdraw(bench: &mut Bench) {
     const SPP_RELAYER_DEADLINE: u64 = 2_000_000_000;
 
     let tree = spr_interface::pda::tree(BENCH_TREE_ID);
-    let payer = Keypair::new();
+    let payer = Keypair::new_from_array([WITHDRAW_CREATOR_SEED; 32]);
     let creator = keypair_from_payer(&payer);
     let creator_address = creator.shielded_address().expect("creator address");
 
+    // The spent escrow UTXO.
     let escrow_utxo = EscrowUtxo {
         terms: EscrowTerms {
             creator: creator_address,
             unlock_timestamp: UNLOCK_TIMESTAMP,
         },
-        blinding: random_blinding(),
+        blinding: INPUT_BLINDING,
         asset: spr_transaction::Mint::SOL,
         amount: LOCK_AMOUNT,
     };

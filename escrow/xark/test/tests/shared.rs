@@ -53,8 +53,9 @@ impl Actor {
     }
 }
 
-// The creator is the only actor: one ed25519 identity whose Solana key pays
-// the transactions and signs the withdraw.
+// The creator is the only shielded actor: one ed25519 identity whose Solana
+// key signs the escrow's source and pays and signs the withdraw. The fixture
+// payer pays the deposit and the escrow.
 pub struct TestEnv {
     /// The localnet with its client and default tree. Dropping it stops the
     /// validator, so it lives as long as the test.

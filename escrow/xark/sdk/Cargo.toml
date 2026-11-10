@@ -34,3 +34,7 @@ spr-test-utils = { workspace = true }
 [[test]]
 name = "circuits"
 path = "tests/circuits.rs"
+
+[[test]]
+name = "instruction_signers"
+path = "tests/instruction_signers.rs"

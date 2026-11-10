@@ -32,9 +32,9 @@ hand:
 - [`gnark/BENCHMARK.md`](gnark/BENCHMARK.md) and
   [`xark/BENCHMARK.md`](xark/BENCHMARK.md) are written by each
   implementation's `bench_cu` test: circuit sizes, constraint counts, key
-  loads and warm proving times, then per instruction the compute units
-  (whole instruction, proof verification, SPP CPI), warm circuit and SPP
-  proving times and the v1 transaction size.
+  loads, per-proof setup, warm and in-memory proving times, then per
+  instruction the compute units (whole instruction, proof verification, SPP
+  CPI), warm circuit and SPP proving times and the v1 transaction size.
 - [`BENCHMARK.md`](BENCHMARK.md) puts the two side by side with the delta,
   written by `test-utils/compare-benchmarks.py` from the two files.
 

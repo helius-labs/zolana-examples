@@ -26,6 +26,8 @@
 //!   the bench (`key_load_probe`).
 #[path = "../../../../test-utils/bench_report.rs"]
 mod bench_report;
+#[path = "../../../../test-utils/xark_proving.rs"]
+mod xark_proving;
 
 use std::{
     env, fs,
@@ -35,7 +37,7 @@ use std::{
 
 use bench_report::{
     cold_key_load, proof_bytes, time_key_load, warm_median, CircuitRow, Implementation,
-    InstructionRow, Report,
+    InstructionRow, Report, INPUT_BLINDING,
 };
 use light_program_profiler::mollusk::{register_profiling_syscalls, take_profiling_entries};
 use mollusk_svm::{program::loader_keys::LOADER_V3, result::Check, Mollusk};
@@ -59,7 +61,7 @@ use spr_interface::{
     },
     SHIELDED_POOL_PROGRAM_ID,
 };
-use spr_keypair::{random_blinding, NullifierKey, ShieldedKeypair, SigningKey};
+use spr_keypair::{NullifierKey, ShieldedKeypair, SigningKey};
 use spr_merkle_tree::{indexed::IndexedMerkleTree, MerkleTree};
 use spr_program::{proof::compressed_proof, CompressedProof, ProgramOwner, ProgramProofInputs};
 use spr_transaction::{
@@ -89,6 +91,15 @@ const BENCH_SLOT: u64 = 1_000;
 const SOURCE_AMOUNT: u64 = 400_000;
 const DESTINATION_AMOUNT: u64 = 250;
 const EXPIRY: u64 = 1_900_000_000;
+/// Keypair seeds of each instruction's paying party and counterparty. Fixed
+/// keys keep the order-authority PDA bump search, and with it the CU, the
+/// same every run.
+const MAKE_MAKER_SEED: u8 = 1;
+const MAKE_TAKER_SEED: u8 = 2;
+const TAKE_TAKER_SEED: u8 = 3;
+const TAKE_MAKER_SEED: u8 = 4;
+const CANCEL_MAKER_SEED: u8 = 5;
+const CANCEL_TAKER_SEED: u8 = 6;
 
 #[test]
 #[ignore = "benchmark; slow, needs the profiling SBF build and a prover. See the module docs"]
@@ -144,9 +155,9 @@ fn bench_make(
     prover: &ProverClient,
 ) -> (CircuitRow, InstructionRow) {
     let tree = spr_interface::pda::tree(BENCH_TREE_ID);
-    let payer = Keypair::new();
+    let payer = fixed_keypair(MAKE_MAKER_SEED);
     let maker = keypair_from_payer(&payer);
-    let taker = keypair_from_payer(&Keypair::new());
+    let taker = keypair_from_payer(&fixed_keypair(MAKE_TAKER_SEED));
     let taker_address = taker.shielded_address().expect("taker address");
 
     // Like the localnet flow, the maker funds the order from its own note.
@@ -196,13 +207,13 @@ fn bench_take(
     prover: &ProverClient,
 ) -> (CircuitRow, InstructionRow) {
     let tree = spr_interface::pda::tree(BENCH_TREE_ID);
-    let taker_payer = Keypair::new();
+    let taker_payer = fixed_keypair(TAKE_TAKER_SEED);
     let taker = keypair_from_payer(&taker_payer);
-    let maker = keypair_from_payer(&Keypair::new());
+    let maker = keypair_from_payer(&fixed_keypair(TAKE_MAKER_SEED));
 
     let order_utxo = OrderUtxo {
         terms: terms(&maker, Some(&taker)),
-        blinding: random_blinding(),
+        blinding: INPUT_BLINDING,
         source_mint: Mint::SOL,
         source_amount: SOURCE_AMOUNT,
     };
@@ -254,16 +265,16 @@ fn bench_cancel(
     const ORDER_EXPIRY: u64 = 1_000_000;
 
     let tree = spr_interface::pda::tree(BENCH_TREE_ID);
-    let maker_payer = Keypair::new();
+    let maker_payer = fixed_keypair(CANCEL_MAKER_SEED);
     let maker = keypair_from_payer(&maker_payer);
-    let taker = keypair_from_payer(&Keypair::new());
+    let taker = keypair_from_payer(&fixed_keypair(CANCEL_TAKER_SEED));
 
     let order_utxo = OrderUtxo {
         terms: OrderTerms {
             expiry: ORDER_EXPIRY,
             ..terms(&maker, Some(&taker))
         },
-        blinding: random_blinding(),
+        blinding: INPUT_BLINDING,
         source_mint: Mint::SOL,
         source_amount: SOURCE_AMOUNT,
     };
@@ -334,7 +345,7 @@ fn wallet_utxo(owner: &ShieldedKeypair, amount: u64, leaf_index: u64) -> WalletU
             owner: owner.signing_pubkey(),
             asset: Mint::SOL,
             amount,
-            blinding: random_blinding(),
+            blinding: INPUT_BLINDING,
             ring_program_id: None,
             data: Data::default(),
         },
@@ -410,13 +421,16 @@ fn prove_spp(
     })
 }
 
-/// Measure `id` on `inputs`: its cold key loads, its warm proof time from one
-/// loaded checked circuit copy, and its sizes. The last proof, checked
-/// against the verifying key, is returned for the instruction.
+/// Measure `id` on `inputs`: its cold key load, per-proof setup, warm and
+/// in-memory proof times, and its sizes. The last warm proof, checked against
+/// the verifying key, is returned for the instruction.
 fn measure_circuit(id: CircuitId, inputs: &ProgramProofInputs) -> (CompressedProof, CircuitRow) {
     let (key_load, _) = cold_key_load(id.name());
-    let (_private, circuit) = checked_circuit(id).expect("checked circuit");
+    let (private, circuit) = checked_circuit(id).expect("checked circuit");
     let (proven, warm_proof) = warm_median(|| circuit.prove(inputs.clone()).expect("swap proof"));
+    let circuit_dir = private.path().join(id.name());
+    let per_proof_setup = xark_proving::per_proof_setup(&circuit_dir);
+    let in_memory_proof = xark_proving::in_memory_proof(&circuit_dir, &inputs.encoded());
     let proof = compressed_proof(&proven.proof).expect("compressed proof");
     let verifying_key = verifying_key(id).expect("verifying key");
     let public_hash = spr_program::from_decimal(
@@ -442,7 +456,9 @@ fn measure_circuit(id: CircuitId, inputs: &ProgramProofInputs) -> (CompressedPro
         verifying_key_bytes: file_size(&keys_dir.join("vk.bin")),
         proof_bytes: proof_bytes(&proof.a, &proof.b, &proof.c),
         key_load,
+        per_proof_setup,
         warm_proof,
+        in_memory_proof,
     };
     (proof, row)
 }
@@ -641,6 +657,11 @@ fn assemble_accounts(
             }
         })
         .collect()
+}
+
+/// The Solana keypair of `seed`.
+fn fixed_keypair(seed: u8) -> Keypair {
+    Keypair::new_from_array([seed; 32])
 }
 
 /// The shielded keypair of a Solana fee payer: one ed25519 identity.

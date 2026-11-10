@@ -6855,6 +6855,9 @@ dependencies = [
  "spr-user-registry-interface",
  "swap-program",
  "swap-sdk",
+ "xark",
+ "xark-groth16",
+ "xark-ir",
 ]
 
 [[package]]

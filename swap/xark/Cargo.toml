@@ -13,6 +13,7 @@ edition = "2021"
 [workspace.dependencies]
 xark = "0.3.0"
 xark-groth16 = "0.3.0"
+xark-ir = "0.3.0"
 spr-account-checks = { git = "https://github.com/helius-labs/zolana", rev = "98948daa1d4043515387041ab42e15961799058d", default-features = false }
 spr-client = { git = "https://github.com/helius-labs/zolana", rev = "98948daa1d4043515387041ab42e15961799058d" }
 spr-hasher = { git = "https://github.com/helius-labs/zolana", rev = "98948daa1d4043515387041ab42e15961799058d", default-features = false }
