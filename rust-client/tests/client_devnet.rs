@@ -1,12 +1,12 @@
 use std::{env, path::PathBuf};
 
 use anyhow::{anyhow, ensure, Result};
-use rust_client_example::{SetupContext, INDEXER_URL, PROVER_URL};
+use rust_client_example::SetupContext;
 use solana_keypair::{read_keypair_file, Keypair};
 use solana_signer::Signer;
 use solana_system_interface::instruction::transfer;
 use spr_client::{ComputeBudgetConfig, ProofDataSource, Rpc, SolanaRpc, ZolanaClient};
-use spr_interface::{pda, PROGRAM_ID_PUBKEY};
+use spr_interface::PROGRAM_ID_PUBKEY;
 use spr_user_registry_interface::user_registry_program_id;
 
 mod shared;
@@ -53,12 +53,7 @@ fn with_funded_payer(
 
 #[test]
 fn rust_and_typescript_clients_on_devnet() -> Result<()> {
-    let context = SetupContext {
-        rpc_url: env::var("DEVNET_RPC_URL")?,
-        indexer_url: INDEXER_URL.to_string(),
-        prover_url: PROVER_URL.to_string(),
-        tree: pda::tree(0),
-    };
+    let context = SetupContext::from_rpc_url(env::var("DEVNET_RPC_URL")?)?;
     let rpc = SolanaRpc::new(&context.rpc_url);
     // Devnet genesis: EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG.
     ensure!(
@@ -70,8 +65,8 @@ fn rust_and_typescript_clients_on_devnet() -> Result<()> {
     let prover = context.prover_client()?;
     ensure!(prover.has_tee(), "devnet proving must use TEE attestation");
     prover.attest()?;
-    prover.check_indexed()?;
-    println!("Devnet Photon: {INDEXER_URL}; attested TEE prover: {PROVER_URL}");
+    prover.check_proving_keys()?;
+    println!("Devnet RPC, indexer, and attested TEE prover use the Helius endpoint");
     let client = context.client()?;
     let keypair_path = env::var("DEVNET_PAYER_KEYPAIR_PATH")?;
     let sponsor = read_keypair_file(keypair_path)

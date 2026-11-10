@@ -18,9 +18,11 @@ cp .env.example .env
 
 By default, the examples use your CLI wallet as `payer`. Make sure it's funded with [devnet SOL](https://faucet.solana.com/).
 
-To run on localnet, toggle `localnet` in [`src/lib.rs`](src/lib.rs). For a local prover without an indexer, select `ProofDataSource::Client` in `SetupContext::client`; the localnet integration tests use this mode through `FixtureLocalnet.client`.
+One Helius RPC endpoint serves Solana RPC, the Photon indexer, and the attested TEE prover. The examples route indexer and prover requests through `/v1/spr`, preserving the API key. For mainnet, set `ZOLANA_ENDPOINT=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY`. The examples select the signed TEE policy for the endpoint's network.
 
-Devnet proofs use the attested TEE prover, which fetches Merkle proofs from Photon and assembles the witness server-side. Photon also serves balance and history reads.
+To run on localnet, set `ZOLANA_ENDPOINT=http://127.0.0.1:8899`, `ZOLANA_INDEXER_URL=http://127.0.0.1:8784`, and `ZOLANA_PROVER_URL=http://127.0.0.1:3001` in `.env`. For a local prover without an indexer, select `ProofDataSource::Client` in `SetupContext::client`; the localnet integration tests use this mode through `FixtureLocalnet.client`.
+
+The attested TEE prover fetches Merkle proofs from Photon and assembles the witness server-side. Photon also serves balance and history reads.
 
 ## Run
 

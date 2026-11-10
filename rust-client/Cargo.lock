@@ -3464,6 +3464,7 @@ dependencies = [
  "spr-test-utils",
  "spr-transaction",
  "spr-user-registry-interface",
+ "url",
 ]
 
 [[package]]
