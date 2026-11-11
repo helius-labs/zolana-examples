@@ -320,9 +320,9 @@ function sortedSigners(signers: readonly NewSigner[]): SmartAccountSigner[] {
  * Squads `executeTransactionSyncV2` with an inner user registry `register`
  * of the record's public keys and a data registry `set_data` of the record,
  * both signed by the vault. The vault pays both records' rent, so it needs
- * SOL. Each
- * approver runs `checkOwnEntry` on `record` first. `register` fails on chain
- * once the vault is registered, so a second Register cannot replace the keys.
+ * SOL. Each approver runs `checkOwnEntry` on `record` first. `register` fails
+ * on chain once the vault is registered, so a second Register cannot replace
+ * the keys.
  */
 export async function registerVaultInstruction(
   input: Readonly<{

@@ -1,6 +1,6 @@
 /**
  * Create, Register, Spend and Rotate against the release localnet with the
- * branch user registry (scripts/localnet.sh). The main test is one test
+ * data registry program (scripts/localnet.sh). The main test is one test
  * because each step builds on the last.
  */
 import assert from "node:assert/strict";
