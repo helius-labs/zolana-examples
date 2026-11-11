@@ -46,7 +46,8 @@
 CI runs all five Rust and TypeScript client examples and the swap (take and
 cancel) and timelock escrow flows of both implementations: the gnark ones in
 the `examples` workflow and the Xark ones in `swap-xark` and `escrow-xark`.
-The `smart-account-client` workflow runs the private smart account flows.
+The `smart-account-client` workflow runs the private smart account flows on
+devnet; the same suite can run locally on mainnet.
 All Rust examples and the Rust client pin the Zolana crates as Git
 dependencies at one commit, `ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08`: the
 [`cli-v0.10.0`](https://github.com/helius-labs/zolana/releases/tag/cli-v0.10.0)

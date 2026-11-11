@@ -34,9 +34,9 @@ import {
 } from "./keyRecord.js";
 import { SYSTEM_PROGRAM_ADDRESS } from "./squads.js";
 
-/** The data registry program (program/), at the address the localnet loads it. */
+/** The data registry program (program/), deployed on devnet and mainnet. */
 export const DATA_REGISTRY_PROGRAM_ADDRESS = address(
-  "Eoxe4CcAxAjM4FE4YcR889kDVDmZvr9txS74LQ8ybHdU",
+  "Stor9L8wQBAGcAcoUcADt5sWYYaEA65Ws2Cgt5UUqXj",
 );
 const UPDATE_KEYS = 2;
 const SET_DATA = 0;

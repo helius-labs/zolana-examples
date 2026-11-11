@@ -6,7 +6,8 @@
   "scripts": {
     "check": "oxfmt --check . && tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
-    "test:localnet": "node --import tsx --test --test-concurrency=1 test/localnet/*.test.ts"
+    "test:devnet": "SA_NETWORK=devnet node --import tsx --test --test-concurrency=1 test/network/*.test.ts",
+    "test:mainnet": "SA_NETWORK=mainnet node --import tsx --test --test-concurrency=1 test/network/*.test.ts"
   },
   "dependencies": {
     "@heliuslabs/spr": "0.9.0-alpha",

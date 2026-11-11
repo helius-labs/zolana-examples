@@ -1,17 +1,12 @@
 /**
- * Create, Register, Spend and Rotate against the release localnet with the
- * data registry program (scripts/localnet.sh). The main test is one test
+ * Create, Register, Spend and Rotate on devnet or mainnet using the deployed
+ * programs. The main test is one test
  * because each step builds on the last.
  */
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 
-import {
-  AccountRole,
-  address,
-  type Address,
-  type Instruction,
-} from "@solana/kit";
+import { type Address, type TransactionSigner } from "@solana/kit";
 import { SOL_MINT } from "@heliuslabs/spr";
 import type { SprClient } from "@heliuslabs/spr/client";
 import { ShieldedKeypair, initializePoseidon } from "@heliuslabs/spr/keypair";
@@ -33,46 +28,40 @@ import {
   vaultKeys,
   type Member,
 } from "../../src/smartAccount.js";
-import { Permission } from "../../src/squads.js";
-import { airdrop, localClient, send, syncedSolBalance } from "./send.js";
-
-const SOL = 1_000_000_000n;
-const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
-
-function transferSol(from: Member, to: Address, amount: bigint): Instruction {
-  const data = new Uint8Array(12);
-  data[0] = 2;
-  new DataView(data.buffer).setBigUint64(4, amount, true);
-  return {
-    programAddress: SYSTEM_PROGRAM,
-    accounts: [
-      {
-        address: from.signer.address,
-        role: AccountRole.WRITABLE_SIGNER,
-        signer: from.signer,
-      },
-      { address: to, role: AccountRole.WRITABLE },
-    ],
-    data,
-  } as Instruction;
-}
+import {
+  Permission,
+  executeTransactionSyncInstruction,
+} from "../../src/squads.js";
+import { networkSetup, send, syncedSolBalance, transferSol } from "./send.js";
 
 /**
- * Funds `count` fresh members. Each registers its own keys, because rotate
+ * Registers `count` fresh members. Each registers its own keys, because rotate
  * reads kept signers' viewing keys from the registry.
  */
 async function registeredMembers(
   client: SprClient,
+  payer: TransactionSigner,
   count: number,
+  t: TestContext,
 ): Promise<Member[]> {
   const members = Array.from({ length: count }, () =>
     memberFromKeypair(ShieldedKeypair.generate()),
   );
+  t.after(async () => {
+    for (const member of members) {
+      const balance = await client.getBalance(member.signer.address);
+      if (balance > 0n) {
+        await send(client, payer, [
+          transferSol(member.signer, payer.address, balance),
+        ]);
+      }
+    }
+  });
   for (const member of members) {
-    await airdrop(client, member.signer.address, 20n * SOL);
-    await send(client, member.signer, [
+    await send(client, payer, [
       await getRegisterInstructionAsync({
         owner: member.signer,
+        payer,
         nullifierPublicKey: member.keypair.nullifierPublicKey(),
         viewingPublicKey: member.keypair.viewingPublicKey().toBytes(),
       }),
@@ -82,7 +71,18 @@ async function registeredMembers(
 }
 
 /** Alice creates a 2-of-2 account for Alice and Bob and funds its vault. */
-async function createTwoOfTwo(client: SprClient, alice: Member, bob: Member) {
+async function createTwoOfTwo(
+  client: SprClient,
+  payer: TransactionSigner,
+  members: readonly Member[],
+  t: TestContext,
+) {
+  const [alice, bob] = members;
+  assert(alice && bob);
+  // The creator pays Squads' account rent; the sponsor pays transaction fees.
+  await send(client, payer, [
+    transferSol(payer, alice.signer.address, 30_000_000n),
+  ]);
   const created = await createSmartAccount({
     client,
     creator: alice.signer,
@@ -94,9 +94,26 @@ async function createTwoOfTwo(client: SprClient, alice: Member, bob: Member) {
     })),
   });
   // The vault pays the registry rent and the SPP fees inside the Squads CPIs.
-  await send(client, alice.signer, [
+  t.after(async () => {
+    const balance = await client.getBalance(created.vault);
+    if (balance === 0n) return;
+    const settings = await fetchSettings(client, created.settings);
+    const approvers = members
+      .filter((member) =>
+        settings.signers.some(({ key }) => key === member.signer.address),
+      )
+      .map((member) => member.signer);
+    await send(client, payer, [
+      await executeTransactionSyncInstruction({
+        settings: created.settings,
+        approvers,
+        inner: [transferSol(created.vault, payer.address, balance)],
+      }),
+    ]);
+  });
+  await send(client, payer, [
     created.instruction,
-    transferSol(alice, created.vault, 2n * SOL),
+    transferSol(payer, created.vault, 20_000_000n),
   ]);
   return created;
 }
@@ -110,14 +127,14 @@ async function vaultRegistry(client: SprClient, vault: Address) {
 
 async function depositToVault(
   client: SprClient,
-  depositor: Member,
+  depositor: TransactionSigner,
   vaultAddress: ReturnType<typeof vaultKeys>["address"],
   amount: bigint,
 ): Promise<void> {
-  await send(client, depositor.signer, [
+  await send(client, depositor, [
     await depositInstruction({
       tree: client.tree,
-      depositor: depositor.signer,
+      depositor,
       deposits: [
         {
           asset: DepositAsset.sol(),
@@ -133,16 +150,17 @@ async function depositToVault(
 test(
   "create, register, spend and rotate a private smart account",
   { timeout: 600_000 },
-  async () => {
+  async (t) => {
     await initializePoseidon();
-    const client = await localClient();
+    const { client, payer } = await networkSetup();
     // 1. Derive: each signer registers its own keys.
-    const [alice, bob, carol] = await registeredMembers(client, 3);
+    const members = await registeredMembers(client, payer, 3, t);
+    const [alice, bob, carol] = members;
     assert(alice && bob && carol);
     const recipient = ShieldedKeypair.generate();
 
     // 1. Create: Alice creates a 2-of-2 account for Alice and Bob.
-    const created = await createTwoOfTwo(client, alice, bob);
+    const created = await createTwoOfTwo(client, payer, members, t);
     const settings = await fetchSettings(client, created.settings);
     assert.equal(settings.threshold, 2);
     assert.deepEqual(
@@ -154,7 +172,7 @@ test(
     // the vault registers the keys and sets the record as its registry data.
     checkOwnEntry(created.record, alice);
     checkOwnEntry(created.record, bob);
-    await send(client, alice.signer, [
+    await send(client, payer, [
       await registerVaultInstruction({
         client,
         settings: created.settings,
@@ -180,7 +198,7 @@ test(
       bobKeys.secrets,
       bobKeys.viewingKeys,
     );
-    await depositToVault(client, carol, vault.address, 10_000_000n);
+    await depositToVault(client, payer, vault.address, 10_000_000n);
     const funded = await syncedSolBalance(
       client,
       vault.address,
@@ -188,8 +206,8 @@ test(
       10_000_000n,
     );
 
-    // 3. Spend: Bob pays 3,000,000 lamports to the recipient, Alice approves.
-    await send(client, bob.signer, [
+    // 3. Spend: Bob initiates a 3,000,000-lamport payment, Alice approves.
+    await send(client, payer, [
       await spendInstruction({
         client,
         settings: created.settings,
@@ -233,7 +251,7 @@ test(
     assert.equal(rotation.record.epoch, 1n);
     // Approve: Alice stays a signer, so she checks her entry before signing.
     checkOwnEntry(rotation.record, alice);
-    await send(client, alice.signer, rotation.instructions);
+    await send(client, payer, rotation.instructions);
     const rotated = await fetchSettings(client, created.settings);
     assert.deepEqual(
       rotated.signers.map((signer) => signer.key).sort(),
@@ -274,7 +292,7 @@ test(
       aliceVault.shielded,
       7_000_000n,
     );
-    await send(client, carol.signer, [
+    await send(client, payer, [
       await spendInstruction({
         client,
         settings: created.settings,
@@ -332,7 +350,7 @@ test(
     });
     assert.equal(keyOnly.instructions.length, 1);
     checkOwnEntry(keyOnly.record, alice);
-    await send(client, carol.signer, keyOnly.instructions);
+    await send(client, payer, keyOnly.instructions);
     assert.deepEqual(await vaultRegistry(client, created.vault), {
       viewingPublicKey: keyOnly.record.sharedViewingPublicKey,
       record: keyOnly.record,
@@ -362,12 +380,13 @@ test(
 test(
   "rotate needs a registered vault, and a second register fails on chain",
   { timeout: 300_000 },
-  async () => {
+  async (t) => {
     await initializePoseidon();
-    const client = await localClient();
-    const [alice, bob] = await registeredMembers(client, 2);
+    const { client, payer } = await networkSetup();
+    const members = await registeredMembers(client, payer, 2, t);
+    const [alice, bob] = members;
     assert(alice && bob);
-    const created = await createTwoOfTwo(client, alice, bob);
+    const created = await createTwoOfTwo(client, payer, members, t);
     const rotateKeys = {
       client,
       settings: created.settings,
@@ -387,7 +406,7 @@ test(
       approvers: [alice.signer, bob.signer],
       record: created.record,
     });
-    await send(client, alice.signer, [register]);
+    await send(client, payer, [register]);
 
     // Adding a current signer is refused; it belongs in `keep`.
     await assert.rejects(
@@ -409,11 +428,9 @@ test(
     // create the vault's record twice, so the replay cannot put record 0's
     // keys back.
     const rotation = await rotateSmartAccount(rotateKeys);
-    await send(client, alice.signer, rotation.instructions);
-    await assert.rejects(
-      send(client, alice.signer, [register]),
-      (error: Error) =>
-        /requires an uninitialized account/.test(String(error.cause)),
+    await send(client, payer, rotation.instructions);
+    await assert.rejects(send(client, payer, [register]), (error: Error) =>
+      /requires an uninitialized account/.test(String(error.cause)),
     );
     assert.deepEqual(await vaultRegistry(client, created.vault), {
       viewingPublicKey: rotation.record.sharedViewingPublicKey,

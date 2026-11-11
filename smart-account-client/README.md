@@ -10,20 +10,20 @@ their limitations.
 > [!WARNING]
 > **Not for production.** An example, not audited code. Nothing checks that a
 > key record's ciphertexts open for every signer; see the limitations in
-> `design.md`. The data registry program is not deployed; the localnet loads
-> it at `Eoxe4CcAxAjM4FE4YcR889kDVDmZvr9txS74LQ8ybHdU`.
+> `design.md`. The data registry program is deployed on devnet and mainnet at
+> `Stor9L8wQBAGcAcoUcADt5sWYYaEA65Ws2Cgt5UUqXj`.
 
 ## Layout
 
-| File                                                                       |                                                                                                                                                             |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`program/src/lib.rs`](program/src/lib.rs)                                 | The data registry: a stripped-down user registry whose only instruction, `set_data`, lets an owner replace the data at the PDA `[b"data", owner]`.          |
-| [`src/squads.ts`](src/squads.ts)                                           | Squads PDAs, `createSmartAccount`, `executeTransactionSyncV2`, `executeSettingsTransactionSync`, the `Settings` decoder and the sync consensus check.       |
-| [`src/keyRecord.ts`](src/keyRecord.ts)                                     | The key record layout (`173 + 97 · N` bytes) and its encryption.                                                                                            |
-| [`src/registry.ts`](src/registry.ts)                                       | The vault's registered key and data record: the current key record, the earlier ones from the `set_data` history, `register`, `update_keys` and `set_data`. |
-| [`src/smartAccount.ts`](src/smartAccount.ts)                               | The Create, Register, Rotate and Spend flows.                                                                                                               |
-| [`src/bytes.ts`](src/bytes.ts)                                             | The little-endian byte reader and writer.                                                                                                                   |
-| [`test/localnet/smartAccount.test.ts`](test/localnet/smartAccount.test.ts) | All flows end to end on a localnet.                                                                                                                         |
+| File                                                                     |                                                                                                                                                             |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`program/src/lib.rs`](program/src/lib.rs)                               | The data registry: a stripped-down user registry whose only instruction, `set_data`, lets an owner replace the data at the PDA `[b"data", owner]`.          |
+| [`src/squads.ts`](src/squads.ts)                                         | Squads PDAs, `createSmartAccount`, `executeTransactionSyncV2`, `executeSettingsTransactionSync`, the `Settings` decoder and the sync consensus check.       |
+| [`src/keyRecord.ts`](src/keyRecord.ts)                                   | The key record layout (`173 + 97 · N` bytes) and its encryption.                                                                                            |
+| [`src/registry.ts`](src/registry.ts)                                     | The vault's registered key and data record: the current key record, the earlier ones from the `set_data` history, `register`, `update_keys` and `set_data`. |
+| [`src/smartAccount.ts`](src/smartAccount.ts)                             | The Create, Register, Rotate and Spend flows.                                                                                                               |
+| [`src/bytes.ts`](src/bytes.ts)                                           | The little-endian byte reader and writer.                                                                                                                   |
+| [`test/network/smartAccount.test.ts`](test/network/smartAccount.test.ts) | All flows end to end on devnet or mainnet.                                                                                                                  |
 
 ## Key record encryption
 
@@ -70,20 +70,27 @@ signature.
 
 ## Run
 
-Install Node.js 24+, pnpm and the Anza CLI (`cargo build-sbf`), then:
+Install Node.js 24+ and pnpm. Set the Helius RPC URLs in the environment;
+the SDK uses the same endpoint's `/v1/spr` for the indexer and attested TEE
+prover. The tests check the cluster's genesis hash, deployed programs,
+Squads configuration, TEE attestation and proving keys before funding accounts.
 
 ```bash
 pnpm install
 pnpm test                    # unit tests
-bash scripts/localnet.sh     # start the cli-v0.10.0 release localnet
-pnpm test:localnet           # create, register, spend and rotate
-bash scripts/localnet.sh --stop
+export SOLANA_DEVNET_RPC_URL='https://devnet.helius-rpc.com/?api-key=YOUR_KEY'
+export SOLANA_MAINNET_RPC_URL='https://mainnet.helius-rpc.com/?api-key=YOUR_KEY'
+pnpm test:devnet             # create, register, spend and rotate on devnet
+pnpm test:mainnet            # the same flows on mainnet
 ```
 
-`scripts/localnet.sh` builds the data registry program, installs the
-`cli-v0.10.0` CLI under `target/sa-client`, and runs `zolana dev start`, which
-loads the deployed shielded pool, user registry and the Squads smart-account
-program the release pins, plus the data registry. It adds the Squads
-`ProgramConfig` account the release snapshot leaves out. Ports default to RPC
-18899, Photon 18784 and prover 13301; `SA_RPC_URL`, `SA_INDEXER_URL` and
-`SA_PROVER_URL` point the tests elsewhere.
+Only the selected network's RPC variable is required. The payer defaults to
+`~/.config/solana/id.json`; set `ZOLANA_PAYER_KEYPAIR` to use another file.
+Fund it with at least 0.1 SOL on the selected network. The payer covers fees,
+account rent and a 0.01 SOL private deposit. Cleanup returns unused public SOL
+from the fresh members and vaults, including after a failed assertion. Account
+rent and the private balances remain on chain.
+
+CI runs the devnet suite using the existing `DEVNET_RPC_URL` and
+`DEVNET_PAYER_KEYPAIR` repository secrets. Fork pull requests run the unit
+checks only. Mainnet tests run locally.
