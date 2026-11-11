@@ -2,8 +2,9 @@
  * The Create, Register, Rotate and Spend flows of design.md, as instruction
  * builders. The vault (Squads smart account at index 0) owns the shielded
  * UTXOs; Squads signs for it in `executeTransactionSyncV2`. The current key
- * record lives in the vault's user registry record (src/registry.ts). No program of
- * this example runs on chain and no proof checks a key record.
+ * record lives in the vault's data record of the data registry program
+ * (src/registry.ts, program/), which only stores it. No proof checks a key
+ * record.
  */
 import {
   type Address,
@@ -132,9 +133,9 @@ async function fetchCurrentKeyRecord(
 
 /**
  * Recovers the shared secrets of the current key record, and the viewing
- * keys of earlier records `member` was in, current first. The registry keeps
- * only the current record, so the earlier ones come from the `set_data`
- * instructions in the registry record's transaction history. Their keys open
+ * keys of earlier records `member` was in, current first. The data record
+ * keeps only the current record, so the earlier ones come from the
+ * `set_data` instructions in its transaction history. Their keys open
  * UTXOs the vault received before a rotate; the SDK's wallet sync tries every
  * viewing key it holds on each of the vault's outputs.
  */
@@ -316,9 +317,10 @@ function sortedSigners(signers: readonly NewSigner[]): SmartAccountSigner[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Squads `executeTransactionSyncV2` with an inner registry `register` of the
- * record's public keys and a `set_data` of the record, both signed by
- * the vault. The vault pays the registry rent, so it needs SOL. Each
+ * Squads `executeTransactionSyncV2` with an inner user registry `register`
+ * of the record's public keys and a data registry `set_data` of the record,
+ * both signed by the vault. The vault pays both records' rent, so it needs
+ * SOL. Each
  * approver runs `checkOwnEntry` on `record` first. `register` fails on chain
  * once the vault is registered, so a second Register cannot replace the keys.
  */
@@ -378,7 +380,8 @@ async function checkApprovers(
 export interface Rotation {
   readonly record: KeyRecord;
   /**
-   * In order: the registry `update_keys` and `set_data` of the new record,
+   * In order: the user registry `update_keys` and the data registry
+   * `set_data` of the new record,
    * then the settings change, if any.
    */
   readonly instructions: readonly Instruction[];

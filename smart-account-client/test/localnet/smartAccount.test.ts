@@ -255,7 +255,7 @@ test(
 
     // Alice was a signer before the rotate, so she still opens the vault's
     // older UTXO with the earlier viewing key, which she reads from record 0
-    // in the registry record's history, and spends it with Carol.
+    // in the data record's history, and spends it with Carol.
     const aliceKeys = await recoverVaultKeys({
       client,
       settings: created.settings,

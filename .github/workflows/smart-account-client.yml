@@ -56,8 +56,7 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
-      # scripts/localnet.sh builds the user registry of the privacy-rings
-      # commit the @heliuslabs/spr dependency pins.
+      # scripts/localnet.sh builds the data registry program (program/).
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -69,11 +68,10 @@ jobs:
       - name: Install pinned SBF platform tools
         run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
 
-      - name: Cache the user registry build
-        uses: actions/cache@v4
+      - name: Cache the program build
+        uses: Swatinem/rust-cache@v2
         with:
-          path: target/sa-client/registry
-          key: sa-client-registry-${{ runner.os }}-${{ hashFiles('smart-account-client/package.json') }}
+          workspaces: smart-account-client/program
 
       - name: Cache release artifacts
         uses: actions/cache@v4

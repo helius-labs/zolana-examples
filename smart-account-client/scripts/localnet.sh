@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Start the cli-v0.10.0 release localnet for the smart-account-client tests:
-# surfpool with the shielded pool and the Squads smart-account program the
-# release pins, plus the prover and Photon. Replaces the release user registry
-# with one built from the pinned privacy-rings commit, which has set_data,
-# and adds the Squads ProgramConfig account the release snapshot leaves out.
+# surfpool with the shielded pool, the user registry and the Squads
+# smart-account program the release pins, plus the prover and Photon. Adds the
+# data registry program (program/), built here, and the Squads ProgramConfig
+# account the release snapshot leaves out.
 #
 #   bash scripts/localnet.sh          # start
 #   bash scripts/localnet.sh --stop   # stop
@@ -35,27 +35,13 @@ if [[ ! -x $cli ]]; then
     install_zolana_cli "$work_dir/$zolana_release" "$cli"
 fi
 
-# The user registry with set_data comes from the privacy-rings commit the
-# @heliuslabs/spr dependency pins, built here. `--sbf-program` would turn off
-# the release artifacts, so it goes to surfpool as a passthrough argument
-# after the release programs, and the later load replaces the release one.
-registry_revision=$(cd "$client_dir" && node -p \
-    'require("./package.json").dependencies["@heliuslabs/spr"].match(/#([0-9a-f]{40})/)[1]')
-registry_program=regy3WAeRXMYuMYxr5iK3Bf9Arr3PcxGxyzAddbiqDQ
-registry_so="$work_dir/registry/$registry_revision/spr_user_registry.so"
-if [[ ! -f $registry_so ]]; then
-    source_dir="$work_dir/registry-src"
-    rm -rf "$source_dir"
-    git init -q "$source_dir"
-    git -C "$source_dir" fetch -q --depth 1 \
-        https://github.com/helius-labs/privacy-rings.git "$registry_revision"
-    git -C "$source_dir" checkout -q FETCH_HEAD
-    # The flags of the repository's tools/build-programs.sh.
-    cargo build-sbf --tools-version "${SBF_TOOLS_VERSION:-v1.54}" \
-        --sbf-out-dir "$(dirname "$registry_so")" \
-        --manifest-path "$source_dir/programs/user-registry/Cargo.toml" \
-        -- --locked --features bpf-entrypoint
-fi
+# The data registry keeps the vault's key record. `--sbf-program` would turn
+# off the release artifacts, so it goes to surfpool as a passthrough argument.
+data_registry_program=Eoxe4CcAxAjM4FE4YcR889kDVDmZvr9txS74LQ8ybHdU
+cargo build-sbf --tools-version "${SBF_TOOLS_VERSION:-v1.54}" \
+    --manifest-path "$client_dir/program/Cargo.toml" \
+    -- --locked --features bpf-entrypoint
+data_registry_so="$client_dir/program/target/deploy/data_registry.so"
 
 account_dir="$work_dir/accounts"
 rm -rf "$account_dir"
@@ -65,7 +51,7 @@ rm -rf "$account_dir"
     --slot-time 100 \
     --account-dir "$account_dir" \
     --log-dir "$work_dir/logs" \
-    -- --bpf-program "$registry_program" "$registry_so"
+    -- --bpf-program "$data_registry_program" "$data_registry_so"
 
 cat <<EOF
 Localnet ready. Run the tests with:

@@ -39,7 +39,7 @@
 
 |  |  |
 |---------|-------------|
-| [`smart-account-client/`](smart-account-client/) | A Squads smart account whose vault holds a private balance, with a shared viewing key encrypted to every signer in a key record on the vault's user registry record. TypeScript, no program. |
+| [`smart-account-client/`](smart-account-client/) | A Squads smart account whose vault holds a private balance, with a shared viewing key encrypted to every signer in a key record that a minimal data registry program stores. TypeScript client and a pinocchio program. |
 
 ## Documentation
 
@@ -57,9 +57,8 @@ and [`escrow/README.md`](escrow/README.md).
 The TypeScript client uses the npm release `@heliuslabs/spr@0.9.0-alpha`,
 which has the paged indexer API of the `cli-v0.10.0` Photon. It predates the
 deployed 1.0 programs' per-tree fee defaults and user-registry `update_keys`
-data, which the TypeScript client does not use; a matching npm release
-replaces it. The private smart account pins the SDK and the user registry to
-an unreleased privacy-rings commit with registry `set_data`; see
+data; a matching npm release replaces it. The private smart account builds
+the `update_keys` instruction itself; see
 [`smart-account-client/README.md`](smart-account-client/README.md).
 The gnark circuits fetch the Go modules
 `github.com/helius-labs/zolana/sdk-libs/gnark-sdk` and `prover/server` at the
