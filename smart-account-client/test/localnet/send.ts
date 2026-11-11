@@ -16,20 +16,19 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { SOL_MINT, Wallet, createSprClient, syncWallet } from "@heliuslabs/spr";
+import type { SprClient } from "@heliuslabs/spr/client";
 import type { ShieldedAddress } from "@heliuslabs/spr/keypair";
 import {
   AssetRegistry,
   type LocalShieldedKeys,
 } from "@heliuslabs/spr/transaction";
 
-import type { Client } from "../../src/smartAccount.js";
-
 export interface Confirmed {
   readonly signature: Signature;
   readonly slot: bigint;
 }
 
-export async function localClient(): Promise<Client> {
+export async function localClient(): Promise<SprClient> {
   return createSprClient({
     solanaRpcUrl: process.env["SA_RPC_URL"] ?? "http://127.0.0.1:18899",
     indexerUrl: process.env["SA_INDEXER_URL"] ?? "http://127.0.0.1:18784",
@@ -40,7 +39,7 @@ export async function localClient(): Promise<Client> {
 
 /** Signs with every signer the instructions name, then waits for confirmation. */
 export async function send(
-  client: Client,
+  client: SprClient,
   feePayer: TransactionSigner,
   instructions: readonly Instruction[],
 ): Promise<Confirmed> {
@@ -77,7 +76,7 @@ export async function send(
 }
 
 export async function airdrop(
-  client: Client,
+  client: SprClient,
   to: Address,
   amount: bigint,
 ): Promise<void> {
@@ -92,7 +91,7 @@ export async function airdrop(
  * indexer lags the validator by a few slots.
  */
 export async function syncedSolBalance(
-  client: Client,
+  client: SprClient,
   address: ShieldedAddress,
   keys: LocalShieldedKeys,
   expected: bigint,

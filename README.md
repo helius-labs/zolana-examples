@@ -39,13 +39,14 @@
 
 |  |  |
 |---------|-------------|
-| [`smart-account-client/`](smart-account-client/) | A Squads smart account whose vault holds a private balance, with a shared viewing key encrypted to every signer off chain. TypeScript, no program. |
+| [`smart-account-client/`](smart-account-client/) | A Squads smart account whose vault holds a private balance, with a shared viewing key encrypted to every signer in a key record on the vault's user registry record. TypeScript, no program. |
 
 ## Documentation
 
 CI runs all five Rust and TypeScript client examples and the swap (take and
 cancel) and timelock escrow flows of both implementations: the gnark ones in
 the `examples` workflow and the Xark ones in `swap-xark` and `escrow-xark`.
+The `smart-account-client` workflow runs the private smart account flows.
 All Rust examples and the Rust client pin the Zolana crates as Git
 dependencies at one commit, `ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08`: the
 [`cli-v0.10.0`](https://github.com/helius-labs/zolana/releases/tag/cli-v0.10.0)
@@ -56,7 +57,10 @@ and [`escrow/README.md`](escrow/README.md).
 The TypeScript client uses the npm release `@heliuslabs/spr@0.9.0-alpha`,
 which has the paged indexer API of the `cli-v0.10.0` Photon. It predates the
 deployed 1.0 programs' per-tree fee defaults and user-registry `update_keys`
-data, which the examples do not use; a matching npm release replaces it.
+data, which the TypeScript client does not use; a matching npm release
+replaces it. The private smart account pins the SDK and the user registry to
+an unreleased privacy-rings commit with registry `set_data`; see
+[`smart-account-client/README.md`](smart-account-client/README.md).
 The gnark circuits fetch the Go modules
 `github.com/helius-labs/zolana/sdk-libs/gnark-sdk` and `prover/server` at the
 same commit. The integration tests run against the `cli-v0.10.0` release: its

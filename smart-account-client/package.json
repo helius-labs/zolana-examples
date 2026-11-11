@@ -9,7 +9,7 @@
     "test:localnet": "node --import tsx --test --test-concurrency=1 test/localnet/*.test.ts"
   },
   "dependencies": {
-    "@heliuslabs/spr": "0.9.0-alpha",
+    "@heliuslabs/spr": "git+https://github.com/helius-labs/privacy-rings.git#25a5242a0de813dba5310ba26299502fd88a21ac&path:/sdk-libs/ts",
     "@solana/kit": "^8.3.0"
   },
   "devDependencies": {

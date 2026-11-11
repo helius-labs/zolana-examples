@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@heliuslabs/spr':
-        specifier: 0.9.0-alpha
-        version: 0.9.0-alpha(@solana/kit@8.6.0(typescript@7.0.2))(typescript@7.0.2)
+        specifier: git+https://github.com/helius-labs/privacy-rings.git#25a5242a0de813dba5310ba26299502fd88a21ac&path:/sdk-libs/ts
+        version: https://codeload.github.com/helius-labs/privacy-rings/tar.gz/25a5242a0de813dba5310ba26299502fd88a21ac#path:/sdk-libs/ts(@solana/kit@8.6.0(typescript@7.0.2))(typescript@7.0.2)
       '@solana/kit':
         specifier: ^8.3.0
         version: 8.6.0(typescript@7.0.2)
@@ -186,8 +186,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@heliuslabs/spr@0.9.0-alpha':
-    resolution: {integrity: sha512-mQVsBnO+Fv/XDlGFAab+ic3Cx0m7nZRd7lRQSNHpR0EhCWZXwPg+2ZLOQkLIzgdum2WFVcWeM0nQqxP098H1Hg==}
+  '@heliuslabs/spr@https://codeload.github.com/helius-labs/privacy-rings/tar.gz/25a5242a0de813dba5310ba26299502fd88a21ac#path:/sdk-libs/ts':
+    resolution: {gitHosted: true, integrity: sha512-f9ZrvGB1gX7C8zBbSPVM6G1IltS2xsVsFe1Y6Lqw4S558KMTBRRcDa7toVLEiK2NQjXJgHPYVyP7tASr9LxyeQ==, path: /sdk-libs/ts, tarball: https://codeload.github.com/helius-labs/privacy-rings/tar.gz/25a5242a0de813dba5310ba26299502fd88a21ac}
+    version: 0.9.0-alpha
     engines: {node: ^22.12.0 || >=24}
     peerDependencies:
       '@solana/kit': ^8.3.0
@@ -1098,7 +1099,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@heliuslabs/spr@0.9.0-alpha(@solana/kit@8.6.0(typescript@7.0.2))(typescript@7.0.2)':
+  '@heliuslabs/spr@https://codeload.github.com/helius-labs/privacy-rings/tar.gz/25a5242a0de813dba5310ba26299502fd88a21ac#path:/sdk-libs/ts(@solana/kit@8.6.0(typescript@7.0.2))(typescript@7.0.2)':
     dependencies:
       '@hpke/core': 1.10.1
       '@lightprotocol/hasher.rs': 0.2.1

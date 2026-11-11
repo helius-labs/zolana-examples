@@ -18,6 +18,13 @@ concurrency:
   group: smart-account-client-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  AGAVE_VERSION: v4.0.2
+  SBF_TOOLS_VERSION: v1.54
+
 jobs:
   test:
     name: check and localnet / smart-account-client
@@ -49,11 +56,30 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      # scripts/localnet.sh builds the user registry of the privacy-rings
+      # commit the @heliuslabs/spr dependency pins.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Anza CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Install pinned SBF platform tools
+        run: cargo build-sbf --tools-version "$SBF_TOOLS_VERSION" --install-only
+
+      - name: Cache the user registry build
+        uses: actions/cache@v4
+        with:
+          path: target/sa-client/registry
+          key: sa-client-registry-${{ runner.os }}-${{ hashFiles('smart-account-client/package.json') }}
+
       - name: Cache release artifacts
         uses: actions/cache@v4
         with:
           path: target/sa-client/zolana-config/cache
-          key: sa-client-zolana-cli-v0.10.0-${{ runner.os }}
+          key: sa-client-zolana-${{ runner.os }}-${{ hashFiles('test-utils/zolana-release.sh') }}
 
       - name: Start localnet
         run: bash scripts/localnet.sh

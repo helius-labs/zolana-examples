@@ -1,4 +1,7 @@
 allowBuilds:
   esbuild: true
+  # The SDK is a git dependency (fetched as a codeload tarball) whose
+  # prepack script builds dist/.
+  "@heliuslabs/spr@https://codeload.github.com/helius-labs/privacy-rings/tar.gz/25a5242a0de813dba5310ba26299502fd88a21ac#path:/sdk-libs/ts": true
 minimumReleaseAgeExclude:
   - "@heliuslabs/spr"

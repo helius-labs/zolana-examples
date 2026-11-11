@@ -6,12 +6,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { getAddressEncoder } from "@solana/kit";
+import { getAddressEncoder, getProgramDerivedAddress } from "@solana/kit";
 
 import {
   PROGRAM_CONFIG_DISCRIMINATOR,
   SMART_ACCOUNT_PROGRAM_ADDRESS,
-  localnetTreasuryAddress,
   programConfigAddress,
 } from "../src/squads.js";
 
@@ -24,13 +23,17 @@ if (accountDir === undefined) {
 }
 
 // smart_account_index 0, authority and creation fee left at zero. The
-// treasury only has to match what the config names.
+// treasury only has to match what the config names; any address works.
+const [treasury] = await getProgramDerivedAddress({
+  programAddress: SMART_ACCOUNT_PROGRAM_ADDRESS,
+  seeds: [
+    new TextEncoder().encode("smart_account"),
+    new TextEncoder().encode("treasury"),
+  ],
+});
 const data = new Uint8Array(PROGRAM_CONFIG_LEN);
 data.set(PROGRAM_CONFIG_DISCRIMINATOR, 0);
-data.set(
-  getAddressEncoder().encode(await localnetTreasuryAddress()),
-  TREASURY_OFFSET,
-);
+data.set(getAddressEncoder().encode(treasury), TREASURY_OFFSET);
 
 const account = {
   pubkey: await programConfigAddress(),

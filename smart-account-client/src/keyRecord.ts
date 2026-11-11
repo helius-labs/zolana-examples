@@ -13,7 +13,7 @@
  * Each (E, R) pair is used once, so the zero IV never repeats under a key.
  * Nothing on chain checks a ciphertext; each signer checks its own entry.
  */
-import { createCipheriv, hkdfSync, randomBytes } from "node:crypto";
+import { createCipheriv, hkdfSync, randomFillSync } from "node:crypto";
 
 import {
   getAddressDecoder,
@@ -25,8 +25,6 @@ import {
   ViewingKey,
   X25519Keypair,
   X25519PublicKey,
-  bytes31,
-  bytes32,
   type Bytes31,
   type Bytes32,
   type Bytes33,
@@ -34,10 +32,10 @@ import {
 
 import { ByteReader, ByteWriter, bytesEqual } from "./bytes.js";
 
-export const KEY_INFO = new TextEncoder().encode(
+const KEY_INFO = new TextEncoder().encode(
   "zolana-examples/smart-account-client/key",
 );
-export const NULLIFIER_INFO = new TextEncoder().encode(
+const NULLIFIER_INFO = new TextEncoder().encode(
   "zolana-examples/smart-account-client/nullifier",
 );
 
@@ -84,11 +82,6 @@ export interface SignerViewingKey {
 export interface SharedSecrets {
   readonly viewingKey: ViewingKey;
   readonly nullifierKey: NullifierKey;
-}
-
-/** `173 + 97 * N` bytes for N signers. */
-export function keyRecordSize(signers: number): number {
-  return 173 + 97 * signers;
 }
 
 export function encodeKeyRecord(record: KeyRecord): Uint8Array {
@@ -211,7 +204,13 @@ function decryptWith(
 
 /** A fresh random nullifier secret; 31 bytes always fit the BN254 field. */
 export function generateNullifierKey(): NullifierKey {
-  return NullifierKey.fromSecret(bytes31(randomBytes(31)));
+  const secret = randomFillSync(new Uint8Array(31));
+  try {
+    // `fromSecret` keeps its own copy.
+    return NullifierKey.fromSecret(secret as Bytes31);
+  } finally {
+    secret.fill(0);
+  }
 }
 
 /**
@@ -232,12 +231,11 @@ export function buildKeyRecord(
   const recipients = [...input.recipients].sort((a, b) =>
     compareAddresses(a.key, b.key),
   );
-  recipients.reduce<Address | undefined>((previous, recipient) => {
-    if (previous === recipient.key) {
-      throw new Error(`signer ${recipient.key} is listed twice`);
-    }
-    return recipient.key;
-  }, undefined);
+  const seen = new Set<Address>();
+  for (const { key } of recipients) {
+    if (seen.has(key)) throw new Error(`signer ${key} is listed twice`);
+    seen.add(key);
+  }
 
   const ephemeral = X25519Keypair.generate();
   try {
@@ -302,7 +300,9 @@ export function recoverSharedSecrets(
     entry.ciphertext,
     KEY_INFO,
   );
-  const viewingKey = ViewingKey.fromBytes(bytes32(viewingSecret));
+  // `fromBytes` and `fromSecret` keep their own copies, so the decrypted
+  // plaintexts can be zeroed right away.
+  const viewingKey = ViewingKey.fromBytes(viewingSecret as Bytes32);
   viewingSecret.fill(0);
   if (
     !bytesEqual(viewingKey.publicKey().toBytes(), record.sharedViewingPublicKey)
@@ -318,7 +318,7 @@ export function recoverSharedSecrets(
     record.nullifierCiphertext,
     NULLIFIER_INFO,
   );
-  const nullifierKey = NullifierKey.fromSecret(bytes31(nullifierSecret));
+  const nullifierKey = NullifierKey.fromSecret(nullifierSecret as Bytes31);
   nullifierSecret.fill(0);
   if (!bytesEqual(nullifierKey.publicKey(), record.nullifierPublicKey)) {
     viewingKey.destroy();
@@ -332,12 +332,12 @@ export function recoverSharedSecrets(
 
 /**
  * The on-chain state a key record must match to be current: the Squads
- * signer set, and the vault's registered viewing key once it is registered.
+ * signer set and the vault's registered viewing key.
  */
 export interface OnChainKeyState {
   readonly settings: Address;
   readonly signers: readonly Address[];
-  readonly registeredViewingPublicKey?: Bytes33;
+  readonly registeredViewingPublicKey: Bytes33;
 }
 
 export function isCurrentKeyRecord(
@@ -352,11 +352,7 @@ export function isCurrentKeyRecord(
   return (
     recordSigners.length === signers.length &&
     recordSigners.every((signer, index) => signer === signers[index]) &&
-    (state.registeredViewingPublicKey === undefined ||
-      bytesEqual(
-        record.sharedViewingPublicKey,
-        state.registeredViewingPublicKey,
-      ))
+    bytesEqual(record.sharedViewingPublicKey, state.registeredViewingPublicKey)
   );
 }
 

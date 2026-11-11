@@ -9,7 +9,6 @@ import {
   getAddressDecoder,
   getAddressEncoder,
   getProgramDerivedAddress,
-  isWritableRole,
   mergeRoles,
   type AccountMeta,
   type AccountSignerMeta,
@@ -23,7 +22,9 @@ import { ByteReader, ByteWriter, bytesEqual } from "./bytes.js";
 export const SMART_ACCOUNT_PROGRAM_ADDRESS = address(
   "SMRTzfY6DfH5ik3TKiyLFfXexV8uSG3d2UksSCYdunG",
 );
-const SYSTEM_PROGRAM_ADDRESS = address("11111111111111111111111111111111");
+export const SYSTEM_PROGRAM_ADDRESS = address(
+  "11111111111111111111111111111111",
+);
 
 // Anchor discriminators: sha256("global:<name>")[0..8] and
 // sha256("account:<name>")[0..8].
@@ -88,7 +89,7 @@ export interface SmartAccountSigner {
 }
 
 export interface Settings {
-  readonly seed: bigint;
+  /** All zeros for an autonomous account, which this example creates. */
   readonly settingsAuthority: Address;
   readonly threshold: number;
   readonly timeLock: number;
@@ -132,11 +133,6 @@ export function vaultAddress(settings: Address): Promise<Address> {
   );
 }
 
-/** The treasury the localnet ProgramConfig fixture names. */
-export function localnetTreasuryAddress(): Promise<Address> {
-  return squadsPda(utf8("treasury"));
-}
-
 export function decodeProgramConfig(data: Uint8Array): ProgramConfig {
   const reader = new ByteReader(data, "Squads ProgramConfig");
   if (
@@ -156,7 +152,7 @@ export function decodeSettings(data: Uint8Array): Settings {
   if (!bytesEqual(reader.bytes(8, "discriminator"), SETTINGS_DISCRIMINATOR)) {
     throw new Error("not a Squads Settings account");
   }
-  const seed = reader.u128("seed");
+  reader.u128("seed");
   const settingsAuthority = addressDecoder.decode(
     reader.bytes(32, "settings_authority"),
   );
@@ -180,7 +176,7 @@ export function decodeSettings(data: Uint8Array): Settings {
     signers.push({ key, permissions });
   }
   // Trailing fields (account utilization, policy data) are not used here.
-  return { seed, settingsAuthority, threshold, timeLock, signers };
+  return { settingsAuthority, threshold, timeLock, signers };
 }
 
 function writeSigner(writer: ByteWriter, signer: SmartAccountSigner): void {
@@ -248,6 +244,9 @@ export function compileSyncPayload(
     // `accounts[-1]` is undefined, so a new address takes this branch.
     const existing = accounts[found];
     if (existing === undefined) {
+      // Payload indexes are u8.
+      if (accounts.length === 256)
+        throw new Error("sync payload has more than 256 accounts");
       accounts.push(meta);
       return accounts.length - 1;
     }
@@ -273,17 +272,14 @@ export function compileSyncPayload(
     const data = instruction.data ?? new Uint8Array();
     writer.u16(data.length).bytes(data);
   }
-  if (accounts.length > 256)
-    throw new Error("sync payload has more than 256 accounts");
-  const outer = accounts.map((meta): AccountMeta => {
-    if (meta.address !== vault) return meta;
-    return {
-      address: vault,
-      role: isWritableRole(meta.role)
-        ? AccountRole.WRITABLE
-        : AccountRole.READONLY,
-    };
-  });
+  // The vault starts writable, so merging never narrows it; only its signer
+  // flag is dropped.
+  const outer = accounts.map(
+    (meta): AccountMeta =>
+      meta.address === vault
+        ? { address: vault, role: AccountRole.WRITABLE }
+        : meta,
+  );
   return { payload: writer.finish(), accounts: outer };
 }
 
@@ -395,13 +391,19 @@ export function rotationActions(
 }
 
 /**
- * Picks approvers that satisfy Squads' sync consensus: at least `threshold`
- * signers with vote permission, together holding initiate, vote and execute.
+ * Checks that `approvers` satisfy Squads' sync consensus: at least
+ * `threshold` signers with vote permission, together holding initiate, vote
+ * and execute. Also checks the account is autonomous with no time lock, so
+ * only this consensus can change its signers.
  */
 export function checkSyncConsensus(
   settings: Settings,
   approvers: readonly Address[],
 ): void {
+  // An autonomous account stores the all-zero key, which encodes as the
+  // System Program address.
+  if (settings.settingsAuthority !== SYSTEM_PROGRAM_ADDRESS)
+    throw new Error("the smart account has a settings authority");
   if (settings.timeLock !== 0)
     throw new Error("sync transactions need time_lock 0");
   const seen = new Set<Address>();
@@ -416,7 +418,7 @@ export function checkSyncConsensus(
     mask |= signer.permissions;
     if ((signer.permissions & Permission.Vote) !== 0) votes += 1;
   }
-  if (mask !== Permission.All) {
+  if ((mask & Permission.All) !== Permission.All) {
     throw new Error("approvers must together hold initiate, vote and execute");
   }
   if (votes < settings.threshold) {

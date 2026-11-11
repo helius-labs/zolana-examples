@@ -14,11 +14,11 @@ import {
   decodeKeyRecord,
   encodeKeyRecord,
   generateNullifierKey,
-  keyRecordSize,
   recoverSharedSecrets,
   type KeyRecord,
 } from "../src/keyRecord.js";
-import { InMemoryKeyRecordStore, currentKeyRecord } from "../src/store.js";
+import { ByteWriter } from "../src/bytes.js";
+import { currentKeyRecord, decodeRecordData } from "../src/registry.js";
 
 interface Member {
   readonly address: Address;
@@ -77,7 +77,7 @@ describe("key record", () => {
     const members = [member(), member()];
     const { record } = recordFor(await settingsAddress(), members, 7n);
     const encoded = encodeKeyRecord(record);
-    assert.equal(encoded.length, keyRecordSize(2));
+    assert.equal(encoded.length, 173 + 97 * 2);
     assert.deepEqual(decodeKeyRecord(encoded), record);
   });
 
@@ -96,23 +96,33 @@ describe("key record", () => {
       ...record,
       entries: record.entries.map((entry) =>
         entry.signer === target.address
-          ? {
-              ...entry,
-              ciphertext: entry.ciphertext.map(
-                (byte) => byte ^ 1,
-              ) as typeof entry.ciphertext,
-            }
+          ? { ...entry, ciphertext: entry.ciphertext.map((byte) => byte ^ 1) }
           : entry,
       ),
-    };
+    } as KeyRecord;
     assert.throws(
       () => recoverSharedSecrets(tampered, target.address, target.keypair),
-      /does not match the key record/,
+      /shared viewing secret does not match/,
     );
     const other = members[1]!;
     assert.doesNotThrow(() =>
       recoverSharedSecrets(tampered, other.address, other.keypair),
     );
+  });
+
+  it("every signer detects a garbage nullifier ciphertext", async () => {
+    const members = [member(), member()];
+    const { record } = recordFor(await settingsAddress(), members);
+    const tampered = {
+      ...record,
+      nullifierCiphertext: record.nullifierCiphertext.map((byte) => byte ^ 1),
+    } as KeyRecord;
+    for (const { address, keypair } of members) {
+      assert.throws(
+        () => recoverSharedSecrets(tampered, address, keypair),
+        /nullifier secret does not match/,
+      );
+    }
   });
 
   it("a non-signer has no entry", async () => {
@@ -124,70 +134,71 @@ describe("key record", () => {
     );
   });
 
-  it("after registration a copy under a higher epoch makes the lookup fail", async () => {
-    const settings = await settingsAddress();
-    const [a, b] = [member(), member()];
-    const attacker = member();
-    const store = new InMemoryKeyRecordStore();
-    const { record } = recordFor(settings, [a, b], 0n);
-    await store.put(record);
-    // Same public fields, a higher epoch, and b's entry pointing at the attacker.
-    await store.put({
-      ...record,
-      epoch: 1n,
-      entries: record.entries.map((entry) =>
-        entry.signer === b.address
-          ? {
-              ...entry,
-              viewingPublicKey: attacker.keypair.viewingPublicKey().toBytes(),
-            }
-          : entry,
-      ),
-    });
-    await store.put(record); // an identical re-upload is not a conflict
-    await assert.rejects(
-      currentKeyRecord(store, {
-        settings,
-        signers: [a.address, b.address],
-        registeredViewingPublicKey: record.sharedViewingPublicKey,
-      }),
-      /several stored key records/,
+  it("decodes the one key record in registry data", async () => {
+    const { record } = recordFor(await settingsAddress(), [member()]);
+    const encoded = [...encodeKeyRecord(record)];
+    const data = (bytes: number[], length = bytes.length) =>
+      new ByteWriter().u32(length).bytes(bytes).finish();
+
+    assert.equal(decodeRecordData(new Uint8Array()), undefined);
+    assert.deepEqual(decodeRecordData(data(encoded)), record);
+    assert.throws(
+      () => decodeRecordData(data(encoded.slice(0, -1))),
+      /truncated/,
     );
+    assert.throws(
+      () => decodeRecordData(data([...encoded, 0], encoded.length)),
+      /trailing bytes/,
+    );
+    assert.throws(() => decodeRecordData(data([...encoded, 0])), /trailing/);
   });
 
-  it("the current record matches the signer set and the registered key", async () => {
+  it("the current record must match the signers and the registered key", async () => {
     const settings = await settingsAddress();
     const [a, b, c] = [member(), member(), member()];
-    const store = new InMemoryKeyRecordStore();
-    const first = recordFor(settings, [a, b], 0n);
-    const second = recordFor(settings, [a, b, c], 1n);
-    // An upload whose rotate never landed: same signers as `second`, other key.
-    const stale = recordFor(settings, [a, b, c], 1n);
-    await store.put(first.record);
-    await store.put(second.record);
-    await store.put(stale.record);
+    const first = recordFor(settings, [a, b], 0n).record;
+    const second = recordFor(settings, [a, c], 1n).record;
+    const signers = [a, c].map(({ address }) => address);
+    const registry = {
+      viewingPublicKey: second.sharedViewingPublicKey,
+      record: second,
+    };
+    assert.deepEqual(currentKeyRecord(registry, settings, signers), second);
 
-    const signers = [a, b, c].map(({ address }) => address);
-    const current = await currentKeyRecord(store, {
-      settings,
-      signers,
-      registeredViewingPublicKey: second.record.sharedViewingPublicKey,
-    });
-    assert.deepEqual(current, second.record);
-
-    const beforeRotate = await currentKeyRecord(store, {
-      settings,
-      signers: [a, b].map(({ address }) => address),
-      registeredViewingPublicKey: first.record.sharedViewingPublicKey,
-    });
-    assert.deepEqual(beforeRotate, first.record);
-
-    await assert.rejects(
-      currentKeyRecord(store, {
-        settings,
-        signers: [a].map(({ address }) => address),
-      }),
-      /no stored key record/,
-    );
+    const mismatches: [string, () => KeyRecord, RegExp][] = [
+      [
+        "a signer set the record does not name",
+        () => currentKeyRecord(registry, settings, [a.address, b.address]),
+        /does not match/,
+      ],
+      [
+        "a registered key other than the record's",
+        () =>
+          currentKeyRecord(
+            { ...registry, viewingPublicKey: first.sharedViewingPublicKey },
+            settings,
+            signers,
+          ),
+        /does not match/,
+      ],
+      [
+        "another Settings account",
+        () => currentKeyRecord(registry, a.address, signers),
+        /does not match/,
+      ],
+      [
+        "no record",
+        () =>
+          currentKeyRecord(
+            { ...registry, record: undefined },
+            settings,
+            signers,
+          ),
+        /no key record/,
+      ],
+    ];
+    for (const [name, lookup, error] of mismatches) {
+      assert.throws(lookup, error, name);
+    }
   });
 });

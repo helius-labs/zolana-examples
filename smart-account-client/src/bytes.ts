@@ -33,6 +33,9 @@ export class ByteWriter {
   }
 
   u64(value: bigint): this {
+    if (value < 0n || value >= 1n << 64n) {
+      throw new RangeError(`u64 out of range: ${value}`);
+    }
     const out = new Uint8Array(8);
     new DataView(out.buffer).setBigUint64(0, value, true);
     return this.bytes(out);
