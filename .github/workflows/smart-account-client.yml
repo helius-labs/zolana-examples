@@ -1,0 +1,113 @@
+name: smart-account-client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "smart-account-client/**"
+      - ".github/workflows/smart-account-client.yml"
+  pull_request:
+    paths:
+      - "smart-account-client/**"
+      - ".github/workflows/smart-account-client.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: smart-account-client-devnet
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: check and devnet / smart-account-client
+    runs-on: ubuntu-latest
+    # Cold runs install Agave and build the SBF program and mollusk.
+    timeout-minutes: 45
+    env:
+      SOLANA_DEVNET_RPC_URL: ${{ secrets.DEVNET_RPC_URL }}
+      AGAVE_VERSION: v4.0.2
+    defaults:
+      run:
+        working-directory: smart-account-client
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: smart-account-client/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting and types
+        run: pnpm check
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache the storage program build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-account-client/program
+
+      - name: Check the storage program
+        run: |
+          cargo fmt --manifest-path program/Cargo.toml -- --check
+          cargo clippy --manifest-path program/Cargo.toml --locked --all-targets -- -D warnings
+
+      - name: Install Anza CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Storage program SBF tests
+        env:
+          RUST_LOG: error
+        # test-sbf passes extra arguments to the test binary, not cargo; the
+        # clippy step's --locked already fails on a stale Cargo.lock.
+        run: cargo test-sbf --tools-version v1.54 --manifest-path program/Cargo.toml --features bpf-entrypoint --test storage
+
+      - name: Prepare devnet wallet
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          DEVNET_PAYER_KEYPAIR: ${{ secrets.DEVNET_PAYER_KEYPAIR }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          if not os.environ.get("SOLANA_DEVNET_RPC_URL") or not os.environ.get("DEVNET_PAYER_KEYPAIR"):
+              raise SystemExit("Configure DEVNET_RPC_URL and DEVNET_PAYER_KEYPAIR in repository secrets")
+          keypair = json.loads(os.environ["DEVNET_PAYER_KEYPAIR"])
+          if not isinstance(keypair, list) or len(keypair) != 64 or any(type(b) is not int or not 0 <= b <= 255 for b in keypair):
+              raise SystemExit("DEVNET_PAYER_KEYPAIR must contain a Solana JSON keypair")
+          directory = Path(os.environ["RUNNER_TEMP"]) / "smart-account-wallet"
+          directory.mkdir(mode=0o700)
+          path = directory / "sponsor.json"
+          path.touch(mode=0o600)
+          path.write_text(json.dumps(keypair))
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              output.write(f"ZOLANA_PAYER_KEYPAIR={path}\n")
+          PY
+
+      - name: Devnet tests
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        run: pnpm test:devnet
+
+      - name: Remove devnet wallet
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/smart-account-wallet"
