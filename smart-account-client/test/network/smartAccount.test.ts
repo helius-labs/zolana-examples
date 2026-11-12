@@ -15,7 +15,16 @@ import { getRegisterInstructionAsync } from "@heliuslabs/spr/instructions";
 import { LocalShieldedKeys } from "@heliuslabs/spr/transaction";
 
 import { recoverSharedSecrets } from "../../src/keyRecord.js";
-import { fetchVaultRegistry } from "../../src/registry.js";
+import {
+  fetchVaultRegistry,
+  prepareKeyRecordUpload,
+} from "../../src/registry.js";
+import {
+  EMPTY_RECORD_ADDRESS,
+  fetchStorageHead,
+  fetchStoredRecord,
+  type RecordUpload,
+} from "../../src/storage.js";
 import {
   checkOwnEntry,
   createSmartAccount,
@@ -33,6 +42,31 @@ import {
   executeTransactionSyncInstruction,
 } from "../../src/squads.js";
 import { networkSetup, send, syncedSolBalance, transferSol } from "./send.js";
+
+/** Partial uploads never change the active head; abandoned uploads are refunded. */
+async function uploadRecord(
+  client: SprClient,
+  payer: TransactionSigner,
+  owner: Address,
+  upload: RecordUpload,
+  t: TestContext,
+): Promise<void> {
+  t.after(async () => {
+    if ((await client.getAccount(upload.address)) === undefined) return;
+    if (!(await fetchStoredRecord(client, upload.address)).sealed) {
+      await send(client, payer, [upload.closeInstruction]);
+    }
+  });
+  const previous = await fetchStorageHead(client, owner);
+  for (const instruction of upload.instructions) {
+    await send(client, payer, [instruction]);
+    assert.deepEqual(
+      await fetchStorageHead(client, owner),
+      previous,
+      "upload leaves the active head unchanged",
+    );
+  }
+}
 
 /**
  * Registers `count` fresh members. Each registers its own keys, because rotate
@@ -172,16 +206,26 @@ test(
     // the vault registers the keys and sets the record as its registry data.
     checkOwnEntry(created.record, alice);
     checkOwnEntry(created.record, bob);
+    const firstUpload = await prepareKeyRecordUpload({
+      owner: created.vault,
+      previous: EMPTY_RECORD_ADDRESS,
+      payer,
+      record: created.record,
+    });
+    await uploadRecord(client, payer, created.vault, firstUpload, t);
     await send(client, payer, [
       await registerVaultInstruction({
         client,
         settings: created.settings,
         approvers: [alice.signer, bob.signer],
         record: created.record,
+        buffer: firstUpload.address,
       }),
     ]);
     assert.deepEqual(await vaultRegistry(client, created.vault), {
       viewingPublicKey: created.record.sharedViewingPublicKey,
+      recordAddress: firstUpload.address,
+      recordRevision: 1n,
       record: created.record,
     });
     const bobKeys = await recoverVaultKeys({
@@ -237,6 +281,7 @@ test(
       client,
       settings: created.settings,
       rotator: alice,
+      payer,
       approvers: [alice.signer, bob.signer],
       keep: [alice.signer.address],
       add: [
@@ -250,7 +295,8 @@ test(
     });
     assert.equal(rotation.record.epoch, 1n);
     // Approve: Alice stays a signer, so she checks her entry before signing.
-    checkOwnEntry(rotation.record, alice);
+    checkOwnEntry(rotation.record, alice, created.record);
+    await uploadRecord(client, payer, created.vault, rotation.upload, t);
     await send(client, payer, rotation.instructions);
     const rotated = await fetchSettings(client, created.settings);
     assert.deepEqual(
@@ -259,6 +305,8 @@ test(
     );
     assert.deepEqual(await vaultRegistry(client, created.vault), {
       viewingPublicKey: rotation.record.sharedViewingPublicKey,
+      recordAddress: rotation.upload.address,
+      recordRevision: 2n,
       record: rotation.record,
     });
     assert.deepEqual(
@@ -271,9 +319,29 @@ test(
       /no entry/,
     );
 
+    // Carol can decrypt the remaining UTXO even though it predates her membership.
+    const carolKeys = await recoverVaultKeys({
+      client,
+      settings: created.settings,
+      member: carol,
+    });
+    assert.equal(carolKeys.viewingKeys.length, 2);
+    const carolVault = vaultKeys(
+      client,
+      created.vault,
+      carolKeys.secrets,
+      carolKeys.viewingKeys,
+    );
+    await syncedSolBalance(
+      client,
+      carolVault.address,
+      carolVault.shielded,
+      7_000_000n,
+    );
+
     // Alice was a signer before the rotate, so she still opens the vault's
-    // older UTXO with the earlier viewing key, which she reads from record 0
-    // in the data record's history, and spends it with Carol.
+    // older UTXO with the earlier viewing key retained in the current record,
+    // and spends it with Carol.
     const aliceKeys = await recoverVaultKeys({
       client,
       settings: created.settings,
@@ -310,20 +378,7 @@ test(
       }),
     ]);
 
-    // Carol joined after the first deposit: she opens only UTXOs sent to the
-    // new shared viewing key, here the change of Alice's spend.
-    const carolKeys = await recoverVaultKeys({
-      client,
-      settings: created.settings,
-      member: carol,
-    });
-    assert.equal(carolKeys.viewingKeys.length, 1);
-    const carolVault = vaultKeys(
-      client,
-      created.vault,
-      carolKeys.secrets,
-      carolKeys.viewingKeys,
-    );
+    // The same keys also open the change sent under the new viewing key.
     await syncedSolBalance(
       client,
       carolVault.address,
@@ -343,25 +398,31 @@ test(
       client,
       settings: created.settings,
       rotator: carol,
+      payer,
       approvers: [alice.signer, carol.signer],
       keep: [alice.signer.address, carol.signer.address],
       add: [],
       threshold: 2,
     });
     assert.equal(keyOnly.instructions.length, 1);
-    checkOwnEntry(keyOnly.record, alice);
+    checkOwnEntry(keyOnly.record, alice, rotation.record);
+    await uploadRecord(client, payer, created.vault, keyOnly.upload, t);
     await send(client, payer, keyOnly.instructions);
     assert.deepEqual(await vaultRegistry(client, created.vault), {
       viewingPublicKey: keyOnly.record.sharedViewingPublicKey,
+      recordAddress: keyOnly.upload.address,
+      recordRevision: 3n,
       record: keyOnly.record,
     });
+    assert.equal(await client.getAccount(firstUpload.address), undefined);
+    assert.equal(await client.getAccount(rotation.upload.address), undefined);
     const carolAfter = await recoverVaultKeys({
       client,
       settings: created.settings,
       member: carol,
     });
     assert.equal(carolAfter.record.epoch, 2n);
-    assert.equal(carolAfter.viewingKeys.length, 2);
+    assert.equal(carolAfter.viewingKeys.length, 3);
     const carolAfterVault = vaultKeys(
       client,
       created.vault,
@@ -391,6 +452,7 @@ test(
       client,
       settings: created.settings,
       rotator: alice,
+      payer,
       approvers: [alice.signer, bob.signer],
       keep: [alice.signer.address, bob.signer.address],
       add: [],
@@ -400,11 +462,19 @@ test(
     // No key record is on chain before Register.
     await assert.rejects(rotateSmartAccount(rotateKeys), /not registered/);
 
+    const firstUpload = await prepareKeyRecordUpload({
+      owner: created.vault,
+      previous: EMPTY_RECORD_ADDRESS,
+      payer,
+      record: created.record,
+    });
+    await uploadRecord(client, payer, created.vault, firstUpload, t);
     const register = await registerVaultInstruction({
       client,
       settings: created.settings,
       approvers: [alice.signer, bob.signer],
       record: created.record,
+      buffer: firstUpload.address,
     });
     await send(client, payer, [register]);
 
@@ -428,12 +498,15 @@ test(
     // create the vault's record twice, so the replay cannot put record 0's
     // keys back.
     const rotation = await rotateSmartAccount(rotateKeys);
+    await uploadRecord(client, payer, created.vault, rotation.upload, t);
     await send(client, payer, rotation.instructions);
     await assert.rejects(send(client, payer, [register]), (error: Error) =>
       /requires an uninitialized account/.test(String(error.cause)),
     );
     assert.deepEqual(await vaultRegistry(client, created.vault), {
       viewingPublicKey: rotation.record.sharedViewingPublicKey,
+      recordAddress: rotation.upload.address,
+      recordRevision: 2n,
       record: rotation.record,
     });
   },

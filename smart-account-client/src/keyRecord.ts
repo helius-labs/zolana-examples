@@ -1,7 +1,7 @@
 /**
  * The key record (design.md, "Key Record"): the shared viewing secret
- * encrypted to every signer and the nullifier secret encrypted to the shared
- * viewing key, under one ephemeral X25519 key.
+ * encrypted to every signer, with the nullifier secret and all earlier viewing
+ * secrets encrypted to the current shared viewing key.
  *
  * Encryption of `plaintext` to recipient public key `R` under ephemeral
  * secret `e` (public key `E`):
@@ -10,7 +10,8 @@
  *   key = HKDF-SHA256(ikm = dh, salt = E || R, info) -> 32 bytes
  *   ct  = AES-256-CTR(key, iv = 0^16, plaintext)
  *
- * Each (E, R) pair is used once, so the zero IV never repeats under a key.
+ * HKDF info separates signer, nullifier and indexed historical-key encryption,
+ * so the zero IV never repeats under a derived key.
  * Nothing on chain checks a ciphertext; each signer checks its own entry.
  */
 import { createCipheriv, hkdfSync, randomFillSync } from "node:crypto";
@@ -38,6 +39,9 @@ const KEY_INFO = new TextEncoder().encode(
 const NULLIFIER_INFO = new TextEncoder().encode(
   "zolana-examples/smart-account-client/nullifier",
 );
+const OLD_KEY_INFO = new TextEncoder().encode(
+  "zolana-examples/smart-account-client/old-key",
+);
 
 const addressEncoder = getAddressEncoder();
 const addressDecoder = getAddressDecoder();
@@ -48,6 +52,13 @@ export interface KeyEntry {
   /** The signer's tagged X25519 viewing public key. */
   readonly viewingPublicKey: Bytes33;
   /** The shared viewing secret encrypted to `viewingPublicKey`. */
+  readonly ciphertext: Bytes32;
+}
+
+export interface EncryptedViewingKey {
+  /** The old secret's public key, checked after decryption. */
+  readonly viewingPublicKey: Bytes33;
+  /** The old viewing secret encrypted to the current shared viewing key. */
   readonly ciphertext: Bytes32;
 }
 
@@ -64,6 +75,8 @@ export interface KeyRecord {
   readonly nullifierCiphertext: Bytes31;
   /** One entry per Squads signer, sorted by signer. */
   readonly entries: readonly KeyEntry[];
+  /** Every previous epoch's viewing key, encrypted, oldest first. */
+  readonly oldViewingKeys: readonly EncryptedViewingKey[];
 }
 
 /** A signer as the key record needs it: its key and viewing public key. */
@@ -85,6 +98,7 @@ export interface SharedSecrets {
 }
 
 export function encodeKeyRecord(record: KeyRecord): Uint8Array {
+  checkHistoryLength(record);
   const writer = new ByteWriter()
     .bytes(addressEncoder.encode(record.settings))
     .u64(record.epoch)
@@ -98,6 +112,10 @@ export function encodeKeyRecord(record: KeyRecord): Uint8Array {
       .bytes(addressEncoder.encode(entry.signer))
       .bytes(entry.viewingPublicKey)
       .bytes(entry.ciphertext);
+  }
+  writer.u32(record.oldViewingKeys.length);
+  for (const oldKey of record.oldViewingKeys) {
+    writer.bytes(oldKey.viewingPublicKey).bytes(oldKey.ciphertext);
   }
   return writer.finish();
 }
@@ -125,6 +143,17 @@ export function decodeKeyRecord(data: Uint8Array): KeyRecord {
       ciphertext: reader.bytes(32, "entry ciphertext") as Bytes32,
     });
   }
+  const oldCount = reader.u32("old viewing keys length");
+  if (BigInt(oldCount) !== epoch) {
+    throw new Error("old viewing key count must match the record epoch");
+  }
+  const oldViewingKeys: EncryptedViewingKey[] = [];
+  for (let index = 0; index < oldCount; index += 1) {
+    oldViewingKeys.push({
+      viewingPublicKey: reader.bytes(33, "old viewing public key") as Bytes33,
+      ciphertext: reader.bytes(32, "old viewing secret ciphertext") as Bytes32,
+    });
+  }
   reader.end();
   return {
     settings,
@@ -134,7 +163,86 @@ export function decodeKeyRecord(data: Uint8Array): KeyRecord {
     nullifierPublicKey,
     nullifierCiphertext,
     entries,
+    oldViewingKeys,
   };
+}
+
+function checkHistoryLength(record: KeyRecord): void {
+  if (BigInt(record.oldViewingKeys.length) !== record.epoch) {
+    throw new Error("old viewing key count must match the record epoch");
+  }
+}
+
+/** Verify against the previous published record before approving a rotation. */
+export function checkKeyHistory(record: KeyRecord, previous?: KeyRecord): void {
+  checkHistoryLength(record);
+  if (previous === undefined) {
+    if (record.epoch !== 0n)
+      throw new Error("rotation approval needs the previous key record");
+    return;
+  }
+  checkHistoryLength(previous);
+  if (
+    record.settings !== previous.settings ||
+    record.epoch !== previous.epoch + 1n ||
+    !bytesEqual(record.nullifierPublicKey, previous.nullifierPublicKey)
+  ) {
+    throw new Error("key record does not extend the previous record");
+  }
+  const expected = [
+    ...previous.oldViewingKeys.map(({ viewingPublicKey }) => viewingPublicKey),
+    previous.sharedViewingPublicKey,
+  ];
+  if (
+    !record.oldViewingKeys.every((entry, index) => {
+      const publicKey = expected.at(index);
+      return (
+        publicKey !== undefined && bytesEqual(entry.viewingPublicKey, publicKey)
+      );
+    })
+  ) {
+    throw new Error(
+      "old viewing keys must preserve the complete previous history",
+    );
+  }
+}
+
+function oldKeyInfo(index: number): Uint8Array {
+  return new ByteWriter().bytes(OLD_KEY_INFO).u32(index).finish();
+}
+
+function encryptOldViewingKeys(
+  ephemeral: X25519Keypair,
+  current: X25519PublicKey,
+  previous: readonly ViewingKey[],
+): EncryptedViewingKey[] {
+  if (previous.length === 0) return [];
+  const dh = ephemeral.ecdh(current);
+  const ephemeralPublicKey = ephemeral.publicKey().toBytes();
+  const currentPublicKey = current.toBytes();
+  try {
+    return previous.map((key, index) => {
+      const secret = key.secretBytes();
+      try {
+        return {
+          viewingPublicKey: key.publicKey().toBytes(),
+          ciphertext: ctrApply(
+            streamKey(
+              dh,
+              ephemeralPublicKey,
+              currentPublicKey,
+              oldKeyInfo(index),
+            ),
+            secret,
+          ) as Bytes32,
+        };
+      } finally {
+        secret.fill(0);
+      }
+    });
+  } finally {
+    dh.fill(0);
+  }
 }
 
 function streamKey(
@@ -216,16 +324,30 @@ export function generateNullifierKey(): NullifierKey {
 /**
  * Encrypts `secrets` to `recipients` under one new ephemeral key. Create
  * passes epoch 0 and fresh secrets; rotate passes the next epoch, a new
- * viewing key and the recovered nullifier key.
+ * viewing key, the recovered nullifier key and all prior viewing keys,
+ * oldest first, ending with the previous current key.
  */
 export function buildKeyRecord(
   input: Readonly<{
     settings: Address;
     epoch: bigint;
     secrets: SharedSecrets;
+    previousViewingKeys: readonly ViewingKey[];
     recipients: readonly KeyRecipient[];
   }>,
 ): KeyRecord {
+  if (BigInt(input.previousViewingKeys.length) !== input.epoch) {
+    throw new Error("one old viewing key is required for every previous epoch");
+  }
+  const publicKeys = new Set<string>([
+    Buffer.from(input.secrets.viewingKey.publicKey().toBytes()).toString("hex"),
+  ]);
+  for (const key of input.previousViewingKeys) {
+    const publicKey = Buffer.from(key.publicKey().toBytes()).toString("hex");
+    if (publicKeys.has(publicKey))
+      throw new Error("viewing key history contains a duplicate key");
+    publicKeys.add(publicKey);
+  }
   if (input.recipients.length === 0)
     throw new Error("a key record needs a signer");
   const recipients = [...input.recipients].sort((a, b) =>
@@ -265,6 +387,11 @@ export function buildKeyRecord(
             KEY_INFO,
           ) as Bytes32,
         })),
+        oldViewingKeys: encryptOldViewingKeys(
+          ephemeral,
+          sharedViewingPublicKey,
+          input.previousViewingKeys,
+        ),
       };
     } finally {
       viewingSecret.fill(0);
@@ -272,6 +399,61 @@ export function buildKeyRecord(
     }
   } finally {
     ephemeral.destroy();
+  }
+}
+
+/** Every current signer can recover the old viewing secrets from this record. */
+export function recoverOldViewingKeys(
+  record: KeyRecord,
+  current: ViewingKey,
+): ViewingKey[] {
+  checkHistoryLength(record);
+  if (
+    !bytesEqual(current.publicKey().toBytes(), record.sharedViewingPublicKey)
+  ) {
+    throw new Error("historical keys require the current shared viewing key");
+  }
+  const recovered: ViewingKey[] = [];
+  if (record.oldViewingKeys.length === 0) return recovered;
+  const dh = current.ecdh(X25519PublicKey.fromBytes(record.ephemeralPublicKey));
+  const seen = new Set<string>([
+    Buffer.from(record.sharedViewingPublicKey).toString("hex"),
+  ]);
+  try {
+    for (const [index, entry] of record.oldViewingKeys.entries()) {
+      const publicKey = Buffer.from(entry.viewingPublicKey).toString("hex");
+      if (seen.has(publicKey))
+        throw new Error("viewing key history contains a duplicate key");
+      seen.add(publicKey);
+      const secret = ctrApply(
+        streamKey(
+          dh,
+          record.ephemeralPublicKey,
+          record.sharedViewingPublicKey,
+          oldKeyInfo(index),
+        ),
+        entry.ciphertext,
+      );
+      let key;
+      try {
+        key = ViewingKey.fromBytes(secret as Bytes32);
+      } finally {
+        secret.fill(0);
+      }
+      if (!bytesEqual(key.publicKey().toBytes(), entry.viewingPublicKey)) {
+        key.destroy();
+        throw new Error(
+          "the decrypted old viewing secret does not match its public key",
+        );
+      }
+      recovered.push(key);
+    }
+    return recovered;
+  } catch (error) {
+    recovered.forEach((key) => key.destroy());
+    throw error;
+  } finally {
+    dh.fill(0);
   }
 }
 

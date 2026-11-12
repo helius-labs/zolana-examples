@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 20
     env:
       SOLANA_DEVNET_RPC_URL: ${{ secrets.DEVNET_RPC_URL }}
+      AGAVE_VERSION: v4.0.2
     defaults:
       run:
         working-directory: smart-account-client
@@ -52,6 +53,31 @@ jobs:
 
       - name: Unit tests
         run: pnpm test
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache the storage program build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-account-client/program
+
+      - name: Check the storage program
+        run: |
+          cargo fmt --manifest-path program/Cargo.toml -- --check
+          cargo clippy --manifest-path program/Cargo.toml --locked --all-targets -- -D warnings
+
+      - name: Install Anza CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${AGAVE_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Storage program SBF tests
+        env:
+          RUST_LOG: error
+        run: cargo test-sbf --tools-version v1.54 --manifest-path program/Cargo.toml --features bpf-entrypoint --test storage
 
       - name: Prepare devnet wallet
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository

@@ -39,7 +39,7 @@
 
 |  |  |
 |---------|-------------|
-| [`smart-account-client/`](smart-account-client/) | A Squads smart account whose vault holds a private balance, with a shared viewing key encrypted to every signer in a key record that a minimal data registry program stores. TypeScript client and a pinocchio program. |
+| [`smart-account-client/`](smart-account-client/) | A Squads smart account whose vault holds a private balance, with a shared viewing key encrypted to every signer. The client carries all old viewing keys forward; a storage program publishes uploaded records atomically and closes superseded accounts. TypeScript client and a pinocchio program. |
 
 ## Documentation
 

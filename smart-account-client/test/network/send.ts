@@ -33,7 +33,7 @@ import {
   type LocalShieldedKeys,
 } from "@heliuslabs/spr/transaction";
 
-import { DATA_REGISTRY_PROGRAM_ADDRESS } from "../../src/registry.js";
+import { STORAGE_PROGRAM_ADDRESS } from "../../src/storage.js";
 import {
   SMART_ACCOUNT_PROGRAM_ADDRESS,
   SYSTEM_PROGRAM_ADDRESS,
@@ -66,7 +66,7 @@ async function setupNetwork(): Promise<
     SHIELDED_POOL_PROGRAM_ID,
     USER_REGISTRY_PROGRAM_ID,
     SMART_ACCOUNT_PROGRAM_ADDRESS,
-    DATA_REGISTRY_PROGRAM_ADDRESS,
+    STORAGE_PROGRAM_ADDRESS,
   ]) {
     const { value } = await client.solanaRpc
       .getAccountInfo(program, { encoding: "base64" })
