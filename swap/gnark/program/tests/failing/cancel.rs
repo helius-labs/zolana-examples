@@ -5,10 +5,11 @@
 // checks, privilege-downgrade sweeps) were removed.
 
 use solana_program_error::ProgramError;
-use spr_test_utils::mollusk::expect_err_exact;
 use swap_program::error::SwapError;
 
-use crate::common::{fixture, setup_mollusk, transact, wrapper_data_with, Wrapper};
+use crate::common::{
+    expect_err_exact, fixture, setup_mollusk, transact, wrapper_data_with, Wrapper,
+};
 
 #[test]
 fn unexpired_order_cancel_is_rejected_exactly() {

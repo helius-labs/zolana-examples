@@ -42,7 +42,6 @@ spr-program = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0
 
 [dev-dependencies]
 mollusk-svm = "0.15.0"
-spr-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08", features = ["mollusk"] }
 solana-account = "4.3"
 solana-instruction = "3.4"
 solana-pubkey = { version = "4.2", features = ["curve25519"] }
