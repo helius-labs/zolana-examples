@@ -1,13 +1,11 @@
-use spr_test_utils::utxo::{
-    encrypt_transaction_data, get_transaction_viewing_key, prepare_output_blindings,
-};
 use spr_transaction::utxo::SppProofInputUtxo;
 mod shared;
+mod utxo;
 
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
-use shared::{send, setup, TestEnv, DESTINATION_AMOUNT, SOURCE_AMOUNT};
+use shared::{send, setup, wait_for_merkle_proof, TestEnv, DESTINATION_AMOUNT, SOURCE_AMOUNT};
 use spr_client::user_registry::ensure_registered;
 use spr_client::Rpc;
 use spr_keypair::random_blinding;
@@ -25,6 +23,7 @@ use swap_sdk::{
     shared::input_sum,
     state::{OrderTerms, OrderUtxo},
 };
+use utxo::{encrypt_transaction_data, get_transaction_viewing_key, prepare_output_blindings};
 
 // The committed order expiry is already in the past, so the maker can cancel
 // immediately: the swap program requires `now > order_expiry`. The SPP relayer
@@ -187,11 +186,8 @@ fn make_and_cancel_swap_inline() -> Result<()> {
         let order_hash = order_utxo
             .output_utxo(maker_address.viewing_pubkey)?
             .hash(localnet.tree_id)?;
-        let order_state = spr_test_utils::test_validator_asserts::wait_for_merkle_proof(
-            localnet.client.indexer(),
-            localnet.tree,
-            order_hash,
-        );
+        let order_state =
+            wait_for_merkle_proof(localnet.client.indexer(), localnet.tree, order_hash)?;
         let order_input_utxo = order_utxo
             .to_input_utxo(localnet.tree_id, order_state.leaf_index)
             .map_err(|e| anyhow!("order input_utxo: {e:?}"))?;

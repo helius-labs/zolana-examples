@@ -1,17 +1,21 @@
+use std::time::{Duration, Instant};
+
 use anyhow::{anyhow, Result};
 use solana_address::Address;
 use solana_instruction::Instruction;
+use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::Signer;
-use spr_client::{ComputeBudgetConfig, Rpc, SolanaRpc};
-use spr_keypair::{ShieldedKeypair, SigningKey};
+use spr_client::{ComputeBudgetConfig, MerkleProof, Rpc, SolanaRpc, UtxoScan};
+use spr_keypair::{ShieldedAddress, ShieldedKeypair, SigningKey};
+use spr_program::instruction::{AssetDeposit, Deposit, DepositAsset, DepositSplAccounts};
 use spr_program_test::{
     fixture,
     localnet::{FixtureLocalnet, LocalnetPorts},
 };
-use spr_test_utils::test_validator_asserts::wait_for_indexed_utxo;
-use spr_test_utils::wallet::{sync_wallet, Deposit, DepositParams, Filter, Wallet};
-use spr_transaction::{utxo::SppProofInputUtxo, AssetRegistry, SOL_MINT};
+use spr_transaction::{
+    utxo::SppProofInputUtxo, AssetRegistry, SpendableDecryptionResult, WalletUtxo,
+};
 use spr_user_registry_interface::user_registry_program_id;
 
 #[path = "../../../../test-utils/localnet.rs"]
@@ -19,6 +23,8 @@ mod release_localnet;
 
 // The whole per-transaction budget: a swap verifies an SPP proof and its own.
 const TRANSACT_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
+const INDEXER_TIMEOUT: Duration = Duration::from_secs(120);
+const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 // SPL the maker shields into the order UTXO (source), and SOL the taker pays (destination).
 pub const MAKER_SHIELD_SPL: u64 = 1_000_000_000;
@@ -26,8 +32,8 @@ pub const SOURCE_AMOUNT: u64 = 400_000_000;
 pub const DESTINATION_AMOUNT: u64 = 250_000_000;
 
 // Each actor is one ed25519 identity: the wallet's signing key doubles as the
-// Solana fee payer (`to_solana_keypair`), and the wallet holds the asset
-// registry and the synced spendable notes.
+// Solana fee payer, and the wallet holds the asset registry and the spendable
+// notes its scan found after the deposits.
 pub struct TestEnv {
     /// The localnet with its client and default tree. Dropping it stops the
     /// validator, so it lives as long as the test.
@@ -40,20 +46,32 @@ pub struct TestEnv {
 }
 
 pub struct TestWallet {
-    pub wallet: Wallet,
     pub keypair: ShieldedKeypair,
+    pub registry: AssetRegistry,
+    spendable: SpendableDecryptionResult,
 }
 
-impl std::ops::Deref for TestWallet {
-    type Target = Wallet;
-    fn deref(&self) -> &Self::Target {
-        &self.wallet
+impl TestWallet {
+    /// Scan the indexer for the notes `keypair` can spend.
+    fn scan(keypair: ShieldedKeypair, registry: AssetRegistry, client: &impl Rpc) -> Result<Self> {
+        let spendable = UtxoScan::new(&keypair, &registry).fetch(client)?.spendable;
+        Ok(Self {
+            keypair,
+            registry,
+            spendable,
+        })
     }
-}
 
-impl std::ops::DerefMut for TestWallet {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.wallet
+    /// The first spendable default-ring note of `mint` worth at least
+    /// `min_amount`.
+    pub fn spendable_utxo(&self, mint: Address, min_amount: u64) -> Option<WalletUtxo> {
+        self.spendable
+            .balances
+            .get_balance(mint)?
+            .utxos
+            .iter()
+            .find(|utxo| utxo.utxo.ring_program_id.is_none() && utxo.utxo.amount >= min_amount)
+            .cloned()
     }
 }
 /// Boot the localnet of test number `test` ([`LocalnetPorts::for_test`]); tests
@@ -101,63 +119,51 @@ pub fn setup(test: u16) -> Result<TestEnv> {
     let maker_address = maker_shielded_keypair
         .shielded_address()
         .map_err(|e| anyhow!("maker address: {e:?}"))?;
-    let maker_deposit = Deposit::new(DepositParams {
-        recipient: &maker_address,
-        asset: spl_mint,
-        amount: MAKER_SHIELD_SPL,
-        spl_token_account: Some(spl_funding),
-        spl_token_program: Some(spr_interface::pda::spl_token_program_id()),
-        memo: None,
-    })?;
-    let maker_view_tag = maker_deposit.view_tag();
-    let maker_signature = maker_deposit.send(&localnet.client, &payer, localnet.tree, &payer)?;
-    let taker_deposit = Deposit::new(DepositParams {
-        recipient: &taker_shielded_keypair.shielded_address()?,
-        asset: SOL_MINT,
-        amount: DESTINATION_AMOUNT,
-        spl_token_account: None,
-        spl_token_program: Some(spr_interface::pda::spl_token_program_id()),
-        memo: None,
-    })?;
-    let taker_view_tag = taker_deposit.view_tag();
-    let taker_signature = taker_deposit.send(&localnet.client, &payer, localnet.tree, &payer)?;
-
+    let maker_signature = deposit(
+        &localnet,
+        &payer,
+        &maker_address,
+        DepositAsset::Spl(DepositSplAccounts {
+            mint: spl_mint,
+            user_token: spl_funding,
+            token_program: spr_interface::pda::spl_token_program_id(),
+        }),
+        MAKER_SHIELD_SPL,
+    )?;
     let taker_address = taker_shielded_keypair
         .shielded_address()
         .map_err(|e| anyhow!("taker address: {e:?}"))?;
+    let taker_signature = deposit(
+        &localnet,
+        &payer,
+        &taker_address,
+        DepositAsset::Sol,
+        DESTINATION_AMOUNT,
+    )?;
 
     // Both deposits are wallet-owned, so each wallet discovers its own
     // through the indexer once it is indexed.
-    wait_for_indexed_utxo(&localnet.client, maker_view_tag, maker_signature);
-    wait_for_indexed_utxo(&localnet.client, taker_view_tag, taker_signature);
-    let mut maker_wallet =
-        Wallet::new(maker_address, assets.clone()).map_err(|e| anyhow!("maker wallet: {e:?}"))?;
-    sync_wallet(&mut maker_wallet, &maker_shielded_keypair, &localnet.client)
-        .map_err(|e| anyhow!("sync maker deposit: {e:?}"))?;
+    for signature in [maker_signature, taker_signature] {
+        localnet
+            .client
+            .confirm_private_transaction_sync(signature)
+            .map_err(|e| anyhow!("deposit {signature} indexed: {e:?}"))?;
+    }
+    let maker = TestWallet::scan(maker_shielded_keypair, assets.clone(), &localnet.client)
+        .map_err(|e| anyhow!("scan maker deposit: {e:?}"))?;
     let maker_input = SppProofInputUtxo::from(
-        maker_wallet
-            .balance(spl_mint, Some(Filter::MinAmount(MAKER_SHIELD_SPL)))?
-            .utxos
-            .first()
-            .cloned()
+        maker
+            .spendable_utxo(spl_mint, MAKER_SHIELD_SPL)
             .ok_or_else(|| anyhow!("the maker's SPL deposit is not spendable"))?,
     );
-    let mut taker_wallet =
-        Wallet::new(taker_address, assets.clone()).map_err(|e| anyhow!("taker wallet: {e:?}"))?;
-    sync_wallet(&mut taker_wallet, &taker_shielded_keypair, &localnet.client)
-        .map_err(|e| anyhow!("sync taker deposit: {e:?}"))?;
+    let taker = TestWallet::scan(taker_shielded_keypair, assets, &localnet.client)
+        .map_err(|e| anyhow!("scan taker deposit: {e:?}"))?;
 
     let env = TestEnv {
         localnet,
-        maker: TestWallet {
-            wallet: maker_wallet,
-            keypair: maker_shielded_keypair,
-        },
+        maker,
         maker_input,
-        taker: TestWallet {
-            wallet: taker_wallet,
-            keypair: taker_shielded_keypair,
-        },
+        taker,
         spl_mint,
     };
 
@@ -191,4 +197,59 @@ pub fn send(rpc: &SolanaRpc, payer: &dyn Signer, ix: Instruction) -> Result<Sign
         &[payer],
         ComputeBudgetConfig::new(TRANSACT_COMPUTE_UNIT_LIMIT),
     )?)
+}
+
+/// Shield `amount` of `asset` from `payer` to `recipient` with a proofless
+/// deposit. `payer` pays the fee and funds the deposit.
+fn deposit(
+    localnet: &FixtureLocalnet,
+    payer: &dyn Signer,
+    recipient: &ShieldedAddress,
+    asset: DepositAsset,
+    amount: u64,
+) -> Result<Signature> {
+    let ix = Deposit {
+        tree: localnet.tree,
+        depositor: payer.pubkey(),
+        deposits: vec![AssetDeposit {
+            asset,
+            // Deposits carry the recipient's viewing key tag.
+            view_tag: recipient.viewing_pubkey.u(),
+            owner: recipient.owner_hash()?,
+            amount,
+            memo: None,
+        }],
+    }
+    .instruction()?;
+    Ok(localnet.client.rpc().create_and_send_transaction(
+        std::slice::from_ref(&ix),
+        payer.pubkey(),
+        &[payer],
+        ComputeBudgetConfig::for_instruction_count(1),
+    )?)
+}
+
+/// Poll the indexer until it serves the inclusion proof of `leaf` in `tree`.
+pub fn wait_for_merkle_proof(
+    indexer: &impl Rpc,
+    tree: Pubkey,
+    leaf: [u8; 32],
+) -> Result<MerkleProof> {
+    let started = Instant::now();
+    let mut last_error = None;
+    while started.elapsed() < INDEXER_TIMEOUT {
+        match indexer.get_merkle_proofs(tree, vec![leaf], None) {
+            Ok(response) => {
+                if let Some(proof) = response.proofs.into_iter().next() {
+                    return Ok(proof);
+                }
+            }
+            Err(error) => last_error = Some(error.to_string()),
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+    Err(anyhow!(
+        "timed out waiting for an indexed merkle proof; last indexer error: {}",
+        last_error.as_deref().unwrap_or("none")
+    ))
 }

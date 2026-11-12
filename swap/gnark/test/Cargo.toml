@@ -20,7 +20,6 @@ spr-client = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c
 spr-interface = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
 spr-keypair = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
 spr-program-test = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08", features = ["localnet"] }
-spr-test-utils = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
 spr-transaction = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08" }
 spr-user-registry-interface = { git = "https://github.com/helius-labs/zolana", rev = "ca4cf4f6f0c83c0b225342e4bc6f16b3da83eb08", features = ["solana"] }
 
