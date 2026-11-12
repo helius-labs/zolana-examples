@@ -121,16 +121,8 @@ pub(crate) fn order_fixture_with_destination(
         ring_program_id: None,
         data: Data::default(),
     };
-    let input_utxo = spr_test_utils::utxo::wallet(
-        input_utxo,
-        &maker_keypair.nullifier_key,
-        INDEXED_TREE_ID,
-        0,
-        None,
-        None,
-    )
-    .unwrap()
-    .into();
+    let input_utxo =
+        crate::shared::test_input_utxo(input_utxo, &maker_keypair.nullifier_key, INDEXED_TREE_ID);
     let input_utxos = vec![
         input_utxo,
         SppProofInputUtxo::dummy(INDEXED_TREE_ID).unwrap(),
@@ -145,16 +137,13 @@ pub(crate) fn order_fixture_with_destination(
         maker_address,
     )
     .expect("change output");
-    let mut spp_proof_inputs = spr_test_utils::utxo::finalized_transaction(
+    let mut spp_proof_inputs = crate::shared::test_transaction(
         input_utxos,
         vec![change, order_output_utxo],
         &maker_keypair,
-        Address::default(),
         INDEXED_TREE_ID,
-        spr_keypair::random_blinding(),
-        spr_keypair::random_salt(),
     );
-    let order_output_utxo = &spp_proof_inputs.output_utxos[1];
+    let order_output_utxo = spp_proof_inputs.output_utxos.get(1).expect("order output");
     order_utxo.blinding = order_output_utxo.blinding;
     let order_utxo_hash = order_output_utxo
         .hash(INDEXED_TREE_ID)
