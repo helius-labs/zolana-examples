@@ -19,8 +19,15 @@ import {
   recoverOldViewingKeys,
   type KeyRecord,
 } from "../src/keyRecord.js";
-import { currentKeyRecord } from "../src/registry.js";
+import { currentKeyRecord, type VaultRegistry } from "../src/registry.js";
 import { checkOwnEntry, memberFromKeypair } from "../src/smartAccount.js";
+import { vaultAddress } from "../src/squads.js";
+import { EMPTY_RECORD_ADDRESS } from "../src/storage.js";
+import {
+  accountClient,
+  publish,
+  type FakeAccounts,
+} from "./storageAccounts.js";
 
 interface Member {
   readonly address: Address;
@@ -34,6 +41,35 @@ function member(): Member {
 
 async function settingsAddress(): Promise<Address> {
   return (await generateKeyPairSigner()).address;
+}
+
+/**
+ * An approver's `checkOwnEntry` against a chain whose storage head holds
+ * `published` for the vault of `settings`, or no head at all.
+ */
+async function approve(
+  record: KeyRecord,
+  approver: Member,
+  published?: KeyRecord,
+  settings: Address = record.settings,
+): Promise<void> {
+  const accounts: FakeAccounts = new Map();
+  if (published !== undefined) {
+    const vault = await vaultAddress(published.settings);
+    await publish(accounts, {
+      owner: vault,
+      record: await settingsAddress(),
+      payer: vault,
+      previous: EMPTY_RECORD_ADDRESS,
+      bytes: encodeKeyRecord(published),
+    });
+  }
+  await checkOwnEntry({
+    client: accountClient(accounts),
+    settings,
+    record,
+    member: memberFromKeypair(approver.keypair),
+  });
 }
 
 function recordFor(settings: Address, members: readonly Member[], epoch = 0n) {
@@ -175,11 +211,7 @@ describe("key record", () => {
     const second = rotateRecord(first, [alice, bob]);
     const third = rotateRecord(second, [alice, carol]);
     checkKeyHistory(second.record, first.record);
-    checkOwnEntry(
-      third.record,
-      memberFromKeypair(carol.keypair),
-      second.record,
-    );
+    await approve(third.record, carol, second.record);
     const secrets = recoverSharedSecrets(
       third.record,
       carol.address,
@@ -247,9 +279,8 @@ describe("key record", () => {
         ) as typeof entry.ciphertext,
       })),
     };
-    assert.throws(
-      () =>
-        checkOwnEntry(tampered, memberFromKeypair(alice.keypair), first.record),
+    await assert.rejects(
+      approve(tampered, alice, first.record),
       /old viewing secret does not match/,
     );
   });
@@ -259,8 +290,8 @@ describe("key record", () => {
     const first = recordFor(await settingsAddress(), [alice]);
     const second = rotateRecord(first, [alice]);
     const third = rotateRecord(second, [alice]);
-    assert.throws(
-      () => checkOwnEntry(second.record, memberFromKeypair(alice.keypair)),
+    await assert.rejects(
+      approve(second.record, alice),
       /needs the previous key record/,
     );
     assert.throws(
@@ -300,15 +331,58 @@ describe("key record", () => {
         },
       ],
     });
-    assert.throws(
-      () =>
-        checkOwnEntry(
-          substituted,
-          memberFromKeypair(alice.keypair),
-          first.record,
-        ),
+    await assert.rejects(
+      approve(substituted, alice, first.record),
       /complete previous history/,
     );
+  });
+
+  it("approvers check against the record on chain, not one the rotator supplies", async () => {
+    const alice = member();
+    const first = recordFor(await settingsAddress(), [alice]);
+    const second = rotateRecord(first, [alice]);
+    const third = rotateRecord(second, [alice]);
+    // `third` extends `second`, but the vault's head still holds `first`.
+    await approve(third.record, alice, second.record);
+    await assert.rejects(
+      approve(third.record, alice, first.record),
+      /does not extend the previous record/,
+    );
+    await assert.rejects(
+      approve(first.record, alice, undefined, await settingsAddress()),
+      /key record belongs to/,
+    );
+  });
+
+  it("a record must extend the previous record's settings, epoch and nullifier key", async () => {
+    const alice = member();
+    const first = recordFor(await settingsAddress(), [alice]);
+    const second = rotateRecord(first, [alice]);
+    const third = rotateRecord(second, [alice]);
+    const other = recordFor(await settingsAddress(), [alice]);
+    const cases: [string, KeyRecord, KeyRecord][] = [
+      [
+        "another Settings account",
+        second.record,
+        { ...first.record, settings: other.record.settings },
+      ],
+      ["a skipped epoch", third.record, first.record],
+      [
+        "a different nullifier key",
+        second.record,
+        {
+          ...first.record,
+          nullifierPublicKey: other.record.nullifierPublicKey,
+        },
+      ],
+    ];
+    for (const [name, record, previous] of cases) {
+      assert.throws(
+        () => checkKeyHistory(record, previous),
+        /does not extend the previous record/,
+        name,
+      );
+    }
   });
 
   it("the codec rejects missing, truncated and mismatched historical key vectors", async () => {
@@ -353,15 +427,19 @@ describe("key record", () => {
     const first = recordFor(settings, [a, b], 0n).record;
     const second = recordFor(settings, [a, c], 1n).record;
     const signers = [a, c].map(({ address }) => address);
-    const registry = {
-      viewingPublicKey: second.sharedViewingPublicKey,
+    const current = {
+      address: await settingsAddress(),
+      revision: 2n,
+      refund: await settingsAddress(),
       record: second,
-      recordAddress: undefined,
-      recordRevision: 0n,
     };
-    assert.deepEqual(currentKeyRecord(registry, settings, signers), second);
+    const registry: VaultRegistry = {
+      viewingPublicKey: second.sharedViewingPublicKey,
+      current,
+    };
+    assert.deepEqual(currentKeyRecord(registry, settings, signers), current);
 
-    const mismatches: [string, () => KeyRecord, RegExp][] = [
+    const mismatches: [string, () => unknown, RegExp][] = [
       [
         "a signer set the record does not name",
         () => currentKeyRecord(registry, settings, [a.address, b.address]),
@@ -386,7 +464,7 @@ describe("key record", () => {
         "no record",
         () =>
           currentKeyRecord(
-            { ...registry, record: undefined },
+            { ...registry, current: undefined },
             settings,
             signers,
           ),

@@ -14,10 +14,11 @@ import { DepositAsset, depositInstruction } from "@heliuslabs/spr/interface";
 import { getRegisterInstructionAsync } from "@heliuslabs/spr/instructions";
 import { LocalShieldedKeys } from "@heliuslabs/spr/transaction";
 
-import { recoverSharedSecrets } from "../../src/keyRecord.js";
+import { recoverSharedSecrets, type KeyRecord } from "../../src/keyRecord.js";
 import {
   fetchVaultRegistry,
   prepareKeyRecordUpload,
+  type VaultRegistry,
 } from "../../src/registry.js";
 import {
   EMPTY_RECORD_ADDRESS,
@@ -159,6 +160,27 @@ async function vaultRegistry(client: SprClient, vault: Address) {
   return registry;
 }
 
+/**
+ * The registry state after `upload` of `record` became the vault's head; the
+ * upload's payer is its default refund destination.
+ */
+function publishedRegistry(
+  record: KeyRecord,
+  upload: RecordUpload,
+  revision: bigint,
+  payer: TransactionSigner,
+): VaultRegistry {
+  return {
+    viewingPublicKey: record.sharedViewingPublicKey,
+    current: {
+      address: upload.address,
+      revision,
+      refund: payer.address,
+      record,
+    },
+  };
+}
+
 async function depositToVault(
   client: SprClient,
   depositor: TransactionSigner,
@@ -204,8 +226,14 @@ test(
 
     // Check, then Register: each approver opens its entry of record 0, and
     // the vault registers the keys and sets the record as its registry data.
-    checkOwnEntry(created.record, alice);
-    checkOwnEntry(created.record, bob);
+    for (const approver of [alice, bob]) {
+      await checkOwnEntry({
+        client,
+        settings: created.settings,
+        record: created.record,
+        member: approver,
+      });
+    }
     const firstUpload = await prepareKeyRecordUpload({
       owner: created.vault,
       previous: EMPTY_RECORD_ADDRESS,
@@ -222,12 +250,10 @@ test(
         buffer: firstUpload.address,
       }),
     ]);
-    assert.deepEqual(await vaultRegistry(client, created.vault), {
-      viewingPublicKey: created.record.sharedViewingPublicKey,
-      recordAddress: firstUpload.address,
-      recordRevision: 1n,
-      record: created.record,
-    });
+    assert.deepEqual(
+      await vaultRegistry(client, created.vault),
+      publishedRegistry(created.record, firstUpload, 1n, payer),
+    );
     const bobKeys = await recoverVaultKeys({
       client,
       settings: created.settings,
@@ -295,7 +321,12 @@ test(
     });
     assert.equal(rotation.record.epoch, 1n);
     // Approve: Alice stays a signer, so she checks her entry before signing.
-    checkOwnEntry(rotation.record, alice, created.record);
+    await checkOwnEntry({
+      client,
+      settings: created.settings,
+      record: rotation.record,
+      member: alice,
+    });
     await uploadRecord(client, payer, created.vault, rotation.upload, t);
     await send(client, payer, rotation.instructions);
     const rotated = await fetchSettings(client, created.settings);
@@ -303,12 +334,10 @@ test(
       rotated.signers.map((signer) => signer.key).sort(),
       [alice.signer.address, carol.signer.address].sort(),
     );
-    assert.deepEqual(await vaultRegistry(client, created.vault), {
-      viewingPublicKey: rotation.record.sharedViewingPublicKey,
-      recordAddress: rotation.upload.address,
-      recordRevision: 2n,
-      record: rotation.record,
-    });
+    assert.deepEqual(
+      await vaultRegistry(client, created.vault),
+      publishedRegistry(rotation.record, rotation.upload, 2n, payer),
+    );
     assert.deepEqual(
       rotation.record.nullifierPublicKey,
       created.record.nullifierPublicKey,
@@ -405,15 +434,18 @@ test(
       threshold: 2,
     });
     assert.equal(keyOnly.instructions.length, 1);
-    checkOwnEntry(keyOnly.record, alice, rotation.record);
+    await checkOwnEntry({
+      client,
+      settings: created.settings,
+      record: keyOnly.record,
+      member: alice,
+    });
     await uploadRecord(client, payer, created.vault, keyOnly.upload, t);
     await send(client, payer, keyOnly.instructions);
-    assert.deepEqual(await vaultRegistry(client, created.vault), {
-      viewingPublicKey: keyOnly.record.sharedViewingPublicKey,
-      recordAddress: keyOnly.upload.address,
-      recordRevision: 3n,
-      record: keyOnly.record,
-    });
+    assert.deepEqual(
+      await vaultRegistry(client, created.vault),
+      publishedRegistry(keyOnly.record, keyOnly.upload, 3n, payer),
+    );
     assert.equal(await client.getAccount(firstUpload.address), undefined);
     assert.equal(await client.getAccount(rotation.upload.address), undefined);
     const carolAfter = await recoverVaultKeys({
@@ -503,11 +535,9 @@ test(
     await assert.rejects(send(client, payer, [register]), (error: Error) =>
       /requires an uninitialized account/.test(String(error.cause)),
     );
-    assert.deepEqual(await vaultRegistry(client, created.vault), {
-      viewingPublicKey: rotation.record.sharedViewingPublicKey,
-      recordAddress: rotation.upload.address,
-      recordRevision: 2n,
-      record: rotation.record,
-    });
+    assert.deepEqual(
+      await vaultRegistry(client, created.vault),
+      publishedRegistry(rotation.record, rotation.upload, 2n, payer),
+    );
   },
 );

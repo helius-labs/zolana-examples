@@ -43,13 +43,15 @@ import {
 } from "./keyRecord.js";
 import {
   currentKeyRecord,
+  fetchPublishedKeyRecord,
   fetchVaultRegistry,
   registerVaultKeysInstruction,
   applyKeyRecordInstruction,
   prepareKeyRecordUpload,
   updateKeysInstruction,
+  type KeyRecordPublication,
 } from "./registry.js";
-import { EMPTY_RECORD_ADDRESS, type RecordUpload } from "./storage.js";
+import type { RecordUpload } from "./storage.js";
 import {
   checkSyncConsensus,
   createSmartAccountInstruction,
@@ -119,9 +121,7 @@ async function fetchCurrentKeyRecord(
   client: SprClient,
   settings: Address,
   decoded: Settings,
-): Promise<
-  Readonly<{ record: KeyRecord; address: Address; revision: bigint }>
-> {
+): Promise<KeyRecordPublication> {
   const registry = await fetchVaultRegistry(
     client,
     await vaultAddress(settings),
@@ -129,26 +129,19 @@ async function fetchCurrentKeyRecord(
   if (registry === undefined) {
     throw new Error(`the vault of ${settings} is not registered`);
   }
-  const record = currentKeyRecord(
+  return currentKeyRecord(
     registry,
     settings,
     decoded.signers.map((signer) => signer.key),
   );
-  if (registry.recordAddress === undefined)
-    throw new Error("the current record address is missing");
-  return {
-    record,
-    address: registry.recordAddress,
-    revision: registry.recordRevision,
-  };
 }
 
 /**
  * Recovers the shared secrets of the current key record, and the viewing
  * keys of every previous epoch, current first. All of these secrets are
- * encrypted into the latest key record, including for newly added signers. Their keys open
- * UTXOs the vault received before a rotate; the SDK's wallet sync tries every
- * viewing key it holds on each of the vault's outputs.
+ * encrypted into the latest key record, including for newly added signers.
+ * Their keys open UTXOs the vault received before a rotate; the SDK's wallet
+ * sync tries every viewing key it holds on each of the vault's outputs.
  */
 export async function recoverVaultKeys(
   input: Readonly<{
@@ -194,16 +187,29 @@ function destroySecrets(secrets: SharedSecrets): void {
 /**
  * For an approver that stays or becomes a signer, before it co-signs a
  * Register or Rotate: checks that its own entry in the new record opens to
- * keys matching the record, including every old viewing key. Rotations also
- * require the previous record read from on-chain state to verify complete
- * history preservation. Throws on a bad ciphertext or missing key.
+ * keys matching the record, including every old viewing key. The previous
+ * record comes from the vault's storage head, the same record the signed
+ * apply binds as its predecessor, never from the rotator. Before Register
+ * there is none, so `record` must be epoch 0. Throws on a bad ciphertext, a
+ * missing key or a broken history.
  */
-export function checkOwnEntry(
-  record: KeyRecord,
-  member: Member,
-  previous?: KeyRecord,
-): void {
-  checkKeyHistory(record, previous);
+export async function checkOwnEntry(
+  input: Readonly<{
+    client: SprClient;
+    settings: Address;
+    record: KeyRecord;
+    member: Member;
+  }>,
+): Promise<void> {
+  const { record, member } = input;
+  if (record.settings !== input.settings) {
+    throw new Error(`the key record belongs to ${record.settings}`);
+  }
+  const previous = await fetchPublishedKeyRecord(
+    input.client,
+    await vaultAddress(input.settings),
+  );
+  checkKeyHistory(record, previous?.record);
   const secrets = recoverSharedSecrets(
     record,
     member.signer.address,
@@ -321,8 +327,9 @@ function sortedSigners(signers: readonly NewSigner[]): SmartAccountSigner[] {
 /**
  * Squads `executeTransactionSyncV2` with an inner user registry `register`
  * of the record's public keys and publication of its uploaded buffer,
- * both signed by the vault. The vault pays both records' rent, so it needs
- * SOL. Each approver runs `checkOwnEntry` on `record` first. `register` fails
+ * both signed by the vault. The vault pays the rent of its user registry
+ * record and storage head, so it needs SOL; the upload's payer funded the
+ * buffer. Each approver runs `checkOwnEntry` on `record` first. `register` fails
  * on chain once the vault is registered, so a second Register cannot replace
  * the keys.
  */
@@ -361,8 +368,7 @@ export async function registerVaultInstruction(
       await applyKeyRecordInstruction(
         vault,
         input.buffer,
-        EMPTY_RECORD_ADDRESS,
-        0n,
+        undefined,
         input.record,
       ),
     ],
@@ -391,9 +397,9 @@ export interface Rotation {
   /** Send these upload instructions before the final atomic transaction. */
   readonly upload: RecordUpload;
   /**
-   * In order: the user registry `update_keys` and the data registry
-   * `apply` of the uploaded record,
-   * then the settings change, if any.
+   * In order: the user registry `update_keys` and the storage `apply` of the
+   * uploaded record, which closes the previous record, then the settings
+   * change, if any.
    */
   readonly instructions: readonly Instruction[];
 }
@@ -420,8 +426,10 @@ async function registeredViewingKey(
  * the new signer set, and returns the new record and the rotate
  * instructions. `keep` lists the current signers that stay, whose viewing
  * keys come from the user registry; `add` lists new signers with their
- * viewing keys. After the approvals (`checkOwnEntry`), the rotator sends the
- * instructions, which write the new key and the new record together.
+ * viewing keys. `payer` funds the upload; `refund`, the payer by default, is
+ * refunded when a later rotate closes this record. After the approvals
+ * (`checkOwnEntry`), the rotator sends the instructions, which write the new
+ * key and the new record together.
  */
 export async function rotateSmartAccount(
   input: Readonly<{
@@ -429,6 +437,7 @@ export async function rotateSmartAccount(
     settings: Address;
     rotator: Member;
     payer: TransactionSigner;
+    refund?: Address;
     approvers: readonly TransactionSigner[];
     keep: readonly Address[];
     add: readonly NewSigner[];
@@ -445,11 +454,12 @@ export async function rotateSmartAccount(
       throw new Error(`${signer.key} is already a signer; list it in keep`);
     }
   }
-  const { record, address, revision } = await fetchCurrentKeyRecord(
+  const published = await fetchCurrentKeyRecord(
     input.client,
     input.settings,
     current,
   );
+  const { record } = published;
   const kept = await Promise.all(
     input.keep.map(async (key): Promise<NewSigner> => {
       const signer = current.signers.find((entry) => entry.key === key);
@@ -488,8 +498,9 @@ export async function rotateSmartAccount(
     const vault = await vaultAddress(input.settings);
     const upload = await prepareKeyRecordUpload({
       owner: vault,
-      previous: address,
+      previous: published.address,
       payer: input.payer,
+      refund: input.refund,
       record: newRecord,
     });
     const instructions: Instruction[] = [
@@ -501,8 +512,7 @@ export async function rotateSmartAccount(
           await applyKeyRecordInstruction(
             vault,
             upload.address,
-            address,
-            revision,
+            published,
             newRecord,
           ),
         ],

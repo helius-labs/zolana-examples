@@ -802,20 +802,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "data-registry"
-version = "0.1.0"
-dependencies = [
- "mollusk-svm",
- "pinocchio",
- "solana-account",
- "solana-address 2.9.0",
- "solana-instruction",
- "solana-program-error",
- "solana-pubkey 4.1.0",
- "solana-sha256-hasher",
-]
-
-[[package]]
 name = "der"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3132,6 +3118,19 @@ checksum = "7ef958a98b9d5da290cfc78946e9f3e61e1e62a18db0d92cac0b83cc161491a9"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "storage"
+version = "0.1.0"
+dependencies = [
+ "mollusk-svm",
+ "pinocchio",
+ "solana-account",
+ "solana-address 2.9.0",
+ "solana-instruction",
+ "solana-program-error",
+ "solana-sha256-hasher",
 ]
 
 [[package]]

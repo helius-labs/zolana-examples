@@ -1,6 +1,6 @@
 # Private Smart Account (Client)
 
-A Squads smart account holds private balances in the zolana shielded pool (SPP). Every signer can view them through a shared viewing key. Whenever the account is created or its signers change, the signer making the change uploads a key record to the key record store, with that key encrypted to every signer. No program or proof checks the encryption.
+A Squads smart account holds private balances in the zolana shielded pool (SPP). Every signer can view them through a shared viewing key. Whenever the account is created or its signers change, the signer making the change uploads a key record to the storage program, with that key encrypted to every signer. No program or proof checks the encryption.
 
 ## Flows
 
@@ -18,7 +18,7 @@ A Squads smart account holds private balances in the zolana shielded pool (SPP).
 1. **Assemble signers.** The rotator picks the new signer set and threshold by adding, removing or keeping signers, and collects each added signer's viewing public key.
 2. **Recover.** The rotator decrypts its entry in the current key record to get the shared viewing secret, then uses that to decrypt the nullifier secret and every old viewing secret in the record.
 3. **Encrypt.** The rotator generates a new random shared viewing keypair. Under one new ephemeral key, it encrypts the new shared viewing secret to every viewing public key in the new set. It encrypts the unchanged nullifier secret and all previous viewing secrets, including the current one, to the new shared viewing public key. The old-key vector is ordered oldest first.
-4. **Upload and approve.** A rent payer uploads the new key record in chunks. The old record stays active. A threshold of the current Squads signers co-signs the final transaction, binding the new record hash, current record address and head revision. Each approver that stays a signer checks its own entry, decrypts and verifies the old viewing keys, and checks their public keys against the previous record's complete history plus its current viewing key.
+4. **Upload and approve.** A rent payer uploads the new key record in chunks. The old record stays active. A threshold of the current Squads signers co-signs the final transaction, binding the new record hash, current record address and head revision. Each approver that stays a signer checks its own entry, decrypts and verifies the old viewing keys, and checks their public keys against the complete history plus current viewing key of the previous record, which it reads from the vault's storage head rather than taking from the rotator.
 5. **Rotate.** The rotator submits one transaction with these instructions, in this order:
    - Squads `executeTransactionSyncV2` with an inner registry `update_keys` setting the new `shared_viewing_pubkey` and storage `apply` publishing the uploaded record;
    - Squads `executeSettingsTransactionSync` with the add-signer, change-threshold and remove-signer actions.
@@ -36,12 +36,12 @@ A Squads smart account holds private balances in the zolana shielded pool (SPP).
 
 ## Key Record
 
-The storage program stores opaque bytes; it does not parse or validate KeyRecord. New records are uploaded in chunks into a separate buffer while the current record stays active. A threshold of signers atomically applies that buffer together with the user-registry update and any Squads settings changes. Apply checks the approved bytes' hash, complete length, expected predecessor and head revision. It seals the replacement, advances the head and revision, closes the superseded record and refunds its balance to the apply rent payer. All of these changes are atomic. Current signers recover every old viewing key directly from the latest record. See [the storage protocol](program/STORAGE.md).
+The storage program stores opaque bytes; it does not parse or validate KeyRecord. New records are uploaded in chunks into a separate buffer while the current record stays active. A threshold of signers atomically applies that buffer together with the user-registry update and any Squads settings changes. Apply checks the approved bytes' hash, complete length, expected predecessor and head revision. It seals the replacement, advances the head and revision, closes the superseded record and refunds its balance to the refund destination its uploader chose. All of these changes are atomic. Current signers recover every old viewing key directly from the latest record. See [the storage protocol](program/STORAGE.md).
 
 A client checks that the current record's `shared_viewing_pubkey` equals the vault's registered `viewing_pubkey` and its entry signers equal the Squads `Settings.signers`. Approvers check their own encrypted entries before signing. The storage program stores opaque bytes and does not validate the ciphertexts.
 
 ```rust
-/// Borsh-serialized key record, stored in the key record store.
+/// Borsh-serialized key record, stored as the bytes of a storage-program record.
 pub struct KeyRecord {
     /// The Squads Settings account this record belongs to.
     pub settings: Pubkey,
@@ -84,7 +84,7 @@ A key record is `177 + 97 · N + 65 · H` bytes for N signers and H old viewing 
 
 1. No check of the ciphertexts.
 2. Reading published records requires an RPC that serves their account state.
-3. An incomplete or abandoned upload locks rent until its buffer signer cancels it.
+3. An incomplete or abandoned upload locks rent until its rent payer cancels it, refunding the chosen destination.
 4. Nothing enforces the rotate flow.
 5. The nullifier key doesn't rotate.
 6. A removed signer keeps the old shared viewing secret and the nullifier secret.

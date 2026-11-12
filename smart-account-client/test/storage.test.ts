@@ -8,7 +8,6 @@ import {
   getAddressDecoder,
   type Address,
 } from "@solana/kit";
-import type { SprClient } from "@heliuslabs/spr/client";
 import { ByteReader, ByteWriter } from "../src/bytes.js";
 import {
   STORAGE_PROGRAM_ADDRESS,
@@ -18,61 +17,41 @@ import {
   applyRecordInstruction,
   decodeStorageHead,
   decodeStoredRecord,
+  fetchPublishedRecord,
   fetchStorageHead,
   fetchStoredRecord,
   prepareRecordUpload,
   storageDataHash,
   storageHeadAddress,
 } from "../src/storage.js";
+import {
+  accountClient,
+  headBytes,
+  publish,
+  storedBytes,
+  type FakeAccounts,
+} from "./storageAccounts.js";
 
 const addressEncoder = getAddressEncoder();
 const addressDecoder = getAddressDecoder();
-const utf8 = new TextEncoder();
-const RECORD_MAGIC = utf8.encode("STORBUF1");
+/** Tag, owner, predecessor, total length and offset before each chunk. */
+const STORE_PREFIX = 1 + 32 + 32 + 4 + 4;
 
-function storedBytes(
-  owner: Address,
-  previous: Address,
-  bytes: Uint8Array,
-  sealed = 1,
-  totalLength = bytes.length,
-): Uint8Array {
-  return new ByteWriter()
-    .bytes(RECORD_MAGIC)
-    .u8(sealed)
-    .bytes(addressEncoder.encode(owner))
-    .bytes(addressEncoder.encode(previous))
-    .u32(totalLength)
-    .bytes(storageDataHash(bytes))
-    .bytes(bytes)
-    .finish();
-}
-
-function headBytes(current: Address, revision = 1n): Uint8Array {
-  return new ByteWriter()
-    .bytes(utf8.encode("STORHEAD"))
-    .bytes(addressEncoder.encode(current))
-    .u64(revision)
-    .finish();
-}
-
-function accountClient(
-  accounts: Map<Address, { owner: Address; data: Uint8Array }>,
-): SprClient {
-  return {
-    getAccount: async (address: Address) => accounts.get(address),
-  } as unknown as SprClient;
+async function newAddress(): Promise<Address> {
+  return (await generateKeyPairSigner()).address;
 }
 
 describe("versioned storage", () => {
-  it("uploads bounded, contiguous chunks and approves exactly their hash", async () => {
+  it("uploads canonical chunks and approves exactly their hash", async () => {
     const payer = await generateKeyPairSigner();
-    const owner = (await generateKeyPairSigner()).address;
+    const owner = await newAddress();
+    const refund = await newAddress();
     const bytes = Uint8Array.from({ length: 2800 }, (_, index) => index % 251);
     const upload = await prepareRecordUpload({
       owner,
       previous: EMPTY_RECORD_ADDRESS,
       payer,
+      refund,
       bytes,
     });
     const chunks: Uint8Array[] = [];
@@ -91,9 +70,11 @@ describe("versioned storage", () => {
       );
       assert.equal(reader.u32("length"), bytes.length);
       assert.equal(reader.u32("offset"), written);
-      const chunk = reader.bytes(instruction.data!.length - 73, "chunk");
+      const chunk = reader.bytes(
+        instruction.data!.length - STORE_PREFIX,
+        "chunk",
+      );
       reader.end();
-      assert(chunk.length > 0 && chunk.length <= STORAGE_CHUNK_SIZE);
       chunks.push(chunk);
       written += chunk.length;
       dataHash = Uint8Array.from(
@@ -101,16 +82,19 @@ describe("versioned storage", () => {
       );
       assert.deepEqual(
         instruction.accounts?.map(({ address }) => address),
-        [upload.address, payer.address, EMPTY_RECORD_ADDRESS],
+        [upload.address, payer.address, EMPTY_RECORD_ADDRESS, refund],
       );
     }
-    assert.equal(upload.instructions.length, 3);
+    // The program accepts a short chunk only at the end.
+    assert.deepEqual(
+      chunks.map((chunk) => chunk.length),
+      [STORAGE_CHUNK_SIZE, STORAGE_CHUNK_SIZE, STORAGE_CHUNK_SIZE, 496],
+    );
     assert.deepEqual(Uint8Array.from(Buffer.concat(chunks)), bytes);
     const apply = await applyRecordInstruction(
       owner,
       upload.address,
-      EMPTY_RECORD_ADDRESS,
-      0n,
+      undefined,
       bytes,
     );
     assert.deepEqual(
@@ -122,14 +106,38 @@ describe("versioned storage", () => {
         .bytes(dataHash)
         .finish(),
     );
-    assert.equal(
-      apply.accounts?.at(0)?.address,
-      await storageHeadAddress(owner),
-    );
-    assert.equal(apply.accounts?.at(1)?.address, upload.address);
     assert.deepEqual(
-      Uint8Array.from(upload.closeInstruction.data!),
-      Uint8Array.of(3),
+      apply.accounts?.map(({ address, role }) => ({ address, role })),
+      [
+        {
+          address: await storageHeadAddress(owner),
+          role: AccountRole.WRITABLE,
+        },
+        { address: upload.address, role: AccountRole.WRITABLE },
+        { address: owner, role: AccountRole.READONLY_SIGNER },
+        { address: owner, role: AccountRole.WRITABLE_SIGNER },
+        { address: EMPTY_RECORD_ADDRESS, role: AccountRole.READONLY },
+        { address: EMPTY_RECORD_ADDRESS, role: AccountRole.READONLY },
+        { address: EMPTY_RECORD_ADDRESS, role: AccountRole.READONLY },
+      ],
+      "the first apply closes nothing and refunds no one",
+    );
+    assert.deepEqual(
+      {
+        accounts: upload.closeInstruction.accounts?.map(
+          ({ address, role }) => ({ address, role }),
+        ),
+        data: Uint8Array.from(upload.closeInstruction.data!),
+      },
+      {
+        accounts: [
+          { address: upload.address, role: AccountRole.WRITABLE },
+          { address: payer.address, role: AccountRole.READONLY_SIGNER },
+          { address: refund, role: AccountRole.WRITABLE },
+        ],
+        data: Uint8Array.of(3),
+      },
+      "the rent payer cancels the upload and its destination is refunded",
     );
   });
 
@@ -138,49 +146,40 @@ describe("versioned storage", () => {
       Buffer.from(storageDataHash(new Uint8Array(25_000).fill(37))).toString(
         "hex",
       ),
-      "369777a38d9a2dc6382c3da6dadf3361f1fbe4b8bbcf7d0d49fc7e15b7e78353",
+      "3c3fe9a628e835a2691694e2a3ccf8f7e42c104fe99a90d64c1de10b4ff8e03e",
     );
   });
 
   it("distinguishes partial uploads from complete sealed records", async () => {
-    const owner = (await generateKeyPairSigner()).address;
+    const owner = await newAddress();
+    const payer = await newAddress();
+    const refund = await newAddress();
     const bytes = Uint8Array.of(1, 2, 3);
-    assert.deepEqual(
-      decodeStoredRecord(storedBytes(owner, EMPTY_RECORD_ADDRESS, bytes)),
-      {
-        sealed: true,
+    const stored = (sealed: number, totalLength?: number) =>
+      storedBytes({
         owner,
+        payer,
+        refund,
         previous: EMPTY_RECORD_ADDRESS,
-        totalLength: 3,
-        dataHash: storageDataHash(bytes),
         bytes,
-      },
-    );
-    assert.equal(
-      decodeStoredRecord(storedBytes(owner, EMPTY_RECORD_ADDRESS, bytes, 0, 5))
-        .sealed,
-      false,
-    );
-    assert.throws(
-      () =>
-        decodeStoredRecord(
-          storedBytes(owner, EMPTY_RECORD_ADDRESS, bytes, 1, 5),
-        ),
-      /length/,
-    );
-    assert.throws(
-      () =>
-        decodeStoredRecord(storedBytes(owner, EMPTY_RECORD_ADDRESS, bytes, 2)),
-      /state/,
-    );
-    assert.throws(
-      () =>
-        decodeStoredRecord(
-          storedBytes(owner, EMPTY_RECORD_ADDRESS, bytes, 0, 2),
-        ),
-      /length/,
-    );
-    const encoded = storedBytes(owner, EMPTY_RECORD_ADDRESS, bytes);
+        sealed,
+        totalLength,
+      });
+    assert.deepEqual(decodeStoredRecord(stored(1)), {
+      sealed: true,
+      owner,
+      payer,
+      refund,
+      previous: EMPTY_RECORD_ADDRESS,
+      totalLength: 3,
+      dataHash: storageDataHash(bytes),
+      bytes,
+    });
+    assert.equal(decodeStoredRecord(stored(0, 5)).sealed, false);
+    assert.throws(() => decodeStoredRecord(stored(1, 5)), /length/);
+    assert.throws(() => decodeStoredRecord(stored(2)), /state/);
+    assert.throws(() => decodeStoredRecord(stored(0, 2)), /length/);
+    const encoded = stored(1);
     for (let length = 0; length < BUFFER_HEADER_SIZE; length += 1) {
       assert.throws(
         () => decodeStoredRecord(encoded.slice(0, length)),
@@ -197,43 +196,82 @@ describe("versioned storage", () => {
     );
   });
 
-  it("reads the current record without needing a closed predecessor", async () => {
-    const owner = (await generateKeyPairSigner()).address;
-    const previous = (await generateKeyPairSigner()).address;
-    const current = (await generateKeyPairSigner()).address;
-    const head = await storageHeadAddress(owner);
+  it("reads the published record without needing a closed predecessor", async () => {
+    const owner = await newAddress();
+    const payer = await newAddress();
+    const refund = await newAddress();
+    const previous = await newAddress();
+    const current = await newAddress();
     const bytes = Uint8Array.of(4, 5, 6);
-    const accounts = new Map<Address, { owner: Address; data: Uint8Array }>([
-      [head, { owner: STORAGE_PROGRAM_ADDRESS, data: headBytes(current, 7n) }],
-      [
-        current,
-        {
-          owner: STORAGE_PROGRAM_ADDRESS,
-          data: storedBytes(owner, previous, bytes),
-        },
-      ],
-    ]);
-    const client = accountClient(accounts);
-    assert.deepEqual(await fetchStorageHead(client, owner), {
-      current,
+    const accounts: FakeAccounts = new Map();
+    await publish(accounts, {
+      owner,
+      record: current,
+      payer,
+      refund,
+      previous,
+      bytes,
       revision: 7n,
     });
-    assert.deepEqual((await fetchStoredRecord(client, current)).bytes, bytes);
+    const client = accountClient(accounts);
+    assert.deepEqual(await fetchPublishedRecord(client, owner), {
+      address: current,
+      revision: 7n,
+      refund,
+      bytes,
+    });
     await assert.rejects(fetchStoredRecord(client, previous), /missing record/);
-    accounts.delete(head);
+    accounts.delete(await storageHeadAddress(owner));
     assert.equal(await fetchStorageHead(client, owner), undefined);
+    assert.equal(await fetchPublishedRecord(client, owner), undefined);
   });
 
-  it("binds the previous account and revision into the signed apply", async () => {
-    const owner = (await generateKeyPairSigner()).address;
-    const previous = (await generateKeyPairSigner()).address;
-    const current = (await generateKeyPairSigner()).address;
+  it("rejects a head that points to an unpublished or foreign record", async () => {
+    const owner = await newAddress();
+    const payer = await newAddress();
+    const record = await newAddress();
+    const accounts: FakeAccounts = new Map();
+    await publish(accounts, {
+      owner,
+      record,
+      payer,
+      previous: EMPTY_RECORD_ADDRESS,
+      bytes: Uint8Array.of(1),
+    });
+    const client = accountClient(accounts);
+    for (const data of [
+      storedBytes({
+        owner,
+        payer,
+        previous: EMPTY_RECORD_ADDRESS,
+        bytes: Uint8Array.of(1),
+        sealed: 0,
+      }),
+      storedBytes({
+        owner: payer,
+        payer,
+        previous: EMPTY_RECORD_ADDRESS,
+        bytes: Uint8Array.of(1),
+      }),
+    ]) {
+      accounts.set(record, { owner: STORAGE_PROGRAM_ADDRESS, data });
+      await assert.rejects(
+        fetchPublishedRecord(client, owner),
+        /unpublished or foreign record/,
+      );
+    }
+  });
+
+  it("binds the predecessor and revision and refunds its destination", async () => {
+    const owner = await newAddress();
+    const previous = await newAddress();
+    const refund = await newAddress();
+    const current = await newAddress();
     const bytes = Uint8Array.of(7);
     const instruction = await applyRecordInstruction(
       owner,
       current,
-      previous,
-      7n,
+      { address: previous, revision: 7n, refund },
       bytes,
     );
     const reader = new ByteReader(Uint8Array.from(instruction.data!), "apply");
@@ -242,23 +280,28 @@ describe("versioned storage", () => {
     assert.equal(reader.u64("revision"), 7n);
     assert.deepEqual(reader.bytes(32, "hash"), storageDataHash(bytes));
     reader.end();
-    assert.deepEqual(instruction.accounts?.at(5), {
-      address: previous,
-      role: AccountRole.WRITABLE,
-    });
+    assert.deepEqual(instruction.accounts?.slice(5), [
+      { address: previous, role: AccountRole.WRITABLE },
+      { address: refund, role: AccountRole.WRITABLE },
+    ]);
   });
 
   it("rejects foreign owners and invalid head revisions", async () => {
-    const owner = (await generateKeyPairSigner()).address;
-    const record = (await generateKeyPairSigner()).address;
+    const owner = await newAddress();
+    const record = await newAddress();
     const head = await storageHeadAddress(owner);
-    const accounts = new Map<Address, { owner: Address; data: Uint8Array }>([
+    const accounts: FakeAccounts = new Map([
       [head, { owner: EMPTY_RECORD_ADDRESS, data: headBytes(record) }],
       [
         record,
         {
           owner: EMPTY_RECORD_ADDRESS,
-          data: storedBytes(owner, EMPTY_RECORD_ADDRESS, Uint8Array.of(1)),
+          data: storedBytes({
+            owner,
+            payer: owner,
+            previous: EMPTY_RECORD_ADDRESS,
+            bytes: Uint8Array.of(1),
+          }),
         },
       ],
     ]);

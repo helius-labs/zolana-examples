@@ -1,43 +1,45 @@
-use data_registry::{
-    state::{
-        decode_head, encode_head, BufferHeader, Head, BUFFER_HEADER_LEN, HEAD_LEN, HEAD_PDA_SEED,
-        MAX_CHUNK_LEN, MAX_RECORD_LEN,
-    },
-    StorageError, APPLY, CLOSE, STORE,
-};
 use mollusk_svm::{
     result::{types::TransactionProgramResult, ProgramResult},
     Mollusk,
 };
 use solana_account::Account;
+use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_program_error::ProgramError;
-use solana_pubkey::Pubkey;
 use solana_sha256_hasher::hashv;
+use storage::{
+    state::{
+        decode_head, encode_head, BufferHeader, Head, BUFFER_HEADER_LEN, CHUNK_LEN, HEAD_LEN,
+        HEAD_PDA_SEED, MAX_RECORD_LEN,
+    },
+    StorageError, APPLY, CLOSE, STORE,
+};
 
-const SYSTEM: Pubkey = Pubkey::new_from_array([0; 32]);
+const SYSTEM: Address = Address::new_from_array([0; 32]);
 
 struct Fixture {
     svm: Mollusk,
-    program: Pubkey,
-    owner: Pubkey,
-    payer: Pubkey,
-    head: Pubkey,
-    buffer: Pubkey,
-    accounts: Vec<(Pubkey, Account)>,
+    program: Address,
+    owner: Address,
+    payer: Address,
+    /// Refund destination new uploads record; the payer unless a test sets one.
+    refund: Address,
+    head: Address,
+    buffer: Address,
+    accounts: Vec<(Address, Account)>,
 }
 
 impl Fixture {
     fn new() -> Self {
-        let program = Pubkey::new_from_array([11; 32]);
-        let owner = Pubkey::new_from_array([12; 32]);
-        let payer = Pubkey::new_from_array([13; 32]);
-        let buffer = Pubkey::new_from_array([14; 32]);
-        let (head, _) = Pubkey::find_program_address(&[HEAD_PDA_SEED, owner.as_ref()], &program);
+        let program = Address::new_from_array([11; 32]);
+        let owner = Address::new_from_array([12; 32]);
+        let payer = Address::new_from_array([13; 32]);
+        let buffer = Address::new_from_array([14; 32]);
+        let (head, _) = Address::find_program_address(&[HEAD_PDA_SEED, owner.as_ref()], &program);
         let mut svm = Mollusk::default();
         let executable = std::fs::read(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/target/deploy/data_registry.so"
+            "/target/deploy/storage.so"
         ))
         .expect("build the SBF program before running integration tests");
         svm.add_program_with_loader_and_elf(
@@ -57,13 +59,14 @@ impl Fixture {
             program,
             owner,
             payer,
+            refund: payer,
             head,
             buffer,
             accounts,
         }
     }
 
-    fn account(&self, address: Pubkey) -> &Account {
+    fn account(&self, address: Address) -> &Account {
         &self
             .accounts
             .iter()
@@ -72,7 +75,7 @@ impl Fixture {
             .1
     }
 
-    fn account_mut(&mut self, address: Pubkey) -> &mut Account {
+    fn account_mut(&mut self, address: Address) -> &mut Account {
         &mut self
             .accounts
             .iter_mut()
@@ -81,7 +84,14 @@ impl Fixture {
             .1
     }
 
-    fn store(&self, previous: Pubkey, total: u32, offset: u32, chunk: &[u8]) -> Instruction {
+    /// A funded system account the tests can use as another signer.
+    fn add_wallet(&mut self) -> Address {
+        let wallet = Address::new_unique();
+        self.accounts.push((wallet, system_account(1_000_000_000)));
+        wallet
+    }
+
+    fn store(&self, previous: Address, total: u32, offset: u32, chunk: &[u8]) -> Instruction {
         let mut instruction_data = vec![STORE];
         instruction_data.extend_from_slice(self.owner.as_ref());
         instruction_data.extend_from_slice(previous.as_ref());
@@ -94,22 +104,38 @@ impl Fixture {
                 AccountMeta::new(self.buffer, true),
                 AccountMeta::new(self.payer, true),
                 AccountMeta::new_readonly(SYSTEM, false),
+                AccountMeta::new_readonly(self.refund, false),
             ],
             data: instruction_data,
         }
     }
 
+    /// Apply of the current buffer; the predecessor's recorded destination gets the refund.
     fn apply(&self, data_hash: [u8; 32]) -> Instruction {
-        let mut instruction_data = vec![APPLY];
-        instruction_data.extend_from_slice(self.header().previous.as_ref());
+        let previous = self.header().previous;
         let revision = if self.account(self.head).data.is_empty() {
             0
         } else {
             decode_head(&self.account(self.head).data).unwrap().revision
         };
+        let mut instruction_data = vec![APPLY];
+        instruction_data.extend_from_slice(previous.as_ref());
         instruction_data.extend_from_slice(&revision.to_le_bytes());
         instruction_data.extend_from_slice(&data_hash);
-        let previous = Pubkey::new_from_array(*self.header().previous.as_array());
+        let (previous_meta, refund_meta) = if previous == SYSTEM {
+            (
+                AccountMeta::new_readonly(SYSTEM, false),
+                AccountMeta::new_readonly(SYSTEM, false),
+            )
+        } else {
+            let refund = BufferHeader::decode(&self.account(previous).data)
+                .expect("published predecessor")
+                .refund;
+            (
+                AccountMeta::new(previous, false),
+                AccountMeta::new(refund, false),
+            )
+        };
         Instruction {
             program_id: self.program,
             accounts: vec![
@@ -118,22 +144,23 @@ impl Fixture {
                 AccountMeta::new_readonly(self.owner, true),
                 AccountMeta::new(self.payer, true),
                 AccountMeta::new_readonly(SYSTEM, false),
-                if previous == SYSTEM {
-                    AccountMeta::new_readonly(SYSTEM, false)
-                } else {
-                    AccountMeta::new(previous, false)
-                },
+                previous_meta,
+                refund_meta,
             ],
             data: instruction_data,
         }
     }
 
+    /// Cancel of the current buffer, refunding its recorded destination.
     fn close(&self) -> Instruction {
+        let refund = BufferHeader::decode(&self.account(self.buffer).data)
+            .map_or(self.refund, |header| header.refund);
         Instruction {
             program_id: self.program,
             accounts: vec![
-                AccountMeta::new(self.buffer, true),
-                AccountMeta::new(self.payer, false),
+                AccountMeta::new(self.buffer, false),
+                AccountMeta::new_readonly(self.payer, true),
+                AccountMeta::new(refund, false),
             ],
             data: vec![CLOSE],
         }
@@ -154,19 +181,19 @@ impl Fixture {
         );
     }
 
-    fn upload(&mut self, previous: Pubkey, bytes: &[u8]) -> [u8; 32] {
+    fn upload(&mut self, previous: Address, bytes: &[u8]) -> [u8; 32] {
         let mut data_hash = [0; 32];
-        for (chunk_index, chunk) in bytes.chunks(MAX_CHUNK_LEN).enumerate() {
-            let offset = chunk_index * MAX_CHUNK_LEN;
+        for (chunk_index, chunk) in bytes.chunks(CHUNK_LEN).enumerate() {
+            let offset = chunk_index * CHUNK_LEN;
             self.succeed(self.store(previous, bytes.len() as u32, offset as u32, chunk));
             data_hash = hashv(&[&data_hash, chunk]).to_bytes();
         }
         data_hash
     }
 
-    fn next_buffer(&mut self) -> Pubkey {
+    fn next_buffer(&mut self) -> Address {
         let previous = self.buffer;
-        self.buffer = Pubkey::new_unique();
+        self.buffer = Address::new_unique();
         self.accounts.push((self.buffer, system_account(0)));
         previous
     }
@@ -187,6 +214,9 @@ fn custom(error: StorageError) -> ProgramError {
     ProgramError::Custom(error as u32)
 }
 
+/// A full first chunk followed by room for one more byte.
+const SPLIT_TOTAL: u32 = CHUNK_LEN as u32 + 1;
+
 #[test]
 fn chunked_growth_preserves_the_active_record_until_atomic_replacement() {
     let mut fixture = Fixture::new();
@@ -201,8 +231,8 @@ fn chunked_growth_preserves_the_active_record_until_atomic_replacement() {
     assert_eq!(
         next_hash,
         [
-            54, 151, 119, 163, 141, 154, 45, 198, 56, 44, 61, 166, 218, 223, 51, 97, 241, 251, 228,
-            184, 187, 207, 125, 13, 73, 252, 126, 21, 183, 231, 131, 83
+            60, 63, 233, 166, 40, 232, 53, 162, 105, 22, 148, 226, 163, 204, 248, 247, 228, 44, 16,
+            79, 233, 154, 144, 214, 76, 29, 225, 11, 79, 248, 224, 62
         ]
     );
     assert_eq!(
@@ -218,17 +248,18 @@ fn chunked_growth_preserves_the_active_record_until_atomic_replacement() {
         pending_header,
         BufferHeader {
             sealed: false,
-            owner: pinocchio::Address::new_from_array(fixture.owner.to_bytes()),
-            previous: pinocchio::Address::new_from_array(first_address.to_bytes()),
+            owner: fixture.owner,
+            payer: fixture.payer,
+            refund: fixture.payer,
+            previous: first_address,
             total_length: next_bytes.len() as u32,
             data_hash: next_hash,
         },
     );
     let payer_balance = fixture.account(fixture.payer).lamports;
     fixture.succeed(fixture.apply(next_hash));
-    let mut closed_first = first_account.clone();
-    closed_first.lamports = 0;
-    closed_first.data.clear();
+    // Closing hands the account back to the System Program with no lamports or data.
+    let closed_first = system_account(0);
     assert_eq!(
         (
             decode_head(&fixture.account(fixture.head).data).unwrap(),
@@ -239,10 +270,11 @@ fn chunked_growth_preserves_the_active_record_until_atomic_replacement() {
                 .get(BUFFER_HEADER_LEN..)
                 .unwrap(),
             fixture.account(first_address),
+            fixture.account(fixture.payer).lamports,
         ),
         (
             Head {
-                current: pinocchio::Address::new_from_array(fixture.buffer.to_bytes()),
+                current: fixture.buffer,
                 revision: 2
             },
             BufferHeader {
@@ -251,12 +283,9 @@ fn chunked_growth_preserves_the_active_record_until_atomic_replacement() {
             },
             next_bytes.as_slice(),
             &closed_first,
+            payer_balance + first_account.lamports,
         ),
         "publication must seal the replacement and close only its predecessor",
-    );
-    assert_eq!(
-        fixture.account(fixture.payer).lamports,
-        payer_balance + first_account.lamports
     );
     assert_eq!(fixture.account(fixture.head).data.len(), HEAD_LEN);
 }
@@ -272,7 +301,7 @@ fn prefunded_buffer_and_head_cannot_block_initialization() {
 }
 
 #[test]
-fn the_owner_can_also_pay_head_rent_as_in_a_squads_cpi() {
+fn the_vault_pays_head_rent_and_the_uploader_gets_the_refund() {
     let mut fixture = Fixture::new();
     fixture.account_mut(fixture.owner).lamports = 20_000_000;
     let data_hash = fixture.upload(SYSTEM, b"record");
@@ -294,18 +323,18 @@ fn the_owner_can_also_pay_head_rent_as_in_a_squads_cpi() {
             fixture.account(fixture.payer).lamports,
             fixture.account(first).lamports
         ),
-        (owner_balance + predecessor_balance, payer_balance, 0),
-        "the vault receives the refund when it is the apply rent payer",
+        (owner_balance, payer_balance + predecessor_balance, 0),
+        "the predecessor's uploader receives its rent, not the apply payer",
     );
 }
 
 #[test]
 fn repeated_or_skipped_offsets_fail() {
     let mut fixture = Fixture::new();
-    fixture.succeed(fixture.store(SYSTEM, 8, 0, b"abc"));
-    for offset in [0, 2, 4, u32::MAX] {
+    fixture.succeed(fixture.store(SYSTEM, SPLIT_TOTAL, 0, &[1; CHUNK_LEN]));
+    for offset in [0, CHUNK_LEN as u32 - 1, CHUNK_LEN as u32 + 1, u32::MAX] {
         fixture.reject(
-            fixture.store(SYSTEM, 8, offset, b"d"),
+            fixture.store(SYSTEM, SPLIT_TOTAL, offset, b"d"),
             custom(StorageError::InvalidOffset),
         );
     }
@@ -314,18 +343,29 @@ fn repeated_or_skipped_offsets_fail() {
 #[test]
 fn upload_metadata_cannot_be_changed() {
     let mut fixture = Fixture::new();
-    fixture.succeed(fixture.store(SYSTEM, 8, 0, b"abc"));
+    let offset = CHUNK_LEN as u32;
+    fixture.succeed(fixture.store(SYSTEM, SPLIT_TOTAL, 0, &[1; CHUNK_LEN]));
     fixture.reject(
-        fixture.store(SYSTEM, 9, 3, b"d"),
+        fixture.store(SYSTEM, SPLIT_TOTAL + 1, offset, b"d"),
         custom(StorageError::MetadataMismatch),
     );
     fixture.reject(
-        fixture.store(Pubkey::new_unique(), 8, 3, b"d"),
+        fixture.store(Address::new_unique(), SPLIT_TOTAL, offset, b"d"),
         custom(StorageError::MetadataMismatch),
     );
-    let mut instruction = fixture.store(SYSTEM, 8, 3, b"d");
+    let mut instruction = fixture.store(SYSTEM, SPLIT_TOTAL, offset, b"d");
     instruction.data.get_mut(1..33).unwrap().fill(99);
     fixture.reject(instruction, custom(StorageError::MetadataMismatch));
+}
+
+#[test]
+fn every_chunk_of_an_upload_has_the_same_payer() {
+    let mut fixture = Fixture::new();
+    fixture.succeed(fixture.store(SYSTEM, SPLIT_TOTAL, 0, &[1; CHUNK_LEN]));
+    let other = fixture.add_wallet();
+    let mut instruction = fixture.store(SYSTEM, SPLIT_TOTAL, CHUNK_LEN as u32, b"d");
+    instruction.accounts.get_mut(1).unwrap().pubkey = other;
+    fixture.reject(instruction, custom(StorageError::PayerMismatch));
 }
 
 #[test]
@@ -336,7 +376,9 @@ fn invalid_lengths_fail_before_mutating_accounts() {
         (MAX_RECORD_LEN as u32 + 1, vec![1]),
         (1, vec![]),
         (1, vec![1, 2]),
-        (2048, vec![1; MAX_CHUNK_LEN + 1]),
+        (2 * SPLIT_TOTAL, vec![1; CHUNK_LEN + 1]),
+        // Only the final chunk may be shorter than CHUNK_LEN.
+        (SPLIT_TOTAL, vec![1; CHUNK_LEN - 1]),
     ] {
         fixture.reject(
             fixture.store(SYSTEM, total, 0, &chunk),
@@ -370,7 +412,7 @@ fn readonly_buffers_are_rejected() {
 #[test]
 fn foreign_buffer_owners_and_discriminators_are_rejected() {
     let mut fixture = Fixture::new();
-    fixture.account_mut(fixture.buffer).owner = Pubkey::new_unique();
+    fixture.account_mut(fixture.buffer).owner = Address::new_unique();
     fixture.reject(
         fixture.store(SYSTEM, 3, 0, b"abc"),
         ProgramError::InvalidAccountData,
@@ -386,7 +428,7 @@ fn foreign_buffer_owners_and_discriminators_are_rejected() {
 #[test]
 fn incomplete_buffers_cannot_be_applied() {
     let mut fixture = Fixture::new();
-    fixture.succeed(fixture.store(SYSTEM, 8, 0, b"abc"));
+    fixture.succeed(fixture.store(SYSTEM, SPLIT_TOTAL, 0, &[1; CHUNK_LEN]));
     fixture.reject(
         fixture.apply(fixture.header().data_hash),
         custom(StorageError::InvalidLength),
@@ -425,11 +467,21 @@ fn a_buffer_for_another_owner_cannot_be_published() {
 fn the_head_must_be_the_owners_canonical_pda() {
     let mut fixture = Fixture::new();
     let data_hash = fixture.upload(SYSTEM, b"abc");
-    let alternate = Pubkey::new_unique();
+    let alternate = Address::new_unique();
     fixture.accounts.push((alternate, system_account(0)));
     let mut instruction = fixture.apply(data_hash);
     instruction.accounts.first_mut().unwrap().pubkey = alternate;
     fixture.reject(instruction, ProgramError::InvalidSeeds);
+}
+
+#[test]
+fn the_first_publication_takes_system_program_placeholders() {
+    let mut fixture = Fixture::new();
+    let data_hash = fixture.upload(SYSTEM, b"abc");
+    let other = fixture.add_wallet();
+    let mut instruction = fixture.apply(data_hash);
+    *instruction.accounts.get_mut(6).unwrap() = AccountMeta::new(other, false);
+    fixture.reject(instruction, ProgramError::InvalidArgument);
 }
 
 #[test]
@@ -526,6 +578,24 @@ fn replacement_requires_the_exact_writable_predecessor() {
 }
 
 #[test]
+fn replacement_refunds_only_the_predecessors_destination() {
+    let mut fixture = Fixture::new();
+    let first_hash = fixture.upload(SYSTEM, b"first");
+    fixture.succeed(fixture.apply(first_hash));
+    let first = fixture.next_buffer();
+    let next_hash = fixture.upload(first, b"next");
+    let other = fixture.add_wallet();
+    let mut redirected = fixture.apply(next_hash);
+    redirected.accounts.get_mut(6).unwrap().pubkey = other;
+    fixture.reject(redirected, custom(StorageError::RefundMismatch));
+    // The vault pays apply, so the uploader appears only as the refund account.
+    let mut readonly = fixture.apply(next_hash);
+    readonly.accounts.get_mut(3).unwrap().pubkey = fixture.owner;
+    readonly.accounts.get_mut(6).unwrap().is_writable = false;
+    fixture.reject(readonly, ProgramError::InvalidAccountData);
+}
+
+#[test]
 fn replacement_rejects_a_foreign_or_unsealed_predecessor() {
     let mut fixture = Fixture::new();
     let first_hash = fixture.upload(SYSTEM, b"first");
@@ -537,7 +607,7 @@ fn replacement_rejects_a_foreign_or_unsealed_predecessor() {
     fixture.reject(fixture.apply(next_hash), ProgramError::IllegalOwner);
     *fixture.account_mut(first) = original.clone();
     let mut header = BufferHeader::decode(&original.data).unwrap();
-    header.owner = pinocchio::Address::new_from_array([99; 32]);
+    header.owner = Address::new_from_array([99; 32]);
     header.encode(&mut fixture.account_mut(first).data).unwrap();
     fixture.reject(fixture.apply(next_hash), ProgramError::IllegalOwner);
     *fixture.account_mut(first) = original;
@@ -556,7 +626,7 @@ fn revision_overflow_cannot_close_the_active_record() {
     let next_hash = fixture.upload(first, b"next");
     encode_head(
         &mut fixture.account_mut(fixture.head).data,
-        &pinocchio::Address::new_from_array(first.to_bytes()),
+        &first,
         u64::MAX,
     )
     .unwrap();
@@ -592,15 +662,120 @@ fn closing_an_unpublished_buffer_refunds_its_full_rent() {
 }
 
 #[test]
-fn closing_requires_the_buffer_signature_and_a_distinct_recipient() {
+fn only_the_recorded_payer_can_cancel_an_upload() {
     let mut fixture = Fixture::new();
     fixture.upload(SYSTEM, b"abc");
     let mut unsigned = fixture.close();
-    unsigned.accounts.first_mut().unwrap().is_signer = false;
+    unsigned.accounts.get_mut(1).unwrap().is_signer = false;
     fixture.reject(unsigned, ProgramError::MissingRequiredSignature);
+    let other = fixture.add_wallet();
+    let mut stranger = fixture.close();
+    stranger.accounts.get_mut(1).unwrap().pubkey = other;
+    fixture.reject(stranger, custom(StorageError::PayerMismatch));
+    let mut redirected = fixture.close();
+    redirected.accounts.get_mut(2).unwrap().pubkey = other;
+    fixture.reject(redirected, custom(StorageError::RefundMismatch));
     let mut aliased = fixture.close();
-    aliased.accounts.get_mut(1).unwrap().pubkey = fixture.buffer;
+    aliased.accounts.get_mut(2).unwrap().pubkey = fixture.buffer;
     fixture.reject(aliased, ProgramError::InvalidArgument);
+}
+
+#[test]
+fn a_chosen_destination_receives_the_cancel_and_replacement_refunds() {
+    let mut fixture = Fixture::new();
+    let destination = fixture.add_wallet();
+    fixture.refund = destination;
+    fixture.upload(SYSTEM, b"cancelled");
+    let destination_balance = fixture.account(destination).lamports;
+    let buffer_balance = fixture.account(fixture.buffer).lamports;
+    fixture.succeed(fixture.close());
+    assert_eq!(
+        fixture.account(destination).lamports,
+        destination_balance + buffer_balance,
+        "cancelling refunds the destination, not the payer",
+    );
+    fixture.next_buffer();
+    let first_hash = fixture.upload(SYSTEM, b"first");
+    fixture.succeed(fixture.apply(first_hash));
+    let first = fixture.next_buffer();
+    fixture.refund = fixture.payer;
+    let next_hash = fixture.upload(first, b"next");
+    let destination_balance = fixture.account(destination).lamports;
+    let payer_balance = fixture.account(fixture.payer).lamports;
+    let first_balance = fixture.account(first).lamports;
+    fixture.succeed(fixture.apply(next_hash));
+    assert_eq!(
+        (
+            fixture.account(destination).lamports,
+            fixture.account(fixture.payer).lamports,
+        ),
+        (destination_balance + first_balance, payer_balance),
+        "replacing a record refunds the destination it recorded",
+    );
+}
+
+#[test]
+fn the_destination_is_fixed_at_the_first_chunk() {
+    let mut fixture = Fixture::new();
+    fixture.succeed(fixture.store(SYSTEM, SPLIT_TOTAL, 0, &[1; CHUNK_LEN]));
+    fixture.refund = fixture.add_wallet();
+    fixture.reject(
+        fixture.store(SYSTEM, SPLIT_TOTAL, CHUNK_LEN as u32, b"d"),
+        custom(StorageError::MetadataMismatch),
+    );
+}
+
+#[test]
+fn the_destination_must_be_a_plain_system_account_other_than_the_buffer() {
+    let mut fixture = Fixture::new();
+    let owned = fixture.add_wallet();
+    fixture.account_mut(owned).owner = fixture.program;
+    let executable = fixture.add_wallet();
+    fixture.account_mut(executable).executable = true;
+    for (destination, error) in [
+        (owned, ProgramError::InvalidAccountData),
+        (executable, ProgramError::InvalidAccountData),
+        (fixture.buffer, ProgramError::InvalidArgument),
+    ] {
+        fixture.refund = destination;
+        fixture.reject(fixture.store(SYSTEM, 3, 0, b"abc"), error);
+    }
+}
+
+#[test]
+fn a_record_cannot_name_its_owners_head_as_destination() {
+    let mut fixture = Fixture::new();
+    fixture.refund = fixture.head;
+    let data_hash = fixture.upload(SYSTEM, b"abc");
+    fixture.reject(fixture.apply(data_hash), ProgramError::InvalidArgument);
+}
+
+#[test]
+fn an_executable_destination_refunds_the_apply_payer_instead() {
+    let mut fixture = Fixture::new();
+    let destination = fixture.add_wallet();
+    fixture.refund = destination;
+    let first_hash = fixture.upload(SYSTEM, b"first");
+    fixture.succeed(fixture.apply(first_hash));
+    let first = fixture.next_buffer();
+    fixture.refund = fixture.payer;
+    let next_hash = fixture.upload(first, b"next");
+    // The destination's owner later deploys a program at that address.
+    fixture.account_mut(destination).executable = true;
+    let destination_balance = fixture.account(destination).lamports;
+    let payer_balance = fixture.account(fixture.payer).lamports;
+    let first_balance = fixture.account(first).lamports;
+    let mut instruction = fixture.apply(next_hash);
+    instruction.accounts.get_mut(6).unwrap().is_writable = false;
+    fixture.succeed(instruction);
+    assert_eq!(
+        (
+            fixture.account(destination).lamports,
+            fixture.account(fixture.payer).lamports,
+        ),
+        (destination_balance, payer_balance + first_balance),
+        "the record stays replaceable and its rent goes to the apply payer",
+    );
 }
 
 #[test]

@@ -3,21 +3,21 @@
 A Squads smart account whose vault holds private balances in the zolana
 shielded pool (SPP). Every signer views them through a shared viewing key,
 which the signers encrypt to each other in a key record. A storage program
-keeps the current key record behind a head PDA and closes superseded accounts. No
-proof checks a key record. See [`design.md`](design.md) for the flows and
-their limitations.
+keeps the current key record behind a head PDA and closes superseded
+accounts. No proof checks a key record. See [`design.md`](design.md) for the
+flows and their limitations.
 
 > [!WARNING]
 > **Not for production.** An example, not audited code. Nothing checks that a
 > key record's ciphertexts open for every signer; see the limitations in
-> `design.md`. The data registry program is deployed on devnet and mainnet at
-> `Stor9L8wQBAGcAcoUcADt5sWYYaEA65Ws2Cgt5UUqXj`.
+> `design.md`. The client uses the storage program at
+> `Stor9L8wQBAGcAcoUcADt5sWYYaEA65Ws2Cgt5UUqXj` on devnet and mainnet.
 
 ## Layout
 
 | File                                                                     |                                                                                                                                                       |
 | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`program/src/lib.rs`](program/src/lib.rs)                               | The storage program: chunked uploads, owner-authorized publication and cancellation of unpublished uploads.                                           |
+| [`program/src/lib.rs`](program/src/lib.rs)                               | The storage program: chunked uploads, owner-authorized publication and payer-signed cancellation of unpublished uploads.                              |
 | [`src/squads.ts`](src/squads.ts)                                         | Squads PDAs, `createSmartAccount`, `executeTransactionSyncV2`, `executeSettingsTransactionSync`, the `Settings` decoder and the sync consensus check. |
 | [`src/keyRecord.ts`](src/keyRecord.ts)                                   | The key record layout (`177 + 97 · N + 65 · H` bytes) and its encryption.                                                                             |
 | [`src/registry.ts`](src/registry.ts)                                     | The registered viewing key, current record and upload/apply builders.                                                                                 |
@@ -52,13 +52,16 @@ serialized bytes; it does not parse this structure.
   SOL. Squads strips the signer flag of its own members inside the CPI, so a
   member cannot pay there.
 - Uploads are separate transactions. `prepareKeyRecordUpload` returns `store`
-  instructions that append chunks of at most 1,024 bytes, growing the buffer
-  as needed. Its rent payer signs uploads; the vault authorizes publication.
+  instructions that append 768-byte chunks (the last may be shorter), growing
+  the buffer as needed; each fits a 1,232-byte transaction. Its rent payer
+  signs every chunk; the vault authorizes publication. The optional `refund`
+  destination, the payer by default, gets the rent back, so a sponsor can pay
+  for uploads and route the rent wherever it wants.
 - Register sends the user registry `register` and storage `apply` for record 0
   in one Squads transaction. Rotate sends `update_keys` and `apply` of the new
-  record, then the settings change in the same transaction. They run under the current signers and
-  threshold. The deployed user registry takes only the viewing key in
-  `update_keys`, so the client builds that instruction itself.
+  record, then the settings change in the same transaction. They run under
+  the current signers and threshold. The deployed user registry takes only the
+  viewing key in `update_keys`, so the client builds that instruction itself.
 - Every Squads transaction is sync: `time_lock` is 0. The tests send version 1
   transactions (4096 bytes). Finalization carries the buffer address and its
   approved hash, so the whole record need not fit in that transaction.
@@ -68,25 +71,28 @@ serialized bytes; it does not parse this structure.
   and is built again.
 - Rotate reads kept signers' viewing keys from their user registry records,
   so every kept signer must be registered.
-- An approver calls `checkOwnEntry` before co-signing Register. For a rotate,
-  pass the previous published record as the third argument, obtained from
-  on-chain state. The client verifies every historical ciphertext and checks
-  that the new vector preserves all previous keys in order.
+- An approver calls `checkOwnEntry` before co-signing Register or a rotate.
+  It reads the previous record from the vault's storage head itself, the same
+  record the signed `apply` binds, so a rotator cannot substitute one. It
+  verifies every historical ciphertext and checks that the new vector
+  preserves all previous keys in order.
 - `apply` checks the complete upload, approved hash, predecessor and head
   revision. It seals the replacement, advances `[b"head", vault]` and its
-  revision, closes the old record, and refunds its balance to the rent payer
-  (the vault). These changes are atomic. Until apply succeeds, the old record
-  stays active. The active record cannot be edited or separately closed.
-  An unpublished buffer can be cancelled with its signer to refund rent.
+  revision, closes the old record, and refunds its balance to that upload's
+  destination. These changes are atomic. Until apply succeeds, the old record
+  stays active. The active record cannot be edited or separately closed. The
+  rent payer of an unpublished buffer can cancel it with
+  `upload.closeInstruction`, refunding the destination.
 - `recoverVaultKeys` decrypts the current and all old viewing keys directly
   from the latest record. It needs no historical record lookup. The SDK's
   `syncWallet` tries every key on the vault's outputs, so UTXOs sent before
   a member joined are visible too.
 
-`rotateSmartAccount` returns `upload.instructions` and the final `instructions`.
-Send each upload instruction in a separate transaction, have approvers check
-the new record, then send the final instructions together. `registerVaultInstruction`
-takes the address returned by `prepareKeyRecordUpload` as its `buffer` argument.
+`rotateSmartAccount` returns `upload.instructions` and the final
+`instructions`. Send each upload instruction in a separate transaction, have
+approvers check the new record, then send the final instructions together.
+`registerVaultInstruction` takes the address returned by
+`prepareKeyRecordUpload` as its `buffer` argument.
 See [the storage protocol](program/STORAGE.md) for its layout and checks.
 The replacement carries the entire encrypted key history. Only the current
 record stays on chain after apply; its size is limited to 10 MiB including
@@ -113,8 +119,9 @@ Only the selected network's RPC variable is required. The payer defaults to
 `~/.config/solana/id.json`; set `ZOLANA_PAYER_KEYPAIR` to use another file.
 Fund it with at least 0.1 SOL on the selected network. The payer covers fees,
 account rent and a 0.01 SOL private deposit. Cleanup returns unused public SOL
-from the fresh members and vaults, including after a failed assertion. Current account
-rent and the private balances remain on chain; superseded record rent is refunded.
+from the fresh members and vaults, including after a failed assertion. Current
+account rent and the private balances remain on chain; superseded record rent
+is refunded to the payer.
 
 CI runs the devnet suite using the existing `DEVNET_RPC_URL` and
 `DEVNET_PAYER_KEYPAIR` repository secrets. Fork pull requests run the unit

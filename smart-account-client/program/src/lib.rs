@@ -1,5 +1,6 @@
 //! Append-only uploads, published atomically through an owner-authorized head.
-//! Publishing a replacement atomically closes its predecessor and refunds rent.
+//! Publishing a replacement atomically closes its predecessor and refunds its
+//! rent to whoever paid for that upload.
 
 use pinocchio::{
     cpi::{invoke, invoke_signed, Seed, Signer},
@@ -12,8 +13,8 @@ use solana_sha256_hasher::hashv;
 
 pub mod state;
 use state::{
-    decode_head, encode_head, read, BufferHeader, Head, BUFFER_HEADER_LEN, HEAD_LEN, HEAD_PDA_SEED,
-    MAX_CHUNK_LEN, MAX_RECORD_LEN, ZERO_ADDRESS,
+    decode_head, encode_head, read, BufferHeader, Head, APPLY_ARGUMENTS_LEN, BUFFER_HEADER_LEN,
+    CHUNK_LEN, HEAD_LEN, HEAD_PDA_SEED, MAX_RECORD_LEN, STORE_ARGUMENTS_LEN, ZERO_ADDRESS,
 };
 
 pub const STORE: u8 = 1;
@@ -30,6 +31,8 @@ pub enum StorageError {
     HashMismatch,
     StaleHead,
     MetadataMismatch,
+    PayerMismatch,
+    RefundMismatch,
 }
 
 impl From<StorageError> for ProgramError {
@@ -60,24 +63,24 @@ pub fn process_instruction(
 fn process_store(
     program_id: &Address,
     accounts: &mut [AccountView],
-    mut arguments: &[u8],
+    arguments: &[u8],
 ) -> ProgramResult {
-    if arguments.len() < 72 {
-        return Err(ProgramError::InvalidInstructionData);
-    }
-    let owner = Address::new_from_array(read(&mut arguments)?);
-    let previous = Address::new_from_array(read(&mut arguments)?);
-    let total_length = u32::from_le_bytes(read(&mut arguments)?);
-    let offset = u32::from_le_bytes(read(&mut arguments)?) as usize;
-    let chunk = arguments;
+    let (mut fields, chunk) = arguments
+        .split_at_checked(STORE_ARGUMENTS_LEN)
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    let owner = Address::new_from_array(read(&mut fields)?);
+    let previous = Address::new_from_array(read(&mut fields)?);
+    let total_length = u32::from_le_bytes(read(&mut fields)?);
+    let offset = u32::from_le_bytes(read(&mut fields)?) as usize;
     if chunk.is_empty()
-        || chunk.len() > MAX_CHUNK_LEN
+        || chunk.len() > CHUNK_LEN
         || total_length == 0
         || total_length as usize > MAX_RECORD_LEN
     {
         return Err(StorageError::InvalidLength.into());
     }
-    let [buffer_account, payer_account, system_program_account, ..] = accounts else {
+    let [buffer_account, payer_account, system_program_account, refund_account, ..] = accounts
+    else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
     if !buffer_account.is_signer() || !payer_account.is_signer() {
@@ -91,9 +94,12 @@ fn process_store(
         load_buffer(buffer_account, program_id)?
     } else {
         require_empty_system_account(buffer_account)?;
+        require_refund_destination(refund_account, buffer_account)?;
         BufferHeader {
             sealed: false,
             owner,
+            payer: *payer_account.address(),
+            refund: *refund_account.address(),
             previous,
             total_length,
             data_hash: [0; 32],
@@ -102,8 +108,16 @@ fn process_store(
     if header.sealed {
         return Err(StorageError::Sealed.into());
     }
-    if header.owner != owner || header.previous != previous || header.total_length != total_length {
+    if header.owner != owner
+        || header.previous != previous
+        || header.total_length != total_length
+        || &header.refund != refund_account.address()
+    {
         return Err(StorageError::MetadataMismatch.into());
+    }
+    // One payer funds the whole buffer, so one account receives every refund.
+    if &header.payer != payer_account.address() {
+        return Err(StorageError::PayerMismatch.into());
     }
     let written = if initialized {
         buffer_account
@@ -119,9 +133,13 @@ fn process_store(
     let end = offset
         .checked_add(chunk.len())
         .ok_or(StorageError::InvalidLength)?;
-    if end > total_length as usize {
+    // Only the final chunk may be short, so the bytes alone fix the hash.
+    if end > total_length as usize || (chunk.len() != CHUNK_LEN && end != total_length as usize) {
         return Err(StorageError::InvalidLength.into());
     }
+    let start = BUFFER_HEADER_LEN
+        .checked_add(offset)
+        .ok_or(StorageError::InvalidLength)?;
     let size = BUFFER_HEADER_LEN
         .checked_add(end)
         .ok_or(StorageError::InvalidLength)?;
@@ -134,11 +152,8 @@ fn process_store(
     }
     let mut buffer_bytes = buffer_account.try_borrow_mut()?;
     header.encode(&mut buffer_bytes)?;
-    let start = BUFFER_HEADER_LEN
-        .checked_add(offset)
-        .ok_or(StorageError::InvalidLength)?;
     buffer_bytes
-        .get_mut(start..)
+        .get_mut(start..size)
         .ok_or(ProgramError::InvalidAccountData)?
         .copy_from_slice(chunk);
     Ok(())
@@ -147,20 +162,15 @@ fn process_store(
 fn process_apply(
     program_id: &Address,
     accounts: &mut [AccountView],
-    arguments: &[u8],
+    mut arguments: &[u8],
 ) -> ProgramResult {
-    let (expected_previous, mut remaining) = arguments
-        .split_first_chunk::<32>()
-        .ok_or(ProgramError::InvalidInstructionData)?;
-    let expected_previous = Address::new_from_array(*expected_previous);
-    if remaining.len() != 40 {
+    if arguments.len() != APPLY_ARGUMENTS_LEN {
         return Err(ProgramError::InvalidInstructionData);
     }
-    let expected_revision = u64::from_le_bytes(read(&mut remaining)?);
-    let approved_hash: [u8; 32] = remaining
-        .try_into()
-        .map_err(|_| ProgramError::InvalidInstructionData)?;
-    let [head_account, buffer_account, owner_account, payer_account, system_program_account, previous_account, ..] =
+    let expected_previous = Address::new_from_array(read(&mut arguments)?);
+    let expected_revision = u64::from_le_bytes(read(&mut arguments)?);
+    let approved_hash: [u8; 32] = read(&mut arguments)?;
+    let [head_account, buffer_account, owner_account, payer_account, system_program_account, previous_account, refund_account, ..] =
         accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -197,6 +207,10 @@ fn process_apply(
     if approved_hash != header.data_hash {
         return Err(StorageError::HashMismatch.into());
     }
+    // A head that must refund itself could never be replaced again.
+    if &header.refund == head_account.address() {
+        return Err(ProgramError::InvalidArgument);
+    }
     let initialized = head_account.owned_by(program_id);
     let current = if initialized {
         decode_head(&head_account.try_borrow()?)?
@@ -217,11 +231,17 @@ fn process_apply(
     if previous_account.address() != &expected_previous {
         return Err(ProgramError::InvalidArgument);
     }
+    // A destination that became a program cannot be credited; its refund goes
+    // to the apply payer so the record stays replaceable.
+    let mut refund_to_payer = false;
     if initialized {
         require_writable(previous_account)?;
-        require_distinct(previous_account, head_account)?;
-        require_distinct(previous_account, buffer_account)?;
-        require_distinct(previous_account, payer_account)?;
+        for other in [&*head_account, &*buffer_account, &*payer_account] {
+            require_distinct(previous_account, other)?;
+        }
+        for other in [&*head_account, &*buffer_account, &*previous_account] {
+            require_distinct(refund_account, other)?;
+        }
         let previous_header = load_buffer(previous_account, program_id)?;
         if !previous_header.sealed {
             return Err(ProgramError::InvalidAccountData);
@@ -229,6 +249,16 @@ fn process_apply(
         if &previous_header.owner != owner_account.address() {
             return Err(ProgramError::IllegalOwner);
         }
+        if &previous_header.refund != refund_account.address() {
+            return Err(StorageError::RefundMismatch.into());
+        }
+        refund_to_payer = refund_account.executable();
+        if !refund_to_payer {
+            require_writable(refund_account)?;
+        }
+    } else if refund_account.address() != &SYSTEM_PROGRAM_ID {
+        // The first publication closes nothing; both slots hold the System Program.
+        return Err(ProgramError::InvalidArgument);
     }
     let next_revision = current
         .revision
@@ -257,36 +287,51 @@ fn process_apply(
         next_revision,
     )?;
     if initialized {
-        close_account(previous_account, payer_account)?;
+        let recipient_account = if refund_to_payer {
+            payer_account
+        } else {
+            refund_account
+        };
+        close_account(previous_account, recipient_account)?;
     }
     Ok(())
 }
 
+/// Cancels an unpublished upload: its rent payer signs and the rent goes to
+/// its refund destination.
 fn process_close(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
-    let [buffer_account, recipient_account, ..] = accounts else {
+    let [buffer_account, payer_account, refund_account, ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
-    if !buffer_account.is_signer() {
+    if !payer_account.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
     require_writable(buffer_account)?;
-    require_writable(recipient_account)?;
-    require_distinct(buffer_account, recipient_account)?;
-    if load_buffer(buffer_account, program_id)?.sealed {
+    require_writable(refund_account)?;
+    require_distinct(buffer_account, refund_account)?;
+    let header = load_buffer(buffer_account, program_id)?;
+    if header.sealed {
         return Err(StorageError::Sealed.into());
     }
-    close_account(buffer_account, recipient_account)
+    if &header.payer != payer_account.address() {
+        return Err(StorageError::PayerMismatch.into());
+    }
+    if &header.refund != refund_account.address() {
+        return Err(StorageError::RefundMismatch.into());
+    }
+    close_account(buffer_account, refund_account)
 }
 
+/// Moves every lamport to `recipient_account`, then hands the account back to
+/// the System Program with no data, so later instructions in the same
+/// transaction cannot load it either.
 fn close_account(account: &mut AccountView, recipient_account: &mut AccountView) -> ProgramResult {
     let refund = recipient_account
         .lamports()
         .checked_add(account.lamports())
         .ok_or(ProgramError::ArithmeticOverflow)?;
-    account.resize(0)?;
-    account.set_lamports(0);
     recipient_account.set_lamports(refund);
-    Ok(())
+    account.close()
 }
 
 fn load_buffer(account: &AccountView, program_id: &Address) -> Result<BufferHeader, ProgramError> {
@@ -306,6 +351,20 @@ fn require_writable(account: &AccountView) -> ProgramResult {
 fn require_distinct(first: &AccountView, second: &AccountView) -> ProgramResult {
     if first.address() == second.address() {
         return Err(ProgramError::InvalidArgument);
+    }
+    Ok(())
+}
+
+/// The refund destination is fixed at the first `store`. It must be a
+/// non-executable System Program account other than the buffer, so it can be
+/// credited when the buffer closes.
+fn require_refund_destination(
+    refund_account: &AccountView,
+    buffer_account: &AccountView,
+) -> ProgramResult {
+    require_distinct(refund_account, buffer_account)?;
+    if !refund_account.owned_by(&SYSTEM_PROGRAM_ID) || refund_account.executable() {
+        return Err(ProgramError::InvalidAccountData);
     }
     Ok(())
 }

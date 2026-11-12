@@ -1,9 +1,20 @@
 use crate::StorageError;
 use pinocchio::{error::ProgramError, Address};
 
-pub const BUFFER_HEADER_LEN: usize = 109;
-pub const HEAD_LEN: usize = 48;
-pub const MAX_CHUNK_LEN: usize = 1024;
+/// `STORBUF1`, sealed u8, owner, rent payer, refund destination, predecessor,
+/// total length u32, data hash.
+pub const BUFFER_HEADER_LEN: usize = 8 + 1 + 32 + 32 + 32 + 32 + 4 + 32;
+/// `STORHEAD`, current record address, revision u64.
+pub const HEAD_LEN: usize = 8 + 32 + 8;
+/// `store` arguments before the chunk: owner, predecessor, total length u32,
+/// offset u32.
+pub const STORE_ARGUMENTS_LEN: usize = 32 + 32 + 4 + 4;
+/// `apply` arguments: expected predecessor, expected revision u64, data hash.
+pub const APPLY_ARGUMENTS_LEN: usize = 32 + 8 + 32;
+/// Every chunk but the last is exactly this long, so the chained hash depends
+/// only on the bytes, and one `store` fits a 1,232-byte transaction with two
+/// signers and compute budget instructions.
+pub const CHUNK_LEN: usize = 768;
 pub const MAX_RECORD_LEN: usize = 10 * 1024 * 1024 - BUFFER_HEADER_LEN;
 pub const HEAD_PDA_SEED: &[u8] = b"head";
 pub const ZERO_ADDRESS: Address = Address::new_from_array([0; 32]);
@@ -20,6 +31,10 @@ pub struct Head {
 pub struct BufferHeader {
     pub sealed: bool,
     pub owner: Address,
+    /// Paid the buffer's rent and signs `close`.
+    pub payer: Address,
+    /// Receives the rent when the buffer is cancelled or superseded.
+    pub refund: Address,
     pub previous: Address,
     pub total_length: u32,
     pub data_hash: [u8; 32],
@@ -38,6 +53,8 @@ impl BufferHeader {
         let header = Self {
             sealed,
             owner: Address::new_from_array(read(&mut account_bytes)?),
+            payer: Address::new_from_array(read(&mut account_bytes)?),
+            refund: Address::new_from_array(read(&mut account_bytes)?),
             previous: Address::new_from_array(read(&mut account_bytes)?),
             total_length: u32::from_le_bytes(read(&mut account_bytes)?),
             data_hash: read(&mut account_bytes)?,
@@ -55,6 +72,8 @@ impl BufferHeader {
         write(&mut header_bytes, BUFFER_DISCRIMINATOR)?;
         write(&mut header_bytes, &[u8::from(self.sealed)])?;
         write(&mut header_bytes, self.owner.as_ref())?;
+        write(&mut header_bytes, self.payer.as_ref())?;
+        write(&mut header_bytes, self.refund.as_ref())?;
         write(&mut header_bytes, self.previous.as_ref())?;
         write(&mut header_bytes, &self.total_length.to_le_bytes())?;
         write(&mut header_bytes, &self.data_hash)

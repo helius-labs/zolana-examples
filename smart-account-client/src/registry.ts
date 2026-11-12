@@ -24,24 +24,36 @@ import {
 } from "./keyRecord.js";
 import {
   applyRecordInstruction,
-  fetchStorageHead,
-  fetchStoredRecord,
+  fetchPublishedRecord,
   prepareRecordUpload,
+  type Predecessor,
   type RecordUpload,
 } from "./storage.js";
 
 const UPDATE_KEYS = 2;
 
+/** The vault's published key record, with what the next apply binds and closes. */
+export interface KeyRecordPublication extends Predecessor {
+  readonly record: KeyRecord;
+}
+
 /** What the registries say about the vault's keys. */
 export interface VaultRegistry {
   /** The registered shared viewing public key. */
   readonly viewingPublicKey: Bytes33;
-  /** The current record address used as the next update's predecessor. */
-  readonly recordAddress: Address | undefined;
-  /** Storage revision bound into the next signed apply instruction. */
-  readonly recordRevision: bigint;
-  /** The key record in the vault's data record, if any. */
-  readonly record: KeyRecord | undefined;
+  /** The published key record, if any. */
+  readonly current: KeyRecordPublication | undefined;
+}
+
+/** The vault's published key record read from its storage head, if any. */
+export async function fetchPublishedKeyRecord(
+  client: SprClient,
+  vault: Address,
+): Promise<KeyRecordPublication | undefined> {
+  const published = await fetchPublishedRecord(client, vault);
+  if (published === undefined) return undefined;
+  const { bytes, ...predecessor } = published;
+  return { ...predecessor, record: decodeKeyRecord(bytes) };
 }
 
 /** The registered viewing key and current published record, if registered. */
@@ -51,33 +63,15 @@ export async function fetchVaultRegistry(
 ): Promise<VaultRegistry | undefined> {
   const userRecord = await fetchUserRecord({ rpc: client, owner: vault });
   if (userRecord === undefined) return undefined;
-  const current = await fetchStorageHead(client, vault);
-  const record =
-    current === undefined
-      ? undefined
-      : await publishedKeyRecord(client, vault, current.current);
   return {
     viewingPublicKey: userRecord.viewingPublicKey,
-    recordAddress: current?.current,
-    recordRevision: current?.revision ?? 0n,
-    record,
+    current: await fetchPublishedKeyRecord(client, vault),
   };
 }
 
-async function publishedKeyRecord(
-  client: SprClient,
-  owner: Address,
-  address: Address,
-): Promise<KeyRecord> {
-  const stored = await fetchStoredRecord(client, address);
-  if (!stored.sealed || stored.owner !== owner)
-    throw new Error("record is unpublished or belongs to another vault");
-  return decodeKeyRecord(stored.bytes);
-}
-
 /**
- * The current key record: the one in the vault's registry data. It must
- * belong to `settings`, name exactly the Squads signers, and hold the
+ * The current key record: the one the vault's storage head points to. It
+ * must belong to `settings`, name exactly the Squads signers, and hold the
  * registered viewing key; a Squads transaction that changed the signers
  * outside the rotate flow breaks the last two.
  */
@@ -85,13 +79,13 @@ export function currentKeyRecord(
   registry: VaultRegistry,
   settings: Address,
   signers: readonly Address[],
-): KeyRecord {
-  const record = registry.record;
-  if (record === undefined) {
+): KeyRecordPublication {
+  const { current } = registry;
+  if (current === undefined) {
     throw new Error(`the vault of ${settings} has no key record`);
   }
   if (
-    !isCurrentKeyRecord(record, {
+    !isCurrentKeyRecord(current.record, {
       settings,
       signers,
       registeredViewingPublicKey: registry.viewingPublicKey,
@@ -101,15 +95,21 @@ export function currentKeyRecord(
       `the key record of ${settings} does not match its signers and registered key`,
     );
   }
-  return record;
+  return current;
 }
 
-/** Prepare upload instructions; send each before submitting register or rotate. */
+/**
+ * Prepare upload instructions; send each before submitting register or
+ * rotate. `payer` funds the upload; `refund`, the payer by default, gets the
+ * rent back when a later rotation closes it, or when the payer sends
+ * `closeInstruction` while it is unpublished.
+ */
 export function prepareKeyRecordUpload(
   input: Readonly<{
     owner: Address;
     previous: Address;
     payer: TransactionSigner;
+    refund?: Address;
     record: KeyRecord;
   }>,
 ): Promise<RecordUpload> {
@@ -157,19 +157,20 @@ export async function updateKeysInstruction(
   };
 }
 
-/** The vault publishes the uploaded record after checking its exact bytes. */
+/**
+ * The vault publishes the uploaded record after checking its exact bytes and
+ * closes `predecessor`, undefined for the first record.
+ */
 export function applyKeyRecordInstruction(
   owner: Address,
   buffer: Address,
-  previous: Address,
-  previousRevision: bigint,
+  predecessor: Predecessor | undefined,
   record: KeyRecord,
 ): Promise<Instruction> {
   return applyRecordInstruction(
     owner,
     buffer,
-    previous,
-    previousRevision,
+    predecessor,
     encodeKeyRecord(record),
   );
 }
