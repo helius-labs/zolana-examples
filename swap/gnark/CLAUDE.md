@@ -63,9 +63,13 @@ instructions, and circuits.
 - sdk: `spr-client`, `spr-keypair`, `spr-transaction`,
   `solana-instruction`/`solana-address` for wire types, plus the program and
   prover crates.
-- test: `spr-program-test` + `spr-test-utils` for the harness,
+- test: `spr-program-test` for the localnet harness,
   `spr-client` (+`indexer-api`, `solana-rpc`), `mollusk-svm` +
   `light-program-profiler` for benchmarks.
+- No crate depends on the unpublished `spr-test-utils`, not even as a dev
+  dependency. Test helpers are local and built on public crates:
+  `program/tests/common`, `sdk/src/shared.rs` (`cfg(test)`),
+  `test/tests/shared.rs` and `test/tests/utxo.rs`.
 
 ## Key Artifacts
 

@@ -13,7 +13,8 @@
 //!    the deployed shielded-pool program it names into the same directory:
 //!    `cp "$SHIELDED_POOL_PROGRAM_PATH" target/bench/shielded_pool_program.so`.
 //! 4. With `ZOLANA_CLI_BIN` and `PROVER_BIN` from step 3 (`ZOLANA_PROVER_URL`
-//!    moves the prover's port, and a prover already serving it is reused), run
+//!    moves the prover's port, and a prover already serving it is reused;
+//!    `ZOLANA_PROVER_KEYS_DIR` defaults to `~/.config/zolana/proving-keys`), run
 //!    `cargo test --release --manifest-path test/Cargo.toml --test bench_cu --
 //!    --ignored --nocapture`.
 //!
