@@ -7,12 +7,11 @@
 
 use solana_program_error::ProgramError;
 use spr_account_checks::AccountError;
-use spr_test_utils::mollusk::expect_err_exact;
 use swap_program::{error::SwapError, instructions::make::MarkerData};
 
 use crate::common::{
-    fixture, marker, setup_mollusk, transact, valid_marker_data, wrapper_data, wrapper_data_with,
-    Wrapper, MAKER, ORDER_UTXO_HASH, PAYER,
+    expect_err_exact, fixture, marker, setup_mollusk, transact, valid_marker_data, wrapper_data,
+    wrapper_data_with, Wrapper, MAKER, ORDER_UTXO_HASH, PAYER,
 };
 
 #[test]

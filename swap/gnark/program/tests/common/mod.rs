@@ -1,6 +1,9 @@
-use mollusk_svm::Mollusk;
+use std::sync::Once;
+
+use mollusk_svm::{result::ProgramResult, Mollusk};
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
+use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
 use spr_interface::{
     instruction::instruction_data::transact::{
@@ -88,12 +91,38 @@ pub fn invalid_bump(maker: [u8; 32]) -> u8 {
         .expect("some bump derives an on-curve point")
 }
 
+static SETUP: Once = Once::new();
+
+/// A Mollusk instance with the swap program loaded from [`SBF_DIR`]. The first
+/// call in a process sets `SBF_OUT_DIR` and quiets `RUST_LOG` unless the
+/// caller set it.
 pub fn setup_mollusk() -> (Mollusk, Pubkey) {
-    spr_test_utils::mollusk::mollusk_with_program(
-        SBF_DIR,
-        *swap_program::ID.as_array(),
-        "swap_program",
-    )
+    SETUP.call_once(|| {
+        std::env::set_var("SBF_OUT_DIR", SBF_DIR);
+        if std::env::var_os("RUST_LOG").is_none() {
+            std::env::set_var("RUST_LOG", "error");
+        }
+    });
+    let program_id = swap_id();
+    let mut mollusk = Mollusk::default();
+    mollusk.add_program(&program_id, "swap_program");
+    (mollusk, program_id)
+}
+
+/// Assert the instruction fails with exactly `expected`.
+#[track_caller]
+pub fn expect_err_exact(
+    mollusk: &Mollusk,
+    instruction: &Instruction,
+    accounts: &[(Pubkey, Account)],
+    expected: ProgramError,
+) {
+    let result = mollusk.process_instruction(instruction, accounts);
+    assert_eq!(
+        result.program_result,
+        ProgramResult::Failure(expected),
+        "unexpected program result"
+    );
 }
 
 pub fn account(lamports: u64) -> Account {

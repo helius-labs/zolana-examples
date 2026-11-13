@@ -13,7 +13,8 @@
 //!    the deployed shielded-pool program it names into the same directory:
 //!    `cp "$SHIELDED_POOL_PROGRAM_PATH" target/bench/shielded_pool_program.so`.
 //! 4. With `ZOLANA_CLI_BIN` and `PROVER_BIN` from step 3 (`ZOLANA_PROVER_URL`
-//!    moves the prover's port, and a prover already serving it is reused), run
+//!    moves the prover's port, and a prover already serving it is reused;
+//!    `ZOLANA_PROVER_KEYS_DIR` defaults to `~/.config/zolana/proving-keys`), run
 //!    `cargo test --release --manifest-path test/Cargo.toml --test bench_cu --
 //!    --ignored --nocapture`.
 //!
@@ -25,11 +26,10 @@ mod bench_report;
 #[path = "../../../../test-utils/gnark_circuit_size.rs"]
 mod gnark_circuit_size;
 
-use spr_test_utils::utxo::{
-    encrypt_transaction_data, get_transaction_viewing_key, prepare_output_blindings,
-};
+mod utxo;
+
 use spr_transaction::utxo::SppProofInputUtxo;
-use std::time::Duration;
+use std::{env, path::Path, time::Duration};
 
 use bench_report::{
     cold_key_load, proof_bytes, time_key_load, warm_median, CircuitRow, Implementation,
@@ -76,6 +76,10 @@ use swap_sdk::{
     prover::SwapProverClient,
     shared::input_sum,
     state::{OrderTerms, OrderUtxo},
+};
+use utxo::{
+    assign_output_blindings, encrypt_transaction_data, get_transaction_viewing_key,
+    prepare_output_blindings, ProofKeys,
 };
 
 /// Holds the profiling `swap_program.so` and a plain `shielded_pool_program.so`.
@@ -269,20 +273,95 @@ fn keypair_from_payer(payer: &Keypair) -> ShieldedKeypair {
         .expect("keypair from payer")
 }
 
+/// `utxo` as an input owned by `key`, committed at `leaf_index` of the
+/// fixture tree with no data or ring data hash.
+fn indexed_input(
+    utxo: Utxo,
+    key: &spr_keypair::NullifierKey,
+    leaf_index: u64,
+) -> SppProofInputUtxo {
+    let nullifier_pubkey = key.pubkey().expect("nullifier pubkey");
+    let utxo_hash = utxo
+        .hash(&nullifier_pubkey, &[0; 32], &[0; 32], BENCH_TREE_ID)
+        .expect("input hash");
+    let nullifier = key
+        .nullifier(&utxo_hash, &utxo.blinding)
+        .expect("input nullifier");
+    spr_transaction::WalletUtxo {
+        utxo,
+        nullifier_pubkey,
+        utxo_hash,
+        nullifier,
+        tx_viewing_key: None,
+        data_hash: None,
+        ring_data_hash: None,
+        tree_id: BENCH_TREE_ID,
+        leaf_index,
+        latest_tree_id: None,
+        slot: 0,
+        tx_signature: Default::default(),
+        slot_index: 0,
+    }
+    .into()
+}
+
+/// Non-inclusion witnesses of the padding inputs in a fresh nullifier tree.
+fn dummy_proofs(transaction: &SppProofInputs) -> Vec<NonInclusionProof> {
+    let tree = nullifier_tree();
+    transaction
+        .input_utxos
+        .iter()
+        .filter(|input| input.is_dummy())
+        .map(|input| {
+            let proof = tree
+                .get_non_inclusion_proof(&BigUint::from_bytes_be(&input.nullifier))
+                .expect("dummy non-inclusion");
+            NonInclusionProof {
+                leaf: input.nullifier,
+                merkle_context: MerkleContext {
+                    tree_type: 1,
+                    tree: spr_interface::pda::tree(input.tree_id),
+                },
+                path: proof.merkle_proof.to_vec(),
+                low_element: proof.leaf_lower_range_value,
+                low_element_index: proof.leaf_index as u64,
+                high_element: proof.leaf_higher_range_value,
+                high_element_index: 0,
+                root: tree.root(),
+                root_seq: 0,
+                root_index: 0,
+            }
+        })
+        .collect()
+}
+
+/// Start the shared SPP prover, or reuse a running one, with the keys in
+/// `ZOLANA_PROVER_KEYS_DIR` (default `~/.config/zolana/proving-keys`).
+fn start_prover() {
+    if env::var_os("ZOLANA_PROVER_KEYS_DIR").is_none() {
+        let home = env::var("HOME").expect("HOME is set");
+        env::set_var(
+            "ZOLANA_PROVER_KEYS_DIR",
+            Path::new(&home).join(".config/zolana/proving-keys"),
+        );
+    }
+    spr_client::spawn_prover().expect("spawn prover");
+}
+
 fn prove_transact_timed(
     proof_inputs: SppProofInputs,
     spend_proofs: &[SpendProof],
     prover: &ProverClient,
     keys: &[&spr_keypair::NullifierKey],
 ) -> (TransactIxData, Duration) {
-    let dummy_proofs = spr_test_utils::utxo::dummy_proofs(&proof_inputs);
+    let dummy_proofs = dummy_proofs(&proof_inputs);
     warm_median(|| {
         prover
             .prove_transact(
                 proof_inputs.clone(),
                 spend_proofs,
                 &dummy_proofs,
-                &spr_test_utils::utxo::ProofKeys(keys),
+                &ProofKeys(keys),
             )
             .expect("prove transact")
     })
@@ -418,7 +497,7 @@ fn bench_cu_swap() {
 
     // Warm provers: the SPP server is up and every circuit's keys are loaded
     // in process before anything is timed.
-    spr_test_utils::prover::spawn_workspace_prover(spr_client::IndexerRequirement::Optional);
+    start_prover();
     for circuit in CircuitId::ALL {
         PROVER.preload(*circuit).expect("preload circuit keys");
     }
@@ -488,16 +567,7 @@ fn bench_make(
         .expect("order output");
 
     let payer_address = Address::new_from_array(payer.pubkey().to_bytes());
-    let input_utxo: SppProofInputUtxo = spr_test_utils::utxo::wallet(
-        input_utxo,
-        &maker.nullifier_key,
-        BENCH_TREE_ID,
-        0,
-        None,
-        None,
-    )
-    .expect("indexed input")
-    .into();
+    let input_utxo = indexed_input(input_utxo, &maker.nullifier_key, 0);
     let input_utxos = vec![
         input_utxo,
         SppProofInputUtxo::dummy_with_blinding(DUMMY_BLINDING, BENCH_TREE_ID).expect("dummy"),
@@ -680,16 +750,7 @@ fn bench_take(
         ring_program_id: None,
         data: Data::default(),
     };
-    let taker_input_utxo: SppProofInputUtxo = spr_test_utils::utxo::wallet(
-        taker_utxo,
-        &taker.nullifier_key,
-        BENCH_TREE_ID,
-        1,
-        None,
-        None,
-    )
-    .expect("indexed input")
-    .into();
+    let taker_input_utxo = indexed_input(taker_utxo, &taker.nullifier_key, 1);
 
     let payer_address = Address::new_from_array(taker_payer.pubkey().to_bytes());
     let input_utxos = vec![order_input_utxo, taker_input_utxo];
@@ -698,12 +759,8 @@ fn bench_take(
     let first_nullifier = input_utxos.first().expect("order input").nullifier();
     let seed = spr_transaction::derive_output_blinding_seed(&first_nullifier, &blinding_seed)
         .expect("take seed");
-    spr_test_utils::utxo::assign_output_blindings(
-        &mut transaction_outputs,
-        &first_nullifier,
-        &seed,
-    )
-    .expect("derive take output blindings");
+    assign_output_blindings(&mut transaction_outputs, &first_nullifier, &seed)
+        .expect("derive take output blindings");
     let [source_output, destination_output]: [_; 2] = transaction_outputs
         .try_into()
         .expect("take transaction has two outputs");

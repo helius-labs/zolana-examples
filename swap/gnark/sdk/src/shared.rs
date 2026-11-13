@@ -26,6 +26,120 @@ pub(crate) fn test_blinding(byte: u8) -> spr_transaction::utxo::Blinding {
     blinding
 }
 
+/// `utxo` as an input owned by `key`, committed under `tree_id` at leaf 0 with
+/// no data or ring data hash.
+#[cfg(test)]
+pub(crate) fn test_input_utxo(
+    utxo: spr_transaction::utxo::Utxo,
+    key: &spr_keypair::NullifierKey,
+    tree_id: u16,
+) -> SppProofInputUtxo {
+    let nullifier_pubkey = key.pubkey().expect("nullifier pubkey");
+    let utxo_hash = utxo
+        .hash(&nullifier_pubkey, &[0; 32], &[0; 32], tree_id)
+        .expect("input hash");
+    let nullifier = key
+        .nullifier(&utxo_hash, &utxo.blinding)
+        .expect("input nullifier");
+    spr_transaction::WalletUtxo {
+        utxo,
+        nullifier_pubkey,
+        utxo_hash,
+        nullifier,
+        tx_viewing_key: None,
+        data_hash: None,
+        ring_data_hash: None,
+        tree_id,
+        leaf_index: 0,
+        latest_tree_id: None,
+        slot: 0,
+        tx_signature: Default::default(),
+        slot_index: 0,
+    }
+    .into()
+}
+
+/// The proof inputs `sender` posts spending `input_utxos` into `output_utxos`
+/// under a random blinding seed and salt: each output blinding derived from
+/// the first input's nullifier, each output encrypted to its owner under the
+/// transaction viewing key and published under `output_tree_id`.
+#[cfg(test)]
+pub(crate) fn test_transaction(
+    input_utxos: Vec<SppProofInputUtxo>,
+    mut output_utxos: Vec<SppProofOutputUtxo>,
+    sender: &spr_keypair::ShieldedKeypair,
+    output_tree_id: u16,
+) -> spr_transaction::instructions::transact::SppProofInputs {
+    use spr_interface::instruction::{OwnerTag, TransactOutput};
+    use spr_transaction::{
+        serialization::{
+            confidential::{Confidential, ConfidentialEncode, ConfidentialOutputPlaintext},
+            UtxoSerialization,
+        },
+        utxo::{derive_output_blinding_seed, derive_transact_output_blinding},
+    };
+
+    let blinding_seed = spr_keypair::random_blinding();
+    let salt = spr_keypair::random_salt();
+    let first_nullifier = input_utxos.first().expect("first input").nullifier;
+    let seed = derive_output_blinding_seed(&first_nullifier, &blinding_seed)
+        .expect("output blinding seed");
+    for (index, output) in (0u32..).zip(output_utxos.iter_mut()) {
+        output.blinding = derive_transact_output_blinding(&first_nullifier, &seed, index)
+            .expect("output blinding");
+    }
+    let tx = sender
+        .get_transaction_viewing_key(&first_nullifier)
+        .expect("transaction viewing key");
+    let mut outputs = Vec::with_capacity(output_utxos.len());
+    let mut tags = Vec::with_capacity(output_utxos.len());
+    for (slot_index, output) in (0u32..).zip(output_utxos.iter()) {
+        let address = output.owner_address.expect("output owner");
+        let tag = address
+            .signing_pubkey
+            .confidential_view_tag()
+            .expect("view tag");
+        let message = Confidential::encode_plaintext(
+            &ConfidentialOutputPlaintext {
+                asset_id: output.asset.asset_id,
+                amount: output.amount,
+                blinding: output.blinding,
+                ring_program_id: output.ring_program_id,
+                data: output.data.clone(),
+            },
+            tag,
+            &ConfidentialEncode {
+                tx: tx.clone(),
+                recipient_pubkey: address.viewing_pubkey,
+                salt,
+                slot_index,
+            },
+        )
+        .expect("encrypted output");
+        outputs.push(TransactOutput {
+            utxo_hash: output.hash(output_tree_id).expect("output hash"),
+            owner_tag: OwnerTag::Inline(tag),
+            data: Some(message.data),
+        });
+        tags.push(tag);
+    }
+    spr_transaction::instructions::transact::SppProofInputs {
+        input_utxos,
+        output_utxos,
+        blinding_seed,
+        output_tree_id,
+        external_data: spr_transaction::ExternalData::new(
+            *tx.pubkey().as_bytes(),
+            salt,
+            outputs,
+            tags,
+            vec![],
+        ),
+        payer: Address::default(),
+        cache_accounts: Default::default(),
+    }
+}
+
 pub(crate) fn check_output_utxo(
     label: &str,
     output: &SppProofOutputUtxo,

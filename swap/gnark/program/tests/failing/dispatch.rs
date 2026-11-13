@@ -1,11 +1,11 @@
 use mollusk_svm::result::ProgramResult;
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
-use spr_test_utils::mollusk::expect_err_exact;
 use swap_program::error::SwapError;
 
 use crate::common::{
-    fixture, fixture_transact, invalid_bump, setup_mollusk, wrapper_data_with_bump, Wrapper,
+    expect_err_exact, fixture, fixture_transact, invalid_bump, setup_mollusk,
+    wrapper_data_with_bump, Wrapper,
 };
 
 #[test]
