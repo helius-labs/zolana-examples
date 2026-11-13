@@ -7,11 +7,12 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use spr_client::{ComputeBudgetConfig, MerkleProof, Rpc, SolanaRpc, UtxoScan};
-use spr_keypair::{ShieldedAddress, ShieldedKeypair, SigningKey};
-use spr_program::instruction::{AssetDeposit, Deposit, DepositAsset, DepositSplAccounts};
+use spr_keypair::{ShieldedKeypair, SigningKey};
+use spr_program::instruction::{AssetDeposit, Deposit};
 use spr_program_test::{
     fixture,
     localnet::{FixtureLocalnet, LocalnetPorts},
+    SprProgramTest,
 };
 use spr_transaction::{
     utxo::SppProofInputUtxo, AssetRegistry, SpendableDecryptionResult, WalletUtxo,
@@ -122,13 +123,12 @@ pub fn setup(test: u16) -> Result<TestEnv> {
     let maker_signature = deposit(
         &localnet,
         &payer,
-        &maker_address,
-        DepositAsset::Spl(DepositSplAccounts {
-            mint: spl_mint,
-            user_token: spl_funding,
-            token_program: spr_interface::pda::spl_token_program_id(),
-        }),
-        MAKER_SHIELD_SPL,
+        SprProgramTest::wallet_spl_shield_data(
+            MAKER_SHIELD_SPL,
+            &maker_address,
+            &spl_mint,
+            &spl_funding,
+        )?,
     )?;
     let taker_address = taker_shielded_keypair
         .shielded_address()
@@ -136,9 +136,7 @@ pub fn setup(test: u16) -> Result<TestEnv> {
     let taker_signature = deposit(
         &localnet,
         &payer,
-        &taker_address,
-        DepositAsset::Sol,
-        DESTINATION_AMOUNT,
+        SprProgramTest::wallet_sol_shield_data(DESTINATION_AMOUNT, &taker_address)?,
     )?;
 
     // Both deposits are wallet-owned, so each wallet discovers its own
@@ -199,26 +197,17 @@ pub fn send(rpc: &SolanaRpc, payer: &dyn Signer, ix: Instruction) -> Result<Sign
     )?)
 }
 
-/// Shield `amount` of `asset` from `payer` to `recipient` with a proofless
-/// deposit. `payer` pays the fee and funds the deposit.
+/// Send the proofless deposit `asset_deposit` from `payer`, which pays the fee
+/// and funds the deposit.
 fn deposit(
     localnet: &FixtureLocalnet,
     payer: &dyn Signer,
-    recipient: &ShieldedAddress,
-    asset: DepositAsset,
-    amount: u64,
+    asset_deposit: AssetDeposit,
 ) -> Result<Signature> {
     let ix = Deposit {
         tree: localnet.tree,
         depositor: payer.pubkey(),
-        deposits: vec![AssetDeposit {
-            asset,
-            // Deposits carry the recipient's viewing key tag.
-            view_tag: recipient.viewing_pubkey.u(),
-            owner: recipient.owner_hash()?,
-            amount,
-            memo: None,
-        }],
+        deposits: vec![asset_deposit],
     }
     .instruction()?;
     Ok(localnet.client.rpc().create_and_send_transaction(
